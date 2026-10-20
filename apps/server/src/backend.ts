@@ -29,5 +29,7 @@ export interface Backend {
   syncAccount(accountId: string): Promise<void>;
   /** Optional connected-provider push. Must settle on abort. */
   waitForChanges?(accountId: string, signal: AbortSignal): Promise<void>;
+  /** Drain due persisted arrivals, sharing the immediate triage queue. */
+  processArrivals?(signal?: AbortSignal): Promise<void>;
   close(): Promise<void>;
 }

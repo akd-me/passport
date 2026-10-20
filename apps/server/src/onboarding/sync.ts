@@ -12,6 +12,7 @@ import { initialDays } from "./config.js";
 export class AccountSyncService extends SyncService {
   private jobs = new Map<string, Promise<void>>();
   private windows: Map<string, number>;
+  private snapshots: Map<string, string>;
   private defaultDays: number;
   private retired = new Set<string>();
   constructor(
@@ -27,6 +28,7 @@ export class AccountSyncService extends SyncService {
     },
   ) {
     const windows = new Map<string, number>();
+    const snapshots = new Map<string, string>();
     const days = initialDays(config);
     super(
       accountStore,
@@ -43,9 +45,11 @@ export class AccountSyncService extends SyncService {
                 );
                 const window =
                   windows.get(id) ?? Number(account.settings.syncDays ?? days);
-                yield* target.sync(cursor, {
-                  since: new Date(Date.now() - window * 86400000).toISOString(),
-                });
+                const since = new Date(
+                  Date.now() - window * 86400000,
+                ).toISOString();
+                snapshots.set(id, since);
+                yield* target.sync(cursor, { since });
               };
             const value = Reflect.get(target, property, target);
             return typeof value === "function" ? value.bind(target) : value;
@@ -55,10 +59,14 @@ export class AccountSyncService extends SyncService {
       calendarProvider,
     );
     this.windows = windows;
+    this.snapshots = snapshots;
     this.defaultDays = days;
   }
   isSyncing(id: string): boolean {
     return this.jobs.has(id);
+  }
+  protected override mailSnapshotSince(id: string): string | undefined {
+    return this.snapshots.get(id);
   }
   override syncAccount(id: string): Promise<void> {
     if (this.retired.has(id)) return Promise.resolve();

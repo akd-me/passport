@@ -140,6 +140,60 @@ describe("account sync lifecycle", () => {
       code: "INVALID_QUERY",
     });
   });
+  it("keeps backfilled annotations and does not tombstone emails outside an expired snapshot window", async () => {
+    const oldRaw = mail.injectEmail({
+      providerId: "old",
+      receivedAt: "2025-12-15T12:00:00.000Z",
+    });
+    const recentRaw = mail.injectEmail({
+      providerId: "recent",
+      receivedAt: "2026-02-15T12:00:00.000Z",
+    });
+    vi.spyOn(mail, "sync").mockImplementationOnce(async function* () {
+      yield { kind: "email", op: "upsert", email: recentRaw };
+      yield { kind: "cursor", cursor: "initial" };
+    });
+    await service.syncAccount(account.id);
+    const recent = (await store.emails.getByProviderId(account.id, "recent"))!;
+    await store.emails.patchMany([recent.id], {
+      category: "receipts",
+      personIds: ["person"],
+    });
+    vi.spyOn(mail, "sync").mockImplementationOnce(async function* () {
+      yield { kind: "email", op: "upsert", email: oldRaw };
+      yield { kind: "cursor", cursor: "backfilled" };
+    });
+    // A null-cursor backfill is additive even if a previous message is omitted.
+    await service.backfill(account.id, 90);
+    const old = (await store.emails.getByProviderId(account.id, "old"))!;
+    expect(
+      (await store.emails.get(recent.id))!.keywords.$deleted,
+    ).toBeUndefined();
+    expect(await store.emails.get(recent.id)).toMatchObject({
+      category: "receipts",
+      personIds: ["person"],
+    });
+    vi.setSystemTime(new Date("2026-04-01T12:00:00.000Z"));
+    vi.spyOn(mail, "sync")
+      .mockImplementationOnce(async function* () {
+        throw Object.assign(new Error("expired"), { code: "CURSOR_EXPIRED" });
+      })
+      .mockImplementationOnce(async function* (
+        cursor: string | null,
+        options?: { since?: string },
+      ): AsyncIterable<SyncDelta> {
+        expect(cursor).toBeNull();
+        expect(options?.since).toBe("2026-01-01T12:00:00.000Z");
+        yield { kind: "cursor", cursor: "recovered" };
+      });
+    await service.syncAccount(account.id);
+    expect((await store.emails.get(old.id))!.keywords.$deleted).toBeUndefined();
+    expect(await store.emails.get(recent.id)).toMatchObject({
+      keywords: { $deleted: true },
+      category: "receipts",
+      personIds: ["person"],
+    });
+  });
   it("applies jitter within the exponential retry window", async () => {
     const sleep = vi.fn(async (_ms: number) => {});
     const jittered = new AccountSyncService(

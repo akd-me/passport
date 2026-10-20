@@ -31,6 +31,7 @@ import { logger } from "./logger.js";
 import { persistOAuthCredentials } from "./onboarding/oauth.js";
 import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
 import { ProviderConnections } from "./sync/connections.js";
+import { ArrivalQueue } from "./arrivals.js";
 
 export interface RealBackendOptions {
   /** Isolated SQLite and dependency injection for offline integration tests. */
@@ -125,7 +126,6 @@ export async function createRealBackend(
       mailProviderFor: connections.mail,
       calendarProviderFor: connections.calendar,
     });
-    const queues = new Map<string, Promise<void>>();
     const agentJobs = new Set<Promise<unknown>>();
     let closing: Promise<void> | undefined;
     let stopped = false;
@@ -186,25 +186,14 @@ export async function createRealBackend(
         return job;
       },
     };
+    const arrivals = new ArrivalQueue(store, bus, agent, () => enabled && !stopped);
     const unsubscribe = bus.on("email.received", ({ email }) => {
       if (!enabled || stopped) return;
-      const job = (queues.get(email.accountId) ?? Promise.resolve()).then(
-        async () => {
-          try {
-            await agent.run({ kind: "email.received", emailId: email.id });
-          } catch {
-            logger.warn("Email triage failed; continuing with the next email");
-          }
-        },
-      );
-      queues.set(email.accountId, job);
-      void job.then(() => {
-        if (queues.get(email.accountId) === job) queues.delete(email.accountId);
-      });
+      void arrivals.enqueue(email.id, email.accountId);
     });
     const drainAgentQueue = async () => {
-      while (queues.size || agentJobs.size)
-        await Promise.allSettled([...queues.values(), ...agentJobs]);
+      await arrivals.drain();
+      while (agentJobs.size) await Promise.allSettled([...agentJobs]);
     };
     const dependencies = { store, executor, policy, bus };
     const mcp = createMailboxMcpServer(dependencies);
@@ -254,6 +243,7 @@ export async function createRealBackend(
           });
       },
       drainAgentQueue,
+      processArrivals: (signal) => arrivals.drainDue(signal),
       close: () =>
         (closing ??= (async () => {
           await sync.drain();
