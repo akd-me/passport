@@ -1,0 +1,18 @@
+services:
+  passport:
+    image: ghcr.io/akd-me/passport:latest
+    build: .
+    init: true
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PASSPORT_DATA_DIR: /data
+      PASSPORT_HOST: 0.0.0.0
+      PASSPORT_PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - passport-data:/data
+
+volumes:
+  passport-data:

@@ -1,149 +1,179 @@
 # Passport
 
-An open-source, local-first, agent-native email harness. Agents work on mail, calendar,
-people and matters through a trust policy you control. Bring your own providers and models.
-Actions are audited, reversible changes support undo, and sends wait in a cancellable outbox.
+Passport is an open-source, local-first email harness where AI agents handle mail and calendar through a trust policy you control. You see decisions, build context around people and matters, and bring your own mail providers, models and agents.
 
-## Try the demo
+![Passport Decisions feed](docs/screenshots/decisions.png)
+![Passport Trust controls](docs/screenshots/trust.png)
 
-Requires Node 25 (for built-in SQLite) and pnpm 10. From the repository root:
+## Why
+
+Your inbox is organized around **the person** and **the matter**: who you are dealing with, and what you are trying to get done. AI handles routine mail, prepares replies and keeps that context current; you see the decisions that need your attention.
+
+- **Earned trust.** Start supervised and grant autonomy per category as evidence accumulates. The ladder mirrors a coding agent's permission modes: `supervised`, `auto_accept_edits`, `auto`, `full_access`. An external agent has a separate ceiling.
+- **A record of every change.** Agent and human changes pass through the policy executor and action log. Reversible actions carry undo; irreversible operations are identified explicitly.
+- **Time to change your mind.** Sends wait in a delayed outbox where you can cancel them. A delivered message cannot be unsent.
+- **Your providers and models.** Connect Gmail, Outlook or IMAP, calendar services, and Anthropic, OpenAI, compatible endpoints or local Ollama models.
+- **A mailbox any agent can use.** The MCP server gives Claude Code, Codex and other clients the same policy-controlled tools as the built-in agent.
+
+## Quickstart
+
+**Pre-release:** npm and GHCR commands below are the release installation paths. They require a published version; until the first release, build from source or use a locally packed tarball. Provider/model integrations have offline tests; this repository does not claim live Gmail, Outlook, IMAP or LLM delivery validation.
+
+### 1. npx
+
+Node **24** is recommended; the persistent backend needs **Node 22.16 or newer with SQLite FTS5**. Stock Node 22.5 has `node:sqlite` but lacks FTS5, so it runs the demo only. The installed shim reports this limitation before opening a persistent workspace.
 
 ```sh
-pnpm install
-pnpm build
-pnpm --filter @passport/server demo
+npx @akd-me/passport demo
+# Or start a persistent workspace:
+npx @akd-me/passport serve
 ```
 
-Open **http://127.0.0.1:3000**. The demo has 40 emails, six matters, eight people, four
-calendar events, decisions, editable drafts, trust controls and USER.md. It stays in memory;
-no provider or model requests run, and restarting resets it.
+Open **http://127.0.0.1:3000**. The offline demo uses in-memory fixtures, makes no provider/model requests and resets on restart. `serve` stores data in `~/.passport` (override with `PASSPORT_DATA_DIR`). Without a model key, the UI, account sync and MCP work while automatic triage is disabled.
 
-## Run for real
+For repeated use, install the executable:
 
-After building, the CLI is `node apps/server/dist/cli.js`; the commands below use that form.
-The package also declares a `passport` executable, so an installed/linked CLI accepts
-`passport serve`, `passport accounts add gmail`, `passport sync`, and `passport triage <emailId>`.
+```sh
+npm install -g @akd-me/passport
+passport --help
+passport serve
+```
 
-Create `~/.passport/passport.config.json` (or set `PASSPORT_DATA_DIR` to another directory):
+The npm package is **`@akd-me/passport`**; its executable is **`passport`**. The unscoped npm name belongs to Passport.js.
+
+### 2. Docker
+
+```sh
+git clone https://github.com/akd-me/passport.git
+cd passport
+cp .env.example .env
+chmod 600 .env
+docker compose up --build -d
+```
+
+Open **http://127.0.0.1:3000**. Compose keeps data in a named volume and publishes only to host loopback. The API has **no authentication**; keep it on localhost or behind a private, authenticated boundary. After a release, `docker compose pull && docker compose up -d --no-build` uses `ghcr.io/akd-me/passport:latest`. See [deployment](docs/deploy.md) for home servers, NAS, backups and remote access.
+
+### 3. From source
+
+```sh
+git clone https://github.com/akd-me/passport.git
+cd passport
+nvm use                      # Node 24; or install Node 24 another way
+corepack enable
+pnpm install --frozen-lockfile
+pnpm build
+pnpm demo
+# Persistent workspace: node apps/server/bin/passport.js serve
+```
+
+`pnpm dev` keeps the source demo in watch mode. For frontend editing, also run `pnpm --filter @passport/web dev` and open the URL Vite prints. The [installation guide](docs/install.md) covers configuration, tarballs and the package build.
+
+## Connect Gmail
+
+Create your own Google OAuth web client, enable the Gmail API and register the exact callback `http://127.0.0.1:53682/oauth/callback`. Then run `passport accounts add gmail` and follow the browser authorization flow. Google Calendar is a separate `passport accounts add google-calendar` account. See [account setup and scopes](docs/accounts.md).
+
+## Connect Outlook
+
+Register your own Microsoft Entra application and loopback redirect URI, then run `passport accounts add graph`. Use `passport accounts add graph-calendar` for calendar access. Tenant settings, scopes and consent are covered in [account setup](docs/accounts.md).
+
+## Connect IMAP
+
+Run `passport accounts add imap` with your provider's IMAP/SMTP hosts and an app password. Prefer TLS; IMAP and SMTP credentials are stored separately from public account settings. See [account setup](docs/accounts.md) for implicit TLS versus STARTTLS and supported provider capabilities.
+
+OAuth setup is currently a CLI flow. Run account setup on the same machine as the browser, or use the documented SSH callback tunnel in [deployment](docs/deploy.md). Stop `serve` before running standalone commands that write to the same data directory.
+
+## Use it from Claude Code or Codex
+
+After installing the CLI, register it in your Claude Code project's `.mcp.json`:
+
+```sh
+passport mcp install --client claude-code
+passport mcp --help
+```
+
+This preserves other MCP entries, records the installed executable's absolute path and carries an explicit `PASSPORT_DATA_DIR` if set. Keep that installation available. Alternatively, add this entry manually to `.mcp.json` after npm publication:
 
 ```json
 {
-  "host": "127.0.0.1",
-  "port": 3000,
-  "mcpPort": 4318,
-  "syncIntervalSeconds": 120,
-  "dailyDigestHour": 8,
-  "llm": {
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-5"
+  "mcpServers": {
+    "passport": {
+      "command": "npx",
+      "args": ["-y", "@akd-me/passport", "mcp"]
+    }
   }
 }
 ```
 
-Set `ANTHROPIC_API_KEY` privately in your environment, then start:
+For Codex, an installed executable can be registered with `codex mcp add passport -- passport mcp`. Stdio starts its own backend; use one backend writer per data directory. When `passport serve` is already running, connect your client to the loopback Streamable HTTP endpoint **http://127.0.0.1:4318/mcp** instead. For example: `codex mcp add passport --url http://127.0.0.1:4318/mcp`. Docker keeps that listener inside the container; see [deployment](docs/deploy.md).
 
-```sh
-node apps/server/dist/cli.js serve
-```
+External agents use the shared executor and their trust ceiling. Human approval, outbox cancellation and undo remain available in the UI/API. Mail and tool results are untrusted input; policy enforcement does not make prompt injection impossible.
 
-The UI opens at **http://127.0.0.1:3000**; mailbox MCP is at **http://127.0.0.1:4318/mcp**.
-An empty data directory works without a model key: sync, UI, human decisions and MCP remain
-available, while automatic triage is disabled and Accounts shows **LLM not configured**.
+## Scheduler and routines
 
-LLM providers are `anthropic` (default), `openai`, `openai-compatible` and `ollama`.
-Configure `model`, optional `fastModel`, `baseUrl` and `apiKey` in the `llm` object.
-Environment overrides are `PASSPORT_LLM_PROVIDER`, `PASSPORT_LLM_MODEL`,
-`PASSPORT_LLM_BASE_URL`, `PASSPORT_LLM_FAST_MODEL`, and `PASSPORT_LLM_API_KEY`;
-`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` supply the selected provider's key. Environment keys
-are never copied into the config file. An explicitly written file key is preserved on save;
-keep that file private. API responses omit all model keys.
+Periodic account sync, outbox release, trust decay, daily digests and matter reviews run alongside `serve` or stdio MCP. USER.md supplies standing instructions; model-backed routines require a configured model. See [scheduler and routines](docs/scheduler.md).
 
-For Ollama, for example, use `{"provider":"ollama","model":"your-installed-model","baseUrl":"http://localhost:11434"}`.
-`PASSPORT_HOST`, `PASSPORT_PORT`, `PASSPORT_MCP_PORT`, `PASSPORT_SYNC_INTERVAL_SECONDS` and
-`PASSPORT_DIGEST_HOUR` override server settings. The digest hour uses local wall-clock time;
-`GET /api/digest/YYYY-MM-DD` uses UTC dates.
+## Tool catalogue
 
-### Gmail with your own OAuth client
-
-1. In your Google Cloud project, enable the Gmail API and configure consent. Add your account
-   as a test user if the app is in testing mode.
-2. Create an OAuth **Web application** client. Register the exact redirect URI
-   `http://127.0.0.1:53682/oauth/callback`. A custom loopback URI can be supplied through
-   `PASSPORT_OAUTH_REDIRECT_URI` and must also be registered with Google.
-3. Run `node apps/server/dist/cli.js accounts add gmail`. Enter your email address, display
-   name, client ID and client secret. Secret entry is hidden; scripting can use
-   `PASSPORT_SETUP_CLIENTSECRET`. Open the printed authorization URL. Passport validates
-   OAuth state, exchanges the code using PKCE, then shuts down its one-shot callback listener.
-4. Start `serve`, or run `node apps/server/dist/cli.js sync` for one pass.
-
-Use `accounts add google-calendar` with the Google Calendar API enabled to add calendar
-sync separately. Microsoft Graph, JMAP and CalDAV also have descriptor-driven CLI setup.
-OAuth accounts are added through the CLI; the Accounts page supports non-OAuth setup.
-Provider-specific details and scopes are in [providers](packages/providers/README.md).
-
-### IMAP with an app password
-
-Create an app password with your provider, then run:
-
-```sh
-node apps/server/dist/cli.js accounts add imap
-```
-
-Enter the IMAP host, port (typically 993), TLS (`true` for implicit TLS), optional username,
-app password, SMTP host, SMTP port (typically 465), and SMTP TLS. Blank optional values use
-provider defaults; a separate SMTP password is optional. Secrets are hidden or read from
-`PASSPORT_SETUP_PASSWORD` / `PASSPORT_SETUP_SMTPPASSWORD`. For STARTTLS use port 143/587
-and `false` for the corresponding implicit TLS field.
-
-Accounts and provider credentials live in SQLite. Credentials are encrypted with
-`PASSPORT_MASTER_KEY`, or a generated `master.key` in the data directory with mode 0600.
-Keep that key with your backups. Periodic sync and supported push notifications share one
-connected adapter per account; failures reconnect on the next operation without replaying sends.
-
-Run one backend writer per data directory. Stop `serve` before using mutating standalone
-CLI commands against the same directory. Use HTTP MCP while the UI server is running.
-
-## Use from Claude Code / Codex
-
-For stdio, register the built CLI with an absolute path. This is the `passport mcp` command;
-it starts the real backend, synchronization and background jobs without an HTTP listener,
-and writes diagnostics only to stderr:
-
-```sh
-claude mcp add --transport stdio passport -- node /absolute/path/to/passport/apps/server/dist/cli.js mcp
-codex mcp add passport -- node /absolute/path/to/passport/apps/server/dist/cli.js mcp
-```
-
-Or run `passport serve` and connect to its Streamable HTTP endpoint:
-
-```sh
-claude mcp add --transport http passport http://127.0.0.1:4318/mcp
-codex mcp add passport --url http://127.0.0.1:4318/mcp
-```
-
-See the [official Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
-and [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp) for client configuration.
-MCP tools include `search_emails`, `archive_emails`, drafts, calendar queries, matters and
-people. All writes use the shared executor as external-agent actions, capped by your external
-trust ceiling. Human approvals, cancellation and undo remain in the UI/API.
+Search and read mail, prepare drafts, organize matters and people, and work with calendars through the mailbox MCP tools. Writes enter the same action pipeline as the UI. See the [tool catalogue](docs/tools.md) for names, schemas and permission behavior.
 
 ## Architecture
 
-[docs/CONTRACT.md](docs/CONTRACT.md) defines the frozen interfaces and invariants.
-`types` defines the model; `store` supplies SQLite, encrypted credentials and the event bus;
-`providers` normalizes mail/calendar services; `policy` gates, audits and executes actions;
-`agent` performs triage and scheduled reviews; `mcp` exposes tools to external agents.
-`apps/server` composes these, maps provider identities during sync, queues triage, schedules
-outbox/digest/review/decay jobs, and serves the React UI in `apps/web`.
+```mermaid
+flowchart TD
+  UI[React web UI] --> Server[Local server and CLI]
+  Client[Claude Code / Codex / other agents] --> MCP[Mailbox MCP]
+  Server --> Agent[Agent runtime and scheduler]
+  Server --> Policy[Policy and action executor]
+  Agent --> Policy
+  MCP --> Policy
+  Policy --> Store[SQLite / credentials / action log]
+  Policy --> Providers[Mail and calendar providers]
+  Agent --> Model[Your chosen model endpoint]
+  Policy --> Outbox[Delayed outbox and undo]
+```
 
-The integration tests in `apps/server/src/e2e.test.ts` include three explicit **policy seams**
-skips pending the executor's complete-Person creation and `emailPatch` conventions:
-newsletter playbooks, known-contact draft decisions, and matter email metadata/undo.
-No server workaround bypasses policy. Other covered paths include real sync, send holds,
-release/cancel, archive undo, trust learning, digests and MCP.
+| Workspace | Responsibility |
+| --- | --- |
+| `@passport/types` | Shared contracts and invariants |
+| `@passport/store` | SQLite, FTS5, encrypted credentials and event bus |
+| `@passport/providers` | Gmail, Graph, IMAP/SMTP, JMAP and calendar adapters |
+| `@passport/policy` | Trust, risk, action execution, delayed sends and undo |
+| `@passport/agent` | Triage, people/matter context, USER.md, digests and reviews |
+| `@passport/mcp` | Policy-controlled tools over stdio and Streamable HTTP |
+| `@passport/server` | Composition root, API, WebSockets, CLI and background jobs |
+| `@passport/web` | Decisions, Matters, People, Trust and account UI |
+
+The public **`@akd-me/passport`** artifact bundles the private workspace code and built web UI. The server workspace retains its development name. See the [engineering contract](docs/CONTRACT.md) and [server reference](apps/server/README.md).
+
+## Security model
+
+Passport is local-first: the database and action history live on your machine. Provider credentials are encrypted at rest with AES-256-GCM using `PASSPORT_MASTER_KEY` or a generated private `master.key`. Message bodies and the database itself are **not** encrypted by Passport; use OS disk encryption and protect backups. Model keys supplied in the environment are not copied into config; a key you put in the config file remains there.
+
+Mail/calendar providers receive the normal synchronization and action requests you authorize. Beyond those connections, the agent sends relevant context only to the LLM endpoint you choose; there is no Passport telemetry service or required hosted backend. External MCP clients can read mailbox content and have their own data handling policies. A local model can keep inference local.
+
+Trust gates and the external-agent ceiling constrain actions. Sends are held before delivery when a hold is configured; reversible changes are logged with undo. Sender verification is derived from headers/signatures, never message content; production Passport identity verification is not wired yet. Loopback defaults and origin checks help, but the HTTP API is unauthenticated. See [SECURITY.md](SECURITY.md) for the threat model and private reporting.
+
+## Status and roadmap
+
+This is an early **0.1.0, unreleased** implementation. The current offline suite passes, including the three server policy-seam integration cases. Live provider/model interoperability and hosted deployment must be validated in your environment.
+
+Near-term work includes authenticated remote access and live provider validation. **Hosted identity and SMTP+ are parked.** Gmail/Graph/JMAP push subscriptions and contacts sync are not implemented; periodic sync is available. See [CHANGELOG.md](CHANGELOG.md).
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/CONTRACT.md](docs/CONTRACT.md). Use offline fixtures for tests and keep all domain writes behind the action executor.
 
 ```sh
 pnpm build
 pnpm typecheck
+pnpm lint
 pnpm test
+pnpm run pack
+node scripts/smoke-package.mjs apps/server/dist/akd-me-passport-0.1.0.tgz
 ```
+
+CI checks Node 22 and 24. Tagged releases publish npm provenance, a GHCR image and changelog release notes; [maintainer setup](docs/deploy.md#releasing) describes the required permissions and secrets.
+
+## License
+
+[MIT](LICENSE).

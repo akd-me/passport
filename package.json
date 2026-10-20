@@ -10,11 +10,14 @@
     "node": ">=22.5"
   },
   "scripts": {
-    "build": "pnpm -r --filter './packages/**' --filter './apps/**' run build",
+    "build": "pnpm -r --filter './packages/**' run build && pnpm --filter @passport/web build && pnpm --filter @passport/server build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "lint": "pnpm -r run lint",
-    "dev": "pnpm --filter @passport/server dev"
+    "dev": "pnpm --filter @passport/server dev",
+    "demo": "pnpm --filter @passport/server demo",
+    "pack": "pnpm build && pnpm --dir apps/server/dist/package pack --pack-destination ..",
+    "docker:build": "docker build -t passport:local ."
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
