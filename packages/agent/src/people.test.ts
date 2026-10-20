@@ -1,15 +1,21 @@
+import { createToolRegistry } from "@passport/tools";
 import { describe, expect, it } from "vitest";
 import type { Email } from "@passport/types";
 import { resolvePeople } from "./people.js";
 import { FakeExecutor, FakePolicy, MemoryBus } from "./testing/collaborators.js";
-import { emailFixture, personFixture, TEST_NOW } from "./testing/fixtures.js";
+import { accountFixture, emailFixture, personFixture, TEST_NOW } from "./testing/fixtures.js";
 import { MemoryStore } from "./testing/memory-store.js";
 
 async function resolve(email: Email = emailFixture(), history: Email[] = [], person?: ReturnType<typeof personFixture>) {
   const store = new MemoryStore(), policy = new FakePolicy(), bus = new MemoryBus(), executor = new FakeExecutor(store, policy);
   await store.emails.upsertMany([email, ...history]);
   if (person) await store.people.upsert(person);
-  const result = await resolvePeople({ email, store, bus, now: TEST_NOW, selfAddresses: new Set(["me@example.com"]), submit: request => executor.submit({ ...request, actor: { kind: "agent", id: "run-people" }, runId: "run-people" }) });
+  await store.accounts.upsert(accountFixture());
+  const tools = createToolRegistry({ store, executor, policy, bus, selfAddresses: ["me@example.com"], actor: { kind: "agent", id: "run-people" } });
+  const result = await resolvePeople({ email, store, bus, now: TEST_NOW, selfAddresses: new Set(["me@example.com"]), savePerson: async (person, reason) => {
+    const result = await tools.find(tool => tool.name === "update_person")!.handler({ accountId: "account-1", personId: person.id, patch: { displayName: person.displayName }, reason }, { personSnapshot: person, projectedPeople: [person], runId: "run-people" });
+    if (result.isError) throw new Error(JSON.stringify(result));
+  } });
   return { store, bus, executor, result, sender: await store.people.getByEmail(email.from[0]!.email) };
 }
 

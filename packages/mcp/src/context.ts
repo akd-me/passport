@@ -1,6 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { ActionExecutor, ActionParams, ActionRequest, ActionType, Email, EventBus, PolicyEngine, Store } from "@passport/types";
-import { categorize } from "./categorize.js";
+import type { ActionExecutor, EventBus, PolicyEngine, Store } from "@passport/types";
 import { MailboxMcpError, required } from "./presentation.js";
 
 /** Collaborators are owned by the host; closing an MCP server never closes the store or bus. */
@@ -16,46 +15,6 @@ export interface MailboxMcpDependencies {
 export class Context {
   readonly store: Store;
   constructor(readonly deps: MailboxMcpDependencies, readonly server: McpServer) { this.store = deps.store; }
-
-  actor() {
-    return { kind: "external-agent" as const, id: this.deps.clientName ?? this.server.server.getClientVersion()?.name ?? "mcp-client" };
-  }
-
-  async account(accountId?: string) {
-    if (accountId) return required(await this.store.accounts.get(accountId), "Account");
-    const accounts = await this.store.accounts.list();
-    if (accounts.length !== 1) throw new MailboxMcpError("ACCOUNT_REQUIRED", "Provide accountId when there is not exactly one account.");
-    return required(accounts[0], "Account");
-  }
-
-  async email(id: string, includeBodies = false) {
-    return required(await this.store.emails.get(id, { includeBodies }), "Email");
-  }
-
-  async emailBatch(ids: string[], accountId?: string) {
-    const emails = await Promise.all([...new Set(ids)].map(id => this.email(id)));
-    const inferredId = accountId ?? required(emails[0], "Email").accountId;
-    if (emails.some(email => email.accountId !== inferredId)) throw new MailboxMcpError("ACCOUNT_MISMATCH", "Split mail operations into separate calls per account.");
-    await this.account(inferredId);
-    return { accountId: inferredId, emails };
-  }
-
-  async submit<T extends ActionType>(type: T, accountId: string, params: ActionParams[T], reason: string,
-    context: { emails?: Email[]; recipientEmails?: string[]; personIds?: string[]; matterId?: string; sensitiveCategory?: "money" | "legal" } = {}) {
-    const accounts = await this.store.accounts.list();
-    const addresses = [...new Set([...(context.recipientEmails ?? []), ...(context.emails ?? []).flatMap(email => email.from.map(address => address.email))].map(email => email.trim().toLowerCase()))];
-    const people = (await Promise.all([
-      ...addresses.map(email => this.store.people.getByEmail(email)),
-      ...(context.personIds ?? []).map(id => this.store.people.get(id)),
-    ])).filter(person => person !== null);
-    const inference = categorize({ type, emails: context.emails, people, recipientEmails: context.recipientEmails, matterId: context.matterId, selfEmails: accounts.map(account => account.emailAddress) });
-    if (context.sensitiveCategory === "legal" || (context.sensitiveCategory === "money" && inference.category !== "legal")) inference.category = context.sensitiveCategory;
-    const request: ActionRequest<T> = {
-      type, accountId, params, reason, actor: this.actor(), ...inference,
-      ...(context.matterId ? { matterId: context.matterId } : {}),
-    };
-    return this.deps.executor.submit(request);
-  }
 
   async matterBundle(id: string, limit = 25, cursor?: string | null, includeBodies = false) {
     const matter = required(await this.store.matters.get(id), "Matter");

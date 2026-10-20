@@ -22,6 +22,7 @@ import { doctorCommand } from "./doctor.js";
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const [command = "serve", subcommand, kind] = args;
+  if (command === "mcp" && (subcommand === "install" || subcommand === "proxy")) return (await import("./cli/mcp-install.js")).handleMcpCommand(args);
   if (command === "jobs") return runJobsCommand(args.slice(1));
   if (command === "init") return initializePassport();
   if (command === "doctor") return doctorCommand(args.includes("--demo"));

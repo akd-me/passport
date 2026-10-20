@@ -1,41 +1,8 @@
 import type { ActionRecord, CalendarEvent, Email, Matter, Person } from "@passport/types";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
-const BODY_LIMIT = 1200;
+const BODY_LIMIT = 2000;
 const clip = (text: string, max = BODY_LIMIT) => text.slice(0, max);
-
-/** Deliberate projection: no raw provider headers, account settings, credentials or action results. */
-export function emailView(email: Email, full = false) {
-  const { id, accountId, threadId, mailboxIds, keywords, from, to, cc, bcc, replyTo, subject, receivedAt, sentAt, size, matterId, personIds, category, verification } = email;
-  const body = (value: string | null | undefined) => value == null ? undefined : full ? value : clip(value);
-  return {
-    id, accountId, threadId, mailboxIds, keywords, from, to, cc, bcc, replyTo, subject, receivedAt, sentAt,
-    preview: clip(email.preview, 240), size, matterId, personIds, category, verification,
-    attachments: email.attachments.map(({ id, name, type, size, blobId }) => ({ id, name, type, size, blobId })),
-    headers: { messageId: email.headers.messageId, inReplyTo: email.headers.inReplyTo, references: email.headers.references, listId: email.headers.listId },
-    canUnsubscribe: Boolean(email.headers.listUnsubscribe),
-    textBody: body(email.textBody), htmlBody: body(email.htmlBody),
-    truncated: !full && (email.textBody !== undefined || email.htmlBody !== undefined),
-  };
-}
-
-export function eventView(event: CalendarEvent, full = false) {
-  return { ...event, description: full ? event.description : event.description == null ? event.description : clip(event.description),
-    truncated: !full && (event.description?.length ?? 0) > BODY_LIMIT };
-}
-
-export function actionView(action: ActionRecord) {
-  return {
-    id: action.id, type: action.request.type, accountId: action.request.accountId,
-    actor: action.request.actor, category: action.request.category, reason: action.request.reason,
-    status: action.status, decision: { outcome: action.decision.outcome, reason: action.decision.reason, trustLevel: action.decision.trustLevel },
-    holdUntil: action.holdUntil ?? action.decision.holdUntil ?? null, createdAt: action.createdAt,
-  };
-}
-
-export function writeResult(action: ActionRecord): CallToolResult {
-  return json({ ...actionView(action), policy_note: `Applied ${action.decision.trustLevel} trust for ${action.decision.category} to this external-agent action: ${action.decision.outcome}.` }, action.decision.outcome === "deny" || action.status === "failed");
-}
 
 export function json(value: unknown, isError = false): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value) }], ...(isError ? { isError: true } : {}) };

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server as HttpServer, type ServerResponse } from "node:http";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -18,8 +18,11 @@ export interface MailboxHttpHandle {
   close(): Promise<void>;
 }
 
-/** Local Streamable HTTP with isolated SDK servers per session and a loopback-only listener. */
-export async function serveHttp(server: McpServer, options: { port: number; path?: string }): Promise<MailboxHttpHandle> {
+/** Authenticated Streamable HTTP; isolated sessions, loopback-bound unless host is explicit. */
+export async function serveHttp(server: McpServer, options: { port: number; path?: string; token: string; host?: string }): Promise<MailboxHttpHandle> {
+  if (!options.token || /\s/.test(options.token)) throw new MailboxMcpError("TOKEN_REQUIRED", "A nonempty bearer token without whitespace is required for HTTP.");
+  const host = options.host ?? "127.0.0.1";
+  const urlHost = host.includes(":") ? `[${host}]` : host;
   const path = options.path ?? "/mcp";
   if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535) throw new MailboxMcpError("INVALID_PORT", "port must be an integer from 0 to 65535.");
   if (!/^\/(?:[A-Za-z0-9._~-]+\/?)*$/.test(path)) throw new MailboxMcpError("INVALID_PATH", "path must be an absolute URL path without a query or fragment.");
@@ -38,7 +41,16 @@ export async function serveHttp(server: McpServer, options: { port: number; path
   const httpServer = createServer(async (req, res) => {
     try {
       if (closing) { fail(res, 503, "Server is shutting down."); return; }
-      const allowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`];
+      const authorization = req.headers.authorization ?? "";
+      const expected = Buffer.from(`Bearer ${options.token}`);
+      const actual = Buffer.from(authorization);
+      if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+        res.setHeader("WWW-Authenticate", "Bearer"); fail(res, 401, "Bearer token required."); return;
+      }
+      const local = req.socket.localAddress?.replace(/^::ffff:/, "");
+      const localHost = local?.includes(":") ? `[${local}]` : local;
+      const allowedHosts = [`${urlHost}:${port}`, ...(host === "127.0.0.1" ? [`localhost:${port}`] : []),
+        ...(["0.0.0.0", "::"].includes(host) && localHost ? [`${localHost}:${port}`] : [])];
       if (!req.headers.host || !allowedHosts.includes(req.headers.host)) { fail(res, 403, "Invalid Host."); return; }
       const origin = req.headers.origin;
       if (origin && !allowedHosts.map(host => `http://${host}`).includes(origin)) { fail(res, 403, "Invalid Origin."); return; }
@@ -73,14 +85,14 @@ export async function serveHttp(server: McpServer, options: { port: number; path
   });
   await new Promise<void>((resolve, reject) => {
     httpServer.once("error", reject);
-    httpServer.listen(options.port, "127.0.0.1", () => { httpServer.off("error", reject); resolve(); });
+    httpServer.listen(options.port, host, () => { httpServer.off("error", reject); resolve(); });
   });
   const address = httpServer.address();
   if (!address || typeof address === "string") throw new MailboxMcpError("LISTEN_FAILED", "HTTP listener did not provide a port.");
   port = address.port;
   let shutdown: Promise<void> | undefined;
   return {
-    httpServer, url: `http://127.0.0.1:${port}${path}`,
+    httpServer, url: `http://${urlHost}:${port}${path}`,
     close() {
       shutdown ??= (async () => {
         closing = true;

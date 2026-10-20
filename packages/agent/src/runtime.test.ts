@@ -1,3 +1,4 @@
+import { createToolRegistry } from "@passport/tools";
 import { describe, expect, it, vi } from "vitest";
 import type { ActionParams, Email } from "@passport/types";
 import { createAgentRuntime } from "./runtime.js";
@@ -244,7 +245,7 @@ describe("schedules and run lifecycle", () => {
 describe("manual tools", () => {
   it("runs a read/draft loop and routes writes through the executor", async () => {
     const draft = { accountId: "account-1", inReplyToEmailId: "email-1", to: [{ email: "alice@example.com" }], subject: "Re: A quick question", textBody: "I can help arrange a review." };
-    const env = await setup([toolOutput("read_email", { emailId: "email-1" }), toolOutput("draft", { draft }, "call-2"), "Draft submitted."]);
+    const env = await setup([toolOutput("get_email", { emailId: "email-1" }), toolOutput("create_draft", { draft, reason: "Draft for review" }, "call-2"), "Draft submitted."]);
     await env.runtime.run({ kind: "manual", instruction: "Draft a reply to Alice", emailIds: ["email-1"] });
     expect(env.executor.requests).toHaveLength(1);
     expect(env.executor.requests[0]).toMatchObject({ type: "draft_create", actor: { kind: "agent" }, params: { draft } });
@@ -253,7 +254,7 @@ describe("manual tools", () => {
   });
 
   it("caps total tool invocations across multiple rounds at twelve", async () => {
-    const env = await setup(Array.from({ length: 13 }, (_, i) => toolOutput("archive", { emailIds: ["email-1"] }, `call-${i}`)));
+    const env = await setup(Array.from({ length: 13 }, (_, i) => toolOutput("archive_emails", { reason: "Organize mail", emailIds: ["email-1"] }, `call-${i}`)));
     const run = await env.runtime.run({ kind: "manual", instruction: "Keep organizing" });
     expect(env.llm.calls).toHaveLength(12);
     expect(env.executor.requests).toHaveLength(12);
@@ -261,8 +262,8 @@ describe("manual tools", () => {
   });
 
   it("caps a single batch of thirteen tool calls at twelve", async () => {
-    const response = toolOutput("archive", { emailIds: ["email-1"] });
-    response.toolCalls = Array.from({ length: 13 }, (_, i) => ({ id: `call-${i}`, name: "archive", arguments: { emailIds: ["email-1"] } }));
+    const response = toolOutput("archive_emails", { reason: "Organize mail", emailIds: ["email-1"] });
+    response.toolCalls = Array.from({ length: 13 }, (_, i) => ({ id: `call-${i}`, name: "archive_emails", arguments: { reason: "Organize mail", emailIds: ["email-1"] } }));
     const env = await setup([response]);
     await env.runtime.run({ kind: "manual", instruction: "Archive selected mail" });
     expect(env.executor.requests).toHaveLength(12);
@@ -270,14 +271,14 @@ describe("manual tools", () => {
   });
 
   it("returns repairable read errors to the model", async () => {
-    const env = await setup([toolOutput("read_email", { emailId: "missing" }), toolOutput("read_email", { emailId: "email-1" }, "call-2"), "Read complete."]);
+    const env = await setup([toolOutput("get_email", { emailId: "missing" }), toolOutput("get_email", { emailId: "email-1" }, "call-2"), "Read complete."]);
     await env.runtime.run({ kind: "manual", instruction: "Read the email" });
     expect(env.llm.calls[1]?.messages.at(-1)).toMatchObject({ isError: true });
     expect(env.executor.requests).toEqual([]);
   });
 
   it("keeps manual sends in the policy-controlled outbox", async () => {
-    const env = await setup([toolOutput("send", { draftEmailId: "draft-1" }), "The send is held."]);
+    const env = await setup([toolOutput("send", { reason: "Send reviewed draft", draftEmailId: "draft-1" }), "The send is held."]);
     await env.store.emails.upsertMany([emailFixture({ id: "draft-1", keywords: { $draft: true } })]);
     await env.runtime.run({ kind: "manual", instruction: "Send my reviewed draft" });
     expect(env.executor.records[0]).toMatchObject({ status: "held", request: { type: "send" } });
@@ -287,8 +288,28 @@ describe("manual tools", () => {
     const env = await setup([toolOutput("provider_send", { actor: { kind: "human" } })]);
     await expect(env.runtime.run({ kind: "manual", instruction: "Send mail" })).rejects.toMatchObject({ code: "LLM_TOOL" });
     expect(env.executor.requests).toEqual([]);
-    const bad = await setup([toolOutput("archive", { emailIds: "email-1" })]);
+    const bad = await setup([toolOutput("archive_emails", { reason: "Organize mail", emailIds: "email-1" })]);
     await expect(bad.runtime.run({ kind: "manual", instruction: "Archive mail" })).rejects.toMatchObject({ code: "LLM_SCHEMA" });
     expect(bad.executor.requests).toEqual([]);
+  });
+});
+
+
+describe("registry integration and tool budgets", () => {
+  it("makes newly registered tools available automatically and reports token/call usage", async () => {
+    const env = await setup([toolOutput("get_standing_rules", {}), "Read the standing instructions."]);
+    const run = await env.runtime.run({ kind: "manual", instruction: "Read standing rules" });
+    const registry = createToolRegistry({ ...env, actor: { kind: "agent", id: run.id } });
+    expect(env.llm.calls[0]?.tools).toEqual(registry.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })));
+    expect(registry.every(tool => env.llm.calls[0]?.system.includes(tool.name))).toBe(true);
+    expect(run.toolBudget).toEqual({ callsMade: 1, llmCalls: 2, inputTokens: 20, outputTokens: 10, totalTokens: 30 });
+    expect(JSON.parse((await env.store.kv.get(`run:${run.id}`))!).toolBudget).toEqual(run.toolBudget);
+  });
+  it("counts triage registry calls and avoids submitting empty scheduling proposals", async () => {
+    const env = await setup([newMatterOutput, { status: "tentative", textBody: "Please suggest a convenient time.", slots: [] }], emailFixture({ subject: "Meeting invite" }));
+    const run = await env.runtime.run({ kind: "email.received", emailId: "email-1" });
+    expect(run.toolBudget.callsMade).toBe(4);
+    expect(env.executor.requests.at(-1)).toMatchObject({ type: "draft_create", category: "scheduling" });
+    expect(env.executor.requests.some(request => request.type === "calendar_propose")).toBe(false);
   });
 });

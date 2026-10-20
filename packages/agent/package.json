@@ -18,7 +18,8 @@
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@passport/types": "workspace:*"
+    "@passport/types": "workspace:*",
+    "@passport/tools": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.0",

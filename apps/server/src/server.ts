@@ -6,6 +6,7 @@ import { startSchedulers } from "./schedulers/index.js";
 import { serveHttp } from "@passport/mcp";
 import { logger } from "./logger.js";
 import { checkBind, getAuth } from "./auth.js";
+import { loadMcpToken } from "./mcp-token.js";
 
 /** Bind locally by default; the WebSocket emits raw DomainEvent JSON at /ws. */
 export function startServer(
@@ -44,9 +45,10 @@ export function startServer(
   });
   const schedulers = startSchedulers(backend);
   const mcp = backend.createMcpServer
-    ? serveHttp(backend.createMcpServer(), {
+    ? loadMcpToken(backend.config.dataDir).then(token => serveHttp(backend.createMcpServer!(), {
         port: backend.config.mcpPort ?? 4318,
-      })
+        token,
+      }))
     : undefined;
   const ready = mcp?.then((handle) => {
     logger.info(`Mailbox MCP → ${handle.url}`);

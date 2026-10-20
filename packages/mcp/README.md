@@ -2,8 +2,8 @@
 
 Point a coding agent at your inbox. This package exposes Passport mail, calendar,
 people and matters through the Model Context Protocol, with all mutations gated
-by the injected `ActionExecutor`. It depends only on `@passport/types`, the MCP
-SDK and Zod; it imports no sibling implementation packages.
+by the injected `ActionExecutor`. It consumes the shared `@passport/tools` registry plus `@passport/types`, the MCP SDK
+and Zod for resource/prompt arguments. Tool schemas and handlers live only in the registry.
 
 ## Host integration
 
@@ -27,22 +27,23 @@ Alternatively, in an **HTTP entrypoint**:
 import { createMailboxMcpServer, serveHttp } from "@passport/mcp";
 
 const server = createMailboxMcpServer({ store, executor, policy, bus });
-const http = await serveHttp(server, { port: 4318, path: "/mcp" });
+const http = await serveHttp(server, { port: 4318, path: "/mcp", token: process.env.PASSPORT_MCP_TOKEN });
 // http.url === "http://127.0.0.1:4318/mcp"
 // At shutdown: await http.close(), then shut down the host's collaborators.
 ```
 
 `createMailboxMcpServer(deps)` returns an unconnected SDK `McpServer`.
 `serveStdio(server)` connects it and resolves; `server.close()` closes stdio.
-`serveHttp(server, { port, path? })` resolves to `{ httpServer, url, close }` once
+`serveHttp(server, { port, token, path?, host? })` resolves to `{ httpServer, url, close }` once
 listening. `path` defaults to `/mcp`; `port: 0` selects an available port.
 Use a fresh factory-created server for each transport. The HTTP helper creates
 an isolated SDK server per session, sharing the injected collaborators, and
 supports POST, GET/SSE and DELETE session termination. `close()` is idempotent.
 Use the returned handle to shut down the entire HTTP host, including its sessions.
 
-The listener binds to `127.0.0.1`, validates Host/Origin, and does not implement
-remote authentication or TLS. Client names are audit labels, not authenticated
+The listener binds to `127.0.0.1` by default, validates Host/Origin, and requires
+`Authorization: Bearer <token>` on every request. An explicit `host` option overrides
+the bind address. TLS termination remains the host's responsibility. Client names are audit labels, not authenticated
 identities. By default, the MCP initialization name becomes the action actor
 ID. A trusted host may provide `clientName` to override it; omit the override
 when distinct HTTP client names should be recorded.
@@ -79,10 +80,10 @@ Equivalent project `.mcp.json`:
 For an already-running HTTP entrypoint, use this instead:
 
 ```sh
-claude mcp add --transport http passport http://127.0.0.1:4318/mcp
+passport mcp install --client claude-code --http
 ```
 
-The JSON entry for HTTP is `{ "type": "http", "url": "http://127.0.0.1:4318/mcp" }`.
+The JSON entry for HTTP is `{ "type": "http", "url": "http://127.0.0.1:4318/mcp", "headers": { "Authorization": "Bearer <token>" } }`.
 See the [official Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
 
 ## Codex configuration
@@ -101,12 +102,13 @@ command = "node"
 args = ["/absolute/path/to/mcp-stdio.mjs"]
 ```
 
-For the running HTTP server, use `codex mcp add passport --url http://127.0.0.1:4318/mcp`,
+For the running HTTP server, use `passport mcp install --client codex --http`,
 or replace the table above with:
 
 ```toml
 [mcp_servers.passport]
 url = "http://127.0.0.1:4318/mcp"
+http_headers = { Authorization = "Bearer <token>" }
 ```
 
 See the [official OpenAI MCP documentation](https://learn.chatgpt.com/docs/extend/mcp).
@@ -114,6 +116,12 @@ The stdio command names the host's bootstrap file, which constructs dependencies
 the library itself does not load account configuration or credentials.
 
 ## Tools
+
+The registry exposes 43 tools. The original tools are described below; the full
+[shared catalogue](../../docs/tools.md) also covers summaries, free slots, person
+search, query batches, standing rules, daily logs, decision explanations and
+unsubscribe previews. `passport mcp install --client <client> [--http]` installs
+client configuration with backups and supports `--dry-run`.
 
 Read tools:
 
@@ -174,7 +182,7 @@ require a human-readable reason.
 
 Tool data is compact JSON in a text content block; SDK input-validation errors
 may be plain text error blocks. Search omits bodies by default;
-`includeBodies: true` includes limited bodies. Message bodies are capped at 1200
+`includeBodies: true` includes limited bodies. Message bodies are capped at 2000
 characters and `truncated: true` indicates the limited-body view; `full: true`
 requests the complete bodies. `full: true` also implies bodies in search.
 Raw provider headers, account settings, credential access, action parameters,
@@ -195,7 +203,7 @@ precedence over newsletter organization; unsubscribe and scheduling use their
 own categories. The executor enforces the external-agent ceiling, global mode,
 category trust, always-ask rules and delayed outbox.
 
-Write results contain `id`, `status`, `decision.outcome`, `decision.reason`,
+Write results contain `actionId`, `status`, `outcome`, `reason`, plus compatible `id`, `decision.outcome`, `decision.reason`,
 `decision.trustLevel`, `holdUntil` and a short `policy_note`:
 
 - `ask` / `proposed`: waiting for a human; the action has not run.
@@ -203,6 +211,7 @@ Write results contain `id`, `status`, `decision.outcome`, `decision.reason`,
 - `allow`: inspect status for the actual execution result.
 - `deny`: MCP `isError: true`, with the denial reason and policy note.
 
+Standing rules submit reversible `profile_update` actions in category `matters`.
 There are no delete/purge, approval, trust-configuration or outbox-release tools.
 The server never writes directly to the store. Resource-list change notifications
 follow relevant bus events, and bus listeners are removed when a client closes.
@@ -210,6 +219,8 @@ follow relevant bus events, and bus listeners are removed when a client closes.
 **Contract adaptation:** `ActionType` has no undo or cancellation variant.
 `undo_action` submits the persisted inverse as a *new* external-agent request,
 recomputing its category/counterparty while retaining money/legal sensitivity.
+Private executor snapshot inverses are not public submission inputs: use the human
+UI/API for those; `profile_update` has an ordinary public inverse.
 It returns the new action's ID and preserves
 the original audit record, including its status. Do not repeatedly undo the same
 record assuming the original will become `undone`. Irreversible, unexecuted and
@@ -231,7 +242,7 @@ describes the original held action's applied trust level.
 
 ```sh
 pnpm install
-pnpm --filter @passport/types build
+pnpm build # builds registry and server CLI used by integration tests
 pnpm --filter @passport/mcp typecheck
 pnpm --filter @passport/mcp test
 pnpm --filter @passport/mcp build
@@ -247,4 +258,4 @@ There are no production stubs. Availability is computed from synced local events
 so sync freshness determines its accuracy. Meeting proposals carry caller-supplied
 slots and a draft through the executor; they do not reserve time independently.
 Provider execution, undo inverses, approval and outbox release remain the host's
-injected policy/executor responsibilities. No shared types were changed.
+injected policy/executor responsibilities. The shared contract appends `profile_update` for reversible USER.md writes.

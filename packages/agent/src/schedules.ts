@@ -66,7 +66,7 @@ export async function reviewMatters(ctx: RunContext, days: number): Promise<void
     const update = await ctx.structured(reviewSchema, reviewPrompt(matter, emails.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).slice(0, 10)));
     const accountId = emails[0]?.accountId ?? events[0]?.accountId ?? (await ctx.store.accounts.list())[0]?.id;
     if (!accountId) throw new AgentError("Matter review requires an account for the action log", "ACCOUNT_NOT_FOUND");
-    await ctx.submit({ type: "matter_update", accountId, category: "matters", matterId: matter.id, reason: `Review matter inactive for ${days} days: ${matter.title}`, params: { matterId: matter.id, patch: { summary: String(update.summary), nextStep: String(update.nextStep), status: update.status as "active" | "waiting" | "done" } } });
+    await ctx.callTool("update_matter", { accountId, matterId: matter.id, reason: `Review matter inactive for ${days} days: ${matter.title}`, patch: { summary: String(update.summary), nextStep: String(update.nextStep), status: update.status as "active" | "waiting" | "done" } });
     reviewed++;
   }
   ctx.notes.push(`Reviewed ${reviewed} inactive matters.`);

@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { CallToolResultSchema, ResourceListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createToolRegistry } from "@passport/tools";
 import { createMailboxMcpServer } from "./index.js";
 import { MemoryBus, MemoryExecutor, MemoryPolicy, MemoryStore } from "./testing/fakes.js";
 import * as f from "./testing/fixtures.js";
@@ -11,6 +12,8 @@ const toolNames = [
   "list_events", "free_busy", "list_pending_decisions", "list_actions", "get_trust", "get_user_profile",
   "archive_emails", "label_emails", "mark_read", "move_emails", "create_draft", "reply_draft", "send", "unsubscribe",
   "respond_to_event", "propose_meeting", "create_matter", "update_matter", "attach_to_matter", "update_person", "snooze", "undo_action", "cancel_held_action",
+  "summarize_thread", "find_free_slots", "list_recent_from_person", "search_people", "batch_archive_by_query", "apply_label_by_query",
+  "get_standing_rules", "add_standing_rule", "remove_standing_rule", "get_daily_log", "explain_decision", "preview_unsubscribe",
 ];
 
 describe("mailbox MCP over SDK InMemoryTransport", () => {
@@ -50,6 +53,12 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
     expect(tools.some(tool => /delete|purge|approve|set_trust/.test(tool.name))).toBe(false);
     expect(tools.find(tool => tool.name === "search_emails")?.inputSchema.properties?.text).toMatchObject({ description: expect.stringContaining("FTS5") });
   });
+  it("exposes every registry tool with exactly the same input schema", async () => {
+    const registry = createToolRegistry({ store, executor, policy, bus, actor: { kind: "external-agent", id: "test-client" }, selfAddresses: [] });
+    const { tools } = await client.listTools();
+    expect(tools.map(tool => tool.name).sort()).toEqual(registry.map(tool => tool.name).sort());
+    for (const tool of registry) expect(tools.find(item => item.name === tool.name)?.inputSchema).toEqual(tool.inputSchema);
+  });
   it("searches using EmailQuery and passes FTS and pagination to the injected store", async () => {
     const { value } = await call("search_emails", { text: "project", accountId: "account-1", mailboxId: "inbox-1", limit: 1 });
     expect(value.items).toHaveLength(1); expect(value.items[0].subject).toBe("Project update");
@@ -61,7 +70,7 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
   it("truncates text and HTML bodies by default and respects explicit full=true", async () => {
     await store.emails.upsertMany([f.email({ textBody: "x".repeat(2000), htmlBody: "y".repeat(3000) })]);
     const compact = (await call("get_email", { emailId: "email-1" })).value;
-    expect(compact.textBody).toHaveLength(1200); expect(compact.htmlBody).toHaveLength(1200); expect(compact.truncated).toBe(true);
+    expect(compact.textBody).toHaveLength(2000); expect(compact.htmlBody).toHaveLength(2000); expect(compact.truncated).toBe(true);
     const full = (await call("get_email", { emailId: "email-1", full: true })).value;
     expect(full.textBody).toHaveLength(2000); expect(full.htmlBody).toHaveLength(3000); expect(full.truncated).toBe(false);
     const search = (await call("search_emails", { full: true })).value;
