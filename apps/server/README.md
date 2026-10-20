@@ -29,9 +29,20 @@ const app = createApp(backend); // app.request(...) works without a socket
 loads or creates a private master key, hydrates accounts, and composes the provider registry, policy,
 executor, agent and MCP server. Optional overrides support offline tests (`storePath: ":memory:"`).
 `src/sync/` persists local ID mappings, ingests mail/calendar deltas, commits opaque cursor envelopes
-only on complete passes, resets expired snapshots, and emits new arrivals once. Connected providers
+only on complete passes, reconciles expired snapshots while preserving local annotations, and emits
+new arrivals once. Provider-side deletions retain emails and matter/thread history with the
+`$deleted` keyword. Interrupted recovery retries from null; backfills remain additive. Connected providers
 are shared per account and reconnect after failure; mutations are never automatically replayed.
 `drainAgentQueue()` awaits event-driven triage; `close()` drains work and releases providers/Store.
+
+New arrivals are persisted in `Store.kv` under `arrival:<emailId>` before ingestion emits the arrival.
+The immediate queue and the single-flight `agent.arrivals` job (every 30 seconds) share per-account
+serialization. Failed attempts retry after 1 minute, 5 minutes, 15 minutes, and 1 hour, including
+after a restart. After five failures, the Decisions feed shows “Needs your attention: triage failed”
+as a proposed internal matter action. Approving it adds a manual-review next step to the existing
+matter or creates a review matter for an unattached email. Rejection dismisses the proposal;
+automatic triage stops after the fifth attempt. Without a configured model, entries remain pending
+without consuming attempts. A durable `arrival:pending` index provides discovery through `Store.kv`.
 
 The HTTP host adds a loopback Streamable HTTP MCP listener on port 4318 (`mcpPort` /
 `PASSPORT_MCP_PORT`). `passport mcp` uses stdio with background jobs and stderr diagnostics, without

@@ -12,8 +12,9 @@ contacts under a trust policy. Think "t3code, but the workspace is a mailbox ins
 - **Bring your own model**: Anthropic, OpenAI, OpenAI-compatible, Ollama.
 - **Two new units**: the *person* (identity, verification state, relationship) and the *matter*
   (a living workspace for a topic). Threads are an implementation detail.
-- **Every state change is an Action** that passes through the policy engine, is logged, and is
-  undoable where possible. Sends are held in a delayed outbox so they are cancellable.
+- **Every locally originated state change is an Action** that passes through the policy engine,
+  is logged, and is undoable where possible. Provider mirroring is system ingestion (see below).
+  Sends are held in a delayed outbox so they are cancellable.
 - **Trust is earned per category** and the UI exposes four modes:
   supervised / auto_accept_edits / auto / full_access (same shape as a code agent's permission picker).
 
@@ -55,7 +56,18 @@ and accept dependencies via constructor injection.
 
 ## Things that must be true of the whole system
 
-- No code path mutates mail, calendar, people or matters without creating an `ActionRecord`.
+- Every change to mail, calendar, people or matters originated locally by a human, agent, or
+  external agent requires an `ActionRecord`. Provider mirroring by the sync service (ingesting
+  provider-side changes, including provider-side deletions) is system ingestion and is exempt
+  from this rule.
+- Provider-side email deletions retain the local email and its matter and thread memberships,
+  marking `keywords["$deleted"] = true` so matter history remains available. The same applies to
+  messages absent from a successfully completed cursor-expiry reconciliation. Reappearing
+  messages refresh provider-owned fields and clear the tombstone without another arrival.
+  Account removal may hard-delete its emails. Full resync preserves local annotations, defers
+  missing-message reconciliation until the full pass succeeds, and retries interrupted recovery
+  from a null cursor. Windowed snapshots retain older mail outside their ingestion window.
+  Explicit onboarding backfills only widen ingestion; they do not prune mail.
 - An `ActionRecord` with `status: "executed"` and `inverse: null` is only allowed for `irreversible` actions.
 - `send` is never executed synchronously when `outboxHoldMinutes > 0`; it is `held` first.
 - External agents (MCP clients) are capped by `externalAgentCeiling`.

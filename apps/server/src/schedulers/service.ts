@@ -116,6 +116,16 @@ export class SchedulerService {
       { retry: { maxAttempts: 5, baseMs: 30000, maxMs: 3600000 } },
     );
     await system(
+      "agent.arrivals",
+      "Retry email triage",
+      { type: "interval", everyMs: 30000 },
+      async ({ signal }) => {
+        await backend.processArrivals?.(signal);
+        return { summary: "Processed due email arrivals" };
+      },
+      { concurrency: "single" },
+    );
+    await system(
       "trust.decay",
       "Trust decay",
       { type: "daily", at: "03:00" },

@@ -10,6 +10,7 @@ import type {
   Store,
 } from "@passport/types";
 import { ApiError, required } from "../errors.js";
+import { persistArrival } from "../arrivals.js";
 
 interface Cursors {
   mail: string | null;
@@ -84,7 +85,9 @@ export class SyncService {
     );
     const boxes = await this.store.mailboxes.list(accountId);
     return {
-      ...email,
+      // Only provider-owned fields may replace an existing record. In particular,
+      // providers cannot reset annotations made by local agents or humans.
+      ...(existing ?? { personIds: [], category: null, matterId: null }),
       accountId,
       id: await this.identity(
         accountId,
@@ -93,6 +96,7 @@ export class SyncService {
         email.id,
         existing?.id,
       ),
+      providerId: email.providerId,
       threadId: await this.reference(accountId, "thread", email.threadId),
       mailboxIds: await Promise.all(
         email.mailboxIds.map((id) =>
@@ -101,9 +105,24 @@ export class SyncService {
             : this.reference(accountId, "mailbox", id),
         ),
       ),
-      personIds: existing?.personIds ?? [],
-      category: existing?.category ?? null,
-      matterId: existing?.matterId ?? null,
+      keywords: email.keywords,
+      from: email.from,
+      to: email.to,
+      cc: email.cc,
+      bcc: email.bcc,
+      replyTo: email.replyTo,
+      subject: email.subject,
+      sentAt: email.sentAt,
+      receivedAt: email.receivedAt,
+      preview: email.preview,
+      textBody:
+        email.textBody === undefined ? existing?.textBody : email.textBody,
+      htmlBody:
+        email.htmlBody === undefined ? existing?.htmlBody : email.htmlBody,
+      attachments: email.attachments,
+      headers: email.headers,
+      size: email.size,
+      verification: email.verification,
     };
   }
   async event(accountId: string, event: CalendarEvent): Promise<CalendarEvent> {
@@ -160,19 +179,31 @@ export class SyncService {
     await Promise.allSettled([...this.active.values()]);
   }
 
-  private async clearMail(accountId: string) {
-    for (;;) {
-      const page = await this.store.emails.query({ accountId, limit: 500 });
-      if (!page.items.length) break;
+  private async markDeleted(email: Email) {
+    if (email.keywords.$deleted) return;
+    await this.store.emails.patchMany([email.id], {
+      keywords: { ...email.keywords, $deleted: true },
+    });
+    // Keep the email, its matter history and its thread available locally.
+    this.bus.emit({ type: "email.updated", emailId: email.id });
+  }
+  /** Windowed onboarding snapshots cannot prove older mail has disappeared. */
+  protected mailSnapshotSince(_accountId: string): string | undefined {
+    return undefined;
+  }
+  private async reconcileMail(accountId: string, seen: Set<string>) {
+    let cursor: string | null | undefined;
+    do {
+      const page = await this.store.emails.query({
+        accountId,
+        limit: 500,
+        cursor,
+        after: this.mailSnapshotSince(accountId),
+      });
       for (const email of page.items)
-        await this.store.threads.upsertMany([
-          { id: email.threadId, accountId, emailIds: [] },
-        ]);
-      await this.store.emails.deleteMany(page.items.map((email) => email.id));
-    }
-    await this.store.mailboxes.deleteMany(
-      (await this.store.mailboxes.list(accountId)).map((box) => box.id),
-    );
+        if (!seen.has(email.providerId)) await this.markDeleted(email);
+      cursor = page.nextCursor;
+    } while (cursor);
   }
   private async clearEvents(accountId: string) {
     for (;;) {
@@ -243,8 +274,16 @@ export class SyncService {
       }
       if (account.capabilities.mail) {
         const provider = await this.mailFor(accountId);
+        const reconcileKey = key("sync-reconcile", accountId, "mail");
+        let reconcile = !!(await this.store.kv.get(reconcileKey));
+        if (reconcile) {
+          cursors.mail = null;
+          await persist();
+        }
         const ingest = async () => {
           let final: string | null = null;
+          const seen = new Set<string>();
+          const deleted = new Set<string>();
           for await (const delta of provider.sync(cursors.mail)) {
             final = delta.kind === "cursor" ? delta.cursor : null;
             if (delta.kind === "mailbox") {
@@ -259,36 +298,34 @@ export class SyncService {
             }
             if (delta.kind === "email") {
               if (delta.op === "delete") {
-                const existing = await this.store.emails.getByProviderId(
-                  accountId,
-                  delta.providerId,
-                );
-                if (existing) {
-                  await this.store.emails.deleteMany([existing.id]);
-                  const thread = await this.store.threads.get(
-                    existing.threadId,
-                  );
-                  if (thread)
-                    await this.store.threads.upsertMany([
-                      {
-                        ...thread,
-                        emailIds: thread.emailIds.filter(
-                          (id) => id !== existing.id,
-                        ),
-                      },
-                    ]);
-                  this.bus.emit({
-                    type: "email.updated",
-                    emailId: existing.id,
-                  });
-                }
+                deleted.add(delta.providerId);
+                seen.delete(delta.providerId);
               } else {
+                seen.add(delta.email.providerId);
+                deleted.delete(delta.email.providerId);
                 const existing = await this.store.emails.getByProviderId(
                   accountId,
                   delta.email.providerId,
                 );
                 const email = await this.email(accountId, delta.email);
+                const seenKey = key("sync-seen", accountId, email.providerId);
+                const isNew = !existing && !(await this.store.kv.get(seenKey));
+                if (isNew) await persistArrival(this.store, email);
                 await this.store.emails.upsertMany([email]);
+                if (existing && existing.threadId !== email.threadId) {
+                  const previous = await this.store.threads.get(
+                    existing.threadId,
+                  );
+                  if (previous)
+                    await this.store.threads.upsertMany([
+                      {
+                        ...previous,
+                        emailIds: previous.emailIds.filter(
+                          (id) => id !== email.id,
+                        ),
+                      },
+                    ]);
+                }
                 const thread = await this.store.threads.get(email.threadId);
                 await this.store.threads.upsertMany([
                   {
@@ -299,9 +336,7 @@ export class SyncService {
                     ],
                   },
                 ]);
-                const seen = key("sync-seen", accountId, email.providerId);
-                const isNew = !existing && !(await this.store.kv.get(seen));
-                await this.store.kv.set(seen, "1");
+                await this.store.kv.set(seenKey, "1");
                 this.bus.emit(
                   isNew
                     ? { type: "email.received", email }
@@ -311,24 +346,31 @@ export class SyncService {
               }
             }
             if (delta.kind === "thread") {
+              const id = await this.reference(
+                accountId,
+                "thread",
+                delta.thread.id,
+              );
+              const existing = await this.store.threads.get(id);
               const emailIds = await Promise.all(
                 delta.thread.emailIds.map((id) =>
                   this.reference(accountId, "email", id),
                 ),
               );
               const present = await Promise.all(
-                emailIds.map((id) => this.store.emails.get(id)),
+                [...new Set([...emailIds, ...(existing?.emailIds ?? [])])].map(
+                  (id) => this.store.emails.get(id),
+                ),
               );
               await this.store.threads.upsertMany([
                 {
-                  id: await this.reference(
-                    accountId,
-                    "thread",
-                    delta.thread.id,
-                  ),
+                  id,
                   accountId,
                   emailIds: present
-                    .filter((email): email is Email => email !== null)
+                    .filter(
+                      (email): email is Email =>
+                        email !== null && email.threadId === id,
+                    )
                     .map((email) => email.id),
                 },
               ]);
@@ -339,6 +381,15 @@ export class SyncService {
               "SYNC_INCOMPLETE",
               "Mail sync did not finish with a cursor",
             );
+          // A partial full snapshot never removes or tombstones unseen mail.
+          if (reconcile) await this.reconcileMail(accountId, seen);
+          for (const providerId of deleted) {
+            const email = await this.store.emails.getByProviderId(
+              accountId,
+              providerId,
+            );
+            if (email) await this.markDeleted(email);
+          }
           return final;
         };
         try {
@@ -346,11 +397,16 @@ export class SyncService {
         } catch (error) {
           if ((error as { code?: string }).code !== "CURSOR_EXPIRED")
             throw error;
+          reconcile = true;
+          await this.store.kv.set(reconcileKey, "1");
           cursors.mail = null;
           await persist();
-          await this.clearMail(accountId);
           cursors.mail = await ingest();
         }
+        // Commit the cursor before clearing recovery intent. A crash between these
+        // writes safely repeats a full reconciliation from null.
+        await persist();
+        if (reconcile) await this.store.kv.delete(reconcileKey);
       }
       await persist();
       const at = new Date().toISOString();
