@@ -10,12 +10,11 @@
     "node": ">=22.5"
   },
   "scripts": {
-    "build": "pnpm --filter @passport/types build && pnpm -r --filter './apps/**' run build",
+    "build": "pnpm -r --filter './packages/**' --filter './apps/**' run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "lint": "pnpm -r run lint",
-    "dev": "pnpm --filter @passport/server dev",
-    "build:all": "pnpm -r --filter './packages/**' --filter './apps/**' run build"
+    "dev": "pnpm --filter @passport/server dev"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
