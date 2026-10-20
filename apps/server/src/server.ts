@@ -5,9 +5,15 @@ import { createApp } from "./app.js";
 import { startSchedulers } from "./schedulers/index.js";
 import { serveHttp } from "@passport/mcp";
 import { logger } from "./logger.js";
+import { checkBind, getAuth } from "./auth.js";
 
 /** Bind locally by default; the WebSocket emits raw DomainEvent JSON at /ws. */
-export function startServer(backend: Backend) {
+export function startServer(
+  backend: Backend,
+  options: { allowRemote?: boolean } = {},
+) {
+  checkBind(backend.config.host, options.allowRemote);
+  const auth = getAuth(backend);
   const app = createApp(backend),
     server = serve({
       fetch: app.fetch,
@@ -16,12 +22,11 @@ export function startServer(backend: Backend) {
     });
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 });
   server.on("upgrade", (request, socket, head) => {
-    if (
-      request.url !== "/ws" ||
-      (request.headers.origin &&
-        request.headers.origin !== `http://${request.headers.host}`)
-    ) {
-      socket.destroy();
+    const status = auth.upgradeStatus(request);
+    if (status) {
+      socket.end(
+        `HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+      );
       return;
     }
     wss.handleUpgrade(request, socket, head, (ws) => {

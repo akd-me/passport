@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { defaultConfig, loadConfig, saveConfig } from "./config.js";
 import { createDemoBackend } from "./demo/index.js";
 import { createRealBackend } from "./compose.js";
-import { createApp } from "./app.js";
+import { createApp } from "./auth.test-client.js";
 import { addAccount } from "./accounts.js";
 
 describe("configuration and composition", () => {

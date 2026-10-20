@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { request, type DomainEvent } from "./api";
+import { checkSession, websocketUrl } from "./auth";
 interface WorkspaceState {
   version: number;
   refresh: () => void;
@@ -35,9 +36,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       attempts = 0;
     const connect = () => {
       if (stopped) return;
-      socket = new WebSocket(
-        `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`,
-      );
+      socket = new WebSocket(websocketUrl());
       socket.onopen = () => {
         attempts = 0;
         setConnection("Live");
@@ -55,6 +54,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       };
       socket.onclose = () => {
         if (!stopped) {
+          void checkSession();
           setConnection("Reconnecting");
           reconnect = setTimeout(
             connect,

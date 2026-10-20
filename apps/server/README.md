@@ -7,7 +7,7 @@ Local Hono HTTP server, `ws` domain-event stream, CLI, and background jobs. Ever
 pnpm install
 pnpm build
 pnpm --filter @passport/server demo
-# http://127.0.0.1:3000
+# Open the http://127.0.0.1:3000/?token=... URL printed in the terminal
 pnpm --filter @passport/server typecheck
 pnpm --filter @passport/server test
 ```
@@ -20,6 +20,7 @@ The demo has 40 emails, eight people, six matters, four calendar events, propose
 import { createApp, createDemoBackend } from "@passport/server";
 const backend = await createDemoBackend();
 const app = createApp(backend); // app.request(...) works without a socket
+// API requests still require authentication; see src/auth.test-client.ts for test injection.
 ```
 
 `src/backend.ts` is the injection contract: `Store`, `ActionExecutor`, `PolicyEngine`, `AgentRuntime`, `ProviderRegistry`, `EventBus`, config persistence, account sync, optional abortable push, and shutdown. `startServer(backend)` adds static serving, WebSockets, schedulers, and a draining `close()`.
@@ -62,9 +63,27 @@ Load `<PASSPORT_DATA_DIR>/passport.config.json` (default `~/.passport/passport.c
 
 Environment overrides: `PASSPORT_DATA_DIR`, `PASSPORT_HOST`, `PASSPORT_PORT`, `PASSPORT_SYNC_INTERVAL_SECONDS` (1–2147483), `PASSPORT_DIGEST_HOUR` (local wall-clock hour, 0–23), `PASSPORT_LLM_PROVIDER`, `PASSPORT_LLM_MODEL`, `PASSPORT_LLM_BASE_URL`, `PASSPORT_LLM_FAST_MODEL`, `PASSPORT_LLM_API_KEY`. LLM providers: `anthropic`, `openai`, `openai-compatible`, `ollama`. Anthropic is the default. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` and `PASSPORT_LLM_API_KEY` override optional file `llm.apiKey`; environment keys are not copied to disk, and file-authored keys are preserved. Public responses omit keys. Without a cloud key the agent is disabled and Accounts shows “LLM not configured”; local Ollama/compatible models can run without a key. Account secrets are separated using descriptor `secret` flags and passed to `Store.accounts.setCredentials`, never account settings/config. The real Store must encrypt them; demo credentials are ephemeral.
 
+## Authentication and network access
+
+`passport serve` prints one login URL at startup. Open `http://127.0.0.1:3000/?token=...` to exchange the token for an opaque `HttpOnly; SameSite=Strict; Path=/` session cookie, then receive a 303 redirect to `/` with the token removed. Without a session, the web app shows a token entry page before loading workspace data. Sessions expire after 24 hours or when the server restarts. Demo mode generates an ephemeral token and never writes it to disk, unless `PASSPORT_API_TOKEN` explicitly supplies the token.
+
+For durable workspaces, `PASSPORT_API_TOKEN` takes precedence; otherwise the server atomically creates `<data dir>/api-token` from 32 random bytes encoded as 64 hex characters, with mode 0600. `passport token` prints the durable token again; `passport token --rotate` replaces the file token and revokes existing sessions and old bearer credentials on the next request. Environment tokens must be rotated by changing the environment and restarting. An already-open WebSocket stays connected until closed; restart to disconnect all clients immediately. The current demo token is available only from that process's startup URL.
+
+Non-browser clients send `Authorization: Bearer <token>` on all `/api` requests (including health). HTTP query tokens are accepted only for the root login URL. Browser API writes automatically send `X-Requested-With: passport`; cookie-authenticated state-changing requests without it return 403. Bearer clients are exempt from that header. Auth endpoints remain subject to Host and Origin checks:
+
+- `POST /api/auth/login { "token": "..." }`: sets the session cookie and redirects to `/` (303).
+- `GET /api/auth/status`: returns `{authenticated, tokenPath}` without returning any credential.
+- `POST /api/auth/logout`: requires authentication (and the header for cookie clients), revokes the current session, and clears the cookie.
+
+`PASSPORT_HOST` defaults to `127.0.0.1`. A non-loopback bind refuses to start unless `PASSPORT_API_TOKEN` is explicitly set or `passport serve --allow-remote` is used; either choice prints a warning. Binding remotely does not add a trusted Host automatically. The Host allowlist defaults to `127.0.0.1`, `localhost`, and `[::1]`, each with any port. Add exact LAN/Tailscale/proxy names with `PASSPORT_ALLOWED_HOSTS=passport.example.ts.net,mail.lan:8443`; bare names allow any port and entries with a port require that port. Wildcards and URL syntax are rejected. Untrusted Hosts return 421, including requests for static assets. If present, Origins on state-changing requests and WebSocket upgrades must be HTTP(S) origins with an allowed host; mismatches return 403, including for bearer clients. Clients outside a browser can omit Origin.
+
+Set `PASSPORT_TRUST_PROXY=true` (or `1`) only behind a trusted reverse proxy that terminates TLS and overwrites `X-Forwarded-Proto`. An `https` value then sets `Secure` on cookies; direct HTTPS also sets it. Forwarded Host headers never expand the Host allowlist. The UI uses a self-only CSP with inline styles allowed, no inline scripts, no framing, `nosniff`, and `Referrer-Policy: no-referrer`; responses use `Cache-Control: no-store`.
+
+In development, the existing Vite `/api` and `/ws` proxies carry cookies and the request header. Paste the token in the Vite login page, or use `http://127.0.0.1:5173/?token=...`; the client exchanges it through `/api/auth/login` and removes it from the address bar. The separate MCP HTTP listener has its own security configuration; this middleware does not apply to it or to `passport mcp` over stdio. See [the security model](../../docs/security.md) before exposing Passport to a network.
+
 ## HTTP API
 
-Same-origin JSON at `/api`; errors are `{ "error": { "code": "...", "message": "..." } }`. Malformed input returns 400, missing records 404, stale/conflicting actions 409, explicit integration stubs 501. Unexpected provider errors return a generic 500 without exposing credential-bearing messages. No CORS: Vite proxies the API. Bind defaults to loopback; authentication for remote hosting is outside this wave.
+Same-origin JSON at `/api`; errors are `{ "error": { "code": "...", "message": "..." } }`. Malformed input returns 400, missing records 404, stale/conflicting actions 409, explicit integration stubs 501. Unexpected provider errors return a generic 500 without exposing credential-bearing messages. No CORS: Vite proxies the API. API requests and WebSocket upgrades require authentication; see above.
 
 All IDs in paths are URL-encoded. `Page<T>` is `{items, total?, nextCursor?}`. List defaults are controlled by Store; the demo uses offset-string cursors. `limit` is 1–500.
 
@@ -99,7 +118,7 @@ All IDs in paths are URL-encoded. `Page<T>` is `{items, total?, nextCursor?}`. L
 | `POST /api/agent/run`               | Optional `{instruction, emailIds, matterId}` → `AgentRun`                                                                                                                                                                                     |
 | `GET /api/digest/:date`             | `YYYY-MM-DD` → `{date, markdown}`; Store KV key `digest:YYYY-MM-DD`; 404 if no digest                                                                                                                                                         |
 
-`ws://127.0.0.1:3000/ws` streams each raw `DomainEvent` as one JSON text frame. Reconnect clients should refetch current HTTP state; there is no replay protocol. Slow clients are disconnected. Mutating browser requests and WebSocket upgrades require matching origins; non-browser local clients can omit Origin.
+`ws://127.0.0.1:3000/ws` streams each raw `DomainEvent` as one JSON text frame. Reconnect clients should refetch current HTTP state; there is no replay protocol. Slow clients are disconnected. The upgrade requires a bearer header, session cookie, or `?token=<token>` for non-browser WS clients. Browser clients use the same-origin cookie automatically. Host and Origin are validated before upgrading.
 
 The built `apps/web/dist` is served when present, with SPA history fallback. Unknown `/api/*` routes stay JSON 404s. Without a web build the root explains how to start/build the UI.
 
@@ -112,6 +131,8 @@ The `passport` bin is `dist/cli.js` after build. During development use `pnpm --
 ```sh
 passport demo                       # full ephemeral UI
 passport serve                      # durable backend, UI and HTTP MCP on :4318/mcp
+passport token                      # print the durable API token
+passport token --rotate             # rotate a file token and revoke sessions
 passport sync --demo
 passport accounts list --demo
 passport accounts add mock --demo

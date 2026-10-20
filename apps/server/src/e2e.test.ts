@@ -11,7 +11,7 @@ import type { ActionRecord, ActionRequest, DomainEvent } from "@passport/types";
 import { createRealBackend, type RealBackend } from "./compose.js";
 import { defaultConfig } from "./config.js";
 import { addAccount } from "./accounts.js";
-import { createApp } from "./app.js";
+import { createApp } from "./auth.test-client.js";
 
 /** The agent's testing FakeLlm is not exported; implement its public LlmClient contract here. */
 class FixtureLlm implements LlmClient {

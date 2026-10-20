@@ -14,6 +14,8 @@ describe("passport mcp", () => {
       if (value !== undefined) env[key] = value;
     env.PASSPORT_DATA_DIR = dataDir;
     env.PASSPORT_PORT = "0";
+    env.PASSPORT_HOST = "0.0.0.0"; // Stdio must not trigger the HTTP remote-bind guard.
+    env.PASSPORT_ALLOWED_HOSTS = "*"; // HTTP auth configuration is not read by stdio.
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [
