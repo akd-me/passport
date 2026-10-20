@@ -4,9 +4,10 @@ import {
   type CalendarEvent, type CalendarProvider, type DraftInput, type Email, type EventBus,
   type MailChange, type MailProvider, type Matter, type Person, type PolicyEngine, type Store, type Timestamp,
 } from '@passport/types';
-import { NotImplementedError, PolicyError } from './errors.js';
+import { PolicyError } from './errors.js';
 import { editDistanceRatio } from './helpers.js';
 import { newId } from './id.js';
+import { parseListUnsubscribe, requestUnsubscribe } from './unsubscribe.js';
 
 /** Providers may be resolved synchronously or asynchronously, and must already be connected. */
 export interface ActionExecutorOptions {
@@ -15,6 +16,8 @@ export interface ActionExecutorOptions {
   policy: PolicyEngine;
   mailProviderFor(accountId: string): MailProvider | Promise<MailProvider>;
   calendarProviderFor(accountId: string): CalendarProvider | Promise<CalendarProvider>;
+  /** HTTP transport for header/link unsubscribe; defaults to the global fetch. */
+  fetch?: typeof globalThis.fetch;
   now?: () => Timestamp;
 }
 type Request = { [K in ActionType]: ActionRequest<K> }[ActionType];
@@ -53,7 +56,7 @@ const agentEmailPatchOf = (request: ActionRequest): Partial<Pick<Email, 'categor
 };
 
 /** Persist, authorize, execute, hold, and undo all mutations through a single serialized gate. */
-export function createActionExecutor({ store, bus, policy, mailProviderFor, calendarProviderFor, now = () => new Date().toISOString() }: ActionExecutorOptions): ActionExecutor {
+export function createActionExecutor({ store, bus, policy, mailProviderFor, calendarProviderFor, fetch: fetcher = globalThis.fetch, now = () => new Date().toISOString() }: ActionExecutorOptions): ActionExecutor {
   let queue = Promise.resolve();
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = queue.then(operation); queue = result.then(() => undefined, () => undefined); return result;
@@ -292,7 +295,28 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
         if (sent) { await store.emails.upsertMany([{ ...sent, accountId: request.accountId }]); bus.emit({ type: 'email.updated', emailId: sent.id }); }
         return { ...result };
       }
-      case 'unsubscribe': throw new NotImplementedError('MailProvider exposes no unsubscribe operation. Header/link/reply unsubscribe requires a future provider capability.');
+      case 'unsubscribe': {
+        const { emailId, method } = request.params;
+        const email = await emailFor(emailId, request.accountId);
+        const { https, mailto, oneClick } = parseListUnsubscribe(email.headers.listUnsubscribe, email.headers.listUnsubscribePost);
+        if ((method === 'header' && oneClick || method === 'link') && https) {
+          return { method, ...await requestUnsubscribe(fetcher, https, method === 'header' ? 'POST' : 'GET') };
+        }
+        let draft: DraftInput;
+        if (method === 'header' && mailto) {
+          draft = { accountId: request.accountId, to: [{ email: mailto.address }], subject: mailto.subject, textBody: mailto.textBody };
+        } else if (method === 'reply' && (email.replyTo.length || email.from.length)) {
+          draft = {
+            accountId: request.accountId, inReplyToEmailId: email.id,
+            to: email.replyTo.length ? email.replyTo : email.from,
+            subject: 'unsubscribe', textBody: 'unsubscribe',
+          };
+        } else {
+          throw new PolicyError('UNSUBSCRIBE_UNSUPPORTED', `No supported unsubscribe target for method ${method}`);
+        }
+        await (await mailProviderFor(request.accountId)).send({ draft });
+        return { method, target: draft.to[0]!.email, status: 'sent' };
+      }
       case 'calendar_create': {
         const event = await (await calendarProviderFor(request.accountId)).createEvent(request.params.event);
         if (snapshot?.kind === 'event') snapshot.createdId = event.id;

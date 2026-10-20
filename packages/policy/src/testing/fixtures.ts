@@ -56,13 +56,13 @@ export class FakeCalendarProvider implements CalendarProvider {
   async freeBusy() { return []; }
 }
 
-export async function setup() {
+export async function setup(options: { fetch?: typeof globalThis.fetch } = {}) {
   const store = createMemoryStore(), bus = createMemoryEventBus();
   let time = at;
   const now = () => time;
   const policy = createPolicyEngine({ store, bus, now });
   const mail = new FakeMailProvider(), calendar = new FakeCalendarProvider();
-  const executor = createActionExecutor({ store, bus, policy, now, mailProviderFor: () => mail, calendarProviderFor: () => calendar });
+  const executor = createActionExecutor({ store, bus, policy, now, mailProviderFor: () => mail, calendarProviderFor: () => calendar, ...options });
   await store.emails.upsertMany([email()]);
   await store.mailboxes.upsertMany(['inbox', 'archive', 'trash', 'drafts', 'sent', 'tag'].map(id => ({ id, accountId: 'account', providerId: `remote-${id}`, name: id, role: id === 'tag' ? null : id as 'inbox', totalEmails: 0, unreadEmails: 0 })));
   await store.trust.upsert(trustState({ pinnedLevel: 'full_access' }));

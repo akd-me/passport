@@ -384,7 +384,190 @@ describe('internal store actions', () => {
   });
 });
 
-describe('gate invariants and explicit unsupported operations', () => {
+describe('unsubscribe execution', () => {
+  it('posts RFC 8058 one-click data, logs only the host, and creates no follow-up actions', async () => {
+    const fetcher = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    const { executor, store, mail, bus } = await setup({ fetch: fetcher });
+    const original = email({ headers: { ...email().headers, listUnsubscribe: '<mailto:leave@example.com>, <https://lists.example/unsubscribe?token=secret>', listUnsubscribePost: 'List-Unsubscribe=One-Click' } });
+    await store.emails.upsertMany([original]);
+    const getEmail = vi.spyOn(store.emails, 'get');
+    fetcher.mockImplementationOnce(async () => {
+      expect((await store.actions.query({ status: ['executing'] })).items[0]).toMatchObject({ inverse: null, request: { type: 'unsubscribe' } });
+      return new Response(null, { status: 204 });
+    });
+    const action = await executor.submit(request('unsubscribe', { emailId: 'email', method: 'header' }));
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith('https://lists.example/unsubscribe?token=secret', {
+      method: 'POST', body: 'List-Unsubscribe=One-Click',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' }, redirect: 'manual', signal: expect.any(AbortSignal),
+    });
+    expect(getEmail).toHaveBeenCalledWith('email', { includeBodies: true });
+    expect(action).toMatchObject({ status: 'executed', inverse: null, decision: { reversibility: 'irreversible' }, result: { method: 'header', target: 'lists.example', status: 204 } });
+    expect((await store.actions.get(action.id))?.result).toEqual(action.result);
+    expect((await store.actions.query({})).items).toHaveLength(1);
+    expect(await store.emails.get('email', { includeBodies: true })).toEqual(original);
+    expect(mail.sends).toEqual([]); expect(mail.changes).toEqual([]);
+    expect(bus.events.at(-1)?.type).toBe('action.executed');
+    await expect(executor.undo(action.id)).rejects.toMatchObject({ code: 'IRREVERSIBLE_ACTION' });
+  });
+
+  it.each([
+    { query: '?subject=Stop%20news&body=Please%20unsubscribe%0AThanks', subject: 'Stop news', textBody: 'Please unsubscribe\nThanks' },
+    { query: '', subject: 'unsubscribe', textBody: 'unsubscribe' },
+  ])('sends a mailto unsubscribe with query $query through the mail provider', async ({ query, subject, textBody }) => {
+    const fetcher = vi.fn<typeof globalThis.fetch>();
+    const { executor, store, mail } = await setup({ fetch: fetcher });
+    await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: `<https://lists.example/u>, <mailto:leave%2Bnews@example.com${query}>` } })]);
+    const action = await executor.submit(request('unsubscribe', { emailId: 'email', method: 'header' }));
+    expect(mail.sends).toEqual([{ draft: { accountId: 'account', to: [{ email: 'leave+news@example.com' }], subject, textBody } }]);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(action).toMatchObject({ status: 'executed', inverse: null, result: { method: 'header', target: 'leave+news@example.com', status: 'sent' } });
+    expect((await store.actions.query({})).items).toHaveLength(1);
+  });
+
+  it('falls back to mailto when one-click offers only an insecure web URL', async () => {
+    const fetcher = vi.fn<typeof globalThis.fetch>();
+    const { executor, store, mail } = await setup({ fetch: fetcher });
+    await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: '<http://lists.example/u>, <mailto:leave@example.com>', listUnsubscribePost: 'List-Unsubscribe=One-Click' } })]);
+    expect((await executor.submit(request('unsubscribe', { emailId: 'email', method: 'header' }))).result).toEqual({ method: 'header', target: 'leave@example.com', status: 'sent' });
+    expect(mail.sends).toHaveLength(1); expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('uses GET for the link method even with a one-click header', async () => {
+    const fetcher = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(null, { status: 200 }));
+    const { executor, store, mail } = await setup({ fetch: fetcher });
+    await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: '<http://insecure.example/u>, <https://lists.example/u?token=secret>', listUnsubscribePost: 'List-Unsubscribe=One-Click' } })]);
+    const action = await executor.submit(request('unsubscribe', { emailId: 'email', method: 'link' }));
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith('https://lists.example/u?token=secret', { method: 'GET', redirect: 'manual', signal: expect.any(AbortSignal) });
+    expect(action).toMatchObject({ status: 'executed', inverse: null, result: { method: 'link', target: 'lists.example', status: 200 } });
+    expect(mail.sends).toEqual([]);
+  });
+
+  it.each([
+    { method: 'header' as const, listUnsubscribe: '<http://lists.example/u>' },
+    { method: 'link' as const, listUnsubscribe: '<http://lists.example/u>' },
+    { method: 'link' as const, listUnsubscribe: '<mailto:leave@example.com>' },
+    { method: 'header' as const, listUnsubscribe: undefined },
+    { method: 'link' as const, listUnsubscribe: undefined },
+  ])('fails $method with unsupported header $listUnsubscribe and records the error', async ({ method, listUnsubscribe }) => {
+    const fetcher = vi.fn<typeof globalThis.fetch>();
+    const { executor, store, mail, bus } = await setup({ fetch: fetcher });
+    await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe, listUnsubscribePost: listUnsubscribe ? 'List-Unsubscribe=One-Click' : undefined } })]);
+    await expect(executor.submit(request('unsubscribe', { emailId: 'email', method }))).rejects.toMatchObject({ code: 'UNSUBSCRIBE_UNSUPPORTED' });
+    expect((await store.actions.query({ status: ['failed'] })).items[0]).toMatchObject({ status: 'failed', error: `No supported unsubscribe target for method ${method}` });
+    expect(bus.events.at(-1)?.type).toBe('action.failed');
+    expect(fetcher).not.toHaveBeenCalled(); expect(mail.sends).toEqual([]);
+  });
+
+  it('does not treat a web header without one-click as permission to GET', async () => {
+    const fetcher = vi.fn<typeof globalThis.fetch>();
+    const { executor, store } = await setup({ fetch: fetcher });
+    await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: '<https://lists.example/u>' } })]);
+    await expect(executor.submit(request('unsubscribe', { emailId: 'email', method: 'header' }))).rejects.toMatchObject({ code: 'UNSUBSCRIBE_UNSUPPORTED' });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([{ replyTo: [] }, { replyTo: [{ email: 'reply@example.com', name: 'List replies' }] }])('sends a threaded unsubscribe reply using reply-to or from ($replyTo)', async ({ replyTo }) => {
+    const { executor, store, mail } = await setup();
+    await store.emails.upsertMany([email({ replyTo })]);
+    const to = replyTo.length ? replyTo : email().from;
+    const action = await executor.submit(request('unsubscribe', { emailId: 'email', method: 'reply' }));
+    expect(mail.sends).toEqual([{ draft: { accountId: 'account', inReplyToEmailId: 'email', to, subject: 'unsubscribe', textBody: 'unsubscribe' } }]);
+    expect(action).toMatchObject({ status: 'executed', inverse: null, result: { method: 'reply', target: to[0]!.email, status: 'sent' } });
+    expect((await store.actions.query({})).items).toHaveLength(1); expect(mail.changes).toEqual([]);
+  });
+
+  it('fails a reply with no recipient instead of sending an empty draft', async () => {
+    const { executor, store, mail } = await setup();
+    await store.emails.upsertMany([email({ from: [], replyTo: [] })]);
+    await expect(executor.submit(request('unsubscribe', { emailId: 'email', method: 'reply' }))).rejects.toMatchObject({ code: 'UNSUBSCRIBE_UNSUPPORTED' });
+    expect(mail.sends).toEqual([]);
+  });
+
+  it.each(['header', 'link'] as const)('follows at most three HTTPS redirects for %s, preserving the method and deadline', async method => {
+    const fetcher = vi.fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { location: '/step?token=second' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 303, headers: { location: 'https://final.example/u' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 307, headers: { location: '/done' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const { executor, store } = await setup({ fetch: fetcher });
+    await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: '<https://lists.example/u?token=secret>', listUnsubscribePost: 'List-Unsubscribe=One-Click' } })]);
+    const action = await executor.submit(request('unsubscribe', { emailId: 'email', method }));
+    expect(action.result).toEqual({ method, target: 'final.example', status: 204 });
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['https://lists.example/u?token=secret', 'https://lists.example/step?token=second', 'https://final.example/u', 'https://final.example/done']);
+    for (const [, init] of fetcher.mock.calls) {
+      expect(init).toMatchObject({ method: method === 'header' ? 'POST' : 'GET', redirect: 'manual', signal: fetcher.mock.calls[0]![1]!.signal });
+      expect(init?.body).toBe(method === 'header' ? 'List-Unsubscribe=One-Click' : undefined);
+    }
+  });
+
+  it.each([
+    { response: () => new Response(null, { status: 302, headers: { location: 'http://insecure.example/u?token=secret' } }), code: 'UNSUBSCRIBE_UNSUPPORTED', calls: 1 },
+    { response: () => new Response(null, { status: 302, headers: { location: '/again?token=secret' } }), code: 'UNSUBSCRIBE_REDIRECT_LIMIT', calls: 4 },
+    { response: () => new Response(null, { status: 302 }), code: 'UNSUBSCRIBE_FAILED', calls: 1 },
+    { response: () => new Response(null, { status: 302, headers: { location: 'https://[' } }), code: 'UNSUBSCRIBE_FAILED', calls: 1 },
+    { response: () => new Response('Secret response body', { status: 500 }), code: 'UNSUBSCRIBE_HTTP_ERROR', calls: 1 },
+  ])('persists $code without query strings when HTTP fails', async ({ response, code, calls }) => {
+    const fetcher = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => response());
+    const { executor, store } = await setup({ fetch: fetcher });
+    await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: '<https://lists.example/u?token=secret>' } })]);
+    await expect(executor.submit(request('unsubscribe', { emailId: 'email', method: 'link' }))).rejects.toMatchObject({ code });
+    expect(fetcher).toHaveBeenCalledTimes(calls);
+    const failed = (await store.actions.query({ status: ['failed'] })).items[0]!;
+    expect(failed.error).toContain('lists.example'); expect(failed.error).not.toMatch(/secret|token|Secret response body/);
+    expect(failed.result).toBeUndefined();
+  });
+
+  it('redacts fetch errors that contain token-bearing URLs', async () => {
+    const fetcher = vi.fn<typeof globalThis.fetch>().mockRejectedValue(new Error('Cannot fetch https://lists.example/u?token=secret'));
+    const { executor, store } = await setup({ fetch: fetcher });
+    await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: '<https://lists.example/u?token=secret>' } })]);
+    await expect(executor.submit(request('unsubscribe', { emailId: 'email', method: 'link' }))).rejects.toMatchObject({ code: 'UNSUBSCRIBE_FAILED', message: 'Unsubscribe request failed for lists.example' });
+    expect((await store.actions.query({ status: ['failed'] })).items[0]?.error).toBe('Unsubscribe request failed for lists.example');
+  });
+
+  it('uses a 10-second abort deadline and records a safe timeout failure', async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    try {
+      const fetcher = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => { controller.abort(); throw new Error('URL with secret token'); });
+      const { executor, store } = await setup({ fetch: fetcher });
+      await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: '<https://lists.example/u?token=secret>' } })]);
+      await expect(executor.submit(request('unsubscribe', { emailId: 'email', method: 'link' }))).rejects.toMatchObject({ code: 'UNSUBSCRIBE_TIMEOUT' });
+      expect(timeout).toHaveBeenCalledExactlyOnceWith(10_000);
+      expect(fetcher.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+      expect((await store.actions.query({ status: ['failed'] })).items[0]?.error).toBe('Unsubscribe request timed out for lists.example');
+    } finally { timeout.mockRestore(); }
+  });
+
+  it('uses global fetch by default', async () => {
+    const fetcher = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const { executor, store } = await setup();
+      await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: '<https://lists.example/u>' } })]);
+      expect((await executor.submit(request('unsubscribe', { emailId: 'email', method: 'link' }))).status).toBe('executed');
+      expect(fetcher).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('persists provider send failures and rethrows the original error', async () => {
+    const { executor, store, mail, bus } = await setup();
+    const failure = Object.assign(new Error('Unsubscribe send failed'), { code: 'REMOTE_FAILURE' }); mail.failure = failure;
+    await expect(executor.submit(request('unsubscribe', { emailId: 'email', method: 'reply' }))).rejects.toBe(failure);
+    expect((await store.actions.query({ status: ['failed'] })).items[0]?.error).toBe(failure.message);
+    expect(bus.events.at(-1)?.type).toBe('action.failed');
+  });
+
+  it('still asks under supervised policy and executes only on approval', async () => {
+    const { executor, policy, mail } = await setup();
+    await policy.pinLevel('other', 'supervised');
+    const proposed = await executor.submit(request('unsubscribe', { emailId: 'email', method: 'reply' }));
+    expect(proposed.status).toBe('proposed'); expect(mail.sends).toEqual([]);
+    expect((await executor.approve(proposed.id)).status).toBe('executed'); expect(mail.sends).toHaveLength(1);
+  });
+});
+
+describe('gate invariants', () => {
   it('records an ActionRecord before a provider is called and never executes reversible actions without an inverse', async () => {
     const { executor, store, mail } = await setup();
     const original = mail.applyChanges.bind(mail);
@@ -404,13 +587,6 @@ describe('gate invariants and explicit unsupported operations', () => {
     await expect(executor.submit(request('archive', { emailIds: ['other'] }))).rejects.toMatchObject({ code: 'ACCOUNT_MISMATCH' });
     await expect(executor.submit(request('person_update', { personId: 'person', patch: { verification: 'blue' } }))).rejects.toMatchObject({ code: 'PROTECTED_IDENTITY' });
     expect(mail.changes).toEqual([]);
-  });
-
-  it('fails unsubscribe explicitly with a persisted error instead of reporting success', async () => {
-    const { executor, store, bus } = await setup();
-    await expect(executor.submit(request('unsubscribe', { emailId: 'email', method: 'header' }))).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED' });
-    expect((await store.actions.query({ status: ['failed'] })).items[0]?.error).toContain('no unsubscribe operation');
-    expect(bus.events.at(-1)?.type).toBe('action.failed');
   });
 
   it('emits every action event defined by the contract across success, hold, proposal, failure, and undo', async () => {

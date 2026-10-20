@@ -32,6 +32,8 @@ matching rather than SQLite FTS syntax. Its credentials are in-memory test data,
 `classifyCounterparty(person, emails, selfAddresses)`, `editDistanceRatio(a, b)`, and
 `describeDecision(decision)` are pure helpers. Both factories accept `now: () => Timestamp`
 for deterministic ISO UTC clocks. Provider resolvers may return a provider or a Promise.
+The executor accepts `fetch?: typeof globalThis.fetch` for unsubscribe HTTP requests;
+it defaults to the global transport. Tests inject a fake transport.
 
 ## Decision matrix
 
@@ -155,13 +157,34 @@ JSON leaves (including added/removed leaves), independent of object key order.
 The shared contract only appends optional `Store.people.delete?(id: Id): Promise<void>`;
 `ActionParams` and the agent package remain unchanged.
 
-## Explicit unsupported operation
+## Unsubscribe
 
-`unsubscribe` is evaluated and logged, but execution throws `NotImplementedError`
-(`code: NOT_IMPLEMENTED`), persists failed, and emits action.failed. MailProvider has no
-unsubscribe capability for header/link/reply methods. Adding that provider capability is an
-integration follow-up; this package performs no implicit HTTP requests. All other ActionTypes
-are implemented. There are no other stubbed production paths.
+`unsubscribe` loads the source email with bodies and uses its normalized List-Unsubscribe
+and List-Unsubscribe-Post headers. Header parsing is local to policy to preserve the
+types-only dependency boundary. Prefer `method: 'header'`:
+
+- `header`: when List-Unsubscribe-Post contains `List-Unsubscribe=One-Click` and an HTTPS
+  target exists, POST `List-Unsubscribe=One-Click` with content type
+  `application/x-www-form-urlencoded`. Otherwise send to the header's mailto address using
+  its decoded subject/body query fields, each defaulting to `unsubscribe` when absent.
+- `link`: GET the first valid HTTPS target from List-Unsubscribe. Use this explicitly when
+  one-click and mailto are unavailable; body links are never inferred or visited.
+- `reply`: send to reply-to, falling back to from, with subject/body `unsubscribe` and
+  `inReplyToEmailId` referencing the source email. Choose this only when a reply is intended.
+
+HTTP requests share a 10-second deadline across at most three redirects. Each redirect must
+also use HTTPS, and one-click redirects preserve POST and its form body. HTTP targets and
+URLs containing credentials are unsupported. Missing targets fail with
+`UNSUBSCRIBE_UNSUPPORTED`; HTTP errors, timeout, network failure, and excess redirects also
+persist a failed action and emit action.failed. HTTP errors expose only the host and status,
+never token-bearing URL queries or response bodies.
+
+Success records `result: { method, target, status }`, where target is the destination host
+or mail address and status is the HTTP status number or `sent` for mail. Unsubscribe is
+irreversible (`inverse: null`), keeps its existing medium base risk and decision matrix,
+and sends immediately once permitted or approved, including mailto/reply. It creates no
+follow-up actions or mailbox changes; the agent must separately decide whether to archive.
+All ActionTypes are implemented; there are no stubbed production paths.
 
 ## Validation
 
