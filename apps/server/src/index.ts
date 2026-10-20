@@ -6,3 +6,5 @@ export { loadConfig, saveConfig, defaultConfig } from "./config.js";
 export { startSchedulers } from "./schedulers/index.js";
 export type { Backend } from "./backend.js";
 export type { PassportConfig } from "./config.js";
+export type { RealBackend, RealBackendOptions } from "./compose.js";
+export { SyncService } from "./sync/index.js";

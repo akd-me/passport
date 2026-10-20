@@ -12,6 +12,7 @@ import type {
   PromotionOffer,
 } from "@passport/types";
 import type { Backend } from "./backend.js";
+import { llmConfigured } from "./config.js";
 import { addAccount } from "./accounts.js";
 import { ApiError, required } from "./errors.js";
 import {
@@ -387,7 +388,11 @@ export function createApp(
     const { apiKey, ...llm } = backend.config.llm;
     return c.json({
       accounts: await backend.store.accounts.list(),
-      llm: { ...llm, apiKeyConfigured: !!apiKey },
+      llm: {
+        ...llm,
+        apiKeyConfigured: !!apiKey,
+        configured: llmConfigured(backend.config.llm),
+      },
       mode: backend.mode,
     });
   });
@@ -419,6 +424,16 @@ export function createApp(
           `Unknown LLM setting ${key}; API keys use PASSPORT_LLM_API_KEY`,
         );
     const llm = { ...backend.config.llm };
+    if (body.provider !== undefined && body.provider !== llm.provider) {
+      delete llm.apiKey;
+      llm.apiKey =
+        process.env.PASSPORT_LLM_API_KEY ||
+        (body.provider === "anthropic"
+          ? process.env.ANTHROPIC_API_KEY
+          : body.provider === "openai" || body.provider === "openai-compatible"
+            ? process.env.OPENAI_API_KEY
+            : undefined);
+    }
     if (body.provider !== undefined)
       llm.provider = member(
         body.provider,

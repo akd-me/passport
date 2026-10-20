@@ -158,12 +158,16 @@ function AddAccount({
         ))}
       {descriptor?.oauth && (
         <p className="subtle">
-          This provider uses OAuth. Consent and token exchange are connected
-          during backend integration.
+          Connect this provider in your terminal with passport accounts add{" "}
+          {kind}. The command opens a local OAuth callback listener for your own
+          client.
         </p>
       )}
       <Feedback error={task.error} />
-      <button className="button primary" disabled={task.busy || !descriptor}>
+      <button
+        className="button primary"
+        disabled={task.busy || !descriptor || !!descriptor.oauth}
+      >
         <Icon name="plus" size={16} />
         {task.busy ? "Connecting…" : "Add account"}
       </button>
@@ -206,6 +210,12 @@ function LlmSettings({
         <div className="info-note">
           Demo mode uses a local toy agent. These preferences are editable; no
           model calls are made.
+        </div>
+      )}
+      {!demo && !llm.configured && (
+        <div className="info-note">
+          LLM not configured. Set an API key on the server or choose a local
+          model to enable the agent.
         </div>
       )}
       <div className="form-columns">
@@ -254,9 +264,9 @@ function LlmSettings({
       </div>
       <p className="subtle">
         {llm.apiKeyConfigured
-          ? "An API key is configured in the server environment."
+          ? "An API key is configured on the server."
           : "For cloud models, set PASSPORT_LLM_API_KEY in the server environment."}{" "}
-        Keys are never stored in the config file.
+        Keys stay on the server and are never returned to the browser.
       </p>
       <Feedback error={task.error} />
       <button className="button secondary" disabled={task.busy}>

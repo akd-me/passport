@@ -1,6 +1,6 @@
 # @passport/server
 
-Local Hono HTTP server, `ws` domain-event stream, CLI, and background jobs. Every handler receives one `Backend`; it imports collaborators only from `@passport/types`.
+Local Hono HTTP server, `ws` domain-event stream, CLI, and background jobs. Every handler receives one `Backend`; `src/compose.ts` owns the real package implementations.
 
 ```sh
 # From the repository root (Node 25, pnpm 10)
@@ -24,15 +24,22 @@ const app = createApp(backend); // app.request(...) works without a socket
 
 `src/backend.ts` is the injection contract: `Store`, `ActionExecutor`, `PolicyEngine`, `AgentRuntime`, `ProviderRegistry`, `EventBus`, config persistence, account sync, optional abortable push, and shutdown. `startServer(backend)` adds static serving, WebSockets, schedulers, and a draining `close()`.
 
-`src/compose.ts:createRealBackend()` deliberately throws `NotImplementedError`. The integrator must restore workspace dependencies and wire these package-root factories (signatures in its comments describe expected dependencies):
+`createRealBackend(config, { storePath?, providers?, llm?, verifier? }?)` migrates the real SQLite Store,
+loads or creates a private master key, hydrates accounts, and composes the provider registry, policy,
+executor, agent and MCP server. Optional overrides support offline tests (`storePath: ":memory:"`).
+`src/sync/` persists local ID mappings, ingests mail/calendar deltas, commits opaque cursor envelopes
+only on complete passes, resets expired snapshots, and emits new arrivals once. Connected providers
+are shared per account and reconnect after failure; mutations are never automatically replayed.
+`drainAgentQueue()` awaits event-driven triage; `close()` drains work and releases providers/Store.
 
-- `@passport/store`: `openStore`
-- `@passport/providers`: `createProviderRegistry`
-- `@passport/policy`: `createPolicyEngine`, `createActionExecutor`
-- `@passport/agent`: `createAgentRuntime`
-- `@passport/mcp`: `createMailboxMcpServer`
+The HTTP host adds a loopback Streamable HTTP MCP listener on port 4318 (`mcpPort` /
+`PASSPORT_MCP_PORT`). `passport mcp` uses stdio with background jobs and stderr diagnostics, without
+an HTTP listener. Use HTTP MCP when the UI server is running; one writer owns each data directory.
 
-Implement mail/calendar delta ingestion and cursor persistence in `syncAccount`, optional provider `waitForChanges`, config/account hydration and persistence, lifecycle cleanup, and mailbox MCP stdio. The schedulers never call unfinished packages directly. Demo policy is intentionally small; production risk, external-agent controls, learning, and dispatch belong to the real policy/executor. Unsupported demo action types fail visibly and persist a failed record. Demo executor supports mail organization, draft creation, sends, matter updates, and person updates; its in-memory restoration snapshots make undo exact. Sends become irreversible after release.
+Three explicit **policy seams** skips in `src/e2e.test.ts` cover complete-Person creation,
+newsletter/known-contact playbooks, and `emailPatch` metadata/undo. The server does not bypass
+these executor conventions. Real send approval/hold/release/cancel, archive undo, trust, digests,
+synchronization, OAuth callbacks, stdio and in-memory MCP are tested independently.
 
 ## Configuration
 
@@ -53,7 +60,7 @@ Load `<PASSPORT_DATA_DIR>/passport.config.json` (default `~/.passport/passport.c
 }
 ```
 
-Environment overrides: `PASSPORT_DATA_DIR`, `PASSPORT_HOST`, `PASSPORT_PORT`, `PASSPORT_SYNC_INTERVAL_SECONDS` (1–2147483), `PASSPORT_DIGEST_HOUR` (local wall-clock hour, 0–23), `PASSPORT_LLM_PROVIDER`, `PASSPORT_LLM_MODEL`, `PASSPORT_LLM_BASE_URL`, `PASSPORT_LLM_FAST_MODEL`, `PASSPORT_LLM_API_KEY`. LLM providers: `anthropic`, `openai`, `openai-compatible`, `ollama`. API keys are environment-only; file-supplied keys are ignored and never persisted or returned. Account secrets are separated using descriptor `secret` flags and passed to `Store.accounts.setCredentials`, never account settings/config. The real Store must encrypt them; demo credentials are ephemeral.
+Environment overrides: `PASSPORT_DATA_DIR`, `PASSPORT_HOST`, `PASSPORT_PORT`, `PASSPORT_SYNC_INTERVAL_SECONDS` (1–2147483), `PASSPORT_DIGEST_HOUR` (local wall-clock hour, 0–23), `PASSPORT_LLM_PROVIDER`, `PASSPORT_LLM_MODEL`, `PASSPORT_LLM_BASE_URL`, `PASSPORT_LLM_FAST_MODEL`, `PASSPORT_LLM_API_KEY`. LLM providers: `anthropic`, `openai`, `openai-compatible`, `ollama`. Anthropic is the default. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` and `PASSPORT_LLM_API_KEY` override optional file `llm.apiKey`; environment keys are not copied to disk, and file-authored keys are preserved. Public responses omit keys. Without a cloud key the agent is disabled and Accounts shows “LLM not configured”; local Ollama/compatible models can run without a key. Account secrets are separated using descriptor `secret` flags and passed to `Store.accounts.setCredentials`, never account settings/config. The real Store must encrypt them; demo credentials are ephemeral.
 
 ## HTTP API
 
@@ -87,7 +94,7 @@ All IDs in paths are URL-encoded. `Page<T>` is `{items, total?, nextCursor?}`. L
 | `GET /api/accounts`                 | `{accounts: Account[], llm: LlmConfig without apiKey + apiKeyConfigured, mode}`                                                                                                                                                               |
 | `POST /api/accounts`                | `{kind, emailAddress?, displayName?, fields: Record<string,string>}`; descriptor-driven fields, required ones validated → `Account` (201). Email/name may be descriptor fields.                                                               |
 | `POST /api/accounts/:id/sync`       | Sync one account → `{ok: true}`                                                                                                                                                                                                               |
-| `GET /api/providers`                | Available setup descriptors. OAuth functions omitted; only scope metadata is JSON. Demo offers mock only. OAuth consent/exchange routes are integration work.                                                                                 |
+| `GET /api/providers`                | Available setup descriptors. OAuth functions omitted; only scope metadata is JSON. Demo offers mock only. OAuth setup uses the CLI callback listener.                                                                                         |
 | `PUT /api/settings/llm`             | Partial `provider`, `model`, `baseUrl`, `fastModel`; rejects API keys → public LLM config                                                                                                                                                     |
 | `POST /api/agent/run`               | Optional `{instruction, emailIds, matterId}` → `AgentRun`                                                                                                                                                                                     |
 | `GET /api/digest/:date`             | `YYYY-MM-DD` → `{date, markdown}`; Store KV key `digest:YYYY-MM-DD`; 404 if no digest                                                                                                                                                         |
@@ -98,19 +105,20 @@ The built `apps/web/dist` is served when present, with SPA history fallback. Unk
 
 ## Schedulers and CLI
 
-`startSchedulers` discovers accounts on startup and each sync interval, prevents overlapping account syncs, and consumes optional abortable push. It calls `releaseDue` every 30 seconds, `applyDecay` every 24 hours, and the `daily_digest` trigger at the configured local hour (rescheduled each day for DST). `stop()` aborts push, clears all timers, and drains active work before storage closes. Failed jobs are logged without credential/body data and retried at the next interval.
+`startSchedulers` discovers accounts on startup and each sync interval, prevents overlapping account syncs, and consumes optional abortable push. It calls `releaseDue` every 30 seconds, `applyDecay` every 24 hours, the daily `matter_review` trigger, and the `daily_digest` trigger at the configured local hour (rescheduled each day for DST). `stop()` aborts push, clears all timers, and drains active work before storage closes. Failed jobs are logged without credential/body data and retried at the next interval.
 
 The `passport` bin is `dist/cli.js` after build. During development use `pnpm --filter @passport/server exec tsx src/cli.ts ...`:
 
 ```sh
 passport demo                       # full ephemeral UI
-passport serve                      # real backend: explicit integration error for now
+passport serve                      # durable backend, UI and HTTP MCP on :4318/mcp
 passport sync --demo
 passport accounts list --demo
 passport accounts add mock --demo
 passport trust --demo
 passport decisions --demo
-passport mcp                        # stderr integration notice; no fake MCP protocol
+passport triage <emailId>            # explicitly triage a stored email
+passport mcp                        # real MCP over stdio; diagnostics on stderr
 ```
 
-Account add prompts for non-secret descriptor fields. Secret fields use `PASSPORT_SETUP_<FIELD_ID_IN_UPPERCASE>` environment variables (punctuation becomes `_`), avoiding terminal echo. Demo CLI mutations last only for that process. `SIGINT`/`SIGTERM` drain the server. Tests use no provider/LLM network; the WebSocket test uses an ephemeral loopback port.
+Account add prompts for descriptor fields, hiding secret entry. Secret fields can also use `PASSPORT_SETUP_<FIELD_ID_IN_UPPERCASE>` environment variables (punctuation becomes `_`), avoiding terminal echo. OAuth setup prints a consent URL and validates state/PKCE at `http://127.0.0.1:53682/oauth/callback` (override with `PASSPORT_OAUTH_REDIRECT_URI`), then stores tokens encrypted. Demo CLI mutations last only for that process. `SIGINT`/`SIGTERM` drain the server. Tests use no provider/LLM network; the WebSocket test uses an ephemeral loopback port.

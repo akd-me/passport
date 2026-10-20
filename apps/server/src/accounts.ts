@@ -7,11 +7,13 @@ import type {
 import type { Backend } from "./backend.js";
 import { ApiError } from "./errors.js";
 import { member, object, string } from "./validation.js";
+import { newId } from "@passport/store";
 
 /** Descriptor fields marked secret are sent exclusively to the credential store. */
 export async function addAccount(
   backend: Backend,
   input: unknown,
+  oauthCredentials?: AccountCredentials,
 ): Promise<Account> {
   const body = object(input),
     kind = member(body.kind, backend.providerKinds, "provider") as ProviderKind;
@@ -29,7 +31,19 @@ export async function addAccount(
     if (value === undefined || value === "") continue;
     const text = string(value, field.label);
     if (field.secret) credentials[field.id] = text;
-    else settings[field.id] = text;
+    else if (["port", "smtpPort"].includes(field.id)) {
+      const port = Number(text);
+      if (!Number.isInteger(port) || port < 1 || port > 65535)
+        throw new ApiError("INVALID_FIELD", `${field.label} must be 1–65535`);
+      settings[field.id] = port;
+    } else if (["tls", "smtpTls"].includes(field.id)) {
+      if (!["true", "false"].includes(text))
+        throw new ApiError(
+          "INVALID_FIELD",
+          `${field.label} must be true or false`,
+        );
+      settings[field.id] = text === "true";
+    } else settings[field.id] = text;
   }
   const emailAddress = string(
     body.emailAddress ?? settings.emailAddress,
@@ -38,7 +52,7 @@ export async function addAccount(
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress))
     throw new ApiError("INVALID_FIELD", "Enter a valid email address");
   const capabilities: AccountCapabilities =
-    kind === "mock"
+    kind === "mock" && backend.mode === "demo"
       ? {
           mail: true,
           calendar: true,
@@ -64,7 +78,7 @@ export async function addAccount(
         : backend.providers.mail(kind as "gmail").capabilities;
   const at = new Date().toISOString();
   const account: Account = {
-    id: crypto.randomUUID(),
+    id: newId(),
     kind,
     emailAddress,
     displayName:
@@ -78,7 +92,11 @@ export async function addAccount(
   };
   await backend.store.accounts.upsert(account);
   try {
-    await backend.store.accounts.setCredentials(account.id, credentials);
+    delete credentials.codeVerifier;
+    await backend.store.accounts.setCredentials(account.id, {
+      ...credentials,
+      ...oauthCredentials,
+    });
     await backend.updateConfig({
       accounts: await backend.store.accounts.list(),
     });

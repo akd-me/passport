@@ -39,7 +39,10 @@ export interface PersonDetail {
 }
 export interface AccountData {
   accounts: Account[];
-  llm: Omit<LlmConfig, "apiKey"> & { apiKeyConfigured: boolean };
+  llm: Omit<LlmConfig, "apiKey"> & {
+    apiKeyConfigured: boolean;
+    configured?: boolean;
+  };
   mode: "demo" | "real";
 }
 export type ProviderDescriptor = Omit<ProviderSetupDescriptor, "oauth"> & {

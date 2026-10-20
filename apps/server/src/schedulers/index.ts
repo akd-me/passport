@@ -108,6 +108,18 @@ export function startSchedulers(backend: Backend): SchedulerHandle {
       decayBusy = false;
     }
   });
+  let reviewBusy = false;
+  interval(86400000, async () => {
+    if (reviewBusy) return;
+    reviewBusy = true;
+    try {
+      await safely("Matter review", () =>
+        backend.agent.run({ kind: "schedule", name: "matter_review" }),
+      );
+    } finally {
+      reviewBusy = false;
+    }
+  });
   function scheduleDigest() {
     if (stopped) return;
     const next = new Date();
