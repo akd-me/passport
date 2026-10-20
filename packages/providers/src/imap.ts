@@ -13,7 +13,7 @@ export interface ImapProviderOptions extends ProviderOptions {
   smtpFactory?: (options: SMTPTransport.Options) => SmtpClient;
 }
 interface FolderState { validity: string; next: number; modseq: string | null; uids: number[] }
-interface ImapCursor { account: string; folders: Record<string, FolderState> }
+interface ImapCursor { account: string; since?: string; folders: Record<string, FolderState> }
 export const imapCapabilities: AccountCapabilities = { mail: true, calendar: false, contacts: false, push: true, labels: false, submit: true };
 const roles: Record<string, MailboxRole> = { "\\Inbox": "inbox", "\\Archive": "archive", "\\Drafts": "drafts", "\\Sent": "sent", "\\Trash": "trash", "\\Junk": "junk", "\\All": "all", "\\Flagged": "important" };
 const flagMap: Record<string, string> = { $seen: "\\Seen", $flagged: "\\Flagged", $draft: "\\Draft", $answered: "\\Answered", $forwarded: "$Forwarded", $junk: "$Junk", $notjunk: "$NotJunk" };
@@ -69,11 +69,13 @@ export class ImapMailProvider implements MailProvider {
     return normalizeMime(message.source, { accountId: this.account.id, providerId: identity(path, validity, message.uid), mailboxIds: [path],
       keywords: imapFlagsToKeywords(message.flags ?? []), receivedAt: message.internalDate ? new Date(message.internalDate).toISOString() : undefined, verifier: this.options.verifier });
   }
-  async *sync(cursor: string | null): AsyncIterable<SyncDelta> {
+  async checkConnection(): Promise<void> { await this.guard(() => this.check().noop()); }
+  async *sync(cursor: string | null, opts: { since?: string } = {}): AsyncIterable<SyncDelta> {
     try {
-      const client = this.check(), previous = cursor ? decodeCursor<ImapCursor>(cursor) : { account: this.account.id, folders: {} };
+      const client = this.check(), previous: ImapCursor = cursor ? decodeCursor<ImapCursor>(cursor) : { account: this.account.id, folders: {} };
       if (previous.account !== this.account.id || !previous.folders) throw new ProviderError("INVALID_CURSOR", "Invalid IMAP account cursor");
-      const next: ImapCursor = { account: this.account.id, folders: {} }, folders = (await client.list()).filter(f => !f.flags.has("\\Noselect"));
+      const since = previous.since ?? opts.since;
+      const next: ImapCursor = { account: this.account.id, since, folders: {} }, folders = (await client.list()).filter(f => !f.flags.has("\\Noselect"));
       for (const [path, saved] of Object.entries(previous.folders)) if (!folders.some(f => f.path === path)) {
         yield { kind: "mailbox", op: "delete", id: localId(this.account.id, "mailbox", path) };
         for (const uid of saved.uids) yield { kind: "email", op: "delete", providerId: identity(path, saved.validity, uid) };
@@ -85,7 +87,7 @@ export class ImapMailProvider implements MailProvider {
           if (!selected) throw new ProviderError("IMAP_ERROR", "IMAP mailbox selection failed");
           const validity = String(selected.uidValidity), modseq = selected.highestModseq ? String(selected.highestModseq) : null, uidNext = selected.uidNext;
           const old = previous.folders[folder.path], same = old?.validity === validity;
-          const uids = await client.search({ all: true }, { uid: true });
+          const uids = await client.search(since ? { since: new Date(since) } : { all: true }, { uid: true });
           if (!Array.isArray(uids)) throw new ProviderError("IMAP_ERROR", "IMAP UID enumeration failed");
           const current = new Set(uids);
           if (old) for (const uid of old.uids) if (!same || !current.has(uid)) yield { kind: "email", op: "delete", providerId: identity(folder.path, old.validity, uid) };
@@ -96,8 +98,9 @@ export class ImapMailProvider implements MailProvider {
           if (uids.length) {
             const changedSince = same && old.modseq && modseq ? BigInt(old.modseq) : undefined;
             // Enumerate UIDs for expunges even with CONDSTORE. FETCH only changed bodies when possible.
-            for await (const message of client.fetch("1:*", { uid: true, flags: true, source: true, internalDate: true }, { uid: true, ...(changedSince ? { changedSince } : {}) })) {
-              if (current.has(message.uid)) yield { kind: "email", op: "upsert", email: await this.normalize(message, folder.path, validity) };
+            const ranges = since ? Array.from({ length: Math.ceil(uids.length / 100) }, (_, i) => uids.slice(i * 100, i * 100 + 100).join(",")) : ["1:*"];
+            for (const range of ranges) for await (const message of client.fetch(range, { uid: true, flags: true, source: true, internalDate: true }, { uid: true, ...(changedSince ? { changedSince } : {}) })) {
+              if (current.has(message.uid) && (!since || !message.internalDate || new Date(message.internalDate).getTime() >= Date.parse(since))) yield { kind: "email", op: "upsert", email: await this.normalize(message, folder.path, validity) };
             }
           }
           next.folders[folder.path] = { validity, next: uidNext ?? Math.max(0, ...uids) + 1, modseq, uids };

@@ -40,6 +40,12 @@ export class GoogleCalendarProvider extends HttpConnection implements CalendarPr
     return normalizeGoogleEvent(event, this.account.id, this.calendarId, this.account.emailAddress, String(this.account.settings.timeZone ?? this.calendarZone ?? "UTC"));
   }
   async listCalendars(): Promise<Calendar[]> {
+    // calendar.events permits event feeds, but not users/me/calendarList.
+    if (this.credentials.scope && !this.credentials.scope.split(" ").some(s => ["https://www.googleapis.com/auth/calendar", "https://www.googleapis.com/auth/calendar.readonly", "https://www.googleapis.com/auth/calendar.calendarlist.readonly"].includes(s))) {
+      const feed = await this.json<{ summary?: string; timeZone?: string }>(`${this.calendarPath}/events?maxResults=1`);
+      this.calendarZone = feed.timeZone;
+      return [{ id: localId(this.account.id, "calendar", this.calendarId), accountId: this.account.id, providerId: this.calendarId, name: feed.summary ?? this.calendarId, isPrimary: this.calendarId === "primary", timeZone: feed.timeZone ?? null }];
+    }
     const out: Calendar[] = []; let pageToken: string | undefined;
     do {
       const page = await this.json<{ items?: Array<{ id: string; summary?: string; primary?: boolean; timeZone?: string }>; nextPageToken?: string }>(`${base}/users/me/calendarList?${new URLSearchParams(pageToken ? { pageToken } : {})}`);
@@ -56,9 +62,10 @@ export class GoogleCalendarProvider extends HttpConnection implements CalendarPr
     let pageToken: string | undefined, state: string | undefined;
     do {
       const params = new URLSearchParams({ showDeleted: "true", maxResults: "250", ...(cursor ? { syncToken: cursor } : {}), ...(pageToken ? { pageToken } : {}) });
-      let page: { items?: GoogleEvent[]; nextPageToken?: string; nextSyncToken?: string };
+      let page: { items?: GoogleEvent[]; timeZone?: string; nextPageToken?: string; nextSyncToken?: string };
       try { page = await this.json(`${this.calendarPath}/events?${params}`); }
       catch (e) { if (e instanceof ProviderError && e.status === 410) throw new ProviderError("CURSOR_EXPIRED", "Google Calendar sync token expired; reset local calendar state and resync"); throw e; }
+      this.calendarZone ??= page.timeZone;
       for (const event of page.items ?? []) {
         if (event.status === "cancelled") yield { kind: "event", op: "delete", providerId: event.id };
         else yield { kind: "event", op: "upsert", event: await this.normalize(event) };

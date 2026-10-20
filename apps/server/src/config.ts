@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Account, LlmConfig } from "@passport/types";
 import { ApiError } from "./errors.js";
+import { initialDays } from "./onboarding/config.js";
 
 export interface PassportConfig {
   dataDir: string;
@@ -10,6 +11,7 @@ export interface PassportConfig {
   port: number;
   mcpPort?: number;
   syncIntervalSeconds: number;
+  sync?: { initialDays?: number };
   dailyDigestHour: number;
   llm: LlmConfig;
   accounts: Account[];
@@ -26,6 +28,7 @@ export function defaultConfig(
     port: 3000,
     mcpPort: 4318,
     syncIntervalSeconds: 120,
+    sync: { initialDays: 30 },
     dailyDigestHour: 8,
     llm: {
       provider: "anthropic",
@@ -36,6 +39,7 @@ export function defaultConfig(
 }
 
 export function validateConfig(config: PassportConfig): PassportConfig {
+  initialDays(config);
   if (!Number.isInteger(config.port) || config.port < 0 || config.port > 65535)
     throw new ApiError("INVALID_CONFIG", "port must be 0–65535");
   if (

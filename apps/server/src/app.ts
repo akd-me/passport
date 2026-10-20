@@ -28,6 +28,7 @@ import {
 import { logger } from "./logger.js";
 import { installJobRoutes } from "./schedulers/routes.js";
 import { getAuth, installAuth, type PassportAuth } from "./auth.js";
+import { registerOnboarding } from "./onboarding/routes.js";
 
 const csv = (value?: string) => value?.split(",").filter(Boolean);
 const limit = (value?: string) =>
@@ -129,6 +130,7 @@ export function createApp(
   });
   installAuth(app, options.auth ?? getAuth(backend));
   installJobRoutes(app, backend);
+  registerOnboarding(app, backend);
   app.get("/api/health", (c) => c.json({ ok: true, mode: backend.mode }));
   app.get("/api/decisions", async (c) =>
     c.json(

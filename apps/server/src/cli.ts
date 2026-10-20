@@ -16,14 +16,18 @@ import { authorizeOAuth } from "./oauth.js";
 import { Writable } from "node:stream";
 import { runJobsCommand } from "./schedulers/cli.js";
 import { apiToken, checkBind, getAuth } from "./auth.js";
+import { initializePassport } from "./onboarding/init.js";
+import { doctorCommand } from "./doctor.js";
 
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const [command = "serve", subcommand, kind] = args;
   if (command === "jobs") return runJobsCommand(args.slice(1));
+  if (command === "init") return initializePassport();
+  if (command === "doctor") return doctorCommand(args.includes("--demo"));
   if (command === "--help" || command === "help") {
     console.log(
-      "passport serve [--allow-remote] | demo [--allow-remote] | token [--rotate] | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo]",
+      "passport init | doctor | serve [--allow-remote] | demo [--allow-remote] | token [--rotate] | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo]",
     );
     return;
   }

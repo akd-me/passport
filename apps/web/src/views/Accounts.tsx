@@ -1,179 +1,13 @@
 import { useState } from "react";
+import "../accounts/accounts.css";
 import type { Account, LlmConfig } from "@passport/types";
 import { api, type AccountData, type ProviderDescriptor } from "../api";
+import { AccountWizard } from "../accounts/AccountWizard";
+import { AccountRow } from "../accounts/AccountRow";
+import { DoctorCard } from "../accounts/DoctorCard";
+import type { ConnectedAccount } from "../accounts/api";
 import { useResource, useTask } from "../state";
-import {
-  Avatar,
-  Badge,
-  Feedback,
-  Icon,
-  Loading,
-  PageHeader,
-  relativeTime,
-} from "../components/ui";
-function AccountRow({ account }: { account: Account }) {
-  const task = useTask();
-  return (
-    <div className="account-row">
-      <Avatar name={account.displayName} />
-      <div className="account-main">
-        <strong>{account.displayName}</strong>
-        <p>{account.emailAddress}</p>
-        <small>
-          {account.lastSyncError
-            ? "Sync needs attention"
-            : account.lastSyncAt
-              ? `Synced ${relativeTime(account.lastSyncAt)}`
-              : "Not synced yet"}
-        </small>
-        <Feedback
-          error={
-            account.lastSyncError
-              ? "The last sync failed. Check your provider settings and try again."
-              : task.error
-          }
-        />
-      </div>
-      <Badge tone="green">
-        {account.kind === "mock" ? "Demo" : account.kind}
-      </Badge>
-      <button
-        className="button secondary"
-        disabled={task.busy}
-        onClick={() =>
-          task.run(() => api.sync(account.id), "Mailbox sync complete.")
-        }
-      >
-        {task.busy ? "Syncing…" : "Sync now"}
-      </button>
-    </div>
-  );
-}
-function AddAccount({
-  providers,
-  onClose,
-}: {
-  providers: ProviderDescriptor[];
-  onClose: () => void;
-}) {
-  const [kind, setKind] = useState(providers[0]?.kind ?? ""),
-    [fields, setFields] = useState<Record<string, string>>({}),
-    [emailAddress, setEmail] = useState(""),
-    [displayName, setName] = useState("");
-  const descriptor = providers.find((p) => p.kind === kind),
-    task = useTask();
-  return (
-    <form
-      className="panel add-account-form"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        const ok = await task.run(
-          () =>
-            api.addAccount({
-              kind,
-              emailAddress,
-              displayName,
-              fields: {
-                ...fields,
-                ...(descriptor?.fields.some((f) => f.id === "emailAddress")
-                  ? { emailAddress }
-                  : {}),
-                ...(descriptor?.fields.some((f) => f.id === "displayName")
-                  ? { displayName }
-                  : {}),
-              },
-            }),
-          "Account added.",
-        );
-        if (ok) {
-          setFields({});
-          onClose();
-        }
-      }}
-    >
-      <div className="section-heading">
-        <h2>Connect a mailbox</h2>
-        <button type="button" className="button text" onClick={onClose}>
-          Close
-        </button>
-      </div>
-      <label>
-        Provider
-        <select
-          value={kind}
-          onChange={(e) => {
-            setKind(e.target.value);
-            setFields({});
-          }}
-        >
-          {providers.map((provider) => (
-            <option key={provider.kind} value={provider.kind}>
-              {provider.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="form-columns">
-        <label>
-          Email address
-          <input
-            type="email"
-            autoComplete="email"
-            required
-            value={emailAddress}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-          />
-        </label>
-        <label>
-          Display name
-          <input
-            required
-            value={displayName}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Personal mailbox"
-          />
-        </label>
-      </div>
-      {descriptor?.fields
-        .filter((field) => !["emailAddress", "displayName"].includes(field.id))
-        .map((field) => (
-          <label key={field.id}>
-            {field.label}
-            <input
-              type={field.secret ? "password" : "text"}
-              required={field.required}
-              autoComplete={field.secret ? "new-password" : "off"}
-              placeholder={field.placeholder}
-              value={fields[field.id] ?? ""}
-              onChange={(e) =>
-                setFields((current) => ({
-                  ...current,
-                  [field.id]: e.target.value,
-                }))
-              }
-            />
-            {field.help && <small>{field.help}</small>}
-          </label>
-        ))}
-      {descriptor?.oauth && (
-        <p className="subtle">
-          Connect this provider in your terminal with passport accounts add{" "}
-          {kind}. The command opens a local OAuth callback listener for your own
-          client.
-        </p>
-      )}
-      <Feedback error={task.error} />
-      <button
-        className="button primary"
-        disabled={task.busy || !descriptor || !!descriptor.oauth}
-      >
-        <Icon name="plus" size={16} />
-        {task.busy ? "Connecting…" : "Add account"}
-      </button>
-    </form>
-  );
-}
+import { Badge, Feedback, Icon, Loading, PageHeader } from "../components/ui";
 function LlmSettings({
   llm,
   demo,
@@ -320,10 +154,13 @@ function ProfileEditor({ markdown }: { markdown: string }) {
   );
 }
 export function Accounts() {
-  const accounts = useResource<AccountData>("/accounts"),
+  const accounts = useResource<
+      Omit<AccountData, "accounts"> & { accounts: ConnectedAccount[] }
+    >("/accounts"),
     providers = useResource<ProviderDescriptor[]>("/providers"),
     profile = useResource<{ markdown: string }>("/user-profile"),
-    [adding, setAdding] = useState(false);
+    [adding, setAdding] = useState(false),
+    [reauthorizing, setReauthorizing] = useState<Account>();
   return (
     <>
       <PageHeader
@@ -333,7 +170,10 @@ export function Accounts() {
       >
         <button
           className="button primary"
-          onClick={() => setAdding(!adding)}
+          onClick={() => {
+            setReauthorizing(undefined);
+            setAdding(!adding);
+          }}
           disabled={!providers.data?.length}
         >
           <Icon name="plus" size={16} />
@@ -363,15 +203,33 @@ export function Accounts() {
               </span>
             </div>
             {accounts.data.accounts.map((a) => (
-              <AccountRow key={a.id} account={a} />
+              <AccountRow
+                key={a.id}
+                account={a}
+                reauthorize={() => {
+                  setReauthorizing(
+                    accounts.data?.accounts.find(
+                      (item) => item.id === a.settings.mailAccountId,
+                    ) ?? a,
+                  );
+                  setAdding(true);
+                }}
+              />
             ))}
           </section>
-          {adding && providers.data && (
-            <AddAccount
+          {(adding || !accounts.data.accounts.length) && providers.data && (
+            <AccountWizard
+              key={reauthorizing?.id ?? "new"}
+              account={reauthorizing}
+              accounts={accounts.data.accounts}
               providers={providers.data}
-              onClose={() => setAdding(false)}
+              onClose={() => {
+                setAdding(false);
+                setReauthorizing(undefined);
+              }}
             />
           )}
+          <DoctorCard />
           <LlmSettings
             key={JSON.stringify(accounts.data.llm)}
             llm={accounts.data.llm}

@@ -12,6 +12,7 @@ import {
   PageHeader,
 } from "../components/ui";
 import { DecisionCard } from "./Decisions";
+import { AccountDot, useAccountId } from "../accounts/AccountFilter";
 function UndoButton({ action }: { action: ActionRecord }) {
   const task = useTask();
   return (
@@ -34,6 +35,7 @@ function UndoButton({ action }: { action: ActionRecord }) {
   );
 }
 export function Activity() {
+  const accountId = useAccountId();
   const today = new Date().toLocaleDateString("en-CA"),
     [date, setDate] = useState(today),
     [status, setStatus] = useState(""),
@@ -45,9 +47,11 @@ export function Activity() {
   if (end) end.setDate(end.getDate() + 1);
   const before = end ? new Date(end.getTime() - 1).toISOString() : undefined;
   const { data, error } = useResource<Page<ActionRecord>>(
-      `/actions${queryString({ status, category, actorKind, after, before, limit: 30, cursor })}`,
+      `/actions${queryString({ accountId, status, category, actorKind, after, before, limit: 30, cursor })}`,
     ),
-    outbox = useResource<Page<ActionRecord>>("/actions?status=held&limit=500");
+    outbox = useResource<Page<ActionRecord>>(
+      `/actions${queryString({ accountId, status: "held", limit: 500 })}`,
+    );
   const reset = (callback: () => void) => {
     callback();
     setCursor("");
@@ -158,7 +162,9 @@ export function Activity() {
                 />
               </span>
               <div className="activity-main">
-                <strong>{a.request.reason}</strong>
+                <strong>
+                  <AccountDot id={a.request.accountId} /> {a.request.reason}
+                </strong>
                 <p>
                   {humanize(a.request.type)} · {humanize(a.request.category)} ·{" "}
                   {a.request.actor.kind === "human" ? "You" : "Passport"}

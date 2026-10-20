@@ -76,6 +76,19 @@ describe("IMAP/SMTP adapter", () => {
     expect(reply.headers.references).toEqual([...original.headers.references, original.headers.messageId]);
     await p.disconnect();
   });
+  it("searches the initial date window, fetches matching UID pages and preserves that window in the cursor", async () => {
+    const server = imapServer(), p = new ImapMailProvider({ imapFactory: () => server.client });
+    await p.connect(configured, { password: "secret" });
+    const since = "2026-01-20T13:00:00Z";
+    const first = await collect(p.sync(null, { since }));
+    expect(server.fake.search).toHaveBeenCalledWith({ since: new Date(since) }, { uid: true });
+    expect(server.fake.fetch).toHaveBeenCalledWith("1", expect.anything(), { uid: true });
+    await collect(p.sync(lastCursor(first), { since: "2026-02-01T00:00:00Z" }));
+    expect(server.fake.search).toHaveBeenLastCalledWith({ since: new Date(since) }, { uid: true });
+    const later = await collect(p.sync(null, { since: "2026-01-20T15:00:00Z" }));
+    expect(later.filter(d => d.kind === "email")).toHaveLength(0);
+    await p.disconnect();
+  });
   it("normalizes source MIME, maps flags and SPECIAL-USE, and tracks MODSEQ and expunges", async () => {
     const server = imapServer(), p = new ImapMailProvider({ imapFactory: () => server.client }); await p.connect(configured, { password: "secret" });
     const first = await collect(p.sync(null)), email = first.find(d => d.kind === "email" && d.op === "upsert"); expect(email?.kind === "email" && email.op === "upsert" && email.email.subject).toBe("Design review ✓");

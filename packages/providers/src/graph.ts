@@ -14,7 +14,7 @@ export interface GraphMessage {
   isRead?: boolean; isDraft?: boolean; flag?: { flagStatus?: string }; categories?: string[]; hasAttachments?: boolean;
   internetMessageId?: string; internetMessageHeaders?: Array<{ name: string; value: string }>; attachments?: GraphAttachment[]; "@removed"?: unknown;
 }
-interface GraphFolder { id: string; displayName: string; parentFolderId?: string; childFolderCount?: number; totalItemCount?: number; unreadItemCount?: number }
+interface GraphFolder { id: string; displayName: string; parentFolderId?: string; childFolderCount?: number; totalItemCount?: number; unreadItemCount?: number; "@removed"?: unknown }
 export interface GraphPage<T> { value?: T[]; "@odata.nextLink"?: string; "@odata.deltaLink"?: string }
 export const graphCapabilities: AccountCapabilities = { mail: true, calendar: false, contacts: false, push: false, labels: false, submit: true };
 
@@ -55,19 +55,28 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
     while (link) { const p: GraphPage<T> = await this.api(link); out.push(...(p.value ?? [])); link = p["@odata.nextLink"]; }
     return out;
   }
-  private async folders(): Promise<GraphFolder[]> {
-    const folders = await this.all<GraphFolder>(`${graphBase}/me/mailFolders?includeHiddenFolders=true`);
-    const visited = new Set(folders.map(f => f.id));
-    for (let i = 0; i < folders.length; i++) if (folders[i]!.childFolderCount) {
-      for (const child of await this.all<GraphFolder>(`${graphBase}/me/mailFolders/${encodeURIComponent(folders[i]!.id)}/childFolders?includeHiddenFolders=true`)) if (!visited.has(child.id)) { visited.add(child.id); folders.push(child); }
+  private async folders(saved?: { link: string; items: Record<string, GraphFolder> }): Promise<{ link: string; items: Record<string, GraphFolder> }> {
+    const items = { ...saved?.items };
+    let link: string | undefined = saved?.link ?? `${graphBase}/me/mailFolders/delta`, final: string | undefined;
+    while (link) {
+      let page: GraphPage<GraphFolder>;
+      try { page = await this.api(link, { headers: { Prefer: "odata.maxpagesize=100" } }); }
+      catch (error) { if (error instanceof ProviderError && [404, 410].includes(error.status ?? 0)) throw new ProviderError("CURSOR_EXPIRED", "Graph folder delta expired; run a full sync"); throw error; }
+      for (const folder of page.value ?? []) {
+        if (folder["@removed"]) delete items[folder.id];
+        else items[folder.id] = { ...items[folder.id], ...folder };
+      }
+      final = page["@odata.deltaLink"]; link = page["@odata.nextLink"];
     }
-    return folders;
+    return { link: this.safeLink(required(final, "Graph folder deltaLink"), graphBase), items };
   }
-  async *sync(cursor: string | null, opts: { maxEmails?: number } = {}): AsyncIterable<SyncDelta> {
+  async *sync(cursor: string | null, opts: { maxEmails?: number; since?: string } = {}): AsyncIterable<SyncDelta> {
     this.check();
-    const previous = cursor ? decodeCursor<{ account: string; folders: Record<string, string>; members?: Record<string, string[]> }>(cursor) : { account: this.account.id, folders: {}, members: {} };
+    const previous = cursor ? decodeCursor<{ account: string; folders: Record<string, string>; members?: Record<string, string[]>; since?: string; hierarchy?: { link: string; items: Record<string, GraphFolder> } }>(cursor) : { account: this.account.id, folders: {}, members: {} };
     if (previous.account !== this.account.id || !previous.folders) throw new ProviderError("INVALID_CURSOR", "Invalid Graph folder cursor");
-    const folders = await this.folders(), roleIds = new Map<string, MailboxRole>();
+    const hierarchy = await this.folders("hierarchy" in previous ? previous.hierarchy : undefined);
+    const since = "since" in previous ? previous.since : opts.since;
+    const folders = Object.values(hierarchy.items), roleIds = new Map<string, MailboxRole>();
     const wellKnown: Record<string, MailboxRole> = { inbox: "inbox", archive: "archive", drafts: "drafts", sentitems: "sent", deleteditems: "trash", junkemail: "junk" };
     for (const [name, role] of Object.entries(wellKnown)) {
       try { roleIds.set((await this.api<GraphFolder>(`${graphBase}/me/mailFolders/${name}`)).id, role); }
@@ -81,13 +90,17 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
     for (const f of folders) {
       yield { kind: "mailbox", op: "upsert", mailbox: { id: localId(this.account.id, "mailbox", f.id), accountId: this.account.id, providerId: f.id, name: f.displayName, role: roleIds.get(f.id) ?? null,
         parentId: f.parentFolderId && folders.some(p => p.id === f.parentFolderId) ? localId(this.account.id, "mailbox", f.parentFolderId) : null, totalEmails: f.totalItemCount ?? 0, unreadEmails: f.unreadItemCount ?? 0 } };
-      let link: string | undefined = previous.folders[f.id] ?? `${graphBase}/me/mailFolders/${encodeURIComponent(f.id)}/messages/delta`;
+      let link: string | undefined = previous.folders[f.id] ?? `${graphBase}/me/mailFolders/${encodeURIComponent(f.id)}/messages/delta?${new URLSearchParams({ "$orderby": "receivedDateTime desc", "$select": "id,receivedDateTime,lastModifiedDateTime,isRead,isDraft,flag,categories" })}`;
       const folderMembers = new Set(previous.members?.[f.id] ?? []);
       while (link) {
         let page: GraphPage<GraphMessage>;
         try { page = await this.api(link, { headers: { Prefer: `odata.maxpagesize=${Math.max(1, Math.min(opts.maxEmails ?? 100, 1000))}` } }); }
         catch (e) { if (e instanceof ProviderError && [410, 404].includes(e.status ?? 0)) throw new ProviderError("CURSOR_EXPIRED", "Graph delta expired; reset local sync state and run a full sync"); throw e; }
-        for (const message of page.value ?? []) { changed.add(message.id); if (message["@removed"]) folderMembers.delete(message.id); else folderMembers.add(message.id); }
+        // Drain metadata pages through deltaLink even beyond the window. Stopping early loses the cursor.
+        for (const message of page.value ?? []) {
+          if (message["@removed"]) { changed.add(message.id); folderMembers.delete(message.id); }
+          else if (!since || !message.receivedDateTime || Date.parse(message.receivedDateTime) >= Date.parse(since)) { changed.add(message.id); folderMembers.add(message.id); }
+        }
         if (page["@odata.deltaLink"]) next[f.id] = this.safeLink(page["@odata.deltaLink"], graphBase);
         link = page["@odata.nextLink"];
       }
@@ -97,10 +110,11 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
     // A folder tombstone can mean a move. Resolve every changed immutable ID globally before deleting.
     for (const providerId of changed) {
       const email = await this.getEmail(providerId);
-      if (email) yield { kind: "email", op: "upsert", email }; else yield { kind: "email", op: "delete", providerId };
+      if (email) { if (!since || Date.parse(email.receivedAt) >= Date.parse(since)) yield { kind: "email", op: "upsert", email }; } else yield { kind: "email", op: "delete", providerId };
     }
-    yield { kind: "cursor", cursor: encodeCursor({ account: this.account.id, folders: next, members }) };
+    yield { kind: "cursor", cursor: encodeCursor({ account: this.account.id, folders: next, members, since, hierarchy }) };
   }
+  async checkConnection(): Promise<void> { await this.api(`${graphBase}/me?$select=id`); }
   async getEmail(providerId: string): Promise<Email | null> {
     const properties = "id,conversationId,parentFolderId,subject,from,sender,toRecipients,ccRecipients,bccRecipients,replyTo,sentDateTime,receivedDateTime,bodyPreview,body,isRead,isDraft,flag,categories,hasAttachments,internetMessageId,internetMessageHeaders";
     let message: GraphMessage;

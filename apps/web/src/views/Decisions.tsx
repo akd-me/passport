@@ -7,7 +7,8 @@ import type {
   Matter,
   Page,
 } from "@passport/types";
-import { api } from "../api";
+import { api, queryString } from "../api";
+import { AccountDot, useAccountId } from "../accounts/AccountFilter";
 import { useResource, useTask } from "../state";
 import {
   Badge,
@@ -88,6 +89,7 @@ export function DecisionCard({
       <div className="card-topline">
         <span className="agent-label">
           <Icon name={held ? "clock" : "sparkle"} size={15} />
+          <AccountDot id={action.request.accountId} />
           {held ? "In your outbox" : "Passport suggests"}
         </span>
         <span className="subtle">{relativeTime(action.createdAt)}</span>
@@ -210,8 +212,11 @@ export function DecisionCard({
   );
 }
 export function Decisions() {
-  const decisions = useResource<Page<ActionRecord>>("/decisions"),
-    matters = useResource<Matter[]>("/matters");
+  const accountId = useAccountId();
+  const decisions = useResource<Page<ActionRecord>>(
+      `/decisions${queryString({ accountId })}`,
+    ),
+    matters = useResource<Matter[]>(`/matters${queryString({ accountId })}`);
   const [selected, setSelected] = useState<string>(),
     task = useTask();
   const items = decisions.data?.items ?? [],
