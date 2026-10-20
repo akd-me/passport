@@ -147,8 +147,14 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     if (mailbox.accountId !== accountId) throw new PolicyError('ACCOUNT_MISMATCH', 'Mailbox belongs to another account');
     return mailbox;
   };
+  const usesLabels = async (accountId: string) => {
+    const account = await store.accounts.get(accountId);
+    if (!account) throw new PolicyError('ACCOUNT_NOT_FOUND', `Account ${accountId} does not exist`);
+    return account.capabilities.labels;
+  };
   const changeMail = async (request: Request, snapshot: Extract<Snapshot, { kind: 'mail' }>) => {
     const boxes = await store.mailboxes.list(request.accountId);
+    const labels = await usesLabels(request.accountId);
     const role = (name: string) => { const box = boxes.find(item => item.role === name); if (!box) throw new PolicyError('MAILBOX_NOT_FOUND', `Account has no ${name} mailbox`); return box; };
     const patches: Array<{ id: string; patch: { mailboxIds?: string[]; keywords?: Email['keywords'] } }> = [];
     const changes: MailChange[] = [];
@@ -158,6 +164,7 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       const keywords = { ...email.keywords };
       const addMailbox = (box: (typeof boxes)[number]) => { if (!mailboxIds.includes(box.id)) { changes.push({ op: 'addToMailbox', providerIds: ids, mailboxProviderId: box.providerId }); mailboxIds.push(box.id); } };
       const removeMailbox = (box: (typeof boxes)[number]) => { if (mailboxIds.includes(box.id)) { changes.push({ op: 'removeFromMailbox', providerIds: ids, mailboxProviderId: box.providerId }); mailboxIds = mailboxIds.filter(id => id !== box.id); } };
+      const moveMailbox = (box: (typeof boxes)[number]) => { changes.push({ op: 'move', providerIds: ids, toMailboxProviderId: box.providerId }); mailboxIds = [box.id]; };
       switch (request.type) {
         case 'label': case 'unlabel': {
           const name = request.params.label;
@@ -166,14 +173,27 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
           if (request.type === 'label') addMailbox(box); else removeMailbox(box);
           break;
         }
-        case 'archive': { const archive = boxes.find(item => item.role === 'archive'); if (archive) addMailbox(archive); removeMailbox(role('inbox')); break; }
+        case 'archive': {
+          if (labels) {
+            const archive = boxes.find(item => item.role === 'archive'); if (archive) addMailbox(archive);
+            removeMailbox(role('inbox'));
+          } else {
+            const archive = boxes.find(item => item.role === 'archive') ?? boxes.find(item => item.role === 'all') ?? boxes.find(item => item.name.toLowerCase() === 'archive');
+            if (!archive) throw new PolicyError('ARCHIVE_MAILBOX_MISSING', 'Account has no archive mailbox (archive role, all role, or Archive folder); refusing to remove mail');
+            moveMailbox(archive);
+          }
+          break;
+        }
         case 'unarchive': {
           const box = request.params.toMailboxId ? await mailboxFor(request.accountId, request.params.toMailboxId) : role('inbox');
-          addMailbox(box); const archive = boxes.find(item => item.role === 'archive'); if (archive && archive.id !== box.id) removeMailbox(archive); break;
+          if (labels) {
+            addMailbox(box); const archive = boxes.find(item => item.role === 'archive'); if (archive && archive.id !== box.id) removeMailbox(archive);
+          } else moveMailbox(box);
+          break;
         }
         case 'move': case 'delete': {
           const box = request.type === 'move' ? await mailboxFor(request.accountId, request.params.toMailboxId) : role('trash');
-          changes.push({ op: 'move', providerIds: ids, toMailboxProviderId: box.providerId }); mailboxIds = [box.id]; break;
+          moveMailbox(box); break;
         }
         case 'mark_read': case 'mark_unread': case 'flag': case 'unflag': {
           const keyword = request.type === 'mark_read' || request.type === 'mark_unread' ? '$seen' : '$flagged';
@@ -192,12 +212,21 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
   const restore = async (request: ActionRequest, snapshot: Snapshot): Promise<Record<string, unknown>> => {
     switch (snapshot.kind) {
       case 'mail': {
+        const labels = await usesLabels(request.accountId);
         const changes: MailChange[] = [];
         for (const prior of snapshot.emails) {
           const current = await emailFor(prior.id, request.accountId);
-          for (const id of prior.mailboxIds.filter(id => !current.mailboxIds.includes(id))) changes.push({ op: 'addToMailbox', providerIds: [current.providerId], mailboxProviderId: (await mailboxFor(request.accountId, id)).providerId });
-          for (const id of current.mailboxIds.filter(id => !prior.mailboxIds.includes(id))) changes.push({ op: 'removeFromMailbox', providerIds: [current.providerId], mailboxProviderId: (await mailboxFor(request.accountId, id)).providerId });
-          changes.push({ op: 'setKeywords', providerIds: [current.providerId], add: Object.keys(prior.keywords).filter(key => prior.keywords[key]), remove: Object.keys(current.keywords).filter(key => current.keywords[key] && !prior.keywords[key]) });
+          const add = Object.keys(prior.keywords).filter(key => prior.keywords[key] && !current.keywords[key]);
+          const remove = Object.keys(current.keywords).filter(key => current.keywords[key] && !prior.keywords[key]);
+          // Apply flags before a folder move, which may change the provider's message ID.
+          if (add.length || remove.length) changes.push({ op: 'setKeywords', providerIds: [current.providerId], add, remove });
+          if (labels) {
+            for (const id of prior.mailboxIds.filter(id => !current.mailboxIds.includes(id))) changes.push({ op: 'addToMailbox', providerIds: [current.providerId], mailboxProviderId: (await mailboxFor(request.accountId, id)).providerId });
+            for (const id of current.mailboxIds.filter(id => !prior.mailboxIds.includes(id))) changes.push({ op: 'removeFromMailbox', providerIds: [current.providerId], mailboxProviderId: (await mailboxFor(request.accountId, id)).providerId });
+          } else if (prior.mailboxIds.length !== current.mailboxIds.length || prior.mailboxIds.some(id => !current.mailboxIds.includes(id))) {
+            if (prior.mailboxIds.length !== 1) throw new PolicyError('INVALID_INVERSE', 'Folder-based mail requires exactly one previous mailbox to restore');
+            changes.push({ op: 'move', providerIds: [current.providerId], toMailboxProviderId: (await mailboxFor(request.accountId, prior.mailboxIds[0]!)).providerId });
+          }
         }
         if (changes.length) await (await mailProviderFor(request.accountId)).applyChanges(changes);
         for (const prior of snapshot.emails) await mirrorEmail(prior.id, { mailboxIds: prior.mailboxIds, keywords: prior.keywords });

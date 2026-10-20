@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { ImapFlow } from "imapflow";
 import { ImapMailProvider, imapFlagsToKeywords } from "./imap.js";
+import { createProviderRegistry } from "./registry.js";
 import { account, collect, draft, lastCursor } from "./test/helpers.js";
 
 const mime = readFileSync(new URL("./fixtures/invite.eml", import.meta.url));
@@ -33,6 +34,22 @@ function imapServer() {
 const configured = { ...account, settings: { host: "imap.example", smtpHost: "smtp.example" } };
 
 describe("IMAP/SMTP adapter", () => {
+  it.each(["store", "provider", "adapter"] as const)("resolves %s reply IDs through the registry before composing MIME", async kind => {
+    const server = imapServer(), resolveEmail = vi.fn();
+    const p = createProviderRegistry({ imapFactory: () => server.client, resolveEmail }).mail("imap");
+    await p.connect(configured, { password: "secret" });
+    const delta = (await collect(p.sync(null))).find(d => d.kind === "email" && d.op === "upsert");
+    if (delta?.kind !== "email" || delta.op !== "upsert") throw new Error("No fixture");
+    const original = delta.email;
+    const stored = { ...original, id: "store-email-ulid", threadId: "store-thread-ulid" };
+    resolveEmail.mockImplementation(async id => id === stored.id ? stored : null);
+    const id = kind === "store" ? stored.id : kind === "provider" ? original.providerId : original.id;
+    const reply = await p.createDraft({ ...draft, inReplyToEmailId: id });
+    expect(resolveEmail).toHaveBeenCalledWith(id);
+    expect(reply.headers.inReplyTo).toBe(original.headers.messageId);
+    expect(reply.headers.references).toEqual([...original.headers.references, original.headers.messageId]);
+    await p.disconnect();
+  });
   it("normalizes source MIME, maps flags and SPECIAL-USE, and tracks MODSEQ and expunges", async () => {
     const server = imapServer(), p = new ImapMailProvider({ imapFactory: () => server.client }); await p.connect(configured, { password: "secret" });
     const first = await collect(p.sync(null)), email = first.find(d => d.kind === "email" && d.op === "upsert"); expect(email?.kind === "email" && email.op === "upsert" && email.email.subject).toBe("Design review ✓");

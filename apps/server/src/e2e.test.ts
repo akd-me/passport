@@ -244,6 +244,81 @@ describe("real backend end to end", () => {
       await client.close();
     }
   });
+  it("creates an MCP reply draft through the default registry using remapped store IDs and the original thread", async () => {
+    const backend = await createRealBackend(defaultConfig(), {
+      storePath: ":memory:",
+    });
+    backends.push(backend);
+    const account = await addAccount(backend, {
+      kind: "mock",
+      emailAddress: "alex@example.com",
+      displayName: "Alex",
+      fields: {},
+    });
+    await backend.syncAccount(account.id);
+    const original = (await backend.store.emails.getByProviderId(
+      account.id,
+      "fixture-19",
+    ))!;
+    expect(original.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(original.threadId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    const client = new Client({
+      name: "passport-reply-integration",
+      version: "1",
+    });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await backend.mcp.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      const result = await client.callTool({
+        name: "reply_draft",
+        arguments: {
+          emailId: original.id,
+          textBody: "Thanks, Sam. I will review it.",
+          reason: "Draft a reply to the reviewed conversation",
+        },
+      });
+      expect(result.isError).not.toBe(true);
+      const { id } = JSON.parse(
+        (result.content as Array<{ text: string }>)[0]!.text,
+      ) as { id: string };
+      let action = (await backend.store.actions.get(id))!;
+      if (action.status === "proposed")
+        action = await backend.executor.approve(id);
+      expect(action).toMatchObject({
+        status: "executed",
+        request: {
+          type: "draft_create",
+          actor: { kind: "external-agent", id: "passport-reply-integration" },
+          params: { draft: { inReplyToEmailId: original.id } },
+        },
+      });
+      const reply = (await backend.store.emails.get(
+        action.result!.emailId as string,
+        { includeBodies: true },
+      ))!;
+      expect(reply).toMatchObject({
+        threadId: original.threadId,
+        keywords: { $draft: true },
+        headers: { inReplyTo: original.headers.messageId },
+      });
+      expect(reply.headers.references).toEqual([
+        ...original.headers.references,
+        original.headers.messageId,
+      ]);
+      expect(reply.textBody).toContain("Thanks, Sam.");
+      await backend.syncAccount(account.id);
+      expect((await backend.store.emails.get(reply.id))!.threadId).toBe(
+        original.threadId,
+      );
+      expect(
+        (await backend.store.threads.get(original.threadId))!.emailIds,
+      ).toContain(reply.id);
+    } finally {
+      await client.close();
+    }
+  });
   it("keeps per-account triage sequential and continues after inference failure", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const { backend, account } = await fixture(true);

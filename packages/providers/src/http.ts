@@ -1,6 +1,7 @@
 import type { Account, AccountCredentials, Email } from "@passport/types";
 import { ProviderError, required } from "./errors.js";
 import type { PassportVerifier } from "./verification.js";
+import { resolveReplyEmail } from "./reply.js";
 
 export interface ProviderOptions {
   fetch?: typeof fetch;
@@ -53,10 +54,7 @@ export class HttpConnection {
   protected now(): Date { return this.options.now?.() ?? new Date(); }
   protected async reply(id: string | null | undefined, getEmail: (providerId: string) => Promise<Email | null>): Promise<Email | null> {
     this.check(); if (!id) return null;
-    const prefix = `${this.account.id}:email:`;
-    const email = this.options.resolveEmail ? await this.options.resolveEmail(id) : id.startsWith(prefix) ? await getEmail(decodeURIComponent(id.slice(prefix.length))) : null;
-    if (!email || email.accountId !== this.account.id) throw new ProviderError("REPLY_NOT_FOUND", "Provide resolveEmail for store IDs, or use an email ID returned by this adapter");
-    return email;
+    return resolveReplyEmail(this.account.id, id, getEmail, this.options.resolveEmail);
   }
   protected async refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;

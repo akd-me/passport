@@ -59,7 +59,7 @@ export function createProviderRegistry(options: ImapProviderOptions = {}): Provi
         case "graph": return new GraphMailProvider(options);
         case "imap": return new ImapMailProvider(options);
         case "jmap": return new JmapMailProvider(options);
-        case "mock": return new MockMailProvider({ now: options.now, verifier: options.verifier });
+        case "mock": return new MockMailProvider(options);
         default: throw new ProviderError("UNKNOWN_PROVIDER", "Unknown mail provider kind");
       }
     },
