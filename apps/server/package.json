@@ -4,19 +4,35 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/cli.ts demo",
+    "demo": "tsx src/cli.ts demo",
+    "start": "node dist/cli.js serve"
   },
   "dependencies": {
     "@passport/types": "workspace:*",
-    "@passport/store": "workspace:*",
-    "@passport/providers": "workspace:*",
-    "@passport/policy": "workspace:*",
-    "@passport/mcp": "workspace:*",
-    "@passport/agent": "workspace:*"
+    "hono": "^4.10.0",
+    "@hono/node-server": "^1.19.0",
+    "ws": "^8.18.0"
   },
-  "devDependencies": { "typescript": "^5.8.0", "vitest": "^3.1.0", "tsx": "^4.19.0" }
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0",
+    "tsx": "^4.19.0",
+    "@types/ws": "^8.18.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "passport": "./dist/cli.js"
+  }
 }

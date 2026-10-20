@@ -1,0 +1,55 @@
+import { serve } from "@hono/node-server";
+import { WebSocket, WebSocketServer } from "ws";
+import type { Backend } from "./backend.js";
+import { createApp } from "./app.js";
+import { startSchedulers } from "./schedulers/index.js";
+
+/** Bind locally by default; the WebSocket emits raw DomainEvent JSON at /ws. */
+export function startServer(backend: Backend) {
+  const app = createApp(backend),
+    server = serve({
+      fetch: app.fetch,
+      hostname: backend.config.host,
+      port: backend.config.port,
+    });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 });
+  server.on("upgrade", (request, socket, head) => {
+    if (
+      request.url !== "/ws" ||
+      (request.headers.origin &&
+        request.headers.origin !== `http://${request.headers.host}`)
+    ) {
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      ws.on("error", () => {});
+      wss.emit("connection", ws, request);
+    });
+  });
+  const unsubscribe = backend.bus.onAny((event) => {
+    const message = JSON.stringify(event);
+    for (const client of wss.clients)
+      if (client.readyState === WebSocket.OPEN) {
+        if (client.bufferedAmount > 1024 * 1024) client.terminate();
+        else client.send(message);
+      }
+  });
+  const schedulers = startSchedulers(backend);
+  let closing: Promise<void> | undefined;
+  return {
+    app,
+    server,
+    close: () =>
+      (closing ??= (async () => {
+        unsubscribe();
+        await schedulers.stop();
+        for (const client of wss.clients) client.terminate();
+        await new Promise<void>((resolve) => wss.close(() => resolve()));
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+        await backend.close();
+      })()),
+  };
+}

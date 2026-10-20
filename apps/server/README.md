@@ -1,0 +1,116 @@
+# @passport/server
+
+Local Hono HTTP server, `ws` domain-event stream, CLI, and background jobs. Every handler receives one `Backend`; it imports collaborators only from `@passport/types`.
+
+```sh
+# From the repository root (Node 25, pnpm 10)
+pnpm install
+pnpm build
+pnpm --filter @passport/server demo
+# http://127.0.0.1:3000
+pnpm --filter @passport/server typecheck
+pnpm --filter @passport/server test
+```
+
+The demo has 40 emails, eight people, six matters, four calendar events, proposed replies, a held send, undoable history, and newsletter promotion evidence. It supports editing/approving/rejecting drafts, delayed outbox release/cancel, exact-state undo, matter status changes, trust configuration/pins, descriptor-based mock account setup/sync, model preferences, USER.md, manual reviews, and a daily digest. Everything is in memory, including credentials and config changes; restarting resets it. No email is sent and no model/provider network call is made. Verification fixtures represent header/signature results; content never sets badges.
+
+## Composition and integration
+
+```ts
+import { createApp, createDemoBackend } from "@passport/server";
+const backend = await createDemoBackend();
+const app = createApp(backend); // app.request(...) works without a socket
+```
+
+`src/backend.ts` is the injection contract: `Store`, `ActionExecutor`, `PolicyEngine`, `AgentRuntime`, `ProviderRegistry`, `EventBus`, config persistence, account sync, optional abortable push, and shutdown. `startServer(backend)` adds static serving, WebSockets, schedulers, and a draining `close()`.
+
+`src/compose.ts:createRealBackend()` deliberately throws `NotImplementedError`. The integrator must restore workspace dependencies and wire these package-root factories (signatures in its comments describe expected dependencies):
+
+- `@passport/store`: `openStore`
+- `@passport/providers`: `createProviderRegistry`
+- `@passport/policy`: `createPolicyEngine`, `createActionExecutor`
+- `@passport/agent`: `createAgentRuntime`
+- `@passport/mcp`: `createMailboxMcpServer`
+
+Implement mail/calendar delta ingestion and cursor persistence in `syncAccount`, optional provider `waitForChanges`, config/account hydration and persistence, lifecycle cleanup, and mailbox MCP stdio. The schedulers never call unfinished packages directly. Demo policy is intentionally small; production risk, external-agent controls, learning, and dispatch belong to the real policy/executor. Unsupported demo action types fail visibly and persist a failed record. Demo executor supports mail organization, draft creation, sends, matter updates, and person updates; its in-memory restoration snapshots make undo exact. Sends become irreversible after release.
+
+## Configuration
+
+Load `<PASSPORT_DATA_DIR>/passport.config.json` (default `~/.passport/passport.config.json`). Missing file uses defaults; malformed files fail. `saveConfig` writes atomically with mode 0600 under a 0700 directory. Example:
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 3000,
+  "syncIntervalSeconds": 120,
+  "dailyDigestHour": 8,
+  "llm": {
+    "provider": "ollama",
+    "model": "llama3.2",
+    "baseUrl": "http://localhost:11434"
+  },
+  "accounts": []
+}
+```
+
+Environment overrides: `PASSPORT_DATA_DIR`, `PASSPORT_HOST`, `PASSPORT_PORT`, `PASSPORT_SYNC_INTERVAL_SECONDS` (1–2147483), `PASSPORT_DIGEST_HOUR` (local wall-clock hour, 0–23), `PASSPORT_LLM_PROVIDER`, `PASSPORT_LLM_MODEL`, `PASSPORT_LLM_BASE_URL`, `PASSPORT_LLM_FAST_MODEL`, `PASSPORT_LLM_API_KEY`. LLM providers: `anthropic`, `openai`, `openai-compatible`, `ollama`. API keys are environment-only; file-supplied keys are ignored and never persisted or returned. Account secrets are separated using descriptor `secret` flags and passed to `Store.accounts.setCredentials`, never account settings/config. The real Store must encrypt them; demo credentials are ephemeral.
+
+## HTTP API
+
+Same-origin JSON at `/api`; errors are `{ "error": { "code": "...", "message": "..." } }`. Malformed input returns 400, missing records 404, stale/conflicting actions 409, explicit integration stubs 501. Unexpected provider errors return a generic 500 without exposing credential-bearing messages. No CORS: Vite proxies the API. Bind defaults to loopback; authentication for remote hosting is outside this wave.
+
+All IDs in paths are URL-encoded. `Page<T>` is `{items, total?, nextCursor?}`. List defaults are controlled by Store; the demo uses offset-string cursors. `limit` is 1–500.
+
+| Method and path                     | Input and response                                                                                                                                                                                                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`                   | `{ok, mode}`                                                                                                                                                                                                                                  |
+| `GET /api/decisions`                | `Page<ActionRecord>` containing proposed and held actions, up to 500                                                                                                                                                                          |
+| `POST /api/actions/:id/approve`     | Empty body or `{request: ActionRequest}` (`editedRequest` alias accepted). Human editor may change draft `textBody`; routing, recipients, actor and category stay with the stored request. Returns `ActionRecord`.                            |
+| `POST /api/actions/:id/reject`      | Optional `{reason: string}` → `ActionRecord`                                                                                                                                                                                                  |
+| `POST /api/actions/:id/cancel-hold` | No body → `ActionRecord`                                                                                                                                                                                                                      |
+| `POST /api/actions/:id/undo`        | No body → original `ActionRecord` marked undone; inverse gets a separate log record                                                                                                                                                           |
+| `GET /api/actions`                  | `ActionQuery`: comma-separated `status`, `category`, `actorKind`, `runId`, `matterId`, ISO `after`/`before`, `limit`, `cursor` → `Page<ActionRecord>`                                                                                         |
+| `GET /api/emails`                   | `EmailQuery`: `accountId`, `mailboxId`, `threadId`, `matterId` (`null` supported), `personId`, `text`, `category`, ISO `after`/`before`, `limit`, `cursor`, `sort`, `includeBodies=true`, comma-separated keyword `has`/`not` → `Page<Email>` |
+| `GET /api/emails/:id`               | Full `Email` including bodies                                                                                                                                                                                                                 |
+| `GET /api/threads/:id`              | `{thread: Thread, emails: Page<Email>}`                                                                                                                                                                                                       |
+| `GET /api/matters`                  | `status` (comma-separated), `personId`, `text`, `limit` → `Matter[]`                                                                                                                                                                          |
+| `GET /api/matters/:id`              | `{matter, emails: Page<Email>, events: CalendarEvent[], actions: Page<ActionRecord>, people: Person[]}`                                                                                                                                       |
+| `PATCH /api/matters/:id`            | Partial `title`, `summary`, `nextStep`, `status`, `dueAt`, `snoozedUntil`; submits a human `matter_update` through the executor → `ActionRecord`                                                                                              |
+| `GET /api/people`                   | `relationship`, `text`, `limit` → `Person[]`                                                                                                                                                                                                  |
+| `GET /api/people/:id`               | `{person, emails: Page<Email>, matters: Matter[]}`                                                                                                                                                                                            |
+| `GET /api/events`                   | Calendar records, not domain history. `accountId`, `matterId`, paired ISO `start`/`end`, `limit` → `CalendarEvent[]`                                                                                                                          |
+| `GET /api/trust`                    | `{config: GlobalPolicyConfig, categories: TrustState[], promotionOffers: PromotionOffer[]}`                                                                                                                                                   |
+| `PUT /api/trust/config`             | Partial `GlobalPolicyConfig` → full config                                                                                                                                                                                                    |
+| `PUT /api/trust/:category/pin`      | `{level: TrustLevel \| null}` → `TrustState` (null restores earned level)                                                                                                                                                                     |
+| `GET /api/user-profile`             | `{markdown: string}`                                                                                                                                                                                                                          |
+| `PUT /api/user-profile`             | `{markdown: string}` → saved profile                                                                                                                                                                                                          |
+| `GET /api/accounts`                 | `{accounts: Account[], llm: LlmConfig without apiKey + apiKeyConfigured, mode}`                                                                                                                                                               |
+| `POST /api/accounts`                | `{kind, emailAddress?, displayName?, fields: Record<string,string>}`; descriptor-driven fields, required ones validated → `Account` (201). Email/name may be descriptor fields.                                                               |
+| `POST /api/accounts/:id/sync`       | Sync one account → `{ok: true}`                                                                                                                                                                                                               |
+| `GET /api/providers`                | Available setup descriptors. OAuth functions omitted; only scope metadata is JSON. Demo offers mock only. OAuth consent/exchange routes are integration work.                                                                                 |
+| `PUT /api/settings/llm`             | Partial `provider`, `model`, `baseUrl`, `fastModel`; rejects API keys → public LLM config                                                                                                                                                     |
+| `POST /api/agent/run`               | Optional `{instruction, emailIds, matterId}` → `AgentRun`                                                                                                                                                                                     |
+| `GET /api/digest/:date`             | `YYYY-MM-DD` → `{date, markdown}`; Store KV key `digest:YYYY-MM-DD`; 404 if no digest                                                                                                                                                         |
+
+`ws://127.0.0.1:3000/ws` streams each raw `DomainEvent` as one JSON text frame. Reconnect clients should refetch current HTTP state; there is no replay protocol. Slow clients are disconnected. Mutating browser requests and WebSocket upgrades require matching origins; non-browser local clients can omit Origin.
+
+The built `apps/web/dist` is served when present, with SPA history fallback. Unknown `/api/*` routes stay JSON 404s. Without a web build the root explains how to start/build the UI.
+
+## Schedulers and CLI
+
+`startSchedulers` discovers accounts on startup and each sync interval, prevents overlapping account syncs, and consumes optional abortable push. It calls `releaseDue` every 30 seconds, `applyDecay` every 24 hours, and the `daily_digest` trigger at the configured local hour (rescheduled each day for DST). `stop()` aborts push, clears all timers, and drains active work before storage closes. Failed jobs are logged without credential/body data and retried at the next interval.
+
+The `passport` bin is `dist/cli.js` after build. During development use `pnpm --filter @passport/server exec tsx src/cli.ts ...`:
+
+```sh
+passport demo                       # full ephemeral UI
+passport serve                      # real backend: explicit integration error for now
+passport sync --demo
+passport accounts list --demo
+passport accounts add mock --demo
+passport trust --demo
+passport decisions --demo
+passport mcp                        # stderr integration notice; no fake MCP protocol
+```
+
+Account add prompts for non-secret descriptor fields. Secret fields use `PASSPORT_SETUP_<FIELD_ID_IN_UPPERCASE>` environment variables (punctuation becomes `_`), avoiding terminal echo. Demo CLI mutations last only for that process. `SIGINT`/`SIGTERM` drain the server. Tests use no provider/LLM network; the WebSocket test uses an ephemeral loopback port.
