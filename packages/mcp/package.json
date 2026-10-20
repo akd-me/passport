@@ -12,13 +12,15 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@passport/types": "workspace:*"
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@passport/types": "workspace:*",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "typescript": "^5.8.0",
