@@ -64,6 +64,11 @@ export function createMemoryStore(): Store {
       async get(id) { return read(people, id); }, async getByEmail(email) { return values(people).find(item => item.emails.some(address => address.toLowerCase() === email.toLowerCase())) ?? null; },
       async list(q = {}) { return values(people).filter(item => (!q.relationship || item.relationship === q.relationship) && (!q.text || `${item.displayName} ${item.emails.join(' ')}`.toLowerCase().includes(q.text.toLowerCase()))).slice(0, q.limit); },
       async upsert(person) { people.set(person.id, clone(person)); return clone(person); },
+      async delete(id) {
+        people.delete(id);
+        for (const [key, email] of emails) emails.set(key, { ...email, personIds: email.personIds.filter(personId => personId !== id) });
+        for (const [key, matter] of matters) matters.set(key, { ...matter, personIds: matter.personIds.filter(personId => personId !== id) });
+      },
       async merge(keepId, mergeId) {
         const keep = people.get(keepId), merge = people.get(mergeId);
         if (!keep || !merge) throw new PolicyError('PERSON_NOT_FOUND', 'Both people must exist to merge');

@@ -631,6 +631,8 @@ export interface Store {
     list(q?: { relationship?: Relationship; text?: string; limit?: number }): Promise<Person[]>;
     upsert(person: Person): Promise<Person>;
     merge(keepId: Id, mergeId: Id): Promise<Person>;
+    /** Remove a person and their email/matter memberships; enables undo of person creation. */
+    delete?(id: Id): Promise<void>;
   };
 
   matters: {

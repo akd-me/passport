@@ -117,12 +117,12 @@ JSON leaves (including added/removed leaves), independent of object key order.
 - Matters, people, and snooze use only Store. Email snooze state is under
   `policy:snooze:<emailId>` because Email has no snooze field. Matter snooze updates
   status/snoozedUntil. Matter attachments update the matter and email/event backlinks.
-  Agents cannot change person relationship, and person verification edits are rejected:
-  verification belongs to the authenticated provider/sync path.
+  Partial person patches cannot edit verification; only humans can change relationships
+  through partial patches. Complete person snapshots follow the agent convention below.
 - Exact inverse snapshots are computed immediately before execution, persisted in
   `ActionRecord.inverse.params.__passportPolicyInverse`, and interpreted by the same dispatch.
   Treat inverses as opaque executor data: submit/approve reject this private field. No shared
-  types were changed. Deleted drafts are recreated with their prior local id and a new provider id.
+  action types were changed. Deleted drafts are recreated with their prior local id and a new provider id.
   Undo creates its own ActionRecord before dispatch and then marks the original undone.
 - Every action domain event is emitted: proposed, decided, held, executed, undone, failed.
   Mirror changes also emit email.updated and matter.updated. `PolicyError` has a `code`;
@@ -133,6 +133,27 @@ JSON leaves (including added/removed leaves), independent of object key order.
   independent writer processes require integration-level coordination. A provider-success /
   local-write failure can leave a partial remote change; reconcile through sync before retrying.
   IDs are locally generated ULIDs because the injected Store interface exposes no id allocator.
+
+## Agent conventions honoured
+
+- `person_update` accepts a complete `Person` snapshot with `patch.id === personId` from
+  authenticated agent/human callers, including inferred relationships and verification.
+  Existing people retain their identity/creation time; undo restores the exact prior snapshot.
+  Missing people require a complete patch and `Store.people.delete` so undo removes the person
+  and its email/matter joins. Stores without that optional method still support updates and
+  snapshot restoration; creation fails before mutation because no prior snapshot exists.
+  External agents retain the identity-edit restrictions. The composition root must authenticate
+  actors and supply verification derived from trusted headers/signatures.
+- `matter_create` and `matter_attach` accept package-local
+  `emailPatch: { category?, personIds? }`. Initial/attached emails receive `matterId` plus the
+  supplied metadata; omitted fields are preserved. Creation returns both `result.matterId`
+  and `result.matter`. Per-email prior matter/category/people metadata is captured before
+  the matter upsert, persisted in the inverse, and restored on undo without reverting later
+  mailbox/keyword edits. Writes share one logged, serialized action; failures compensate
+  from its snapshot because Store has no cross-repository transaction API.
+
+The shared contract only appends optional `Store.people.delete?(id: Id): Promise<void>`;
+`ActionParams` and the agent package remain unchanged.
 
 ## Explicit unsupported operation
 
