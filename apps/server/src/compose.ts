@@ -34,7 +34,7 @@ import { logger } from "./logger.js";
 import { persistOAuthCredentials } from "./onboarding/oauth.js";
 import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
 import { ProviderConnections } from "./sync/connections.js";
-import { ArrivalQueue, type ArrivalTrigger } from "./arrivals.js";
+import { ArrivalQueue, type Arrival, type ArrivalTrigger } from "./arrivals.js";
 import { calendarSafeStore } from "./calendar-safety.js";
 
 export interface RealBackendOptions {
@@ -139,7 +139,7 @@ export async function createRealBackend(
     };
     const releasing = new AsyncLocalStorage<boolean>();
     const executor = createActionExecutor({
-      store: calendarSafeStore(store, bus, () => releasing.getStore() === true),
+      store: calendarSafeStore(store, bus, () => releasing.getStore() === true, () => config.calendarMaxSyncAgeMinutes ?? 10),
       bus,
       policy,
       mailProviderFor: connections.mail,
@@ -154,31 +154,34 @@ export async function createRealBackend(
     let runQueue: Promise<unknown> = Promise.resolve();
     let enabled = false;
     let currentTrigger: ArrivalTrigger | undefined;
+    let currentStep: string | undefined;
     const agentExecutor: ActionExecutor = {
       ...executor,
-      submit: request => executor.submit({
-        ...request,
-        ...(currentTrigger?.runId ? { runId: currentTrigger.runId } : {}),
-        ...(currentTrigger?.availabilityUnverified && request.category === "scheduling"
-          ? { reason: `${request.reason}\ncalendar not synced, availability unverified` } : {}),
-      }),
-    };
-    // Mirror runtime checkpoints under the caller's stable identity as well as
-    // its generated ID, without depending on a cross-package signature change.
-    const runtimeStore = Object.assign(Object.create(store), {
-      kv: {
-        ...store.kv,
-        async set(key: string, value: string) {
-          await store.kv.set(key, value);
-          if (currentTrigger?.runId && key.startsWith("run:"))
-            await store.kv.set(`run:${currentTrigger.runId}`, value);
-        },
+      submit: async request => {
+        const runId = currentTrigger?.runId;
+        // People may require several actions in one step. Address identity survives
+        // retries even when a partial step already created a person's local ID.
+        const params = request.params as { patch?: { emails?: string[] }; personId?: string };
+        const identity = request.type === "person_update" ? (params.patch?.emails?.map(email => email.toLowerCase()).sort().join(",") ?? params.personId ?? "") : "";
+        const marker = runId && currentStep ? `[arrival-step=${currentStep};action=${request.type};identity=${encodeURIComponent(identity)}]` : "";
+        if (marker) {
+          const previous = (await store.actions.query({ runId, limit: 2147483647 })).items.find(action => action.request.reason.endsWith(marker));
+          if (previous) {
+            if (["failed", "executing"].includes(previous.status)) throw new ApiError("TRIAGE_ACTION_INCOMPLETE", "Prior triage action requires review");
+            return previous;
+          }
+        }
+        return executor.submit({
+          ...request,
+          ...(runId ? { runId } : {}),
+          reason: `${request.reason}${currentTrigger?.availabilityUnverified && request.category === "scheduling" ? "\ncalendar not synced, availability unverified" : ""}${marker ? `\n${marker}` : ""}`,
+        });
       },
-    });
+    };
     const configureAgent = () => {
       enabled = !!options.llm || llmConfigured(config.llm);
       runtime = createAgentRuntime({
-        store: runtimeStore,
+        store,
         executor: agentExecutor,
         policy,
         bus,
@@ -195,6 +198,34 @@ export async function createRealBackend(
                 },
               }),
         selfAddresses: config.accounts.map((account) => account.emailAddress),
+        runId: () => currentTrigger?.runId,
+        triageStep: async <T>(step: string, task: () => Promise<T>): Promise<T> => {
+          if (currentTrigger?.kind !== "email.received" || !currentTrigger.runId) return task();
+          const key = `arrival:${currentTrigger.emailId}`;
+          const entry: Arrival | null = JSON.parse((await store.kv.get(key)) ?? "null");
+          // Explicit one-off runs need no arrival journal.
+          if (!entry) return task();
+          if (entry.checkpoints?.[step]) return entry.checkpoints[step].value as T;
+          entry.step = step;
+          await store.kv.set(key, JSON.stringify(entry));
+          currentStep = step;
+          try {
+            // Recover a step whose action committed before its checkpoint did.
+            const actions = (await store.actions.query({ runId: currentTrigger.runId, limit: 2147483647 })).items;
+            const stepActions = actions.filter(action => action.request.reason.split("\n").at(-1)?.startsWith(`[arrival-step=${step};`));
+            const previous = step === "playbook" ? stepActions.find(action => ["archive", "draft_create"].includes(action.request.type)) : stepActions[0];
+            let value: T;
+            if (previous && ["matter", "scheduling", "playbook"].includes(step)) {
+              if (["failed", "executing"].includes(previous.status)) throw new ApiError("TRIAGE_ACTION_INCOMPLETE", "Prior triage action requires review");
+              const email = await store.emails.get(currentTrigger.emailId);
+              const matter = email?.matterId ? await store.matters.get(email.matterId) : null;
+              value = (step === "matter" ? { ...(matter ? { id: matter.id } : {}), summary: matter?.summary ?? "Review this email" } : undefined) as T;
+            } else value = await task();
+            entry.checkpoints = { ...entry.checkpoints, [step]: { value } };
+            await store.kv.set(key, JSON.stringify(entry));
+            return value;
+          } finally { currentStep = undefined; }
+        },
       });
       if (!enabled)
         logger.warn(

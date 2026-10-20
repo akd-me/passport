@@ -17,6 +17,10 @@ export interface AgentRuntimeOptions {
   /** Injectable clock for schedulers and tests. */
   now?: () => string;
   freeBusy?: import("@passport/tools").FreeBusyResolver;
+  /** Host-owned durable arrival checkpoints; ordinary/manual runs can run the task directly. */
+  triageStep?: <T>(step: string, task: () => Promise<T>) => Promise<T>;
+  /** A host may supply a stable identity for retries of the same durable trigger. */
+  runId?: (trigger: import("@passport/types").AgentTrigger) => string | undefined;
 }
 
 export interface RunContext {
@@ -34,6 +38,7 @@ export interface RunContext {
   digest?: DailyDigest;
   now: () => string;
   freeBusy?: import("@passport/tools").FreeBusyResolver;
+  triageStep?: AgentRuntimeOptions["triageStep"];
   complete: (opts: CompleteOptions) => Promise<LlmCompletion>;
   structured: (schema: JsonSchema, content: string, model?: "main" | "fast") => Promise<Record<string, unknown>>;
   tools: Tool[];

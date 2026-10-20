@@ -7,6 +7,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
+import { test } from "node:test";
 
 if (process.argv.length !== 3) throw new Error("Usage: node scripts/smoke-package.mjs <tarball>");
 const tarball = resolve(process.argv[2]);
@@ -48,20 +49,30 @@ async function smokeServer(cli, mode) {
   try {
     const base = `http://127.0.0.1:${port}`;
     let healthy = false;
+    let token = env.PASSPORT_API_TOKEN;
     for (let attempt = 0; attempt < 100; attempt++) {
       if (spawnError) throw spawnError;
       if (child.exitCode !== null) throw new Error(`${mode} exited early:\n${logs}`);
+      if (!token) {
+        for (const raw of logs.match(/https?:\/\/[^\s]+/g) ?? []) {
+          const url = new URL(raw);
+          if (url.origin === base) token = url.searchParams.get("token") ?? undefined;
+        }
+      }
+      if (!token) { await setTimeout(100); continue; }
       try {
-        const response = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(500) });
+        const response = await fetch(`${base}/api/health`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(500) });
         if (response.ok) { healthy = true; break; }
       } catch { /* Wait for the listener. */ }
       await setTimeout(100);
     }
     assert(healthy, `${mode} did not become healthy:\n${logs}`);
-    const health = JSON.parse(command("curl", ["--fail", "--silent", "--show-error", "--max-time", "5", `${base}/api/health`]));
+    assert.equal((await fetch(`${base}/api/health`)).status, 401, "Health must require authentication");
+    const curl = ["--fail", "--silent", "--show-error", "--max-time", "5", "--header", `Authorization: Bearer ${token}`];
+    const health = JSON.parse(command("curl", [...curl, `${base}/api/health`]));
     assert.equal(health.ok, true);
     assert.equal(health.mode, mode === "serve" ? "real" : "demo");
-    const decisions = JSON.parse(command("curl", ["--fail", "--silent", "--show-error", "--max-time", "5", `${base}/api/decisions`]));
+    const decisions = JSON.parse(command("curl", [...curl, `${base}/api/decisions`]));
     assert(Array.isArray(decisions.items));
     if (mode === "demo") assert(decisions.items.length > 0, "Demo must contain decisions");
     const response = await fetch(base, { signal: AbortSignal.timeout(5000) });
@@ -81,25 +92,32 @@ async function smokeServer(cli, mode) {
   }
 }
 
-try {
-  await writeFile(join(directory, "package.json"), '{"private":true}\n');
-  command("npm", ["install", "--no-audit", "--no-fund", tarball]);
-  const manifest = JSON.parse(await readFile(join(directory, "node_modules/@akd-me/passport/package.json"), "utf8"));
-  assert.equal(manifest.name, "@akd-me/passport");
-  assert.equal(manifest.bin.passport, "bin/passport.js");
-  assert(!Object.keys(manifest.dependencies).some((name) => name.startsWith("@passport/")));
-  const cli = join(directory, "node_modules/.bin/passport");
-  assert.match(command(cli, ["--help"], { timeout: 10_000 }), /passport serve/);
-  assert.match(command(cli, ["mcp", "--help"], { timeout: 10_000 }), /stdio/);
-  await writeFile(join(directory, ".mcp.json"), JSON.stringify({ mcpServers: { example: { command: "example" } } }));
-  command(cli, ["mcp", "install", "--client", "claude-code"]);
-  command(cli, ["mcp", "install", "--client", "claude-code"]);
-  const config = JSON.parse(await readFile(join(directory, ".mcp.json"), "utf8"));
-  assert.equal(config.mcpServers.example.command, "example");
-  assert.equal(config.mcpServers.passport.args[1], "mcp");
-  await smokeServer(cli, "demo");
-  await smokeServer(cli, "serve");
-  console.log(`Tarball smoke passed on Node ${process.versions.node}`);
-} finally {
-  await rm(directory, { recursive: true, force: true });
-}
+await test("B4: packed CLI help, MCP dry-run and authenticated demo/persistent APIs", async () => {
+  try {
+    await writeFile(join(directory, "package.json"), '{"private":true}\n');
+    command("npm", ["install", "--no-audit", "--no-fund", tarball]);
+    const manifest = JSON.parse(await readFile(join(directory, "node_modules/@akd-me/passport/package.json"), "utf8"));
+    assert.equal(manifest.name, "@akd-me/passport");
+    assert.equal(manifest.bin.passport, "bin/passport.js");
+    assert(!Object.keys(manifest.dependencies).some((name) => name.startsWith("@passport/")));
+    const cli = join(directory, "node_modules/.bin/passport");
+    assert.match(command(cli, ["--help"], { timeout: 10_000 }), /\bserve\b/);
+    assert.match(command(cli, ["mcp", "--help"], { timeout: 10_000 }), /stdio/);
+    const before = JSON.stringify({ mcpServers: { example: { command: "example" } } });
+    await writeFile(join(directory, ".mcp.json"), before);
+    const dry = JSON.parse(command(cli, ["mcp", "install", "--client", "claude-code", "--dry-run"]));
+    assert.equal(dry.dryRun, true);
+    assert.equal(JSON.parse(dry.content).mcpServers.passport.args[1], "mcp");
+    assert.equal(await readFile(join(directory, ".mcp.json"), "utf8"), before, "Dry run must preserve config");
+    command(cli, ["mcp", "install", "--client", "claude-code"]);
+    command(cli, ["mcp", "install", "--client", "claude-code"]);
+    const config = JSON.parse(await readFile(join(directory, ".mcp.json"), "utf8"));
+    assert.equal(config.mcpServers.example.command, "example");
+    assert.equal(config.mcpServers.passport.args[1], "mcp");
+    await smokeServer(cli, "demo");
+    await smokeServer(cli, "serve");
+    console.log(`Tarball smoke passed on Node ${process.versions.node}`);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

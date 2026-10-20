@@ -11,6 +11,7 @@ export interface PassportConfig {
   port: number;
   mcpPort?: number;
   syncIntervalSeconds: number;
+  calendarMaxSyncAgeMinutes?: number;
   sync?: { initialDays?: number };
   dailyDigestHour: number;
   llm: LlmConfig;
@@ -28,6 +29,7 @@ export function defaultConfig(
     port: 3000,
     mcpPort: 4318,
     syncIntervalSeconds: 120,
+    calendarMaxSyncAgeMinutes: 10,
     sync: { initialDays: 30 },
     dailyDigestHour: 8,
     llm: {
@@ -40,6 +42,8 @@ export function defaultConfig(
 
 export function validateConfig(config: PassportConfig): PassportConfig {
   initialDays(config);
+  if (config.calendarMaxSyncAgeMinutes !== undefined && (!Number.isFinite(config.calendarMaxSyncAgeMinutes) || config.calendarMaxSyncAgeMinutes <= 0))
+    throw new ApiError("INVALID_CONFIG", "calendarMaxSyncAgeMinutes must be positive");
   if (!Number.isInteger(config.port) || config.port < 0 || config.port > 65535)
     throw new ApiError("INVALID_CONFIG", "port must be 0–65535");
   if (
@@ -112,6 +116,8 @@ export async function loadConfig(
   if (env.PASSPORT_MCP_PORT) config.mcpPort = Number(env.PASSPORT_MCP_PORT);
   if (env.PASSPORT_SYNC_INTERVAL_SECONDS)
     config.syncIntervalSeconds = Number(env.PASSPORT_SYNC_INTERVAL_SECONDS);
+  if (env.PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES)
+    config.calendarMaxSyncAgeMinutes = Number(env.PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES);
   if (env.PASSPORT_DIGEST_HOUR)
     config.dailyDigestHour = Number(env.PASSPORT_DIGEST_HOUR);
   if (env.PASSPORT_LLM_PROVIDER)

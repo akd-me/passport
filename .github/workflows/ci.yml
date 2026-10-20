@@ -23,4 +23,24 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm --dir apps/server/dist/package pack --pack-destination ..
+      - uses: actions/upload-artifact@v4
+        if: matrix.node == 24
+        with:
+          name: passport-package
+          path: apps/server/dist/*.tgz
+  package-smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: passport-package
+          path: apps/server/dist
       - run: node scripts/smoke-package.mjs apps/server/dist/*.tgz

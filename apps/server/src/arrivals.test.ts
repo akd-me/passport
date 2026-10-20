@@ -161,10 +161,12 @@ describe("durable email arrivals", () => {
     expect(await entry(backend, email)).toBeNull();
   });
 
-  it("R2: acknowledges an action-bearing run after a journal failure instead of delivering twice", async () => {
+  it("R2/B1: retries an unfinished action-bearing run after a journal failure without delivering twice", async () => {
     const { backend, mail, run, scheduler } = await fixture();
     await backend.policy.setConfig({ globalMode: "full_access" });
     await backend.policy.pinLevel("scheduling", "full_access");
+    await backend.store.accounts.upsert({ ...account, id: "calendar", capabilities: { ...account.capabilities, mail: false, calendar: true }, lastSyncAt: at });
+    await backend.store.syncState.set({ accountId: "calendar", cursor: "complete", updatedAt: at });
     run.mockImplementationOnce(async trigger => {
       const runId = (trigger as { runId?: string }).runId;
       expect(runId).toBe(`arrival:${trigger.kind === "email.received" ? trigger.emailId : ""}`);
@@ -180,7 +182,7 @@ describe("durable email arrivals", () => {
     await backend.drainAgentQueue();
     await vi.advanceTimersByTimeAsync(60000);
     await scheduler.scheduler.runNow("agent.arrivals");
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(2);
     expect((await backend.store.actions.query({ runId: `arrival:${(await arrival(backend)).id}` })).items).toHaveLength(1);
     await backend.executor.releaseDue("2099-01-01T00:00:00Z");
     expect(mail.sentMail).toHaveLength(1);
@@ -298,7 +300,7 @@ describe("durable email arrivals", () => {
         expect(items[0]).toMatchObject({
           status: "proposed",
           request: {
-            reason: "Needs your attention: triage failed",
+            reason: "Needs your attention: triage incomplete at people",
             type: existingMatter ? "matter_update" : "matter_create",
           },
         });

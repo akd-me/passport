@@ -129,49 +129,56 @@ async function scheduling(ctx: RunContext, email: Email, counterparty: Counterpa
 }
 
 export async function triage(ctx: RunContext, emailId: string, bus: import("@passport/types").EventBus): Promise<void> {
+  const step = ctx.triageStep ?? (async <T>(_name: string, task: () => Promise<T>) => task());
   const email = await ctx.store.emails.get(emailId, { includeBodies: true });
   if (!email) throw new AgentError("Received email was not found in the store", "EMAIL_NOT_FOUND");
-  const resolved = await resolvePeople({ email, store: ctx.store, bus, selfAddresses: ctx.selfAddresses, now: ctx.now(), savePerson: async (person, reason) => {
+  const resolved = await step("people", () => resolvePeople({ email, store: ctx.store, bus, selfAddresses: ctx.selfAddresses, now: ctx.now(), savePerson: async (person, reason) => {
     await ctx.callTool("update_person", { accountId: email.accountId, personId: person.id, patch: { displayName: person.displayName }, reason }, { personSnapshot: person, projectedPeople: [person] });
-  } });
+  } }));
   ctx.downgrades.push(...resolved.downgraded);
-  let category = sensitiveCategory(email, resolved.people);
-  if (!category) {
-    const modelCategory = (await ctx.structured(classificationSchema, classificationPrompt(email, resolved.people), "fast")).category as ActionCategory;
-    // The fast model screens even routine-looking mail for sensitive or stranger requests.
-    category = ["money", "legal", "replies_stranger"].includes(modelCategory)
-      ? modelCategory : heuristicCategory(email) ?? modelCategory;
-  }
+  const category = await step("classify", async () => {
+    let category = sensitiveCategory(email, resolved.people);
+    if (!category) {
+      const modelCategory = (await ctx.structured(classificationSchema, classificationPrompt(email, resolved.people), "fast")).category as ActionCategory;
+      // The fast model screens even routine-looking mail for sensitive or stranger requests.
+      category = ["money", "legal", "replies_stranger"].includes(modelCategory)
+        ? modelCategory : heuristicCategory(email) ?? modelCategory;
+    }
+    const downgraded = resolved.downgraded.length > 0 || email.verification.passport === "downgraded";
+    const knownSender = resolved.people.some(person => (person.relationship === "known" || person.relationship === "self" && (person.verifiedSelf || person.emails.every(address => ctx.selfAddresses.has(normalizeAddress(address))))) && email.from.some(address => person.emails.includes(normalizeAddress(address.email))));
+    return category === "replies_known" && (!knownSender || downgraded) ? "replies_stranger" : category;
+  });
   const downgraded = resolved.downgraded.length > 0 || email.verification.passport === "downgraded";
   const counterparty = emailCounterparty(email, resolved.people, downgraded);
   if (counterparty.personId && !resolved.persistedIds.includes(counterparty.personId)) counterparty.personId = null;
-  const knownSender = resolved.people.some(person => (person.relationship === "known" || person.relationship === "self" && (person.verifiedSelf || person.emails.every(address => ctx.selfAddresses.has(normalizeAddress(address))))) && email.from.some(address => person.emails.includes(normalizeAddress(address.email))));
-  if (category === "replies_known" && (!knownSender || downgraded)) category = "replies_stranger";
-  const matter = await attachMatter(ctx, email, category, resolved.persistedIds, counterparty);
+  const matter = await step("matter", () => attachMatter(ctx, email, category, resolved.persistedIds, counterparty));
   const common = { accountId: email.accountId, emailIds: [email.id] };
   const toolContext = { classification: category, projectedPeople: resolved.people, matterId: matter.id };
-  if ((await ctx.policy.getConfig()).alwaysAsk.includes(category)) {
-    const proposal = category === "newsletters" || category === "receipts" ? `Propose labeling and archiving ${category}`
-      : category === "notifications" ? "Propose marking read and archiving" : "Propose human review";
-    const summary = `${matter.summary} ${proposal}: ${category} is in alwaysAsk and requires human approval.`;
-    const decision = { emailId: email.id, ...(matter.id ? { matterId: matter.id } : {}), summary };
-    ctx.decisions.push(decision);
-    await recordDecision(ctx.store, ctx.run.id, decision);
-  } else if (category === "newsletters" || category === "receipts") {
-    if ((await ctx.store.accounts.get(email.accountId))?.capabilities.labels) await ctx.callTool("label_emails", { ...common, label: category === "receipts" ? "Receipts" : "Newsletters", reason: `Label ${category}: ${email.subject}` }, toolContext);
-    await ctx.callTool("archive_emails", { ...common, reason: `Archive routine ${category}: ${email.subject}` }, toolContext);
-  } else if (category === "notifications") {
-    await ctx.callTool("mark_read", { ...common, reason: `Mark routine notification read: ${email.subject}` }, toolContext);
-    await ctx.callTool("archive_emails", { ...common, reason: `Archive routine notification: ${email.subject}` }, toolContext);
-  } else if (category === "scheduling") {
-    await scheduling(ctx, email, counterparty, matter.id);
-  } else if (category === "replies_known") {
-    const response = await ctx.structured(replySchema, replyPrompt(email, await readThread(ctx.store, email)));
-    await ctx.callTool("create_draft", { draft: replyDraft(ctx, email, String(response.textBody)), reason: `Draft a reply for review: ${email.subject}` }, toolContext);
-  } else {
-    const decision = { emailId: email.id, ...(matter.id ? { matterId: matter.id } : {}), summary: matter.summary };
-    ctx.decisions.push(decision);
-    await recordDecision(ctx.store, ctx.run.id, decision);
-  }
+  await step(category === "scheduling" ? "scheduling" : "playbook", async () => {
+    if ((await ctx.policy.getConfig()).alwaysAsk.includes(category)) {
+      const proposal = category === "newsletters" || category === "receipts" ? `Propose labeling and archiving ${category}`
+        : category === "notifications" ? "Propose marking read and archiving" : "Propose human review";
+      const summary = `${matter.summary} ${proposal}: ${category} is in alwaysAsk and requires human approval.`;
+      const decision = { emailId: email.id, ...(matter.id ? { matterId: matter.id } : {}), summary };
+      ctx.decisions.push(decision);
+      await recordDecision(ctx.store, ctx.run.id, decision);
+    } else if (category === "newsletters" || category === "receipts") {
+      if ((await ctx.store.accounts.get(email.accountId))?.capabilities.labels) await ctx.callTool("label_emails", { ...common, label: category === "receipts" ? "Receipts" : "Newsletters", reason: `Label ${category}: ${email.subject}` }, toolContext);
+      await ctx.callTool("archive_emails", { ...common, reason: `Archive routine ${category}: ${email.subject}` }, toolContext);
+    } else if (category === "notifications") {
+      await ctx.callTool("mark_read", { ...common, reason: `Mark routine notification read: ${email.subject}` }, toolContext);
+      await ctx.callTool("archive_emails", { ...common, reason: `Archive routine notification: ${email.subject}` }, toolContext);
+    } else if (category === "scheduling") {
+      await scheduling(ctx, email, counterparty, matter.id);
+    } else if (category === "replies_known") {
+      const response = await ctx.structured(replySchema, replyPrompt(email, await readThread(ctx.store, email)));
+      await ctx.callTool("create_draft", { draft: replyDraft(ctx, email, String(response.textBody)), reason: `Draft a reply for review: ${email.subject}` }, toolContext);
+    } else {
+      const decision = { emailId: email.id, ...(matter.id ? { matterId: matter.id } : {}), summary: matter.summary };
+      ctx.decisions.push(decision);
+      await recordDecision(ctx.store, ctx.run.id, decision);
+    }
+  });
+  await step("done", async () => undefined);
   ctx.notes.push(`Triaged ${email.id} as ${category}${ctx.decisions.some(d => d.emailId === email.id) ? "; decision needed" : ""}.`);
 }

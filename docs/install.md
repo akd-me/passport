@@ -28,7 +28,7 @@ passport --help
 passport mcp --help
 ```
 
-Open http://127.0.0.1:3000. `demo` is an ephemeral, offline fixture workspace;
+Open the login URL printed at startup (it includes the API token). `demo` is an ephemeral, offline fixture workspace;
 `serve` creates a persistent workspace. No account or model key is required just
 to start it. Without a model key, automatic triage is disabled, while UI, sync,
 human decisions and MCP remain available.
@@ -62,11 +62,15 @@ node scripts/smoke-package.mjs apps/server/dist/akd-me-passport-0.1.0.tgz
 Use `pnpm run pack` explicitly: bare `pnpm pack` invokes pnpm's built-in command
 against the root workspace rather than the root script.
 The smoke script installs it with npm into an OS temporary directory, runs
-`passport --help`, `passport mcp --help` and project MCP registration, then starts
-both demo and persistent servers. It uses curl to check health and decisions,
+`passport --help`, `passport mcp --help`, MCP install `--dry-run` and repeat project
+MCP registration, then starts both demo and persistent servers on free loopback
+ports. It reads the token from each printed login URL (or `PASSPORT_API_TOKEN`)
+and uses authenticated curl requests to check `/api/health` and decisions,
 fetches the packaged UI/assets, checks graceful shutdown and deletes its data.
 It uses no real mail or model credentials. Curl and network access to npm are
-required for this installation check.
+required for this installation check. Any failed assertion exits non-zero.
+CI runs this B4 regression in a separate package-smoke job on Node 22 and 24,
+using the tarball produced by the build/test job.
 
 To install a local build yourself:
 
@@ -109,6 +113,7 @@ it. Configuration is read from `<data-dir>/passport.config.json`:
   "port": 3000,
   "mcpPort": 4318,
   "syncIntervalSeconds": 120,
+  "calendarMaxSyncAgeMinutes": 10,
   "dailyDigestHour": 8,
   "llm": {
     "provider": "anthropic",
@@ -135,6 +140,7 @@ shell or service manager. Docker Compose loads the supplied `.env` file.
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | Provider-specific fallback keys |
 | `PASSPORT_MASTER_KEY` | Credential encryption secret; omitted generates `master.key` |
 | `PASSPORT_SYNC_INTERVAL_SECONDS` | Poll interval, default `120` |
+| `PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES` | Maximum calendar sync age at proposal release, default `10` minutes |
 | `PASSPORT_DIGEST_HOUR` | Local wall-clock digest hour, default `8` |
 | `PASSPORT_OAUTH_REDIRECT_URI` | Override the registered OAuth callback |
 
@@ -175,6 +181,13 @@ with `PASSPORT_API_TOKEN` or `<data-dir>/api-token`. A 401 is an error with reco
 instructions, never a local fallback. Direct access is allowed only when no server
 responds and the owner lock is absent/stale; the command announces that fallback.
 A live owner with an unreachable listener is an error.
+
+Automatic arrivals persist checkpoints for people, classification, matters and
+playbooks. Retries resume unfinished work; five failures surface a proposed
+decision naming the incomplete step. Meeting proposals remain held while any
+calendar sync is incomplete or its completed sync is too old. Release waits in
+30-second increments up to three times, then returns the proposal for review
+with `AVAILABILITY_UNVERIFIED`. Conflicting slots also return for review.
 
 Live provider/model validation is separate from the offline suite and package
 smoke checks. See [SECURITY.md](../SECURITY.md) before exposing a listener.

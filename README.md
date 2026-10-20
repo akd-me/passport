@@ -29,7 +29,7 @@ npx @akd-me/passport demo
 npx @akd-me/passport serve
 ```
 
-Open **http://127.0.0.1:3000**. The offline demo uses in-memory fixtures, makes no provider/model requests and resets on restart. `serve` stores data in `~/.passport` (override with `PASSPORT_DATA_DIR`). Without a model key, the UI, account sync and MCP work while automatic triage is disabled.
+Open the login URL printed at startup. The offline demo uses in-memory fixtures, makes no provider/model requests and resets on restart. `serve` stores data in `~/.passport` (override with `PASSPORT_DATA_DIR`). Without a model key, the UI, account sync and MCP work while automatic triage is disabled.
 
 For repeated use, install the executable:
 
@@ -163,7 +163,7 @@ Trust gates and the external-agent ceiling constrain actions. Sends are held bef
 
 ## Status and roadmap
 
-This is an early **0.1.0, unreleased** implementation. The current offline suite passes, including the three server policy-seam integration cases. Live provider/model interoperability and hosted deployment must be validated in your environment.
+This is an early **0.1.0, unreleased** implementation. The offline suite covers policy integration, resumable arrivals and calendar release checks. Live provider/model interoperability and hosted deployment must be validated in your environment.
 
 Near-term work includes live provider validation and deployment verification. **Hosted identity and SMTP+ are parked.** Gmail/Graph/JMAP push subscriptions and contacts sync are not implemented; periodic sync is available. See [CHANGELOG.md](CHANGELOG.md).
 
@@ -180,7 +180,9 @@ pnpm run pack
 node scripts/smoke-package.mjs apps/server/dist/akd-me-passport-0.1.0.tgz
 ```
 
-CI checks Node 22 and 24. Tagged releases publish npm provenance, a GHCR image and changelog release notes; [maintainer setup](docs/deploy.md#releasing) describes the required permissions and secrets.
+The package smoke test installs the tarball in a temporary directory, checks CLI help and MCP install `--dry-run`, and boots demo and persistent servers on free ports. It reads their startup login tokens and curls `/api/health` with bearer authentication, checks decisions and UI assets, and fails on any error. See the [installation guide](docs/install.md#pack-and-test-the-installable-artifact).
+
+CI checks Node 22 and 24, with a separate package-smoke job after build/tests. Tagged releases publish npm provenance, a GHCR image and changelog release notes; [maintainer setup](docs/deploy.md#releasing) describes the required permissions and secrets.
 
 ## License
 

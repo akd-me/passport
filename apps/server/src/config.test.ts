@@ -20,6 +20,12 @@ describe("configuration and composition", () => {
     paths.push(path);
     return path;
   }
+  it("B2: loads and validates the calendar freshness setting", async () => {
+    const path = await dataDir();
+    expect((await loadConfig({ PASSPORT_DATA_DIR: path })).calendarMaxSyncAgeMinutes).toBe(10);
+    expect((await loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES: "20" })).calendarMaxSyncAgeMinutes).toBe(20);
+    for (const value of ["0", "-1", "NaN"]) await expect(loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES: value })).rejects.toThrow("calendarMaxSyncAgeMinutes");
+  });
   it("loads file keys, applies environment overrides, and never persists environment keys", async () => {
     const path = await dataDir();
     await writeFile(

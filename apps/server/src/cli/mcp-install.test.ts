@@ -16,6 +16,37 @@ async function fixture() {
   directories.push(root);
   return { cwd: root, home: root, dataDir: join(root, "workspace"), entryPath: "/absolute/passport/cli.js", nodePath: process.execPath, platform: "darwin" };
 }
+it.each([false, true].flatMap(dryRun => ["claude-code", "codex"].map(client => ({ dryRun, client }))))("B3: redacts argv, URL values and opaque secrets in install previews ($client, dry-run=$dryRun)", async ({ dryRun, client }) => {
+  const options = await fixture();
+  const secrets = ["argument-credential", "query-credential", "fragment-credential", "environment-credential", "0123456789abcdef0123456789abcdef", "/aBC9dE1fG2hJ3kL4mN5pQ6rS7tU8vW9x"];
+  const other = { args: [`--token=${secrets[0]}`, `--api-key=${secrets[0]}`, `Bearer ${secrets[0]}`, `opaque:${secrets[5]}`], url: `https://x/mcp?token=${secrets[1]}&arbitrary=${secrets[1]}#${secrets[2]}`, env: { FLAGS: `secret=${secrets[3]} key=${secrets[3]} token=${secrets[3]}`, VALUE: secrets[4] } };
+  const path = client === "codex" ? join(options.home, ".codex", "config.toml") : join(options.cwd, ".mcp.json");
+  await mkdir(dirname(path), { recursive: true });
+  const before = client === "codex" ? `[mcp_servers.other]\nargs = ${JSON.stringify(other.args)}\nurl = ${JSON.stringify(other.url)}\nenv = { FLAGS = ${JSON.stringify(other.env.FLAGS)}, VALUE = ${JSON.stringify(other.env.VALUE)} }\n` : JSON.stringify({ mcpServers: { other } });
+  await writeFile(path, before);
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  const result = await installMcp(["--client", client, ...(dryRun ? ["--dry-run"] : [])], options);
+  for (const secret of secrets) {
+    expect(result.content).not.toContain(secret);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
+  }
+  const saved = await readFile(result.path, "utf8");
+  if (client === "codex") expect(saved).toContain(before.trim());
+  else expect(JSON.parse(saved).mcpServers.other).toEqual(other);
+  if (result.backup) expect(await readFile(result.backup, "utf8")).toBe(before);
+});
+it("B3: redacts opaque credentials in printed config and backup paths", async () => {
+  const options = await fixture();
+  const secret = "e5a298c70145b2f67d903e8ac61f4b90";
+  options.cwd = join(options.cwd, secret);
+  await mkdir(options.cwd);
+  await writeFile(join(options.cwd, ".mcp.json"), "{}");
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  const result = await installMcp(["--client", "claude-code"], options);
+  expect(result.backup).toContain(secret);
+  expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
+  expect(await readFile(result.backup!, "utf8")).toBe("{}");
+});
 it("R15: redacts nested existing JSON secrets while preserving them on disk and in the backup", async () => {
   const options = await fixture();
   const before = JSON.stringify({ mcpServers: { other: { env: { apiKey: "old-key", PASSWORD: "old-password", nested: [{ Authorization: "old-bearer", refresh_token: "old-token", clientSecret: "old-secret" }] } }, passport: { env: { keep: "yes" } } } });

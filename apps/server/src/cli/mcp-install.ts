@@ -16,10 +16,28 @@ const object = (value: unknown): value is JsonObject => value !== null && typeof
 const invalid = (message: string): never => { throw new ApiError("MCP_INSTALL", message); };
 const connectionKeys = new Set(["command", "args", "url", "type", "headers", "http_headers", "env_http_headers", "bearer_token_env_var"]);
 const sensitive = /authorization|token|secret|key|password/i;
+/** Apply to decoded JSON values, TOML strings/comments and displayed file paths. */
+function redactString(source: string): string {
+  return source
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>\\]+/gi, raw => {
+      try {
+        const url = new URL(raw);
+        if (url.username || url.password) { url.username = "<redacted>"; url.password = ""; }
+        for (const name of new Set(url.searchParams.keys())) url.searchParams.set(name, "<redacted>");
+        if (url.hash) url.hash = "<redacted>";
+        return url.href;
+      } catch { return "<redacted-url>"; }
+    })
+    .replace(/((?:--)?(?:api[-_]?key|token|key|secret)\s*=\s*|Bearer\s+)[^\s"'<>\\,;&]+/gi, "$1<redacted>")
+    // Treat path separators as boundaries; a complete slash-prefixed base64
+    // value is still redacted. UUID backup names are not contiguous hex/base64.
+    .replace(/[A-Za-z0-9+_]{32,}={0,2}|(?<![\w/])[A-Za-z0-9+][A-Za-z0-9+/]{31,}={0,2}|(?<![\w/])\/[A-Za-z0-9+/]{31,}={0,2}(?=$|[\s"'\\])/g, "<redacted>");
+}
 function redactJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactJson);
+  if (typeof value === "string") return redactString(value);
   if (!object(value)) return value;
-  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, sensitive.test(key)
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [redactString(key), sensitive.test(key)
     ? typeof child === "string" && /^Bearer\s/i.test(child) ? "Bearer <redacted>" : "<redacted>"
     : redactJson(child)]));
 }
@@ -241,10 +259,10 @@ export async function installMcp(args: string[], options: InstallOptions = {}): 
     try { await writeFile(temp, content, { mode: 0o600, flag: "wx" }); await rename(temp, path); }
     finally { await rm(temp, { force: true }); }
   }
-  const redacted = client === "codex" ? redactToml(content) : JSON.stringify(redactJson(JSON.parse(content)), null, 2) + "\n";
+  const redacted = client === "codex" ? redactString(redactToml(content)) : JSON.stringify(redactJson(JSON.parse(content)), null, 2) + "\n";
   const visible = token ? redacted.split(token).join("<redacted>") : redacted;
   const result = { path, content: visible, dryRun, ...(backup ? { backup } : {}) };
-  console.log(JSON.stringify(result, null, 2));
+  console.log(JSON.stringify({ ...result, path: redactString(path), ...(backup ? { backup: redactString(backup) } : {}) }, null, 2));
   return result;
 }
 

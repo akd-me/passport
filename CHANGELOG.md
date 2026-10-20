@@ -23,12 +23,27 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 - Single `@akd-me/passport` npm artifact with bundled workspace code and web UI,
   project MCP registration, Docker deployment and tag-driven release automation.
 
+### Hardened
+
+- Fixed 36 review findings across pre-release hardening waves covering API
+  authentication and request boundaries, owner coordination, durable ingestion,
+  provider identity/recurrence handling, policy enforcement and outbox approvals.
+- Arrival retries now resume persisted triage steps and reuse recorded actions;
+  exhausted retries surface the incomplete step for human review.
+- Calendar proposals wait for complete, fresh sync data before release, with
+  bounded hold extensions and an explicit availability-unverified review state.
+- MCP install previews redact secrets in arguments, environment values, URLs and
+  printed paths. Packed CLI smoke coverage authenticates its API checks and runs
+  as a separate CI job.
+
 ### Known limitations
 
-- Pre-release software. Provider and model integrations have offline test
-  coverage; live account/model delivery must be validated separately.
-- The HTTP API has no authentication. Keep it on localhost or behind a private,
-  authenticated access boundary. One backend writer per data directory.
+- Pre-release software. Live OAuth consent/refresh, provider send/calendar
+  delivery, real model interoperability, Docker deployment and registry publishing
+  remain unverified by the offline suite and local package smoke test.
+- The HTTP API requires a bearer token or browser session with Host/Origin
+  checks. Keep it on localhost or behind a private access boundary. One backend
+  writer per data directory.
 - Persistent storage needs SQLite FTS5: stock Node 22.5 lacks it despite exposing
   `node:sqlite`. Use Node >=22.16 with FTS5, preferably Node 24. The CLI reports
   missing FTS5 before opening the workspace; the demo works on Node 22.5.

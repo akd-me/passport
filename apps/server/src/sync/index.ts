@@ -244,8 +244,12 @@ export class SyncService {
       });
     let emailsUpserted = 0;
     try {
+      await this.store.kv.set(`sync-in-progress:${accountId}`, "1");
       // Calendar data must be available before email.received can start scheduling playbooks.
       if (account.capabilities.calendar) {
+        // Durable intent also survives a crash/partial failed pass. Only a fully
+        // ingested snapshot can clear it and establish availability again.
+        await this.store.kv.set(`calendar-sync-in-progress:${accountId}`, "1");
         const provider = await this.calendarFor(accountId);
         const reconcileKey = key("sync-reconcile", accountId, "calendar");
         let reconcile = !!(await this.store.kv.get(reconcileKey));
@@ -304,6 +308,7 @@ export class SyncService {
         await this.store.kv.set(`calendar-sync:${accountId}`, JSON.stringify({
           syncState: { cursor: cursors.calendar }, lastSyncAt: new Date().toISOString(),
         }));
+        await this.store.kv.delete(`calendar-sync-in-progress:${accountId}`);
       }
       if (account.capabilities.mail) {
         const provider = await this.mailFor(accountId);
@@ -464,6 +469,8 @@ export class SyncService {
         lastSyncError: safeCode,
       });
       throw error;
+    } finally {
+      await this.store.kv.delete(`sync-in-progress:${accountId}`);
     }
   }
 }

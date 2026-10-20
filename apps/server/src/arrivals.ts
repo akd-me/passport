@@ -15,6 +15,8 @@ export interface Arrival {
   startedAt?: string;
   completedAt?: string;
   calendarWaitStartedAt?: string;
+  step?: string;
+  checkpoints?: Record<string, { value?: unknown }>;
 }
 const INDEX = "arrival:pending";
 const delays = [60000, 300000, 900000, 3600000];
@@ -84,7 +86,7 @@ export class ArrivalQueue {
     entry.attentionActionId ??= newId();
     await this.save(email.id, entry);
     if (!(await this.store.actions.get(entry.attentionActionId))) {
-      const reason = "Needs your attention: triage failed";
+      const reason = `Needs your attention: triage incomplete at ${entry.step ?? "people"}`;
       const action = await this.store.actions.insert({
         id: entry.attentionActionId,
         status: "proposed",
@@ -168,8 +170,7 @@ export class ArrivalQueue {
     const runId = `arrival:${emailId}`;
     const journal = await this.store.kv.get(`run:${runId}`);
     const checkpoint = journal ? JSON.parse(journal) : null;
-    if (entry.completedAt || (checkpoint?.finishedAt && !checkpoint.error) ||
-        (await this.store.actions.query({ runId, limit: 1 })).items.length) {
+    if (entry.completedAt || entry.checkpoints?.done || (checkpoint?.finishedAt && !checkpoint.error)) {
       await this.acknowledge(emailId);
       return;
     }
@@ -213,6 +214,8 @@ export class ArrivalQueue {
       const run = await this.agent.run(trigger);
       if (run.error) throw new Error(run.error);
     } catch (error) {
+      // The runtime persists progress while inference runs; retain its latest steps.
+      Object.assign(entry, JSON.parse((await this.store.kv.get(arrivalKey(emailId))) ?? "{}"));
       const code = (error as { code?: unknown })?.code;
       entry.lastError =
         typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code)
