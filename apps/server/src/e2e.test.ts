@@ -235,10 +235,10 @@ describe("real backend end to end", () => {
         (archive.content as Array<{ text: string }>)[0]!.text,
       );
       const action = await backend.store.actions.get(result.id);
-      expect(action!.request.actor).toEqual({
-        kind: "external-agent",
-        id: "passport-integration",
-      });
+      // Actor id is bound to the transport session, not the client-supplied name (R8).
+      expect(action!.request.actor.kind).toBe("external-agent");
+      expect(action!.request.actor.id).not.toBe("passport-integration");
+      expect(action!.request.reason).toContain("passport-integration");
       expect(["proposed", "executed"]).toContain(action!.status);
     } finally {
       await client.close();
@@ -290,7 +290,7 @@ describe("real backend end to end", () => {
         status: "executed",
         request: {
           type: "draft_create",
-          actor: { kind: "external-agent", id: "passport-reply-integration" },
+          actor: { kind: "external-agent" },
           params: { draft: { inReplyToEmailId: original.id } },
         },
       });
