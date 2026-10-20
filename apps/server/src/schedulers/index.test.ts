@@ -73,7 +73,16 @@ describe("backend schedulers", () => {
     expect(run).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(86400000);
     await vi.advanceTimersByTimeAsync(0);
-    expect(run).toHaveBeenCalledTimes(2);
+    expect(
+      run.mock.calls.filter(
+        ([trigger]) =>
+          trigger.kind === "schedule" && trigger.name === "daily_digest",
+      ),
+    ).toHaveLength(2);
+    expect(run).toHaveBeenCalledWith({
+      kind: "schedule",
+      name: "matter_review",
+    });
   });
   it("does not overlap sync or outbox jobs and drains outstanding work before stop", async () => {
     let finishSync!: () => void, finishRelease!: () => void;

@@ -3,6 +3,8 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { Backend } from "./backend.js";
 import { createApp } from "./app.js";
 import { startSchedulers } from "./schedulers/index.js";
+import { serveHttp } from "@passport/mcp";
+import { logger } from "./logger.js";
 
 /** Bind locally by default; the WebSocket emits raw DomainEvent JSON at /ws. */
 export function startServer(backend: Backend) {
@@ -36,14 +38,29 @@ export function startServer(backend: Backend) {
       }
   });
   const schedulers = startSchedulers(backend);
+  const mcp = backend.createMcpServer
+    ? serveHttp(backend.createMcpServer(), {
+        port: backend.config.mcpPort ?? 4318,
+      })
+    : undefined;
+  const ready = mcp?.then((handle) => {
+    logger.info(`Mailbox MCP → ${handle.url}`);
+    return handle.url;
+  });
+  void ready?.catch(() => logger.error("MCP HTTP listener failed"));
   let closing: Promise<void> | undefined;
   return {
     app,
     server,
+    ready: ready ?? Promise.resolve(),
     close: () =>
       (closing ??= (async () => {
         unsubscribe();
         await schedulers.stop();
+        await mcp?.then(
+          (handle) => handle.close(),
+          () => undefined,
+        );
         for (const client of wss.clients) client.terminate();
         await new Promise<void>((resolve) => wss.close(() => resolve()));
         await new Promise<void>((resolve, reject) =>

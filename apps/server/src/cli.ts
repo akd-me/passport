@@ -10,26 +10,31 @@ import { addAccount } from "./accounts.js";
 import { startServer } from "./server.js";
 import { logger } from "./logger.js";
 import { ApiError } from "./errors.js";
+import { serveStdio } from "@passport/mcp";
+import { startSchedulers } from "./schedulers/index.js";
+import { authorizeOAuth } from "./oauth.js";
+import { Writable } from "node:stream";
 
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const [command = "serve", subcommand, kind] = args;
-  if (command === "mcp") {
-    console.error(
-      "Mailbox MCP stdio will be wired at integration via createMailboxMcpServer. No MCP server was started.",
-    );
-    return;
-  }
   if (command === "--help" || command === "help") {
     console.log(
-      "passport serve | demo | sync [--demo] | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo]",
+      "passport serve | demo | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo]",
     );
     return;
   }
   if (
-    !["serve", "demo", "sync", "accounts", "trust", "decisions"].includes(
-      command,
-    )
+    ![
+      "serve",
+      "demo",
+      "sync",
+      "triage",
+      "mcp",
+      "accounts",
+      "trust",
+      "decisions",
+    ].includes(command)
   )
     throw new ApiError(
       "INVALID_COMMAND",
@@ -37,11 +42,44 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     );
   const config = await loadConfig(),
     backend =
-      command === "demo" || args.includes("--demo")
+      command === "demo" || (command !== "mcp" && args.includes("--demo"))
         ? await createDemoBackend(config)
         : await createRealBackend(config);
+  if (command === "mcp") {
+    const server = backend.createMcpServer!();
+    const schedulers = startSchedulers(backend);
+    let closing: Promise<void> | undefined;
+    const shutdown = () =>
+      (closing ??= (async () => {
+        await schedulers.stop();
+        await server.close();
+        await backend.close();
+      })());
+    const previousClose = server.server.onclose;
+    server.server.onclose = () => {
+      previousClose?.();
+      void shutdown();
+    };
+    process.once("SIGINT", () => {
+      void shutdown();
+    });
+    process.once("SIGTERM", () => {
+      void shutdown();
+    });
+    try {
+      await serveStdio(server);
+    } catch (error) {
+      await shutdown();
+      throw error;
+    }
+    return;
+  }
   if (command === "serve" || command === "demo") {
     const handle = startServer(backend);
+    void handle.ready.catch(() => {
+      process.exitCode = 1;
+      void handle.close();
+    });
     handle.server.on("listening", () => {
       const address = handle.server.address();
       logger.info(
@@ -64,6 +102,20 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     return;
   }
   try {
+    if (command === "triage") {
+      if (!subcommand)
+        throw new ApiError("INVALID_COMMAND", "Use triage <emailId>");
+      console.log(
+        JSON.stringify(
+          await backend.agent.run({
+            kind: "email.received",
+            emailId: subcommand,
+          }),
+          null,
+          2,
+        ),
+      );
+    }
     if (command === "sync") {
       for (const account of await backend.store.accounts.list())
         await backend.syncAccount(account.id);
@@ -101,7 +153,18 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           );
         const descriptor = backend.providers.describe(kind as never),
           fields: Record<string, string> = {},
-          rl = createInterface({ input: stdin, output: stdout });
+          output = new Writable({
+            write(chunk, _encoding, done) {
+              if (!muted) stdout.write(chunk);
+              done();
+            },
+          });
+        let muted = false;
+        const rl = createInterface({
+          input: stdin,
+          output,
+          terminal: !!stdout.isTTY,
+        });
         try {
           const emailAddress = await rl.question("Email address: "),
             displayName = await rl.question("Display name: ");
@@ -109,25 +172,44 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
             if (field.id === "emailAddress") fields[field.id] = emailAddress;
             else if (field.id === "displayName") fields[field.id] = displayName;
             else if (field.secret) {
-              // Secrets are never echoed by readline; supply them through a named environment variable.
               const env = `PASSPORT_SETUP_${field.id.replace(/[^a-zA-Z0-9]/g, "_").toUpperCase()}`;
               if (process.env[env]) fields[field.id] = process.env[env]!;
-              else if (field.required)
-                throw new ApiError(
-                  "MISSING_CREDENTIAL",
-                  `Set ${env} privately in your environment before adding this provider.`,
+              else if (field.id !== "codeVerifier") {
+                stdout.write(
+                  `${field.label}${field.required ? "" : " (optional)"} (hidden): `,
                 );
+                muted = true;
+                try {
+                  fields[field.id] = await rl.question("");
+                } finally {
+                  muted = false;
+                  stdout.write("\n");
+                }
+              }
             } else
               fields[field.id] = await rl.question(
                 `${field.label}${field.required ? "" : " (optional)"}: `,
               );
           }
-          const account = await addAccount(backend, {
-            kind,
-            emailAddress,
-            displayName,
-            fields,
-          });
+          const credentials = descriptor.oauth
+            ? await authorizeOAuth(descriptor, fields, {
+                redirectUri: process.env.PASSPORT_OAUTH_REDIRECT_URI,
+                onAuthUrl: (url, redirect) =>
+                  console.log(
+                    `Registered callback: ${redirect}\nOpen this URL to authorize Passport:\n${url}`,
+                  ),
+              })
+            : undefined;
+          const account = await addAccount(
+            backend,
+            {
+              kind,
+              emailAddress,
+              displayName,
+              fields,
+            },
+            credentials,
+          );
           console.log(
             `Added ${account.displayName} (${account.id})${backend.mode === "demo" ? " for this ephemeral demo session" : ""}.`,
           );
@@ -144,10 +226,15 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     await backend.close();
   }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
-  void main().catch(() => {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+)
+  void main().catch((error: unknown) => {
     logger.error(
-      "Command failed. Check configuration or run passport demo; real composition is pending integration.",
+      error instanceof ApiError
+        ? error.message
+        : "Command failed. Check your configuration and provider credentials.",
     );
     process.exitCode = 1;
   });

@@ -8,6 +8,7 @@ export interface PassportConfig {
   dataDir: string;
   host: string;
   port: number;
+  mcpPort?: number;
   syncIntervalSeconds: number;
   dailyDigestHour: number;
   llm: LlmConfig;
@@ -23,12 +24,12 @@ export function defaultConfig(
     dataDir,
     host: "127.0.0.1",
     port: 3000,
+    mcpPort: 4318,
     syncIntervalSeconds: 120,
     dailyDigestHour: 8,
     llm: {
-      provider: "ollama",
-      model: "llama3.2",
-      baseUrl: "http://localhost:11434",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
     },
     accounts: [],
   };
@@ -37,6 +38,13 @@ export function defaultConfig(
 export function validateConfig(config: PassportConfig): PassportConfig {
   if (!Number.isInteger(config.port) || config.port < 0 || config.port > 65535)
     throw new ApiError("INVALID_CONFIG", "port must be 0–65535");
+  if (
+    config.mcpPort !== undefined &&
+    (!Number.isInteger(config.mcpPort) ||
+      config.mcpPort < 0 ||
+      config.mcpPort > 65535)
+  )
+    throw new ApiError("INVALID_CONFIG", "mcpPort must be 0–65535");
   if (
     !Number.isFinite(config.syncIntervalSeconds) ||
     config.syncIntervalSeconds < 1 ||
@@ -65,7 +73,15 @@ export function validateConfig(config: PassportConfig): PassportConfig {
   return config;
 }
 
-/** Environment overrides win; API keys are environment-only and never written to JSON. */
+export function llmConfigured(llm: LlmConfig): boolean {
+  return (
+    llm.provider === "ollama" ||
+    (llm.provider === "openai-compatible" && !!llm.baseUrl?.trim()) ||
+    !!llm.apiKey?.trim()
+  );
+}
+
+/** Environment overrides win. Public API responses always omit API keys. */
 export async function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<PassportConfig> {
@@ -87,26 +103,56 @@ export async function loadConfig(
     dataDir,
     llm: { ...base.llm, ...saved.llm },
   };
-  delete config.llm.apiKey;
   if (env.PASSPORT_HOST) config.host = env.PASSPORT_HOST;
   if (env.PASSPORT_PORT) config.port = Number(env.PASSPORT_PORT);
+  if (env.PASSPORT_MCP_PORT) config.mcpPort = Number(env.PASSPORT_MCP_PORT);
   if (env.PASSPORT_SYNC_INTERVAL_SECONDS)
     config.syncIntervalSeconds = Number(env.PASSPORT_SYNC_INTERVAL_SECONDS);
   if (env.PASSPORT_DIGEST_HOUR)
     config.dailyDigestHour = Number(env.PASSPORT_DIGEST_HOUR);
   if (env.PASSPORT_LLM_PROVIDER)
     config.llm.provider = env.PASSPORT_LLM_PROVIDER as LlmConfig["provider"];
+  if (saved.llm?.provider && saved.llm.provider !== config.llm.provider)
+    delete config.llm.apiKey;
+  if (!saved.llm?.model && !env.PASSPORT_LLM_MODEL)
+    config.llm.model = {
+      anthropic: "claude-sonnet-4-5",
+      openai: "gpt-4.1",
+      "openai-compatible": "local-model",
+      ollama: "llama3.2",
+    }[config.llm.provider];
   if (env.PASSPORT_LLM_MODEL) config.llm.model = env.PASSPORT_LLM_MODEL;
   if (env.PASSPORT_LLM_BASE_URL) config.llm.baseUrl = env.PASSPORT_LLM_BASE_URL;
   if (env.PASSPORT_LLM_FAST_MODEL)
     config.llm.fastModel = env.PASSPORT_LLM_FAST_MODEL;
-  if (env.PASSPORT_LLM_API_KEY) config.llm.apiKey = env.PASSPORT_LLM_API_KEY;
+  config.llm.apiKey =
+    env.PASSPORT_LLM_API_KEY ||
+    (config.llm.provider === "anthropic"
+      ? env.ANTHROPIC_API_KEY
+      : config.llm.provider === "openai" ||
+          config.llm.provider === "openai-compatible"
+        ? env.OPENAI_API_KEY
+        : undefined) ||
+    config.llm.apiKey;
   return validateConfig(config);
 }
 
 export async function saveConfig(config: PassportConfig): Promise<void> {
   validateConfig(config);
   const { apiKey: _secret, ...llm } = config.llm;
+  // Preserve an operator-authored file key, but never copy an environment override to disk.
+  try {
+    const saved = JSON.parse(
+      await readFile(join(config.dataDir, "passport.config.json"), "utf8"),
+    );
+    if (
+      saved.llm?.provider === config.llm.provider &&
+      typeof saved.llm.apiKey === "string"
+    )
+      Object.assign(llm, { apiKey: saved.llm.apiKey });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   // Whitelist account metadata; credentials only ever go through Store.accounts.
   const accounts = config.accounts.map(
     ({

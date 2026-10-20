@@ -26,6 +26,24 @@ importers:
       '@hono/node-server':
         specifier: ^1.19.0
         version: 1.19.17(hono@4.13.13)
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.25.0
+        version: 1.32.1(zod@4.6.7)
+      '@passport/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@passport/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
+      '@passport/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
+      '@passport/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
+      '@passport/store':
+        specifier: workspace:*
+        version: link:../../packages/store
       '@passport/types':
         specifier: workspace:*
         version: link:../../packages/types

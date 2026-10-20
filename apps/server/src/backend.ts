@@ -8,6 +8,7 @@ import type {
   Store,
 } from "@passport/types";
 import type { PassportConfig } from "./config.js";
+import type { createMailboxMcpServer } from "@passport/mcp";
 
 /** The only server dependency: implementations are composed outside the HTTP layer. */
 export interface Backend {
@@ -20,6 +21,8 @@ export interface Backend {
   readonly providerKinds: readonly ProviderKind[];
   readonly bus: EventBus;
   readonly config: PassportConfig;
+  /** Fresh protocol state per transport/session; shares policy and persistence. */
+  createMcpServer?(): ReturnType<typeof createMailboxMcpServer>;
   updateConfig(
     patch: Partial<Pick<PassportConfig, "llm" | "accounts">>,
   ): Promise<void>;
