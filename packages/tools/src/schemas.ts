@@ -49,4 +49,5 @@ export const personPatch = z.strictObject({
   displayName: z.string().trim().min(1).max(200).optional(), emails: z.array(z.email()).min(1).max(100).optional(),
   primaryEmail: z.email().optional(), avatarUrl: z.url().nullable().optional(), relationship: relationship.optional(),
   notes: z.string().max(10_000).nullable().optional(),
+  downgradeAcknowledgedAt: timestamp.nullable().optional(),
 }).refine(value => Object.keys(value).length > 0, "Provide at least one field");

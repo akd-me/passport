@@ -26,7 +26,7 @@ export interface ActionExecutorOptions {
 type Request = { [K in ActionType]: ActionRequest<K> }[ActionType];
 type EmailPatch = Pick<Email, 'id' | 'matterId' | 'personIds' | 'category'>;
 type Snapshot =
-  | { kind: 'mail'; emails: Email[] }
+  | { kind: 'mail'; emails: Email[]; createdMailboxIds?: string[] }
   | { kind: 'draft'; email: Email | null; createdId?: string }
   | { kind: 'event'; event: CalendarEvent | null; createdId?: string }
   | { kind: 'matter'; matter: Matter | null; id: string; emails: EmailPatch[]; events: CalendarEvent[] }
@@ -117,7 +117,7 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     }
     return normalizedDraft(resolved);
   };
-  const assertPublic = (request: ActionRequest) => {
+  const assertPublic = async (request: ActionRequest) => {
     if (!request.params || typeof request.params !== 'object' || Object.prototype.hasOwnProperty.call(request.params, marker)) throw new PolicyError('INVALID_PARAMS', 'Private inverse data cannot be submitted');
     if (!['human', 'agent', 'external-agent'].includes(request.actor?.kind)) throw new PolicyError('INVALID_ACTOR', 'Unknown actor kind');
     const params = request.params as unknown as { draft?: DraftInput; event?: CalendarEvent; patch?: { accountId?: string; id?: string; providerId?: string; verification?: unknown; relationship?: unknown } };
@@ -126,7 +126,8 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     const completePerson = personParams && isCompletePerson(personParams.patch);
     const personSnapshot = completePerson && request.actor.kind !== 'external-agent';
     if (params.draft && params.draft.accountId !== request.accountId || params.event && params.event.accountId !== request.accountId || params.patch?.accountId && params.patch.accountId !== request.accountId || params.patch?.id !== undefined && !(completePerson && params.patch.id === personParams.personId) || params.patch?.providerId !== undefined) throw new PolicyError('ACCOUNT_MISMATCH', 'Action edits cannot change identity or account');
-    if (request.type === 'person_update' && params.patch && !personSnapshot && ('verification' in params.patch || request.actor.kind !== 'human' && 'relationship' in params.patch)) throw new PolicyError('PROTECTED_IDENTITY', 'Verification must come from trusted identity data; only humans can change relationships');
+    const target = personParams ? await store.people.get(personParams.personId) : null;
+    if (request.type === 'person_update' && params.patch && !personSnapshot && ('verification' in params.patch || request.actor.kind !== 'human' && 'relationship' in params.patch && params.patch.relationship !== 'self' && target?.relationship !== 'self')) throw new PolicyError('PROTECTED_IDENTITY', 'Verification must come from trusted identity data; only humans can change relationships');
   };
   const capture = async (request: Request): Promise<Snapshot | null> => {
     switch (request.type) {
@@ -201,6 +202,16 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
   const changeMail = async (request: Request, snapshot: Extract<Snapshot, { kind: 'mail' }>) => {
     const boxes = await store.mailboxes.list(request.accountId);
     const labels = await usesLabels(request.accountId);
+    if (request.type === 'label' && !boxes.some(box => [box.id, box.providerId, box.name].includes(request.params.label))) {
+      if (!labels) throw new PolicyError('MAILBOX_NOT_FOUND', `Label ${request.params.label} does not exist`);
+      const provider = await mailProviderFor(request.accountId);
+      if (!provider.createMailbox) throw new PolicyError('LABEL_CREATE_UNSUPPORTED', 'Provider does not support creating labels');
+      const created = await provider.createMailbox(request.params.label);
+      if (created.accountId !== request.accountId || created.role === 'trash' || created.role === 'junk') throw new PolicyError('INVALID_MAILBOX', 'Provider returned an invalid label');
+      await store.mailboxes.upsertMany([created]);
+      boxes.push(created);
+      snapshot.createdMailboxIds = [created.id];
+    }
     const role = (name: string) => { const box = boxes.find(item => item.role === name); if (!box) throw new PolicyError('MAILBOX_NOT_FOUND', `Account has no ${name} mailbox`); return box; };
     const patches: Array<{ id: string; patch: { mailboxIds?: string[]; keywords?: Email['keywords'] } }> = [];
     const changes: MailChange[] = [];
@@ -461,11 +472,21 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       case 'person_update': {
         if (snapshot?.kind !== 'person') throw new PolicyError('INVALID_INVERSE', 'Person snapshot is required');
         const prior = snapshot.person;
-        if (!prior) {
-          if (!isCompletePerson(request.params.patch)) throw new PolicyError('PERSON_NOT_FOUND', 'Creation requires a complete Person patch');
-          await store.people.upsert(request.params.patch); return { personId: request.params.personId };
+        const patch = { ...request.params.patch };
+        // Neither model input nor complete inferred snapshots can mint an approved self identity.
+        delete patch.verifiedSelf;
+        if (prior?.verifiedSelf !== undefined) patch.verifiedSelf = prior.verifiedSelf;
+        const approved = request.actor.kind === 'human' || Boolean(await store.kv.get(`policy:feedback:${action.id}`));
+        if ((patch.relationship ?? prior?.relationship) === 'self' && approved && await store.kv.get(`policy:feedback:${action.id}`)) patch.verifiedSelf = true;
+        if (!approved) {
+          delete patch.downgradeAcknowledgedAt;
+          if (prior?.downgradeAcknowledgedAt !== undefined) patch.downgradeAcknowledgedAt = prior.downgradeAcknowledgedAt;
         }
-        await store.people.upsert({ ...prior, ...request.params.patch, id: prior.id, createdAt: prior.createdAt, updatedAt: now() }); return { personId: prior.id };
+        if (!prior) {
+          if (!isCompletePerson(patch)) throw new PolicyError('PERSON_NOT_FOUND', 'Creation requires a complete Person patch');
+          await store.people.upsert(patch); return { personId: request.params.personId };
+        }
+        await store.people.upsert({ ...prior, ...patch, id: prior.id, createdAt: prior.createdAt, updatedAt: now() }); return { personId: prior.id };
       }
       case 'profile_update': {
         await store.kv.set('user_profile', request.params.markdown);
@@ -524,7 +545,21 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       bus.emit({ type: 'action.failed', action: current }); await settleUnsubscribeParent(current); throw error;
     }
   };
+  const executeUndo = async (action: ActionRecord, originalId: string, claimedOriginal?: ActionRecord): Promise<ActionRecord> => {
+    const original = claimedOriginal ?? await requireAction(originalId, ['executed']);
+    if (!claimedOriginal) await requireClaim(original);
+    try {
+      const executed = await execute(action, original);
+      const undone = await store.actions.update(originalId, { status: 'undone', undoneAt: now() });
+      bus.emit({ type: 'action.undone', action: undone });
+      return executed;
+    } catch (error) {
+      await store.actions.update(originalId, { status: 'executed' }); throw error;
+    }
+  };
   const holdOrExecute = async (action: ActionRecord): Promise<ActionRecord> => {
+    const undoOf = await store.kv.get(`policy:undo:${action.id}`);
+    if (undoOf) return executeUndo(action, undoOf);
     if (action.request.type === 'send' || action.request.type === 'calendar_propose') {
       try {
         action = await store.actions.update(action.id, { approvedSnapshot: await resolvedDraft(action.request), error: null });
@@ -542,7 +577,7 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
   };
   // Internal submission avoids re-entering this executor's queue for unsubscribe child sends.
   const submitAction = async (request: ActionRequest, onCreated?: (action: ActionRecord) => Promise<void>): Promise<ActionRecord> => {
-    assertPublic(request);
+    await assertPublic(request);
     const decision = await policy.evaluate(request), at = now();
     const record = await store.actions.insert({ id: newId(at), request: structuredClone(request), decision, status: decision.outcome === 'deny' ? 'rejected' : decision.outcome === 'ask' ? 'proposed' : 'approved', createdAt: at, ...(decision.outcome !== 'ask' ? { decidedAt: at } : {}), ...(decision.outcome === 'deny' ? { error: decision.reason } : {}) });
     await onCreated?.(record);
@@ -557,7 +592,8 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       const original = await requireAction(actionId, ['proposed']);
       let distance = 0;
       if (edited) {
-        assertPublic(edited);
+        await assertPublic(edited);
+        if (await store.kv.get(`policy:undo:${actionId}`)) throw new PolicyError('INVALID_EDIT', 'Stored undo snapshots cannot be edited');
         if (edited.type !== original.request.type || edited.accountId !== original.request.accountId || edited.category !== original.request.category || edited.actor.kind !== original.request.actor.kind || edited.actor.id !== original.request.actor.id) throw new PolicyError('INVALID_EDIT', 'Approval edits must preserve action type, account, actor, and category');
         const text = (request: ActionRequest): string | null => {
           const draft = (request.params as { draft?: DraftInput }).draft;
@@ -585,18 +621,37 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       const cancelled = await store.actions.update(actionId, { status: 'rejected', decidedAt: now(), holdUntil: null, error: 'Cancelled during outbox hold' });
       bus.emit({ type: 'action.decided', action: cancelled }); await settleUnsubscribeParent(cancelled); return cancelled;
     }),
-    undo: actionId => serial(async () => {
+    undo: (actionId, context) => serial(async () => {
       const original = await requireAction(actionId, ['executed']);
       if (!original.inverse) throw new PolicyError('IRREVERSIBLE_ACTION', 'This action has no inverse');
-      await requireClaim(original);
       const at = now();
-      const inverse = await store.actions.insert({ id: newId(at), request: structuredClone(original.inverse), decision: { ...original.decision, outcome: 'allow', reversibility: 'reversible', reason: `Human requested undo of ${actionId}` }, status: 'approved', createdAt: at, decidedAt: at });
-      bus.emit({ type: 'action.decided', action: inverse });
-      try { await execute(inverse, original); } catch (error) {
-        await store.actions.update(actionId, { status: 'executed' }); throw error;
+      const request = { ...structuredClone(original.inverse), ...(context ? { actor: context.actor, reason: `Undo ${actionId}: ${context.reason ?? 'Restore prior state'}` } : {}) };
+      const decision = context ? await policy.evaluate(request) : { ...original.decision, outcome: 'allow' as const, reversibility: 'reversible' as const, reason: `Human requested undo of ${actionId}` };
+      if (context?.actor.kind === 'external-agent') {
+        if ((original.request.actor.kind !== 'external-agent' || original.request.actor.id !== context.actor.id) && decision.trustLevel !== 'full_access') {
+          decision.outcome = 'deny'; decision.reason = 'External agents can only undo their own actions below full access.';
+        }
+        const snapshot = snapshotOf(request);
+        const boxes = await store.mailboxes.list(request.accountId);
+        let protectedPerson = false;
+        if (snapshot?.kind === 'person') {
+          const id = (request.params as ActionParams['person_update']).personId;
+          const current = await store.people.get(id), prior = snapshot.person;
+          protectedPerson = !prior || !current || !isDeepStrictEqual({ emails: prior.emails, relationship: prior.relationship, verifiedSelf: prior.verifiedSelf, downgradeAcknowledgedAt: prior.downgradeAcknowledgedAt }, { emails: current.emails, relationship: current.relationship, verifiedSelf: current.verifiedSelf, downgradeAcknowledgedAt: current.downgradeAcknowledgedAt });
+        }
+        if (snapshot?.kind === 'mail' && snapshot.emails.some(email => email.mailboxIds.some(id => boxes.some(box => box.id === id && ['trash', 'junk'].includes(box.role ?? ''))))
+          || snapshot?.kind === 'event' && !snapshot.event || protectedPerson) {
+          decision.outcome = 'deny'; decision.reason = 'The external agent ceiling forbids restoring protected or destructive state.';
+        }
       }
-      const undone = await store.actions.update(actionId, { status: 'undone', undoneAt: now() });
-      bus.emit({ type: 'action.undone', action: undone }); return undone;
+      if (decision.outcome !== 'deny' && decision.outcome !== 'ask') await requireClaim(original);
+      const inverse = await store.actions.insert({ id: newId(at), request, decision, status: decision.outcome === 'deny' ? 'rejected' : decision.outcome === 'ask' ? 'proposed' : 'approved', createdAt: at, ...(decision.outcome !== 'ask' ? { decidedAt: at } : {}) });
+      await store.kv.set(`policy:undo:${inverse.id}`, actionId);
+      if (decision.outcome === 'ask') { bus.emit({ type: 'action.proposed', action: inverse }); return inverse; }
+      bus.emit({ type: 'action.decided', action: inverse });
+      if (decision.outcome === 'deny') return inverse;
+      const executed = await executeUndo(inverse, actionId, original);
+      return context ? executed : (await store.actions.get(actionId))!;
     }),
     releaseDue: (at = now()) => serial(async () => {
       if (!Number.isFinite(Date.parse(at))) throw new PolicyError('INVALID_TIME', 'Release time must be an ISO timestamp');

@@ -35,6 +35,7 @@ export class FakeMailProvider implements MailProvider {
   failure: Error | null = null;
   count = 0;
   sentEmail: Email | null = null;
+  createMailbox?: MailProvider['createMailbox'];
   async connect() {} async disconnect() {}
   async *sync() { yield { kind: 'cursor' as const, cursor: 'test' }; }
   async getEmail() { return this.sentEmail; }

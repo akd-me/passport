@@ -56,7 +56,14 @@ edits, at every level. Pure bookkeeping (`matter_*`, `person_update`, `snooze`, 
 label/unlabel) is exempt from alwaysAsk and follows the normal matrix. Trash/junk labels and
 removing inbox membership are not harmless. Editing or deleting a draft referenced by a held
 send always asks, even at full access.
-External agents are always denied `delete`, `unsubscribe`, and `calendar_delete`.
+External agents are always denied `delete`, `unsubscribe`, `calendar_delete`, and
+mailbox mutations carrying the shared registry's trusted `destructive` flag.
+Destructive mail mutations have at least medium risk and are not bookkeeping.
+Self-address/relationship changes and assignments always ask and are denied
+externally; known-person address additions always ask. The executor alone sets
+`Person.verifiedSelf` after execution of a human-approved self action. Derived
+verification cannot be forged by an action patch. Downgrade acknowledgements
+always ask and are denied externally.
 An external ceiling of supervised denies all non-reversible external actions.
 Explicit deny takes precedence over the matrix and alwaysAsk.
 
@@ -118,7 +125,11 @@ JSON leaves (including added/removed leaves), independent of object key order.
   executors/processes sharing a database cannot release or approve the same action twice.
   Undo claims the original executed action before creating its inverse record. Stores without
   this method fail these transitions with `ACTION_CLAIM_UNSUPPORTED`; there is no unsafe fallback.
-- Labels resolve existing mailboxes by local id, provider id, or name. For accounts with labels,
+- Labels resolve existing mailboxes by local id, provider id, or name. Missing
+  labels on label-capable accounts are created through optional
+  `MailProvider.createMailbox`, in the same action, with IDs recorded in the
+  inverse snapshot. Undo restores message membership and retains the created
+  label. Folder-only providers do not auto-create triage labels. For accounts with labels,
   archive removes inbox and adds an archive mailbox when present. Folder accounts archive by
   moving to the archive-role mailbox, then the all-role mailbox, then a folder named Archive;
   missing destinations fail with `ARCHIVE_MAILBOX_MISSING` before changing mail. Folder unarchive
@@ -151,7 +162,13 @@ JSON leaves (including added/removed leaves), independent of object key order.
   `ActionRecord.inverse.params.__passportPolicyInverse`, and interpreted by the same dispatch.
   Treat inverses as opaque executor data: submit/approve reject this private field. No shared
   action types were changed. Deleted drafts are recreated with their prior local id and a new provider id.
-  Undo creates its own ActionRecord before dispatch and then marks the original undone.
+  `undo(id)` retains the authenticated human API behavior. Tool callers pass
+  `undo(id,{actor,reason})` so the executor evaluates the current actor and ceiling.
+  Below effective full access, external agents may undo only their own external
+  actor IDs; destructive or protected identity restores remain denied. Proposed
+  undos persist their original-action reference under `policy:undo:<inverseId>`
+  for later human approval. Undo creates its own ActionRecord before dispatch and
+  then marks the original undone. Private inverse snapshots cannot be edited.
 - Every action domain event is emitted: proposed, decided, held, executed, undone, failed.
   Mirror changes also emit email.updated and matter.updated. `PolicyError` has a `code`;
   provider errors are persisted as failed and rethrown unchanged, except `SUBMISSION_ACCEPTED`:
@@ -182,8 +199,10 @@ JSON leaves (including added/removed leaves), independent of object key order.
   from its snapshot because Store has no cross-repository transaction API.
 
 Shared additions are optional `ActionRecord.approvedSnapshot`, optional `Store.actions.claim`,
-and `MailChangeResult` with a widened `MailProvider.applyChanges` result. Existing void-returning
-providers remain compatible. `ActionParams` and the agent package remain unchanged.
+and `MailChangeResult` with a widened `MailProvider.applyChanges` result. The review
+fixes append optional Person identity/downgrade fields, ActionRequest.destructive,
+MailProvider.createMailbox, and optional actor/reason context on undo. Existing
+void-returning providers and one-argument human undo callers remain compatible.
 
 ## Unsubscribe
 

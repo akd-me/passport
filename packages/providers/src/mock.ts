@@ -1,4 +1,4 @@
-import type { Account, AccountCapabilities, AccountCredentials, Calendar, CalendarEvent, CalendarProvider, DraftInput, Email, MailChange, MailProvider, ParticipationStatus, SendResult, SyncDelta, TimeRange } from "@passport/types";
+import type { Account, AccountCapabilities, AccountCredentials, Calendar, CalendarEvent, CalendarProvider, DraftInput, Email, MailChange, Mailbox, MailProvider, ParticipationStatus, SendResult, SyncDelta, TimeRange } from "@passport/types";
 import { assertSend, decodeCursor, encodeCursor, localId, ProviderError } from "./errors.js";
 import { generatePreview, normalizeAddresses, normalizeHeaders, toIso } from "./normalize/index.js";
 import { parseAuthenticationResults, verifyHeaders } from "./verification.js";
@@ -63,6 +63,7 @@ export class MockMailProvider implements MailProvider {
   private sent: Email[] = [];
   private blobs = new Map<string, { type: string; data: Uint8Array }>();
   private sequence = 0;
+  private folderNames = [...folderNames];
   constructor(private readonly options: MockMailOptions = {}) {}
   get sentMail(): readonly Email[] { return clone(this.sent); }
   async connect(account: Account, _credentials: AccountCredentials = {}): Promise<void> {
@@ -89,6 +90,11 @@ export class MockMailProvider implements MailProvider {
   injectBlob(data: Uint8Array, type = "application/octet-stream"): string {
     this.check(); const id = `mock-blob:${++this.sequence}`; this.blobs.set(id, { type, data: new Uint8Array(data) }); return id;
   }
+  async createMailbox(name: string): Promise<Mailbox> {
+    const account = this.check();
+    if (!this.folderNames.includes(name)) this.folderNames.push(name);
+    return { id: localId(account.id, "mailbox", name), accountId: account.id, providerId: name, name, role: null, totalEmails: 0, unreadEmails: 0 };
+  }
   async *sync(cursor: string | null): AsyncIterable<SyncDelta> {
     const account = this.check(), end = this.changes.length;
     let start = 0;
@@ -98,7 +104,7 @@ export class MockMailProvider implements MailProvider {
       start = c.revision;
     }
     const emails = clone([...this.emails.values()]);
-    for (const name of folderNames) {
+    for (const name of this.folderNames) {
       const id = localId(account.id, "mailbox", name), members = emails.filter(e => e.mailboxIds.includes(id));
       const roles = { Inbox: "inbox", Archive: "archive", Drafts: "drafts", Sent: "sent", Trash: "trash", Junk: "junk" } as const;
       yield { kind: "mailbox", op: "upsert", mailbox: { id, accountId: account.id, providerId: name, name, role: roles[name as keyof typeof roles] ?? null, totalEmails: members.length, unreadEmails: members.filter(e => !e.keywords.$seen).length } };
@@ -197,6 +203,7 @@ export class MockCalendarProvider implements CalendarProvider {
   private events = new Map<string, CalendarEvent>();
   private changes: CalendarDelta[] = [];
   private sequence = 0;
+  private folderNames = [...folderNames];
   async connect(account: Account, _credentials: AccountCredentials = {}): Promise<void> {
     if (this.account && this.account.id !== account.id) throw new ProviderError("ACCOUNT_MISMATCH", "Use a separate mock instance per account");
     const first = !this.account; this.account = clone(account); this.connected = true;

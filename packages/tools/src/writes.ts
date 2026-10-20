@@ -1,4 +1,4 @@
-import type { ActionParams, DraftInput, EmailAddress } from "@passport/types";
+import type { DraftInput, EmailAddress } from "@passport/types";
 import { schema as z } from "./schema.js";
 import type { Context } from "./context.js";
 import { ToolError, required, writeResult } from "./presentation.js";
@@ -32,7 +32,6 @@ export function registerWrites(ctx: Context) {
     const batch = await ctx.emailBatch(emailIds, accountId);
     const mailbox = required(await store.mailboxes.get(toMailboxId), "Destination mailbox");
     if (mailbox.accountId !== batch.accountId) throw new ToolError("ACCOUNT_MISMATCH", "Destination mailbox belongs to another account.");
-    if (mailbox.role === "trash" || mailbox.role === "junk") throw new ToolError("UNSAFE_DESTINATION", "Moving mail to trash or junk is unavailable through MCP.");
     return writeResult(await ctx.submit("move", batch.accountId, { emailIds, toMailboxId }, reason, batch));
   });
 
@@ -51,7 +50,7 @@ export function registerWrites(ctx: Context) {
   }, true, async ({ emailId, textBody, replyAll, quoteOriginal, reason }, ctx) => {
     const original = await ctx.email(emailId, true);
     const [accounts, ownPeople] = await Promise.all([store.accounts.list(), store.people.list({ relationship: "self", limit: 100 })]);
-    const self = new Set([...accounts.map(account => account.emailAddress), ...ctx.deps.selfAddresses, ...ownPeople.flatMap(person => person.emails)].map(normalize));
+    const self = new Set([...accounts.map(account => account.emailAddress), ...ctx.deps.selfAddresses, ...ownPeople.filter(person => person.verifiedSelf).flatMap(person => person.emails)].map(normalize));
     await ctx.account(original.accountId);
     // Replying to our own sent mail targets the original recipients, never ourselves.
     const fromSelf = original.from.length > 0 && original.from.every(address => self.has(normalize(address.email)));
@@ -162,23 +161,13 @@ export function registerWrites(ctx: Context) {
     const batch = emailIds ? await ctx.emailBatch(emailIds, accountId) : { accountId: (await ctx.account(accountId)).id, emails: [] };
     return writeResult(await ctx.submit("snooze", batch.accountId, { emailIds, matterId, until }, reason, { ...batch, matterId }));
   });
-  register(ctx, "undo_action", "Submit the stored inverse of an executed reversible action as a NEW external-agent action. Policy can ask/hold/deny; original audit record is retained.", {
+  register(ctx, "undo_action", "Undo an executed action by ID through the executor's trusted inverse and actor-aware policy gate. Policy may ask or deny.", {
     actionId: s.id, reason: s.reason,
   }, true, async ({ actionId, reason }, ctx) => {
     const action = required(await store.actions.get(actionId), "Action");
     if (action.status !== "executed" || !action.inverse) throw new ToolError("NOT_REVERSIBLE", "Only executed actions with a stored inverse can be undone.");
-    const inverse = action.inverse;
-    if (["delete", "calendar_delete"].includes(inverse.type)) throw new ToolError("UNSAFE_INVERSE", "Deletion inverses are unavailable through MCP.");
-    // Stored inverse is trusted store data, never accepted as arbitrary tool input. It still crosses submit().
-    await ctx.account(inverse.accountId);
-    const params = inverse.params as { emailIds?: string[]; draft?: DraftInput; draftEmailId?: string; personId?: string };
-    const emails = params.emailIds ? (await ctx.emailBatch(params.emailIds, inverse.accountId)).emails : params.draftEmailId ? [await ctx.email(params.draftEmailId)] : [];
-    const sensitiveCategory = [inverse.category, action.request.category].includes("legal") ? "legal"
-      : [inverse.category, action.request.category].includes("money") ? "money" : undefined;
-    const inferred = await ctx.submit(inverse.type, inverse.accountId, inverse.params as ActionParams[typeof inverse.type],
-      `Undo ${actionId}: ${reason}`, { emails, recipientEmails: params.draft ? recipients(params.draft) : undefined,
-        personIds: params.personId ? [params.personId] : undefined, matterId: inverse.matterId ?? action.request.matterId ?? undefined, sensitiveCategory });
-    return writeResult(inferred);
+    await ctx.account(action.request.accountId);
+    return writeResult(await ctx.deps.executor.undo(actionId, { actor: ctx.actor(), reason }));
   });
   register(ctx, "cancel_held_action", "Cancel this MCP client's held outbox action before release, using executor.cancelHold(). No approval or outbox release capability is exposed.", {
     actionId: s.id,

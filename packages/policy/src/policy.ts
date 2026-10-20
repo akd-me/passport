@@ -82,9 +82,25 @@ export function createPolicyEngine({ store, bus, now = () => new Date().toISOStr
       if (external) trustLevel = minTrust(trustLevel, config.externalAgentCeiling);
       const reversibility = BASE_REVERSIBILITY[request.type];
       let riskIndex = risks.indexOf(BASE_RISK[request.type]);
+      const destructive = request.type === 'delete' || request.destructive === true;
+      if (destructive) riskIndex = Math.max(1, riskIndex);
+      let selfChange = false, knownAddressAddition = false, downgradeAcknowledgement = false;
+      if (request.type === 'person_update') {
+        const { personId, patch } = request.params as import('@passport/types').ActionParams['person_update'];
+        const person = await store.people.get(personId);
+        const normalize = (email: string) => email.trim().toLowerCase();
+        const previous = new Set(person?.emails.map(normalize) ?? []);
+        const next = patch.emails ? new Set(patch.emails.map(normalize)) : previous;
+        const changedEmails = next.size !== previous.size || [...next].some(email => !previous.has(email));
+        selfChange = person?.relationship === 'self' && (changedEmails || patch.relationship !== undefined && patch.relationship !== person.relationship)
+          || patch.relationship === 'self' && (person?.relationship !== 'self' || !person.verifiedSelf || !patch.stats);
+        knownAddressAddition = person?.relationship === 'known' && [...next].some(email => !previous.has(email));
+        downgradeAcknowledgement = patch.downgradeAcknowledgedAt !== undefined && patch.downgradeAcknowledgedAt !== person?.downgradeAcknowledgedAt;
+        if (selfChange || knownAddressAddition) riskIndex = Math.max(1, riskIndex);
+      }
       if (request.counterparty?.class === 'stranger') { riskIndex++; if (request.type === 'send' || request.type.startsWith('calendar_')) riskIndex++; }
       if (request.type === 'unsubscribe') riskIndex++;
-      if (request.type === 'delete') {
+      if (destructive) {
         const ids = (request.params as { emailIds: string[] }).emailIds;
         const emails = await Promise.all(ids.map(id => store.emails.get(id)));
         if (emails.some(email => email && (email.keywords.$flagged || !email.keywords.$seen))) riskIndex++;
@@ -97,12 +113,15 @@ export function createPolicyEngine({ store, bus, now = () => new Date().toISOStr
         // Removing inbox membership archives mail; trash/junk labels are destructive.
         bookkeeping = !!box && !['trash', 'junk'].includes(box.role ?? '') && !(request.type === 'unlabel' && box.role === 'inbox');
       }
+      if (destructive) bookkeeping = false;
       const heldDraft = (request.type === 'draft_update' || request.type === 'draft_delete') &&
         await hasHeldSend((request.params as { draftEmailId: string }).draftEmailId, request.accountId);
       let outcome: PolicyOutcome = 'ask';
       let reason = 'Human approval is required at this trust level.';
-      if (external && (['delete', 'unsubscribe', 'calendar_delete'].includes(request.type) || (config.externalAgentCeiling === 'supervised' && reversibility !== 'reversible'))) {
+      if (external && (destructive || selfChange || downgradeAcknowledgement || ['unsubscribe', 'calendar_delete'].includes(request.type) || (config.externalAgentCeiling === 'supervised' && reversibility !== 'reversible'))) {
         outcome = 'deny'; reason = 'The external agent ceiling forbids this action.';
+      } else if (selfChange || knownAddressAddition || downgradeAcknowledgement) {
+        reason = 'Identity changes and downgrade acknowledgements require human approval.';
       } else if (heldDraft) {
         reason = 'This draft is referenced by a held send and requires approval to change.';
       } else if (config.alwaysAsk.includes(request.category) && !bookkeeping) {

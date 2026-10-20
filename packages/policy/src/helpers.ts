@@ -6,7 +6,8 @@ export function classifyCounterparty(person: Person | null, emails: string[], se
   const self = new Set(selfAddresses.map(normalize));
   if (emails.length > 0 && emails.every(email => self.has(normalize(email)))) return 'self';
   if (!person || !emails.every(email => person.emails.some(known => normalize(known) === normalize(email)))) return 'stranger';
-  if (person.relationship === 'self') return 'self';
+  if (person.relationship === 'self' && person.verifiedSelf) return 'self';
+  if (person.lastSeenBlueAt && person.verification !== 'blue' && (!person.downgradeAcknowledgedAt || person.downgradeAcknowledgedAt < person.lastSeenBlueAt)) return 'stranger';
   if (person.relationship === 'service') return 'service';
   if (person.verification === 'blue') return 'blue';
   return person.relationship === 'known' ? 'green_known' : 'stranger';

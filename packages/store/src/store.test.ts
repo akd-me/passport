@@ -530,3 +530,16 @@ describe("actions and trust", () => {
     expect(await store.trust.getConfig()).toEqual({ ...DEFAULT_POLICY_CONFIG, outboxHoldMinutes: 10 });
   });
 });
+
+it("T8 queries all in-range events with an explicit limit beyond the 50 oldest events", async () => {
+  await store.events.upsertMany([...Array.from({ length: 60 }, (_, i) => event(`old-${i}`, { start: "2025-01-01T00:00:00Z", end: "2025-01-01T01:00:00Z" })), event("recent")]);
+  expect(await store.events.query({ range: { start: "2026-10-20T00:00:00Z", end: "2026-10-22T00:00:00Z" }, limit: 2_147_483_647 })).toHaveLength(1);
+});
+
+it("T9 availability can query old series masters and cancelled instances without changing ordinary range queries", async () => {
+  const series = event("series", { start: "2025-01-01T09:00:00Z", end: "2025-01-01T10:00:00Z", recurrenceRule: "FREQ=WEEKLY;BYDAY=WE" });
+  await store.events.upsertMany([series]);
+  const range = { start: "2026-10-20T00:00:00Z", end: "2026-10-22T00:00:00Z" };
+  expect(await store.events.query({ range })).toEqual([]);
+  expect(await store.events.query({ range, includeRecurring: true, limit: 2_147_483_647 })).toEqual([expect.objectContaining({ id: "series" })]);
+});

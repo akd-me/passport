@@ -154,7 +154,7 @@ Write tools:
 - `reply_draft`: `emailId`, `textBody`, optional `replyAll`, `quoteOriginal`, `reason`.
   Sets `inReplyToEmailId`; the provider sets In-Reply-To, References and thread ID
   according to the shared draft contract. Uses Reply-To/From, preserves existing
-  `Re:`, excludes own account addresses and self-contact aliases, deduplicates
+  `Re:`, excludes own account addresses and human-verified self-contact aliases, deduplicates
   To/CC and never copies BCC.
   Quoting uses original plain text, falling back to the preview for HTML-only mail.
 - `send`: exactly one of `draftEmailId` or inline `draft`, plus `reason`.
@@ -216,18 +216,24 @@ There are no delete/purge, approval, trust-configuration or outbox-release tools
 The server never writes directly to the store. Resource-list change notifications
 follow relevant bus events, and bus listeners are removed when a client closes.
 
-**Contract adaptation:** `ActionType` has no undo or cancellation variant.
-`undo_action` submits the persisted inverse as a *new* external-agent request,
-recomputing its category/counterparty while retaining money/legal sensitivity.
-Private executor snapshot inverses are not public submission inputs: use the human
-UI/API for those; `profile_update` has an ordinary public inverse.
-It returns the new action's ID and preserves
-the original audit record, including its status. Do not repeatedly undo the same
-record assuming the original will become `undone`. Irreversible, unexecuted and
-mail/event deletion inverses are rejected. `cancel_held_action` uses the existing
-`executor.cancelHold()` lifecycle method and returns that record; it does not
-invent an unsupported action type or invoke human approval. Its policy note
-describes the original held action's applied trust level.
+`undo_action` calls the executor's actor-aware undo path by ID. The executor loads
+its trusted private inverse, evaluates current policy and the external ceiling,
+and records the undo before execution. Below effective full access, an external
+agent may undo only its own `actor.id` actions. Protected identity and destructive
+restorations remain denied. A proposed undo waits for human approval; execution
+marks the original `undone`. Clients cannot submit or edit private snapshots.
+`cancel_held_action` retains its ownership-checked lifecycle.
+
+Mailbox writes share a destination guard: trash/junk roles and label aliases,
+including removal of the last safe mailbox, receive destructive risk and the
+same external deny rule as delete. Self-address/relationship changes are denied
+externally, known-person address additions ask, and self classification requires
+configured addresses or human-approved `verifiedSelf`.
+
+The host can inject `freeBusy(accountId,range)` into the MCP constructor. Return
+`null` for disconnected accounts; availability falls back to all matching stored
+events and expands supported recurrence rules. See [tools](../../docs/tools.md)
+for supported rules, exposed cancellation identities, and label creation/undo.
 
 ## Resources and prompts
 

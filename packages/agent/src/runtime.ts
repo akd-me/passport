@@ -39,7 +39,7 @@ class PersonalAgentRuntime implements AgentRuntime {
     const { store, executor, policy, bus } = this.options;
     const run: AgentRunResult = { toolBudget: { callsMade: 0, llmCalls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 }, id: newAgentId(), trigger, startedAt: this.now(), actionIds: [], summary: "Started." };
     const ctx: RunContext = {
-      run, store, now: this.now, profile: "", selfAddresses: new Set(this.options.selfAddresses.map(normalizeAddress)), drafts: this.options.drafts ?? {},
+      run, store, now: this.now, freeBusy: this.options.freeBusy, profile: "", selfAddresses: new Set(this.options.selfAddresses.map(normalizeAddress)), drafts: this.options.drafts ?? {},
       tools: [], toolCalls: 0, actions: [], decisions: [], downgrades: [], notes: [], usages: [],
       complete: async opts => {
         const response = await this.llm.complete(opts);
@@ -71,7 +71,7 @@ class PersonalAgentRuntime implements AgentRuntime {
         return result;
       },
     };
-    ctx.tools = createToolRegistry({ store, policy, bus, selfAddresses: this.options.selfAddresses, now: this.now,
+    ctx.tools = createToolRegistry({ store, policy, bus, selfAddresses: this.options.selfAddresses, now: this.now, freeBusy: this.options.freeBusy,
       actor: { kind: "agent", id: run.id }, executor: {
         ...executor,
         submit: async request => {

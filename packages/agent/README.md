@@ -2,7 +2,7 @@
 
 Personal email triage, people inference, matter organization, policy-controlled playbooks,
 manual tool use, USER.md, and daily digests. Runtime dependencies: `@passport/types` and `@passport/tools`;
-LLM requests use Node's `fetch`. No mail/calendar provider is accessed by this package.
+LLM requests use Node's `fetch`. Providers remain host-owned; an optional injected free/busy resolver supplies live calendar availability.
 
 ```ts
 import { createAgentRuntime } from "@passport/agent";
@@ -48,12 +48,17 @@ and [Anthropic tool calls](https://platform.claude.com/docs/en/agents-and-tools/
 ## How triage decides
 
 1. Read the stored email, including available bodies. Resolve from/to/cc case-insensitively.
-   Infer `self` from configured addresses, `service` from List-Id/no-reply/bulk headers, and
+   Infer `self` from configured addresses or human-verified self contacts, `service` from List-Id/no-reply/bulk headers, and
    `known` from any prior sent mail or at least two **prior** received emails; otherwise `stranger`.
-   Drafts and later messages are excluded from history. Existing known/service relationships
+   Sent evidence requires a sent-role mailbox, explicit provider sent provenance, or an
+   executed send action; From headers alone never prove outbound contact. Drafts and
+   later messages are excluded from history. Per-person contribution IDs in
+   `person-stats:<personId>` make reprocessing idempotent. Existing known/service relationships
    are retained. Verification is taken only from the normalized email's verification fields;
    recipients never inherit the sender's verification. Blue-to-green senders emit
-   `person.downgraded` and are treated as strangers for reply decisions.
+   `person.downgraded` and remain stranger risk until blue returns or a human approves
+   `downgradeAcknowledgedAt`. Inbound self From with failed DMARC/DKIM also warns
+   and has stranger counterparty risk; its recipients gain no sent-history trust.
 2. Classify List-Unsubscribe as newsletters, receipt/order/invoice patterns as receipts,
    calendar parts/ICS/invite subjects as scheduling, and service senders as notifications.
    The remaining mail uses `fastModel`. A model cannot turn an unestablished contact into
@@ -62,9 +67,15 @@ and [Anthropic tool calls](https://platform.claude.com/docs/en/agents-and-tools/
    subject tokens. The main model picks a supplied ID or proposes a new matter. Receipts
    use `Purchases/<sender name or domain>`. Unknown model-supplied matter IDs are rejected.
 4. Submit the playbook: newsletters → label `Newsletters`, archive; receipts → label `Receipts`,
-   archive; notifications → mark read, archive; known replies → `draft_create` with the source
+   archive; folder providers without label support attach the matter and archive
+   without a label. The executor creates missing labels on label-capable accounts;
+   undo removes membership while retaining the label. Notifications → mark read, archive; known replies → `draft_create` with the source
    `inReplyToEmailId` and thread context. No triage playbook sends a reply.
-5. Scheduling checks all stored calendar accounts. A linked invite proposes `calendar_respond`;
+5. Scheduling checks all calendar accounts over the proposal range without a 50-event
+   cap, preferring injected `freeBusy(accountId,range)` for connected accounts. Return
+   `null` for disconnected accounts to fall back to local events. Local recurrence
+   expansion supports DAILY/WEEKLY/MONTHLY with INTERVAL, BYDAY, COUNT, UNTIL and
+   WKST, event-zone DST, and exposed cancellation/override identities. A linked invite proposes `calendar_respond`;
    conflicting acceptance becomes tentative. Without a linked event, `calendar_propose`
    carries a reply draft and up to three validated free slots in the next 14 days. The shared
    contract calls this action `calendar_propose`, not `propose_meeting`. Missing calendar data
@@ -159,5 +170,7 @@ validation; retain the manual call cap. Add fixture tests with `src/testing/memo
 Run `pnpm --filter @passport/agent typecheck`, `pnpm --filter @passport/agent test`, and
 `pnpm --filter @passport/agent build`. Builds omit tests/testing helpers. Production features are
 implemented; no production stubs. Test fakes deliberately do not model provider delivery,
-approval/undo, or real outbox release. Calendar proposals use synced Store events rather than
-live provider free/busy, and the runtime does not fetch missing bodies or attachment blobs.
+approval/undo, or real outbox release. Calendar proposals use optional injected provider free/busy and otherwise synced Store
+events. Google/CalDAV exception identities are currently unexposed, so their local
+recurring availability cannot honour instance cancellations; use live availability.
+The runtime does not fetch missing bodies or attachment blobs.

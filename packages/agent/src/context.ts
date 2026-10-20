@@ -16,6 +16,7 @@ export interface AgentRuntimeOptions {
   drafts?: DraftSettings;
   /** Injectable clock for schedulers and tests. */
   now?: () => string;
+  freeBusy?: import("@passport/tools").FreeBusyResolver;
 }
 
 export interface RunContext {
@@ -31,6 +32,7 @@ export interface RunContext {
   usages: LlmUsage[];
   digest?: DailyDigest;
   now: () => string;
+  freeBusy?: import("@passport/tools").FreeBusyResolver;
   complete: (opts: CompleteOptions) => Promise<LlmCompletion>;
   structured: (schema: JsonSchema, content: string, model?: "main" | "fast") => Promise<Record<string, unknown>>;
   tools: Tool[];

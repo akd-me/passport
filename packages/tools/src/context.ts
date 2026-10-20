@@ -1,5 +1,6 @@
 import type { ActionExecutor, ActionParams, ActionRequest, ActionType, Email, EventBus, PolicyEngine, Store } from "@passport/types";
 import { categorize } from "./categorize.js";
+import { destinationGuard } from "./destination.js";
 import { ToolError, required } from "./presentation.js";
 
 import type { Tool, ToolContext, ToolRegistryOptions } from "./types.js";
@@ -45,8 +46,11 @@ export class Context {
     const inference = categorize({ type, emails: context.emails, people, recipientEmails: context.recipientEmails, matterId: context.matterId, selfEmails: [...accounts.map(account => account.emailAddress), ...this.deps.selfAddresses] });
     if (context.sensitiveCategory === "legal" || (context.sensitiveCategory === "money" && inference.category !== "legal")) inference.category = context.sensitiveCategory;
     if (trusted.classification && !["money", "legal", "matters", "unsubscribe", "scheduling"].includes(inference.category)) inference.category = trusted.classification;
+    const destructive = await destinationGuard(this.store, type, accountId, params, context.emails ?? []);
+    if (destructive && !["money", "legal"].includes(inference.category)) inference.category = "other";
     const request: ActionRequest<T> = {
       type, accountId, params, reason, actor: this.actor(), ...inference,
+      ...(destructive ? { destructive: true } : {}),
       ...(this.callContext.runId ? { runId: this.callContext.runId } : {}),
       ...(context.matterId ?? trusted.matterId ? { matterId: context.matterId ?? trusted.matterId } : {}),
     };

@@ -27,7 +27,7 @@ describe("categorize", () => {
     expect(categorize({ type: "archive", emails: [email()], people: [person({ verification: "blue" })] }).counterparty?.class).toBe("green_known");
   });
   it.each(["self", "service"] as const)("derives %s counterparties from relationships", relationship => {
-    expect(categorize({ type: "archive", people: [person({ relationship })] }).counterparty?.class).toBe(relationship);
+    expect(categorize({ type: "archive", people: [person({ relationship, verifiedSelf: relationship === "self" })] }).counterparty?.class).toBe(relationship);
   });
   it("resolves own account aliases and normalizes and deduplicates addresses", () => {
     expect(categorize({ type: "send", recipientEmails: [" ME@example.com ", "me@example.com"], selfEmails: ["me@example.com"] })).toEqual({
@@ -58,4 +58,12 @@ describe("categorize", () => {
   it("categorizes a matter-only snooze as an internal matter edit", () => {
     expect(categorize({ type: "snooze", matterId: "matter-1" }).category).toBe("matters");
   });
+});
+
+it("T2 unapproved self contacts cannot grant self or replies_known to a stranger address", () => {
+  const contact = person({ relationship: "self", emails: ["stranger@example.com"], primaryEmail: "stranger@example.com" });
+  const input = { type: "draft_create" as const, recipientEmails: ["stranger@example.com"], people: [contact] };
+  expect(categorize(input)).toMatchObject({ category: "replies_stranger", counterparty: { class: "stranger" } });
+  expect(categorize({ ...input, people: [{ ...contact, verifiedSelf: true }] })).toMatchObject({ category: "replies_known", counterparty: { class: "self" } });
+  expect(categorize({ ...input, selfEmails: ["stranger@example.com"] })).toMatchObject({ counterparty: { class: "self" } });
 });

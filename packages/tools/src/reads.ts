@@ -1,3 +1,4 @@
+import { availability } from "./availability.js";
 import { schema as z } from "./schema.js";
 import type { Context } from "./context.js";
 import { actionView, emailView, eventView, json, required } from "./presentation.js";
@@ -38,22 +39,10 @@ export function registerReads(ctx: Context) {
   register(ctx, "list_events", "List local calendar events overlapping a UTC time range, optionally scoped to an account or matter.", {
     accountId: s.id.optional(), range: s.range, matterId: s.id.optional(), limit: s.limit, full: s.full,
   }, false, async ({ full, ...query }, ctx) => json({ items: (await store.events.query(query)).map(event => eventView(event, full)) }));
-  register(ctx, "free_busy", "Compute merged busy intervals from synced local events in a UTC range. Excludes cancelled/declined events; not a live provider availability check.", {
+  register(ctx, "free_busy", "Compute merged busy intervals, preferring connected provider availability and expanding stored recurring events as fallback.", {
     accountId: s.id.optional(), range: s.range,
   }, false, async ({ accountId, range }, ctx) => {
-    const events = await store.events.query({ accountId, range, limit: 2_147_483_647 });
-    const intervals = events.filter(event => event.status !== "cancelled" && event.myStatus !== "declined"
-      && Date.parse(event.start) < Date.parse(range.end) && Date.parse(event.end) > Date.parse(range.start))
-      .map(event => ({ start: new Date(Math.max(Date.parse(event.start), Date.parse(range.start))).toISOString(),
-        end: new Date(Math.min(Date.parse(event.end), Date.parse(range.end))).toISOString() }))
-      .sort((a, b) => a.start.localeCompare(b.start));
-    const busy: Array<{ start: string; end: string }> = [];
-    for (const interval of intervals) {
-      const last = busy.at(-1);
-      if (last && interval.start <= last.end) { if (interval.end > last.end) last.end = interval.end; }
-      else busy.push({ ...interval });
-    }
-    return json({ range, busy, source: "local_store" });
+    return json({ range, ...await availability(store, range, { accountId, freeBusy: ctx.deps.freeBusy }) });
   });
   register(ctx, "list_pending_decisions", "List actions awaiting human approval (proposed) or outbox release (held); no approval capability is exposed.", {
     limit: s.limit, cursor: z.string().nullable().optional(),

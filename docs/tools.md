@@ -3,7 +3,7 @@
 `@passport/tools` owns the 43 tool definitions, JSON Schemas, validation, inference
 and handlers consumed by both the built-in agent and the MCP server. Clients see
 the same mailbox, calendar, people, matters and tool inputs. Reads use the local
-Store; provider synchronization determines freshness. No tool reads account
+Store; availability can prefer a host-injected connected calendar provider. No tool reads account
 credentials or provider settings.
 
 ## Catalogue
@@ -35,7 +35,7 @@ Read tools do not submit actions and therefore have no write policy category.
 | `archive_emails` | write | Archive a batch from one account | Mail inference / archive |
 | `label_emails` | write | Add label; `remove: true` removes it | Mail inference / label or unlabel |
 | `mark_read` | write | Mark a batch read | Mail inference / mark_read |
-| `move_emails` | write | Move within an account; trash/junk destinations rejected | Mail inference / move |
+| `move_emails` | write | Move within an account; destructive destinations pass through the delete ceiling | Mail inference / move |
 | `create_draft` | write | Create a reviewable draft | Outgoing inference / draft_create |
 | `reply_draft` | write | Threaded reply or reply-all, deduplicating recipients and self aliases | Outgoing inference / draft_create |
 | `send` | write | Submit one existing draft or an inline draft to policy/outbox | Outgoing inference / send |
@@ -47,7 +47,7 @@ Read tools do not submit actions and therefore have no write policy category.
 | `attach_to_matter` | write | Attach existing emails, events or people | matters / matter_attach |
 | `update_person` | write | Patch editable contact fields | matters / person_update |
 | `snooze` | write | Snooze mail and/or a matter until a future UTC time | Mail inference, or matters for matter-only snooze / snooze |
-| `undo_action` | write | Submit a public stored inverse as a new action under current policy | Re-inferred; retains legal/money sensitivity / inverse action type |
+| `undo_action` | write | Undo the trusted stored inverse by ID under current actor policy | Original category / executor.undo lifecycle |
 | `cancel_held_action` | write | Cancel this actor's own held action | Original action category / executor.cancelHold lifecycle |
 | `summarize_thread` | read | LLM-free participants, preview timeline, candidate open questions and last message | — |
 | `find_free_slots` | read | Duration-sized slots within a window, working hours and IANA time zone | — |
@@ -122,12 +122,51 @@ action, with the previous Markdown captured at execution for undo. A pending
 proposal leaves USER.md unchanged. Review pending profile edits against subsequent
 human changes before approving a whole-document replacement.
 
-`undo_action` resubmits a public stored inverse with the caller's current actor;
-the original record remains intact. The executor's private snapshot inverses are
-not public submission inputs and must be undone through the human API/UI. The
-new `profile_update` inverse is public and works through this tool. Cancellation
-uses the existing executor lifecycle after an actor ownership check. No tool
-approves a decision, changes trust, releases the outbox, or purges mail.
+`undo_action` calls `executor.undo(actionId, {actor,reason})`. The executor loads its
+private snapshot by ID, evaluates the caller under the current external ceiling,
+and logs the inverse before execution. Below effective `full_access`, an external
+agent can undo only actions created by the same external `actor.id`. Destructive
+restorations and protected identity changes remain denied. Proposed undos wait for
+human approval; executed undos mark the original `undone`. Snapshots cannot be
+submitted or edited as public action params. Cancellation uses the existing
+executor lifecycle after an actor ownership check. No tool approves decisions,
+changes trust, releases the outbox, or purges mail.
+
+A single `destinationGuard` covers `label`, `unlabel`, `move`, `archive`,
+`unarchive`, and `delete`, including query writes. It resolves label names/local
+IDs/provider IDs to mailbox roles. Adding a `trash` or `junk` mailbox, or removing
+the last safe mailbox so that only trash/junk remains, is destructive. Folder
+membership removals that would discard the last folder are also destructive.
+These actions escalate to `other` (preserving `money`/`legal`), carry trusted
+`destructive` metadata, have at least medium risk, and use the same external deny
+rule as delete. A harmless-looking label sequence cannot bypass the ceiling.
+
+`update_person` asks for human approval when changing a self person's addresses
+or relationship, assigning self status, or adding an address to a known person.
+Self identity changes are denied to external agents at every trust level.
+`verifiedSelf` is derived by the executor after human approval and is absent from
+the tool schema. Classification trusts self addresses only from account/configured
+addresses or human-verified self contacts. `downgradeAcknowledgedAt` clears a
+persistent blue-to-green warning through a human-approved person update; external
+agents cannot acknowledge it. A later blue message resets the warning baseline.
+
+On label-capable accounts, a missing label is created through the provider within
+the same label action, then persisted locally. Its ID is recorded in the inverse;
+undo removes membership from those messages and leaves the created label in place.
+Gmail, JMAP and mock providers implement creation. IMAP and the current Graph
+folder adapter advertise no label support; newsletter/receipt triage attaches a
+matter and archives without requiring a label.
+
+Availability queries include the complete proposal range and older recurring
+masters, with no default 50-event cap. `free_busy`, `find_free_slots`, and agent
+scheduling share recurrence expansion: DAILY/WEEKLY/MONTHLY, INTERVAL, BYDAY
+(including monthly ordinal weekdays), COUNT, UNTIL, and WKST. Expansion preserves
+the event's wall time across DST changes. Unsupported rules fail explicitly.
+Cancelled/declined occurrences are excluded; overrides with `recurringEventId`
+and `originalStart` replace or cancel their master occurrence. Current Google and
+CalDAV adapters do not retain exception identities, so local fallback cannot
+honour their unexposed cancellations; prefer provider availability in that case.
+Working-hours slot calculation still uses the requested IANA time zone.
 
 ## External and built-in agents
 
@@ -284,8 +323,13 @@ Configuration references: [Claude Code](https://code.claude.com/docs/en/mcp),
 
 ## Host integration
 
-`createMailboxMcpServer({store,executor,policy,bus,clientName?})` and
-`createAgentRuntime(...)` retain their constructor inputs. The libraries now
+`createMailboxMcpServer({store,executor,policy,bus,clientName?,freeBusy?})`,
+`createAgentRuntime(...)`, and `createToolRegistry(...)` accept an optional
+`freeBusy(accountId,range)` resolver. Return provider intervals for a connected
+calendar account, or `null` when none is connected; an empty array means confirmed
+free time. Resolver failures propagate rather than silently declaring time free.
+Without a resolver, availability uses the local store. Results identify
+`source: "provider" | "local_store" | "mixed"`. The libraries now
 import `@passport/tools` from the workspace. Host-created HTTP listeners must
 supply `serveHttp(server,{port,token,host?})`: every request, including session
 GET/DELETE, requires the bearer. The default bind remains `127.0.0.1`; only an

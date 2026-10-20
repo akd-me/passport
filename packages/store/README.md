@@ -96,3 +96,9 @@ Run `pnpm --filter @passport/types build`, then
 `pnpm --filter @passport/store typecheck && pnpm --filter @passport/store test`.
 Tests primarily use isolated in-memory databases; a temporary file tests restart,
 key configuration, on-disk encryption, and wrong-key behavior.
+
+Availability callers use `events.query({range,includeRecurring:true,limit:2147483647})`
+to include older series masters and provider-exposed override/cancellation records
+without the default 50-event cap. Ordinary range queries retain overlap semantics;
+expansion belongs to the shared tools availability layer. Person records persist
+optional `verifiedSelf` and `downgradeAcknowledgedAt` fields without a migration.

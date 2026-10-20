@@ -10,6 +10,7 @@ export interface MailboxMcpDependencies {
   bus: EventBus;
   /** Trusted host override; otherwise the MCP initialization client's name is used as an audit label. */
   clientName?: string;
+  freeBusy?: import("@passport/tools").FreeBusyResolver;
 }
 
 export class Context {

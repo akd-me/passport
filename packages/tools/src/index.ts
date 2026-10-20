@@ -23,3 +23,5 @@ export type { JsonSchema } from "./schema.js";
 export { categorize } from "./categorize.js";
 export type { CategorizeInput } from "./categorize.js";
 export { ToolError } from "./presentation.js";
+export { availability, availabilityEvents, expandRecurringEvents } from "./availability.js";
+export type { FreeBusyResolver } from "./availability.js";

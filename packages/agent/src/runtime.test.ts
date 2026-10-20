@@ -313,3 +313,39 @@ describe("registry integration and tool budgets", () => {
     expect(env.executor.requests.some(request => request.type === "calendar_propose")).toBe(false);
   });
 });
+
+it.each(["Your receipt", "Newsletter"])("T7 folder-provider playbooks archive and attach matters without labelling: %s", async subject => {
+  const env = await setup([newMatterOutput], emailFixture({ subject, ...(subject === "Newsletter" ? { headers: { messageId: null, inReplyTo: null, references: [], listUnsubscribe: "<mailto:leave@example.com>" } } : {}) }));
+  await env.store.accounts.upsert(accountFixture({ capabilities: { ...accountFixture().capabilities, labels: false } }));
+  await env.runtime.run({ kind: "email.received", emailId: "email-1" });
+  expect(env.executor.requests.some(request => request.type === "label")).toBe(false);
+  expect(env.executor.requests.some(request => request.type === "archive")).toBe(true);
+  expect((await env.store.matters.list())[0]?.emailIds).toContain("email-1");
+});
+
+it("T8 scheduling finds conflicts beyond 50 historical events and queries its proposal range", async () => {
+  const slot = { start: "2026-10-22T14:00:00.000Z", end: "2026-10-22T14:30:00.000Z" };
+  const env = await setup([newMatterOutput, { status: "tentative", textBody: "Can we meet?", slots: [slot] }], emailFixture({ subject: "Meeting invite" }));
+  await env.store.events.upsertMany([...Array.from({ length: 60 }, (_, i) => eventFixture({ id: `old-${i}`, start: "2025-10-01T14:00:00Z", end: "2025-10-01T15:00:00Z", sourceEmailId: null })), eventFixture({ id: "busy", ...slot, sourceEmailId: null })]);
+  const query = vi.spyOn(env.store.events, "query");
+  await expect(env.runtime.run({ kind: "email.received", emailId: "email-1" })).rejects.toMatchObject({ code: "LLM_SCHEDULE" });
+  expect(query).toHaveBeenCalledWith(expect.objectContaining({ range: { start: TEST_NOW, end: "2026-11-03T14:00:00.000Z" }, limit: 2_147_483_647 }));
+});
+
+it("T8 scheduling prefers injected connected-provider free/busy over stale local events", async () => {
+  const slot = { start: "2026-10-22T14:00:00.000Z", end: "2026-10-22T14:30:00.000Z" };
+  const env = await setup([newMatterOutput, { status: "tentative", textBody: "Can we meet?", slots: [slot] }], emailFixture({ subject: "Meeting invite" }));
+  await env.store.accounts.upsert(accountFixture({ capabilities: { ...accountFixture().capabilities, calendar: true } }));
+  const freeBusy = vi.fn(async () => [slot]);
+  const runtime = createAgentRuntime({ ...env, freeBusy });
+  await expect(runtime.run({ kind: "email.received", emailId: "email-1" })).rejects.toMatchObject({ code: "LLM_SCHEDULE" });
+  expect(freeBusy).toHaveBeenCalledWith("account-1", expect.objectContaining({ start: TEST_NOW }));
+});
+
+it("T9 scheduling rejects conflicts with weekly BYDAY/UNTIL occurrences from a stored master", async () => {
+  const slot = { start: "2026-10-22T14:00:00.000Z", end: "2026-10-22T14:30:00.000Z" };
+  const env = await setup([newMatterOutput, { status: "tentative", textBody: "Can we meet?", slots: [slot] }], emailFixture({ subject: "Meeting invite" }));
+  await env.store.events.upsertMany([eventFixture({ id: "series", start: "2026-10-01T14:00:00.000Z", end: "2026-10-01T15:00:00.000Z", recurrenceRule: "FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261029T140000Z", sourceEmailId: null })]);
+  await expect(env.runtime.run({ kind: "email.received", emailId: "email-1" })).rejects.toMatchObject({ code: "LLM_SCHEDULE" });
+  expect(env.executor.requests.some(request => request.type === "calendar_propose")).toBe(false);
+});

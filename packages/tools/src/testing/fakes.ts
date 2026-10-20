@@ -74,7 +74,7 @@ export class MemoryStore implements Store {
     get: async id => clone(this.data.events.get(id) ?? null),
     query: async query => clone([...this.data.events.values()].filter(value => (!query.accountId || value.accountId === query.accountId)
       && (!query.matterId || value.matterId === query.matterId)
-      && (!query.range || (value.start < query.range.end && value.end > query.range.start))).slice(0, query.limit)),
+      && (!query.range || (value.start < query.range.end && value.end > query.range.start) || query.includeRecurring && (Boolean(value.recurringEventId) || Boolean(value.recurrenceRule) && value.start < query.range.end))).slice(0, query.limit)),
     upsertMany: async items => upsert(this.data.events, items), deleteMany: async ids => { for (const id of ids) this.data.events.delete(id); },
   };
   people: Store["people"] = {
@@ -148,7 +148,11 @@ export class MemoryExecutor implements ActionExecutor {
   async cancelHold(actionId: string) { this.cancelled.push(actionId); return this.store.actions.update(actionId, { status: "rejected", holdUntil: null }); }
   async approve(): Promise<ActionRecord> { throw error("MCP cannot approve"); }
   async reject(): Promise<ActionRecord> { throw error("MCP cannot reject human decisions"); }
-  async undo(): Promise<ActionRecord> { throw error("MCP must resubmit inverses as external-agent actions"); }
+  async undo(actionId: string, context?: Parameters<ActionExecutor["undo"]>[1]): Promise<ActionRecord> {
+    const original = await this.store.actions.get(actionId);
+    if (!original?.inverse) throw error("Missing inverse");
+    return this.submit({ ...original.inverse, category: original.request.category, actor: context?.actor ?? { kind: "human", id: "undo" }, reason: `Undo ${actionId}: ${context?.reason}`, runId: "run-1" });
+  }
   async releaseDue(): Promise<ActionRecord[]> { throw error("The host scheduler owns outbox release"); }
 }
 

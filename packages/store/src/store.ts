@@ -328,7 +328,13 @@ class SQLiteStore implements Store {
       const params: SQLInputValue[] = [];
       if (q.accountId !== undefined) { where.push("account_id = ?"); params.push(q.accountId); }
       if (q.matterId !== undefined) { where.push("matter_id = ?"); params.push(q.matterId); }
-      if (q.range) { where.push("start < ? AND end > ?"); params.push(q.range.end, q.range.start); }
+      if (q.range) {
+        where.push(q.includeRecurring
+          ? "((start < ? AND end > ?) OR (start < ? AND json_extract(data, '$.recurrenceRule') IS NOT NULL) OR json_extract(data, '$.recurringEventId') IS NOT NULL)"
+          : "start < ? AND end > ?");
+        params.push(q.range.end, q.range.start);
+        if (q.includeRecurring) params.push(q.range.end);
+      }
       return this.all(`SELECT data, matter_id FROM events ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY start, id LIMIT ?`,
         [...params, limitOf(q.limit)]).map(row => this.readEvent(row));
     },
