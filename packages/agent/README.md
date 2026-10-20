@@ -52,21 +52,26 @@ and [Anthropic tool calls](https://platform.claude.com/docs/en/agents-and-tools/
    `known` from any prior sent mail or at least two **prior** received emails; otherwise `stranger`.
    Sent evidence requires a sent-role mailbox, explicit provider sent provenance, or an
    executed send action; From headers alone never prove outbound contact. Drafts and
-   later messages are excluded from history. Per-person contribution IDs in
+   later messages are excluded from history. Provider tombstones remain available as prior-contact
+   and thread evidence through explicit `includeDeleted: true` queries. Per-person contribution IDs in
    `person-stats:<personId>` make reprocessing idempotent. Existing known/service relationships
    are retained. Verification is taken only from the normalized email's verification fields;
    recipients never inherit the sender's verification. Blue-to-green senders emit
    `person.downgraded` and remain stranger risk until blue returns or a human approves
    `downgradeAcknowledgedAt`. Inbound self From with failed DMARC/DKIM also warns
    and has stranger counterparty risk; its recipients gain no sent-history trust.
-2. Classify List-Unsubscribe as newsletters, receipt/order/invoice patterns as receipts,
+2. Preserve stored money/legal categories on reprocessing. Screen sensitive requests first:
+   legal/payment/stranger-request heuristics, then `fastModel` for every remaining message,
+   including bulk mail. Money, legal, and stranger requests take priority over routine signals.
+   Only then classify List-Unsubscribe as newsletters, receipt/order/invoice patterns as receipts,
    calendar parts/ICS/invite subjects as scheduling, and service senders as notifications.
-   The remaining mail uses `fastModel`. A model cannot turn an unestablished contact into
+   A model cannot turn an unestablished contact into
    `replies_known`, even if their identity is blue.
 3. Collect matter candidates from the current/thread mail, persisted people, and quoted FTS
    subject tokens. The main model picks a supplied ID or proposes a new matter. Receipts
    use `Purchases/<sender name or domain>`. Unknown model-supplied matter IDs are rejected.
-4. Submit the playbook: newsletters → label `Newsletters`, archive; receipts → label `Receipts`,
+4. For any category in `alwaysAsk`, record only a proposal/attention item explaining the
+   approval requirement; never label, archive, or mark read automatically. Otherwise submit the playbook: newsletters → label `Newsletters`, archive; receipts → label `Receipts`,
    archive; folder providers without label support attach the matter and archive
    without a label. The executor creates missing labels on label-capable accounts;
    undo removes membership while retaining the label. Notifications → mark read, archive; known replies → `draft_create` with the source
@@ -93,7 +98,9 @@ for reasoning can be unpersisted; only existing persisted person IDs are attache
 ## USER.md and prompts
 
 `getUserProfile`/`setUserProfile` use `store.kv["user_profile"]`; the initial template is
-[USER.md](./USER.md), also exported as `DEFAULT_USER_PROFILE`. Editing this checked-in template
+[USER.md](./USER.md), also exported as `DEFAULT_USER_PROFILE`. Agent reads, tools, MCP resources and policy inverse
+capture share `getEffectiveProfile(store)` from `@passport/types`; the first rule edit retains
+the entire default document. Editing this checked-in template
 does not update a running user's profile: save it through the setter. All LLM prompts include
 the profile and distinguish trusted instructions from untrusted email/tool/matter content.
 Templates are short pure functions in `src/prompts/`.
@@ -107,7 +114,7 @@ when enabled. This switch applies to triage, calendar response drafts, and manua
 
 ## Manual tools and schedules
 
-The manual loop offers all 43 tools from `@passport/tools`, using the same names,
+The manual loop offers all 44 tools from `@passport/tools`, using the same names,
 JSON Schemas, account checks and handlers as MCP. Triage playbook writes and matter
 reviews invoke those handlers too. The system prompt lists registry tool names, so
 new tools become available automatically. The full [catalogue](../../docs/tools.md)

@@ -44,7 +44,7 @@ export class MemoryStore implements Store {
     getByProviderId: async (accountId, providerId) => clone([...this.data.emails.values()].find(value => value.accountId === accountId && value.providerId === providerId) ?? null),
     query: async query => {
       this.emailQueries.push(clone(query));
-      let items = [...this.data.emails.values()].filter(value => (!query.accountId || value.accountId === query.accountId)
+      let items = [...this.data.emails.values()].filter(value => (query.includeDeleted || value.keywords.$deleted !== true) && (!query.accountId || value.accountId === query.accountId)
         && (!query.mailboxId || value.mailboxIds.includes(query.mailboxId)) && (!query.threadId || value.threadId === query.threadId)
         && (query.matterId === undefined || (value.matterId ?? null) === query.matterId)
         && (!query.personId || value.personIds.includes(query.personId)) && (!query.category || value.category === query.category)

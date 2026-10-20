@@ -10,6 +10,8 @@ export interface MailboxMcpDependencies {
   bus: EventBus;
   /** Trusted host override; otherwise the MCP initialization client's name is used as an audit label. */
   clientName?: string;
+  /** Maximum serialized response size in bytes, including resource content. Default 512 KiB. */
+  responseByteBudget?: number;
   freeBusy?: import("@passport/tools").FreeBusyResolver;
 }
 
@@ -22,7 +24,7 @@ export class Context {
     // The contract tracks explicit attachments in matter.*Ids and also permits back-links.
     const [attachedEmails, linkedEmails, attachedEvents, linkedEvents, people] = await Promise.all([
       Promise.all(matter.emailIds.map(id => this.store.emails.get(id))),
-      this.store.emails.query({ matterId: id, limit: 100, includeBodies: false }),
+      this.store.emails.query({ matterId: id, limit: 100, includeBodies: false, includeDeleted: true }),
       Promise.all(matter.eventIds.map(id => this.store.events.get(id))),
       this.store.events.query({ matterId: id, limit: 100 }),
       Promise.all(matter.personIds.map(id => this.store.people.get(id))),

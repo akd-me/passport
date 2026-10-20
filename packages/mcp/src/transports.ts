@@ -3,7 +3,7 @@ import { createServer, type Server as HttpServer, type ServerResponse } from "no
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { cloneMailboxServer } from "./server.js";
+import { bindTransportActor, cloneMailboxServer } from "./server.js";
 import { MailboxMcpError } from "./presentation.js";
 
 /** Attach stdio. The host must keep stdout exclusive to MCP, and call server.close() at shutdown. */
@@ -70,7 +70,7 @@ export async function serveHttp(server: McpServer, options: { port: number; path
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: randomUUID,
         enableJsonResponse: true,
-        onsessioninitialized: id => { sessions.set(id, { server: sessionServer, transport }); },
+        onsessioninitialized: id => { bindTransportActor(sessionServer, id); sessions.set(id, { server: sessionServer, transport }); },
       });
       await sessionServer.connect(transport);
       const previousClose = sessionServer.server.onclose;

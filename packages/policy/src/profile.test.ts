@@ -24,3 +24,13 @@ it('leaves USER.md unchanged until a proposed update is approved', async () => {
   await executor.undo(action.id);
   expect(await store.kv.get('user_profile')).toBe('Edited while pending');
 });
+
+it('R12 captures and restores the complete default profile on the first edit', async () => {
+  const { DEFAULT_USER_PROFILE } = await import('@passport/types');
+  const { executor, store, policy } = await setup();
+  await policy.pinLevel('matters', 'full_access');
+  const action = await executor.submit(request('profile_update', { markdown: 'New profile' }, { category: 'matters' }));
+  expect(action.inverse?.params).toEqual({ markdown: DEFAULT_USER_PROFILE });
+  await executor.undo(action.id);
+  expect(await store.kv.get('user_profile')).toBe(DEFAULT_USER_PROFILE);
+});

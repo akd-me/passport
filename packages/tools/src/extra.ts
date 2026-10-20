@@ -1,3 +1,4 @@
+import { getEffectiveProfile } from "@passport/types";
 import { availability } from "./availability.js";
 import type { ActionRecord, EmailQuery, TimeRange } from "@passport/types";
 import type { Context } from "./context.js";
@@ -17,8 +18,8 @@ export function registerExtra(ctx: Context) {
     threadId: s.id, full: s.full, limit: s.limit, cursor: z.string().nullable().optional(),
   }, false, async ({ threadId, full, limit, cursor }) => {
     const thread = required(await store.threads.get(threadId), "Thread");
-    const page = await store.emails.query({ threadId, accountId: thread.accountId, includeBodies: true, sort: "receivedAt_asc", limit, cursor });
-    const last = await store.emails.query({ threadId, accountId: thread.accountId, includeBodies: true, sort: "receivedAt_desc", limit: 1 });
+    const page = await store.emails.query({ threadId, accountId: thread.accountId, includeDeleted: true, includeBodies: true, sort: "receivedAt_asc", limit, cursor });
+    const last = await store.emails.query({ threadId, accountId: thread.accountId, includeDeleted: true, includeBodies: true, sort: "receivedAt_desc", limit: 1 });
     const participants = [...new Map(page.items.flatMap(email => [...email.from, ...email.to, ...email.cc]).map(address => [address.email.toLowerCase(), address])).values()];
     const questions = page.items.slice(-10).flatMap(email => (email.textBody ?? email.preview).split(/\r?\n/)
       .filter(line => !/^\s*>/.test(line)).flatMap(line => line.match(/[^.!?]*\?/g) ?? [])
@@ -94,12 +95,12 @@ export function registerExtra(ctx: Context) {
       });
   }
   register(ctx, "get_standing_rules", "Read bullet rules from the Standing rules section of USER.md.", {}, false,
-    async () => json({ rules: standingRules(await store.kv.get("user_profile") ?? "").rules }));
+    async () => json({ rules: standingRules(await getEffectiveProfile(store)).rules }));
   for (const [name, remove] of [["add_standing_rule", false], ["remove_standing_rule", true]] as const) {
     register(ctx, name, `${remove ? "Remove" : "Add"} one exact bullet rule in USER.md; submits a reversible matters/profile_update action. Other sections are preserved.`, {
       rule: z.string().trim().min(1).max(2000).regex(/^[^\r\n]+$/, "Rule must be one line."), accountId: s.id.optional(), reason: s.reason,
     }, true, async ({ rule, accountId, reason }, call) => {
-      const markdown = editStandingRule(await store.kv.get("user_profile") ?? "", rule, remove);
+      const markdown = editStandingRule(await getEffectiveProfile(store), rule, remove);
       return writeResult(await call.submit("profile_update", (await call.account(accountId)).id, { markdown }, reason));
     });
   }

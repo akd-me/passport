@@ -386,3 +386,55 @@ describe("persistent scheduler", () => {
     await scheduler.stop();
   });
 });
+
+describe("R10 interrupted occurrence recovery", () => {
+  it.each([undefined, 2000])("R10 recovers an unfinished occurrence exactly once on restart (timeout %s)", async timeoutMs => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T12:00:00Z"));
+    const data = new Map<string, string>();
+    const options = { store: { kv: {
+      get: async (key: string) => data.get(key) ?? null,
+      set: async (key: string, value: string) => { data.set(key, value); },
+      delete: async (key: string) => { data.delete(key); },
+    } }, bus: { emit: () => {}, on: () => () => {}, onAny: () => () => {} } as EventBus, stopTimeoutMs: 1 };
+    const original = createScheduler(options);
+    let restarted: Scheduler | undefined;
+    const def = { id: "interrupted", name: "Interrupted", kind: "user" as const, schedule: { type: "interval" as const, everyMs: 60_000 }, timeoutMs };
+    try {
+      await original.register({ ...def, run: () => new Promise(() => {}) });
+      await original.start();
+      await vi.advanceTimersByTimeAsync(60_000);
+      const saved = JSON.parse(data.get("job:interrupted")!);
+      expect(saved.activeRun).toMatchObject({ occurrenceAt: "2026-10-20T12:01:00.000Z", startedAt: "2026-10-20T12:01:00.000Z", runId: expect.any(String) });
+      const stop = original.stop();
+      await vi.advanceTimersByTimeAsync(1);
+      await stop;
+      const occurrences: string[] = [];
+      restarted = createScheduler(options);
+      const run = vi.fn(async () => {
+        occurrences.push(restarted!.get("interrupted")!.activeRun!.occurrenceAt);
+        return {};
+      });
+      await restarted.register({ ...def, run });
+      await restarted.start();
+      await vi.advanceTimersByTimeAsync(0);
+      if (timeoutMs) {
+        expect(run).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(timeoutMs);
+      }
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(occurrences).toEqual([saved.activeRun.occurrenceAt]);
+      expect(JSON.parse(data.get("job:interrupted")!).activeRun).toBeNull();
+      await restarted.stop();
+      const again = createScheduler(options);
+      await again.register({ ...def, run });
+      await again.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(run).toHaveBeenCalledTimes(1);
+      await again.stop();
+    } finally {
+      if (restarted) await restarted.stop();
+      vi.useRealTimers();
+    }
+  });
+});

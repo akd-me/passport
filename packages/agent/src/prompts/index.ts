@@ -17,7 +17,7 @@ export function emailContext(email: Email): string {
 }
 
 export function classificationPrompt(email: Email, people: Person[]): string {
-  return `Classify this email into one action category. Money/legal requests take priority over routine replies. A stranger cannot be replies_known.\nPeople: ${JSON.stringify(people.map(p => ({ email: p.primaryEmail, relationship: p.relationship })))}\nEmail: ${emailContext(email)}`;
+  return `Classify this email into one action category. Detect money, legal, and requests from strangers before routine categories, even when bulk/list-unsubscribe headers are present. Use replies_stranger for a stranger asking for action, not for an ordinary newsletter or receipt. A stranger cannot be replies_known.\nPeople: ${JSON.stringify(people.map(p => ({ email: p.primaryEmail, relationship: p.relationship })))}\nEmail: ${emailContext(email)}`;
 }
 
 export function matterPrompt(email: Email, candidates: Matter[]): string {

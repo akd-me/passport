@@ -1,10 +1,20 @@
+import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Context, type MailboxMcpDependencies } from "./context.js";
-import { createToolRegistry, toMcpTools } from "@passport/tools";
+import { createToolRegistry, toMcpTools, limitResponse, responseByteBudget } from "@passport/tools";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { registerPrompts, registerResources } from "./resources.js";
 
 import { MailboxMcpError } from "./presentation.js";
+
+const transportActors = new WeakMap<McpServer, { id: string }>();
+
+/** Bind only a host-issued, authenticated transport/session identity. */
+export function bindTransportActor(server: McpServer, id: string): void {
+  const actor = transportActors.get(server);
+  if (!actor) throw new MailboxMcpError("INVALID_SERVER", "Unknown MCP server");
+  actor.id = id;
+}
 
 const dependencies = new WeakMap<McpServer, MailboxMcpDependencies>();
 
@@ -16,16 +26,25 @@ export function createMailboxMcpServer(deps: MailboxMcpDependencies): McpServer 
     maxToolInputElements: 10_000,
   });
   const context = new Context(deps, server);
-  const tools = createToolRegistry({ ...deps, selfAddresses: [], actor: {
-    kind: "external-agent", get id() { return deps.clientName ?? server.server.getClientVersion()?.name ?? "mcp-client"; },
-  } });
+  const actor = { kind: "external-agent" as const, id: randomUUID() };
+  transportActors.set(server, actor);
+  const tools = createToolRegistry({ ...deps, selfAddresses: [], actor,
+    actorAuditLabel: () => deps.clientName ?? server.server.getClientVersion()?.name,
+  });
   server.server.registerCapabilities({ tools: {} });
   server.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toMcpTools(tools) }));
   server.server.setRequestHandler(CallToolRequestSchema, async request => {
     const tool = tools.find(tool => tool.name === request.params.name);
     if (!tool) return { content: [{ type: "text", text: JSON.stringify({ error: "UNKNOWN_TOOL", reason: "Unknown Passport tool." }) }], isError: true };
-    const result = await tool.handler(request.params.arguments ?? {});
-    return { content: [{ type: "text", text: JSON.stringify(result) }], ...(result.isError ? { isError: true } : {}) };
+    let result = await tool.handler(request.params.arguments ?? {});
+    const budget = responseByteBudget(deps.responseByteBudget);
+    const envelope = () => ({ content: [{ type: "text" as const, text: JSON.stringify(result) }], ...(result.isError ? { isError: true } : {}) });
+    // The protocol serializes tool JSON inside a string; account for that second escaping pass.
+    for (let available = budget - 128; Buffer.byteLength(JSON.stringify(envelope())) > budget; available = Math.floor(available / 2)) {
+      try { result = limitResponse(result, available); }
+      catch { result = { isError: true, error: "RESPONSE_TOO_LARGE", reason: "Request fewer results." }; break; }
+    }
+    return envelope();
   });
   registerResources(context);
   registerPrompts(context);

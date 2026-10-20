@@ -1,3 +1,4 @@
+import { heuristicCategory } from "./triage.js";
 import { createToolRegistry } from "@passport/tools";
 import { describe, expect, it, vi } from "vitest";
 import type { ActionParams, Email } from "@passport/types";
@@ -9,7 +10,9 @@ import { accountFixture, emailFixture, eventFixture, matterFixture, newMatterOut
 import { MemoryStore } from "./testing/memory-store.js";
 
 async function setup(script: unknown[], email: Email = emailFixture()) {
-  const store = new MemoryStore(), policy = new FakePolicy(), bus = new MemoryBus(), llm = new FakeLlm(script);
+  const routine = heuristicCategory(email);
+  const screened = routine && !(script[0] && typeof script[0] === "object" && "category" in script[0]) ? [{ category: routine }, ...script] : script;
+  const store = new MemoryStore(), policy = new FakePolicy(), bus = new MemoryBus(), llm = new FakeLlm(screened);
   await store.accounts.upsert(accountFixture());
   await store.emails.upsertMany([email]);
   const executor = new FakeExecutor(store, policy);
@@ -27,7 +30,7 @@ describe("email triage", () => {
     expect(actions.every(action => action.category === "newsletters")).toBe(true);
     expect(env.executor.requests.every(action => action.actor.kind === "agent" && action.actor.id === run.id && action.runId === run.id)).toBe(true);
     expect((await env.store.emails.get(email.id))).toMatchObject({ category: "newsletters", mailboxIds: [], keywords: { "label:Newsletters": true } });
-    expect(env.llm.calls).toHaveLength(1);
+    expect(env.llm.calls).toHaveLength(2);
     expect(JSON.parse((await env.store.kv.get(`run:${run.id}`))!)).toMatchObject({ id: run.id, finishedAt: TEST_NOW, actionIds: run.actionIds });
     expect(env.bus.events.map(event => event.type)).toEqual(["agent.run.started", "agent.run.finished"]);
   });
@@ -348,4 +351,46 @@ it("T9 scheduling rejects conflicts with weekly BYDAY/UNTIL occurrences from a s
   await env.store.events.upsertMany([eventFixture({ id: "series", start: "2026-10-01T14:00:00.000Z", end: "2026-10-01T15:00:00.000Z", recurrenceRule: "FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261029T140000Z", sourceEmailId: null })]);
   await expect(env.runtime.run({ kind: "email.received", emailId: "email-1" })).rejects.toMatchObject({ code: "LLM_SCHEDULE" });
   expect(env.executor.requests.some(request => request.type === "calendar_propose")).toBe(false);
+});
+
+describe("R1 sensitive classification and always-ask triage", () => {
+  it.each(["legal", "money"] as const)("R1 retains stored %s despite List-Unsubscribe on reprocessing", async category => {
+    const message = emailFixture({ category, headers: { messageId: null, inReplyTo: null, references: [], listUnsubscribe: "<https://list.test/u>" } });
+    const env = await setup([newMatterOutput], message);
+    // Stored sensitive categories do not need a model screen.
+    env.llm.script.shift();
+    await env.policy.setConfig({ alwaysAsk: [category] });
+    const run = await env.runtime.run({ kind: "email.received", emailId: message.id });
+    expect((await env.store.emails.get(message.id))?.category).toBe(category);
+    expect(env.executor.requests.some(request => ["archive", "label", "mark_read"].includes(request.type))).toBe(false);
+    expect(await env.store.kv.get(`decision:${run.id}:${message.id}`)).toContain("alwaysAsk");
+  });
+  it.each(["money", "legal", "replies_stranger"])("R1 fast screen finds %s before routine newsletter heuristics", async category => {
+    const env = await setup([{ category }, newMatterOutput], emailFixture({ headers: { messageId: null, inReplyTo: null, references: [], listUnsubscribe: "<https://list.test/u>" } }));
+    await env.runtime.run({ kind: "email.received", emailId: "email-1" });
+    expect((await env.store.emails.get("email-1"))?.category).toBe(category);
+    expect(env.llm.calls[0]?.model).toBe("fast");
+    expect(env.executor.requests.some(request => ["archive", "label"].includes(request.type))).toBe(false);
+  });
+  it("R1 heuristics detect legal requests hidden behind routine headers", async () => {
+    const env = await setup([newMatterOutput], emailFixture({ subject: "Contract for signature", headers: { messageId: null, inReplyTo: null, references: [], listUnsubscribe: "<https://list.test/u>" } }));
+    env.llm.script.shift();
+    await env.runtime.run({ kind: "email.received", emailId: "email-1" });
+    expect((await env.store.emails.get("email-1"))?.category).toBe("legal");
+  });
+  it("R1 only proposes a routine playbook when its category is alwaysAsk", async () => {
+    const env = await setup([newMatterOutput], emailFixture({ headers: { messageId: null, inReplyTo: null, references: [], listUnsubscribe: "<https://list.test/u>" } }));
+    await env.policy.setConfig({ alwaysAsk: ["newsletters"] });
+    const run = await env.runtime.run({ kind: "email.received", emailId: "email-1" });
+    expect(env.executor.requests.some(request => ["archive", "label"].includes(request.type))).toBe(false);
+    expect(await env.store.kv.get(`decision:${run.id}:email-1`)).toContain("Propose labeling and archiving newsletters");
+  });
+});
+
+it("R1 detects an explicit request from a stranger before routine classification", async () => {
+  const env = await setup([newMatterOutput], emailFixture({ textBody: "Please provide your availability." }));
+  await env.runtime.run({ kind: "email.received", emailId: "email-1" });
+  expect((await env.store.emails.get("email-1"))?.category).toBe("replies_stranger");
+  expect(env.llm.calls).toHaveLength(1);
+  expect(env.executor.requests.some(request => ["archive", "label", "draft_create"].includes(request.type))).toBe(false);
 });

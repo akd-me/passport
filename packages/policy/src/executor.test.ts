@@ -551,11 +551,11 @@ describe('unsubscribe execution', () => {
     } finally { timeout.mockRestore(); }
   });
 
-  it('uses global fetch by default', async () => {
+  it('R6 retains an explicit injectable fetch for tests', async () => {
     const fetcher = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetcher);
     try {
-      const { executor, store } = await setup();
+      const { executor, store } = await setup({ fetch: fetcher });
       await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: '<https://lists.example/u>' } })]);
       expect((await executor.submit(request('unsubscribe', { emailId: 'email', method: 'link' }))).status).toBe('executed');
       expect(fetcher).toHaveBeenCalledOnce();

@@ -35,3 +35,10 @@ This is a single-process scheduler, not a distributed lock or exactly-once actio
 
 See [scheduler guide](../../docs/scheduler.md) for retries, DST, persistence, routines and APIs.
 Nothing is stubbed. Run `pnpm --filter @passport/scheduler build`, `typecheck`, and `test`.
+
+Each started occurrence persists `activeRun: {runId,occurrenceAt,startedAt}` before invoking
+the handler. It clears only when the handler settles, including after a timeout. On restart,
+an interrupted occurrence runs once immediately after its timeout expires (immediately for
+jobs without a timeout), before the next occurrence is calculated. Paused jobs remain paused.
+Completed runs do not replay. Recovery is at least once; handlers must tolerate repeats if
+an external effect succeeded before the process stopped.

@@ -1,3 +1,4 @@
+import { responseByteBudget } from "./response-budget.js";
 import { registerExtra } from "./extra.js";
 import { Context } from "./context.js";
 import { registerReads } from "./reads.js";
@@ -6,6 +7,7 @@ import type { Tool, ToolRegistryOptions } from "./types.js";
 
 /** One tool surface for built-in agents, MCP and provider function calling. */
 export function createToolRegistry(options: ToolRegistryOptions): Tool[] {
+  responseByteBudget(options.responseByteBudget);
   const ctx = new Context(options);
   registerReads(ctx);
   registerWrites(ctx);
@@ -25,3 +27,5 @@ export type { CategorizeInput } from "./categorize.js";
 export { ToolError } from "./presentation.js";
 export { availability, availabilityEvents, expandRecurringEvents } from "./availability.js";
 export type { FreeBusyResolver } from "./availability.js";
+
+export { limitResponse, responseByteBudget, DEFAULT_RESPONSE_BYTE_BUDGET } from "./response-budget.js";

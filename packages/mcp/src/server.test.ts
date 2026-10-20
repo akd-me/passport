@@ -8,7 +8,7 @@ import { MemoryBus, MemoryExecutor, MemoryPolicy, MemoryStore } from "./testing/
 import * as f from "./testing/fixtures.js";
 
 const toolNames = [
-  "search_emails", "get_email", "get_thread", "list_mailboxes", "list_matters", "get_matter", "list_people", "get_person",
+  "search_emails", "get_email", "get_email_body", "get_thread", "list_mailboxes", "list_matters", "get_matter", "list_people", "get_person",
   "list_events", "free_busy", "list_pending_decisions", "list_actions", "get_trust", "get_user_profile",
   "archive_emails", "label_emails", "mark_read", "move_emails", "create_draft", "reply_draft", "send", "unsubscribe",
   "respond_to_event", "propose_meeting", "create_matter", "update_matter", "attach_to_matter", "update_person", "snooze", "undo_action", "cancel_held_action",
@@ -90,7 +90,7 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
     expect(value.status).toBe(({ ask: "proposed", allow: "executed", hold: "held", deny: "rejected" })[outcome]);
     expect(value.policy_note).toContain(value.decision.trustLevel);
     expect(Boolean(response.isError)).toBe(outcome === "deny");
-    expect(executor.submitted[0]?.actor).toEqual({ kind: "external-agent", id: "test-client" });
+    expect(executor.submitted[0]?.actor).toEqual({ kind: "external-agent", id: expect.any(String) });
     expect(store.data.emails.get("email-1")?.mailboxIds).toEqual(["inbox-1"]); // Only executor may mutate.
     expect(value).not.toHaveProperty("params");
   });
@@ -99,7 +99,43 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
     server = createMailboxMcpServer({ store, executor, policy, bus, clientName: "codex-workspace" });
     const [ct, st] = InMemoryTransport.createLinkedPair(); await server.connect(st); await client.connect(ct);
     await call("mark_read", { emailIds: ["email-1"], reason: "Read" });
-    expect(executor.submitted[0]?.actor).toEqual({ kind: "external-agent", id: "codex-workspace" });
+    expect(executor.submitted[0]?.actor.id).not.toBe("codex-workspace");
+    expect(executor.submitted[0]?.reason).toContain("codex-workspace");
+  });
+  it("R8 binds a fresh server identity even when the client reuses an initialization name", async () => {
+    await call("mark_read", { emailIds: ["email-1"], reason: "Read" });
+    const originalActor = executor.submitted.at(-1)!.actor.id;
+    expect(originalActor).not.toBe("test-client");
+    expect(executor.submitted.at(-1)!.reason).toContain('MCP client: "test-client"');
+    await client.close(); await server.close();
+    server = createMailboxMcpServer({ store, executor, policy, bus });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.connect(st); await client.connect(ct);
+    await call("mark_read", { emailIds: ["email-1"], reason: "Read again" });
+    expect(executor.submitted.at(-1)!.actor.id).not.toBe(originalActor);
+    const boundActor = executor.submitted.at(-1)!.actor.id;
+    await call("archive_emails", { emailIds: ["email-1"], reason: "Archive" });
+    expect(executor.submitted.at(-1)!.actor.id).toBe(boundActor);
+  });
+  it("R12 exposes the same default profile in the tool and MCP resource", async () => {
+    const { DEFAULT_USER_PROFILE } = await import("@passport/types");
+    await store.kv.delete("user_profile");
+    expect((await call("get_user_profile")).value.markdown).toBe(DEFAULT_USER_PROFILE);
+    expect((await client.readResource({ uri: "passport://user-profile" })).contents[0]).toHaveProperty("text", DEFAULT_USER_PROFILE);
+  });
+  it("R14 caps complete MCP tool envelopes and resources including escaped Unicode", async () => {
+    await client.close(); await server.close();
+    server = createMailboxMcpServer({ store, executor, policy, bus, responseByteBudget: 4096 });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.connect(st); await client.connect(ct);
+    await store.emails.upsertMany([f.email({ textBody: '😀\n"\\'.repeat(5000), htmlBody: null })]);
+    const { response, value } = await call("get_email", { emailId: "email-1", full: true });
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThanOrEqual(4096);
+    expect(value).toMatchObject({ truncated: true, continueFrom: expect.any(Number) });
+    await store.kv.set("user_profile", '😀\n"\\'.repeat(5000));
+    const resource = await client.readResource({ uri: "passport://user-profile" });
+    expect(Buffer.byteLength(JSON.stringify(resource))).toBeLessThanOrEqual(4096);
+    expect(resource.contents[0]?._meta).toMatchObject({ truncated: true, continueFrom: expect.any(Number) });
   });
   it("does not allow actor/category injection or identity verification edits", async () => {
     expect((await call("archive_emails", { emailIds: ["email-1"], reason: "Archive", actor: { kind: "human", id: "user" } })).response.isError).toBe(true);
@@ -173,7 +209,7 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
   ] as const)("routes %s through the executor without direct domain writes", async (name, args, type) => {
     const result = await call(name, { ...args, reason: "Agent request" });
     expect(result.response.isError).toBeUndefined(); expect(result.value.policy_note).toContain("supervised");
-    expect(executor.submitted).toHaveLength(1); expect(executor.submitted[0]).toMatchObject({ type, reason: "Agent request", actor: { kind: "external-agent", id: "test-client" } });
+    expect(executor.submitted).toHaveLength(1); expect(executor.submitted[0]).toMatchObject({ type, reason: expect.stringContaining("Agent request"), actor: { kind: "external-agent", id: expect.any(String) } });
   });
   it("requires a List-Unsubscribe header for header unsubscribe and infers its category", async () => {
     expect((await call("unsubscribe", { emailId: "email-1", reason: "Leave" })).response.isError).toBe(true);
@@ -197,7 +233,7 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
     policy.outcome = "ask";
     const result = await call("undo_action", { actionId: "original", reason: "Restore to inbox" });
     expect(result.value.status).toBe("proposed");
-    expect(executor.submitted[0]).toMatchObject({ type: "unarchive", category: "legal", actor: { kind: "external-agent", id: "test-client" }, reason: "Undo original: Restore to inbox" });
+    expect(executor.submitted[0]).toMatchObject({ type: "unarchive", category: "legal", actor: { kind: "external-agent", id: expect.any(String) }, reason: expect.stringContaining("Undo original: Restore to inbox") });
     expect((await store.actions.get("original"))?.status).toBe("executed");
     expect((await call("undo_action", { actionId: "action-1", reason: "Undo proposed" })).response.isError).toBe(true);
   });
@@ -212,7 +248,7 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
   });
   it("reads matters with attached emails, events and people even without backlinks", async () => {
     const result = (await call("get_matter", { matterId: "matter-1" })).value;
-    expect(result.matter.title).toBe("Launch"); expect(result.emails[0].id).toBe("email-1"); expect(result.emails[0].truncated).toBe(true);
+    expect(result.matter.title).toBe("Launch"); expect(result.emails[0].id).toBe("email-1"); expect(result.emails[0].truncated).toBe(false);
     expect(result.events[0].id).toBe("event-1"); expect(result.people[0].id).toBe("person-1");
   });
   it("deduplicates and paginates explicit and linked matter emails", async () => {

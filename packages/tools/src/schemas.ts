@@ -29,6 +29,7 @@ export const emailQuery = {
   category: category.optional(), after: timestamp.optional(), before: timestamp.optional(),
   limit, cursor: z.string().max(2000).nullable().optional(),
   sort: z.enum(["receivedAt_desc", "receivedAt_asc"]).optional(),
+  includeDeleted: z.boolean().default(false).describe("Include deleted email history; excluded by default."),
   includeBodies: z.boolean().default(false).describe("Include bodies in search results (still truncated unless full=true)."), full,
 };
 export const actionQuery = {

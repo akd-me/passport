@@ -124,7 +124,7 @@ export function createPolicyEngine({ store, bus, now = () => new Date().toISOStr
         reason = 'Identity changes and downgrade acknowledgements require human approval.';
       } else if (heldDraft) {
         reason = 'This draft is referenced by a held send and requires approval to change.';
-      } else if (config.alwaysAsk.includes(request.category) && !bookkeeping) {
+      } else if (config.alwaysAsk.includes(request.category) && (!bookkeeping || ['label', 'unlabel'].includes(request.type))) {
         reason = 'This category always requires approval.';
       } else if (trustLevel === 'supervised') {
         if (reversibility === 'reversible' && (request.category === 'matters' || request.category === 'triage') && ['matter_create', 'matter_update', 'matter_attach', 'person_update', 'snooze'].includes(request.type)) outcome = 'allow';

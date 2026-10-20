@@ -41,7 +41,21 @@ settings are never read. Query writes cap at 200 matches and require one account
 Standing-rule edits submit a reversible `profile_update` action in `matters`;
 USER.md lives at `store.kv["user_profile"]`, including its other sections.
 
-A shared destination guard escalates trash/junk additions and last-safe-mailbox
+All results have a serialized UTF-8 byte budget: 512 KiB by default, configured with
+`responseByteBudget` (minimum 1024). `full: true` keeps this total cap. Clipped bodies
+carry `truncated: true` and `continueFrom`; `get_email_body({emailId,offset,length})`
+returns text/HTML chunks with UTF-16 offsets and sanitized HTML. Default length is
+16,000, maximum 1,000,000; resume at `continueFrom`. Oversized metadata returns
+`RESPONSE_TOO_LARGE`; request fewer results. Search and query writes exclude
+`keywords.$deleted === true` unless `includeDeleted: true`; direct reads retain
+history and report `deleted: true`. Thread and matter histories include tombstones.
+
+`getEffectiveProfile(store)` from `@passport/types` supplies the default USER.md when
+unset. Profile reads, standing-rule edits and undo capture use the complete document.
+
+A shared destination guard follows `parentId` to the root, detects trash/junk roles
+and role-less aliases (Trash, Deleted Items, Deleted Messages, Bin, Junk, Spam,
+[Gmail]/Trash and [Gmail]/Spam, case-insensitive), and escalates additions and last-safe-mailbox
 removals to destructive actions before policy evaluation. External agents receive
 the delete ceiling for every mailbox mutation, including query writes. Self
 identities require configured addresses or `verifiedSelf` from human approval;

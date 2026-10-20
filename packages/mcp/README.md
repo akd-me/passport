@@ -44,9 +44,9 @@ Use the returned handle to shut down the entire HTTP host, including its session
 The listener binds to `127.0.0.1` by default, validates Host/Origin, and requires
 `Authorization: Bearer <token>` on every request. An explicit `host` option overrides
 the bind address. TLS termination remains the host's responsibility. Client names are audit labels, not authenticated
-identities. By default, the MCP initialization name becomes the action actor
-ID. A trusted host may provide `clientName` to override it; omit the override
-when distinct HTTP client names should be recorded.
+identities. Stdio actors use a random ID allocated at server startup; HTTP actors
+use the bearer-authenticated session's issued ID. A trusted host may provide
+`clientName` to override the audit label in action reasons; it never changes ownership.
 
 The host must run provider synchronization and the executor's `releaseDue()`
 outbox scheduler. It also supplies the human approval UI/API. This package does
@@ -117,7 +117,7 @@ the library itself does not load account configuration or credentials.
 
 ## Tools
 
-The registry exposes 43 tools. The original tools are described below; the full
+The registry exposes 44 tools. The original tools are described below; the full
 [shared catalogue](../../docs/tools.md) also covers summaries, free slots, person
 search, query batches, standing rules, daily logs, decision explanations and
 unsubscribe previews. `passport mcp install --client <client> [--http]` installs
@@ -143,7 +143,7 @@ Read tools:
 - `list_actions`: action log filtered by status, category, actor kind, run, matter
   and timestamps, with cursor and limit.
 - `get_trust`: per-category ladder plus global config, including the external ceiling.
-- `get_user_profile`: `{ markdown }` from `store.kv.get("user_profile")`, empty if unset.
+- `get_user_profile`: `{ markdown }` from the effective USER.md, including the default when unset.
 
 Write tools:
 
@@ -184,7 +184,7 @@ Tool data is compact JSON in a text content block; SDK input-validation errors
 may be plain text error blocks. Search omits bodies by default;
 `includeBodies: true` includes limited bodies. Message bodies are capped at 2000
 characters and `truncated: true` indicates the limited-body view; `full: true`
-requests the complete bodies. `full: true` also implies bodies in search.
+requests bodies within the total response budget. `full: true` also implies bodies in search.
 Raw provider headers, account settings, credential access, action parameters,
 provider action results and raw action errors are not exposed. Attachment blob
 handles are available for composing drafts.
@@ -192,10 +192,13 @@ handles are available for composing drafts.
 Paginated email/action reads return `nextCursor`. Matter email cursors are email
 IDs, separate from store search cursors. A matter also includes up to 100 linked
 emails and events; `linkedEmailsNextCursor`, when present, continues via
-`search_emails({ matterId, cursor })`. Resource discovery lists at most 100 matters
+`search_emails({ matterId, cursor, includeDeleted: true })`. Resource discovery lists at most 100 matters
 and 100 people; any known ID remains readable through its URI.
 
-Every submitted write uses `{ kind: "external-agent", id: clientName }`; no tool
+Every submitted write uses `{ kind: "external-agent", id: transportId }`. Stdio servers
+allocate a random identity at startup; authenticated HTTP sessions use their issued session
+ID. Client/host names appear only as audit labels appended to `reason`, never as ownership
+identities. Reusing a name cannot claim another transport's actions. No tool
 accepts an actor or category override. Category/counterparty inference uses target
 email classifications and headers, outgoing To/CC/BCC and stored relationships.
 Unknown or mixed recipients remain strangers. Money/legal classifications take
@@ -265,3 +268,15 @@ so sync freshness determines its accuracy. Meeting proposals carry caller-suppli
 slots and a draft through the executor; they do not reserve time independently.
 Provider execution, undo inverses, approval and outbox release remain the host's
 injected policy/executor responsibilities. The shared contract appends `profile_update` for reversible USER.md writes.
+
+Tools and resources have a total serialized UTF-8 cap of 512 KiB, configurable through
+`createMailboxMcpServer({ ..., responseByteBudget })` (minimum 1024 bytes). Tool envelopes
+account for protocol JSON escaping. `full: true` respects this cap; truncated bodies include
+`truncated` and `continueFrom`. Use `get_email_body({emailId,offset,length})` for text/HTML
+chunks (UTF-16 offsets; default length 16,000, max 1,000,000). Resources expose truncation
+and continuation offsets in content `_meta`. Request fewer results if metadata alone exceeds
+the cap. Search and query writes exclude tombstones unless `includeDeleted: true`; direct
+`get_email` retains them and reports `deleted: true`. Thread/matter reads retain history.
+Profile resources, tools and the built-in agent share the complete effective default profile;
+first standing-rule edits preserve all sections. Trash/junk checks include mailbox ancestors
+and case-insensitive special-folder aliases on role-less providers.

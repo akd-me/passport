@@ -13,6 +13,10 @@ export class Context {
   forCall(ctx?: ToolContext) { return ctx ? new Context(this.deps, ctx) : this; }
 
   actor() { return this.deps.actor; }
+  auditReason(reason: string) {
+    const label = this.deps.actorAuditLabel?.();
+    return label ? `${reason} [MCP client: ${JSON.stringify(label.slice(0, 200))}]` : reason;
+  }
 
   async account(accountId?: string) {
     if (accountId) return required(await this.store.accounts.get(accountId), "Account");
@@ -49,7 +53,7 @@ export class Context {
     const destructive = await destinationGuard(this.store, type, accountId, params, context.emails ?? []);
     if (destructive && !["money", "legal"].includes(inference.category)) inference.category = "other";
     const request: ActionRequest<T> = {
-      type, accountId, params, reason, actor: this.actor(), ...inference,
+      type, accountId, params, reason: this.auditReason(reason), actor: this.actor(), ...inference,
       ...(destructive ? { destructive: true } : {}),
       ...(this.callContext.runId ? { runId: this.callContext.runId } : {}),
       ...(context.matterId ?? trusted.matterId ? { matterId: context.matterId ?? trusted.matterId } : {}),
@@ -62,7 +66,7 @@ export class Context {
     // The contract tracks explicit attachments in matter.*Ids and also permits back-links.
     const [attachedEmails, linkedEmails, attachedEvents, linkedEvents, people] = await Promise.all([
       Promise.all(matter.emailIds.map(id => this.store.emails.get(id))),
-      this.store.emails.query({ matterId: id, limit: 100, includeBodies: false }),
+      this.store.emails.query({ matterId: id, limit: 100, includeBodies: false, includeDeleted: true }),
       Promise.all(matter.eventIds.map(id => this.store.events.get(id))),
       this.store.events.query({ matterId: id, limit: 100 }),
       Promise.all(matter.personIds.map(id => this.store.people.get(id))),
@@ -78,7 +82,7 @@ export class Context {
     const withBodies = includeBodies ? (await Promise.all(page.map(email => this.store.emails.get(email.id, { includeBodies: true })))).filter(email => email !== null) : page;
     return { matter, emails: withBodies,
       nextCursor: offset + limit < emails.length ? page.at(-1)?.id ?? null : null,
-      // Linked queries may have further pages; report their cursor explicitly, never silently omit it.
+      // Linked queries may have further pages; report their cursor explicitly; continue search with includeDeleted:true for history.
       linkedEmailsNextCursor: linkedEmails.nextCursor ?? null,
       events: [...new Map([...attachedEvents.filter(event => event !== null), ...linkedEvents].map(event => [event.id, event])).values()],
       people: people.filter(person => person !== null) };

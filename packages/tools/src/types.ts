@@ -31,6 +31,10 @@ export interface ToolRegistryOptions {
   actor: Actor;
   selfAddresses: readonly string[];
   now?: () => string;
+  /** Trusted audit label, never used for actor ownership. */
+  actorAuditLabel?: () => string | undefined;
+  /** Serialized UTF-8 response budget; default 512 KiB, minimum 1024 bytes. */
+  responseByteBudget?: number;
   /** Null means no connected calendar provider for this account. */
   freeBusy?: import("./availability.js").FreeBusyResolver;
 }

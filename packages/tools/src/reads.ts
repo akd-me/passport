@@ -1,7 +1,8 @@
+import { getEffectiveProfile } from "@passport/types";
 import { availability } from "./availability.js";
 import { schema as z } from "./schema.js";
 import type { Context } from "./context.js";
-import { actionView, emailView, eventView, json, required } from "./presentation.js";
+import { actionView, emailView, eventView, json, required, stripTrackingPixels } from "./presentation.js";
 import { register } from "./register.js";
 import * as s from "./schemas.js";
 
@@ -13,10 +14,24 @@ export function registerReads(ctx: Context) {
   });
   register(ctx, "get_email", "Read one email. Bodies are clipped to 2000 characters unless full=true.", { emailId: s.id, full: s.full }, false,
     async ({ emailId, full }, ctx) => json(emailView(await ctx.email(emailId, true), full)));
+  register(ctx, "get_email_body", "Read body chunks using UTF-16 offsets. Returns textBody and sanitized htmlBody; continue with continueFrom until truncated=false. The response byte budget still applies.", {
+    emailId: s.id, offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
+    length: z.number().int().min(1).max(1_000_000).default(16_000),
+  }, false, async ({ emailId, offset, length }, ctx) => {
+    const email = await ctx.email(emailId, true);
+    const text = email.textBody ?? "", html = stripTrackingPixels(email.htmlBody ?? "");
+    const end = Math.min(offset + length, Math.max(text.length, html.length));
+    const textBody = text.slice(offset, offset + length), htmlBody = html.slice(offset, offset + length);
+    const truncated = offset + textBody.length < text.length || offset + htmlBody.length < html.length;
+    const ends = [text.length > offset + textBody.length ? offset + textBody.length : end,
+      html.length > offset + htmlBody.length ? offset + htmlBody.length : end];
+    return json({ emailId, offset, textBody, htmlBody, totalLength: Math.max(text.length, html.length), truncated,
+      ...(truncated ? { continueFrom: Math.min(...ends) } : {}) });
+  });
   register(ctx, "get_thread", "Read a thread as chronological emails; continue with nextCursor. Bodies are clipped unless full=true.",
     { threadId: s.id, full: s.full, limit: s.limit, cursor: z.string().nullable().optional() }, false, async ({ threadId, full, limit, cursor }, ctx) => {
       const thread = required(await store.threads.get(threadId), "Thread");
-      const page = await store.emails.query({ threadId, accountId: thread.accountId, sort: "receivedAt_asc", includeBodies: true, limit, cursor });
+      const page = await store.emails.query({ threadId, accountId: thread.accountId, includeDeleted: true, sort: "receivedAt_asc", includeBodies: true, limit, cursor });
       return json({ id: thread.id, accountId: thread.accountId, ...page, items: page.items.map(email => emailView(email, full)) });
     });
   register(ctx, "list_mailboxes", "List mailboxes and counts for one account, or all accounts when accountId is omitted.", { accountId: s.id.optional() }, false, async ({ accountId }, ctx) => {
@@ -59,5 +74,5 @@ export function registerReads(ctx: Context) {
     return json({ ladder, config });
   });
   register(ctx, "get_user_profile", "Read USER.md standing instructions from the user_profile store key.", {}, false,
-    async (_input, ctx) => json({ markdown: await store.kv.get("user_profile") ?? "" }));
+    async (_input, ctx) => json({ markdown: await getEffectiveProfile(store) }));
 }

@@ -57,6 +57,8 @@ export interface JobState {
   runCount: number;
   history: JobRun[];
   running: boolean;
+  /** Durable occurrence claim, retained across interrupted processes. */
+  activeRun?: { runId: string; occurrenceAt: string; startedAt: string } | null;
 }
 export interface Scheduler {
   register(def: JobDefinition): Promise<JobState>;
@@ -87,6 +89,7 @@ interface Entry {
   work?: Promise<unknown>;
   detached?: boolean;
   removed?: boolean;
+  recoverInterrupted?: boolean;
 }
 const clone = <T>(value: T): T => structuredClone(value);
 const iso = (ms: number | null) =>
@@ -126,21 +129,24 @@ export function createScheduler(options: {
   }
   function arm(e: Entry) {
     clear(e);
-    if (!started || e.removed || !e.state.enabled || !e.state.nextRunAt) return;
-    const delay = Date.parse(e.state.nextRunAt) - now();
+    if (!started || e.removed || !e.state.enabled) return;
+    const interrupted = e.recoverInterrupted && e.state.activeRun && !e.active && !e.work ? e.state.activeRun : undefined;
+    if (!interrupted && !e.state.nextRunAt) return;
+    const dueAt = interrupted ? Math.max(now(), Date.parse(interrupted.startedAt) + (e.def.timeoutMs ?? 0)) : Date.parse(e.state.nextRunAt!);
+    const delay = dueAt - now();
     e.timer = setTimeout(
       () => {
         e.timer = undefined;
-        if (Date.parse(e.state.nextRunAt!) > now()) {
+        if (dueAt > now()) {
           arm(e);
           return;
         }
-        const due = Date.parse(e.state.nextRunAt!);
-        e.state.nextRunAt = iso(nextOccurrence(e.state.schedule, now(), due));
-        arm(e);
-        void execute(e).catch(() =>
+        const due = interrupted ? Date.parse(interrupted.occurrenceAt) : Date.parse(e.state.nextRunAt!);
+        if (!interrupted) e.state.nextRunAt = iso(nextOccurrence(e.state.schedule, now(), due));
+        void execute(e, new Date(due).toISOString(), !!interrupted).catch(() =>
           options.logger?.warn(`Job ${e.def.id} could not persist its run`),
         );
+        if (!interrupted) arm(e);
       },
       Math.max(0, Math.min(MAX_DELAY, delay)),
     );
@@ -168,7 +174,7 @@ export function createScheduler(options: {
     await persist(e);
     finished(e, run);
   }
-  function execute(e: Entry): Promise<JobRun> {
+  function execute(e: Entry, occurrenceAt = new Date(now()).toISOString(), recovering = false): Promise<JobRun> {
     const startedMs = now();
     const run: JobRun = {
       runId: crypto.randomUUID(),
@@ -184,7 +190,9 @@ export function createScheduler(options: {
     e.controller = new AbortController();
     const controller = e.controller;
     const hadFailures = e.state.consecutiveFailures > 0;
+    e.recoverInterrupted = false;
     e.state.running = true;
+    e.state.activeRun = { runId: run.runId, occurrenceAt, startedAt: run.startedAt };
     const active = (async () => {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -209,14 +217,14 @@ export function createScheduler(options: {
           }),
         );
         e.work = work;
-        void work.then(
-          () => {
-            if (e.work === work) e.work = undefined;
-          },
-          () => {
-            if (e.work === work) e.work = undefined;
-          },
-        );
+        const workSettled = () => {
+          if (e.work === work) e.work = undefined;
+          if (!e.detached && !e.removed && e.state.activeRun?.runId === run.runId) {
+            e.state.activeRun = null;
+            void persist(e).catch(() => options.logger?.warn(`Job ${e.def.id} could not clear its active run`));
+          }
+        };
+        void work.then(workSettled, workSettled);
         const result =
           e.def.timeoutMs === undefined
             ? await work
@@ -303,7 +311,7 @@ export function createScheduler(options: {
       // A manual invocation of a periodic job keeps its future scheduled occurrence.
       if (
         e.state.enabled &&
-        (!e.state.nextRunAt || Date.parse(e.state.nextRunAt) <= now())
+        (recovering && run.status !== "error" || !e.state.nextRunAt || Date.parse(e.state.nextRunAt) <= now())
       )
         e.state.nextRunAt = iso(nextOccurrence(e.state.schedule, now()));
       await record(
@@ -381,6 +389,7 @@ export function createScheduler(options: {
         runCount: 0,
         history: [],
         running: false,
+        activeRun: null,
       };
       const e: Entry = {
         def: {
@@ -404,6 +413,7 @@ export function createScheduler(options: {
             schedule: validateSchedule(saved.schedule),
             running: false,
           });
+          e.recoverInterrupted = !!state.activeRun;
           if (!state.enabled) state.nextRunAt = null;
         }
         await persist(e);
@@ -429,6 +439,7 @@ export function createScheduler(options: {
             "A previous handler is still running after shutdown",
           );
         e.detached = false;
+        if (!e.active && !e.work) e.recoverInterrupted = !!e.state.activeRun;
       }
       started = true;
       for (const e of entries.values()) arm(e);

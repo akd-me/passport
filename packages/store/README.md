@@ -102,3 +102,9 @@ to include older series masters and provider-exposed override/cancellation recor
 without the default 50-event cap. Ordinary range queries retain overlap semantics;
 expansion belongs to the shared tools availability layer. Person records persist
 optional `verifiedSelf` and `downgradeAcknowledgedAt` fields without a migration.
+
+Email queries and FTS exclude provider tombstones (`keywords.$deleted === true`) by default,
+including totals and pagination. Use `emails.query({includeDeleted:true,...filters})` for
+thread/matter history or reconciliation that needs the previous inclusive behavior. ID and
+provider-ID lookups still return tombstones. Clearing `$deleted` makes the message searchable
+again; tombstone filtering does not remove bodies, FTS entries, or memberships.

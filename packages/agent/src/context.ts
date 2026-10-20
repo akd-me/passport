@@ -23,6 +23,7 @@ export interface RunContext {
   run: AgentRun;
   store: Store;
   profile: string;
+  policy: PolicyEngine;
   selfAddresses: Set<string>;
   drafts: DraftSettings;
   actions: ActionRecord[];

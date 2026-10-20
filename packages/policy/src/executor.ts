@@ -1,3 +1,4 @@
+import { getEffectiveProfile } from "@passport/types";
 import { isDeepStrictEqual } from 'node:util';
 import {
   BASE_REVERSIBILITY,
@@ -17,7 +18,7 @@ export interface ActionExecutorOptions {
   policy: PolicyEngine;
   mailProviderFor(accountId: string): MailProvider | Promise<MailProvider>;
   calendarProviderFor(accountId: string): CalendarProvider | Promise<CalendarProvider>;
-  /** HTTP transport for header/link unsubscribe; defaults to the global fetch. */
+  /** HTTP transport for header/link unsubscribe; optional test override; defaults to DNS-pinned HTTPS requests. */
   fetch?: typeof globalThis.fetch;
   /** Resolve all addresses before each unsubscribe request, including redirect hops. */
   resolveDns?: ResolveDns;
@@ -60,7 +61,7 @@ const agentEmailPatchOf = (request: ActionRequest): Partial<Pick<Email, 'categor
 };
 
 /** Persist, authorize, execute, hold, and undo all mutations through a single serialized gate. */
-export function createActionExecutor({ store, bus, policy, mailProviderFor, calendarProviderFor, fetch: fetcher = globalThis.fetch, resolveDns, now = () => new Date().toISOString() }: ActionExecutorOptions): ActionExecutor {
+export function createActionExecutor({ store, bus, policy, mailProviderFor, calendarProviderFor, fetch: fetcher, resolveDns, now = () => new Date().toISOString() }: ActionExecutorOptions): ActionExecutor {
   let queue = Promise.resolve();
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = queue.then(operation); queue = result.then(() => undefined, () => undefined); return result;
@@ -108,7 +109,7 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     if (email.headers.inReplyTo) {
       let cursor: string | null | undefined;
       do {
-        const page = await store.emails.query({ accountId: email.accountId, threadId: email.threadId, limit: 100, cursor });
+        const page = await store.emails.query({ accountId: email.accountId, threadId: email.threadId, includeDeleted: true, limit: 100, cursor });
         const source = page.items.find(source => source.id !== email.id && source.headers.messageId === email.headers.inReplyTo);
         if (source) { resolved.inReplyToEmailId = source.id; break; }
         cursor = page.nextCursor;
@@ -518,7 +519,7 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       }
       const snapshot = snapshotOf(request) ? null : await capture(request);
       const inverseParams = request.type === 'profile_update'
-        ? { markdown: await store.kv.get('user_profile') ?? '' }
+        ? { markdown: await getEffectiveProfile(store) }
         : snapshot ? { ...request.params, [marker]: snapshot } : null;
       const inverse: ActionRequest | null = undoOf ? undoOf.request : inverseParams ? { ...structuredClone(request), actor: { kind: 'human', id: 'undo' }, reason: `Undo: ${request.reason}`, params: inverseParams } : null;
       const reversibility = undoOf ? 'reversible' : BASE_REVERSIBILITY[request.type] === 'delayed' ? 'irreversible' : BASE_REVERSIBILITY[request.type];

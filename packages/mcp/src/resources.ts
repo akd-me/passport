@@ -1,3 +1,5 @@
+import { limitResponse } from "@passport/tools";
+import { getEffectiveProfile } from "@passport/types";
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { Context } from "./context.js";
@@ -7,11 +9,11 @@ import { id } from "./schemas.js";
 export function registerResources(ctx: Context) {
   const { server, store } = ctx;
   async function listSafely<T>(list: () => Promise<T>): Promise<T> {
-    try { return await list(); }
+    try { return limitResponse(await list() as object, ctx.deps.responseByteBudget) as T; }
     catch { throw new McpError(ErrorCode.InternalError, "Unable to list Passport resources."); }
   }
   async function markdown(uri: URL, render: () => Promise<string>) {
-    try { return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: await render() }] }; }
+    try { return limitResponse({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: await render() }] }, ctx.deps.responseByteBudget); }
     catch (error) {
       throw new McpError(ErrorCode.InvalidParams, error instanceof MailboxMcpError ? error.message : "Unable to read this Passport resource.");
     }
@@ -34,7 +36,7 @@ export function registerResources(ctx: Context) {
   }), { description: "Person identity, verification, relationship and notes.", mimeType: "text/markdown" },
   async (uri, variables) => markdown(uri, async () => personMarkdown(required(await store.people.get(variableId(variables.id)), "Person"))));
   server.registerResource("user-profile", "passport://user-profile", { description: "USER.md standing instructions.", mimeType: "text/markdown" },
-    async uri => markdown(uri, async () => await store.kv.get("user_profile") ?? ""));
+    async uri => markdown(uri, async () => await getEffectiveProfile(store)));
   server.registerResource("decisions", "passport://decisions", { description: "Pending human decisions and held outbox actions (first 100; use the tool cursor to continue).", mimeType: "text/markdown" },
     async uri => markdown(uri, async () => {
       const page = await store.actions.query({ status: ["proposed", "held"], limit: 100 });

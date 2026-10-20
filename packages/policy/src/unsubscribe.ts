@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import type { LookupAddress } from 'node:dns';
+import { request as httpsRequest, type RequestOptions } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import { PolicyError } from './errors.js';
 
@@ -40,8 +41,8 @@ async function validateTarget(url: URL, resolveDns: ResolveDns, signal: AbortSig
   } finally {
     if (onAbort) signal.removeEventListener('abort', onAbort);
   }
-  // Fetch cannot pin the validated address: mixed public/private answers must fail closed.
-  if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) throw blocked();
+  if (!addresses.length || addresses.some(({ address, family }) => !isPublicAddress(address) || isIP(address) !== family)) throw blocked();
+  return addresses;
 }
 
 /** Header targets only; never infer unsubscribe links from untrusted message bodies. */
@@ -67,21 +68,48 @@ export function parseListUnsubscribe(value?: string | null, post?: string | null
   return { https, mailto, oneClick: /(?:^|[;\s])List-Unsubscribe\s*=\s*One-Click(?:$|[;\s])/i.test(post ?? '') };
 }
 
+/** Use a fresh connection whose resolver can return only this hop's validated addresses. */
+async function pinnedRequest(url: URL, init: RequestInit, addresses: LookupAddress[]): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const lookup: RequestOptions["lookup"] = (_hostname, options, callback) => {
+      const allowed = options.family ? addresses.filter(address => address.family === options.family) : addresses;
+      if (!allowed.length) { callback(Object.assign(new Error("No validated address for family"), { code: "ENOTFOUND" }), "", 4); return; }
+      if (options.all) callback(null, allowed);
+      else callback(null, allowed[0]!.address, allowed[0]!.family);
+    };
+    const hostname = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
+    const req = httpsRequest(url, {
+      method: init.method, headers: init.headers as Record<string, string>, signal: init.signal ?? undefined,
+      agent: false, lookup, servername: isIP(hostname) ? undefined : hostname, rejectUnauthorized: true,
+    }, response => {
+      // Unsubscribe needs status/Location only; never buffer an untrusted response body.
+      const headers = new Headers();
+      if (response.headers.location) headers.set("location", response.headers.location);
+      const status = response.statusCode ?? 502;
+      response.destroy();
+      resolve(new Response(null, { status, headers }));
+    });
+    req.on("error", reject);
+    req.end(init.body);
+  });
+}
+
 /** A single deadline covers the initial request and at most three HTTPS redirects. */
-export async function requestUnsubscribe(fetcher: typeof globalThis.fetch, target: URL, method: 'GET' | 'POST', resolveDns: ResolveDns = lookup) {
+export async function requestUnsubscribe(fetcher: typeof globalThis.fetch | undefined, target: URL, method: 'GET' | 'POST', resolveDns: ResolveDns = lookup) {
   const signal = AbortSignal.timeout(10_000);
   let url = target;
   for (let redirects = 0; ; redirects++) {
-    await validateTarget(url, resolveDns, signal);
+    const addresses = await validateTarget(url, resolveDns, signal);
     let response: Response;
     try {
-      response = await fetcher(url.href, {
+      const init: RequestInit = {
         method, redirect: 'manual', signal,
         ...(method === 'POST' ? {
           headers: { 'content-type': 'application/x-www-form-urlencoded' },
           body: 'List-Unsubscribe=One-Click',
         } : {}),
-      });
+      };
+      response = fetcher ? await fetcher(url.href, init) : await pinnedRequest(url, init, addresses);
       await response.body?.cancel();
     } catch {
       // Fetch errors can include token-bearing URLs; expose only the destination host.

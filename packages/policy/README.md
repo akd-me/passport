@@ -52,9 +52,9 @@ approval/rejection/undo are explicit human operations that the caller must autho
 Internal work means `matter_create`, `matter_update`, `matter_attach`, `person_update`, or
 `snooze`; an archive marked triage still needs approval when supervised. Categories in
 `alwaysAsk` require approval for every action, including reversible delete/archive and draft
-edits, at every level. Pure bookkeeping (`matter_*`, `person_update`, `snooze`, and harmless
-label/unlabel) is exempt from alwaysAsk and follows the normal matrix. Trash/junk labels and
-removing inbox membership are not harmless. Editing or deleting a draft referenced by a held
+edits, at every level. Internal bookkeeping (`matter_*`, `person_update`, `snooze`) is exempt from alwaysAsk
+and follows the normal matrix. All label/unlabel operations in an always-ask category
+require approval. Editing or deleting a draft referenced by a held
 send always asks, even at full access.
 External agents are always denied `delete`, `unsubscribe`, `calendar_delete`, and
 mailbox mutations carrying the shared registry's trusted `destructive` flag.
@@ -225,8 +225,11 @@ reject the entire set if any is loopback, private, link-local, unspecified, mult
 reserved. Localhost and `.local`/`.internal` hostnames are blocked before transport, as are
 mixed public/private DNS answers and unresolvable/empty answers (`UNSUBSCRIBE_TARGET_BLOCKED`).
 Only public IPv4 and global unicast IPv6 are accepted; IPv4-mapped IPv6, documentation, and
-transition/reserved ranges are blocked. Fetch cannot pin a connection to the validated IP;
-DNS changes between validation and fetch remain a transport limitation. Each redirect must
+transition/reserved ranges are blocked. The default transport uses Node HTTPS `request()`
+with a lookup override returning only this hop's validated addresses, a fresh connection,
+hostname SNI, and certificate verification enabled. DNS rebinding cannot replace the
+validated destination. An explicit `fetch` option remains available for test injection.
+Each redirect must
 also use HTTPS, and one-click redirects preserve POST and its form body. HTTP targets and
 URLs containing credentials are unsupported. Missing targets fail with
 `UNSUBSCRIBE_UNSUPPORTED`; HTTP errors, timeout, network failure, and excess redirects also
@@ -255,3 +258,8 @@ pnpm --filter @passport/policy build
 ```
 
 Tests use the exported in-memory Store/EventBus and recording mail/calendar fakes; no network.
+
+Always-ask categories require approval for label/unlabel as well as archive and other mail
+edits; internal matter/person bookkeeping retains its existing exemption. USER.md inverses
+capture `getEffectiveProfile(store)` from `@passport/types`, so the first edit restores the
+complete default template on undo.

@@ -17,7 +17,7 @@ async function host(options: { host?: string } = {}) {
   const server = createMailboxMcpServer({ store, executor, policy, bus });
   const handle = await serveHttp(server, { port: 0, token, ...options });
   cleanup.push(() => handle.close());
-  return { handle, executor, bus };
+  return { handle, executor, bus, store };
 }
 async function connect(handle: MailboxHttpHandle, name: string) {
   const client = new Client({ name, version: "1" });
@@ -39,13 +39,30 @@ describe("authenticated streamable HTTP", () => {
   it("authenticates isolated SDK sessions and still requires a token for an existing session", async () => {
     const { handle, executor, bus } = await host();
     const one = await connect(handle, "one"), two = await connect(handle, "two");
-    expect((await one.client.listTools()).tools).toHaveLength(43);
+    expect((await one.client.listTools()).tools).toHaveLength(44);
     for (const { client } of [one, two]) await client.callTool({ name: "archive_emails", arguments: { emailIds: ["email-1"], reason: "Organize" } });
-    expect(executor.submitted.map(request => request.actor)).toEqual([{ kind: "external-agent", id: "one" }, { kind: "external-agent", id: "two" }]);
+    expect(executor.submitted.map(request => request.actor)).toEqual([{ kind: "external-agent", id: one.transport.sessionId }, { kind: "external-agent", id: two.transport.sessionId }]);
     const response = await fetch(handle.url, { headers: { "mcp-session-id": one.transport.sessionId! } });
     expect(response.status).toBe(401);
     await one.client.close(); await two.client.close(); await handle.close(); await handle.close();
     expect(bus.listenerCount).toBe(0);
+  });
+  it("R8 same-name authenticated sessions cannot impersonate ownership of held actions or undo", async () => {
+    const { handle, executor, store } = await host();
+    const one = await connect(handle, "same-name"), two = await connect(handle, "same-name");
+    for (const { client } of [one, two]) await client.callTool({ name: "mark_read", arguments: { emailIds: ["email-1"], reason: "Read" } });
+    expect(executor.submitted.map(request => request.actor.id)).toEqual([one.transport.sessionId, two.transport.sessionId]);
+    expect(one.transport.sessionId).not.toBe(two.transport.sessionId);
+    const original = (await store.actions.get("action-1"))!;
+    await store.actions.update(original.id, { status: "held" });
+    const response = await two.client.callTool({ name: "cancel_held_action", arguments: { actionId: original.id } });
+    expect(response.isError).toBe(true);
+    expect(executor.cancelled).toEqual([]);
+    await store.actions.update(original.id, { status: "executed", inverse: original.request });
+    await two.client.callTool({ name: "undo_action", arguments: { actionId: original.id, reason: "Restore" } });
+    // The real executor's ownership gate receives the session ID, never the shared label.
+    expect(executor.submitted.at(-1)!.actor.id).toBe(two.transport.sessionId);
+    expect(executor.submitted.at(-1)!.actor.id).not.toBe(original.request.actor.id);
   });
   it("retains Host/Origin validation with authentication", async () => {
     const { handle } = await host();
@@ -60,7 +77,7 @@ describe("authenticated streamable HTTP", () => {
   it("accepts an explicit host override", async () => {
     const { handle } = await host({ host: "localhost" });
     expect(handle.url).toMatch(/^http:\/\/localhost:/);
-    expect((await (await connect(handle, "host-test")).client.listTools()).tools).toHaveLength(43);
+    expect((await (await connect(handle, "host-test")).client.listTools()).tools).toHaveLength(44);
   });
   it("bridges Claude Desktop stdio to authenticated HTTP", async () => {
     const { handle } = await host();
@@ -72,7 +89,7 @@ describe("authenticated streamable HTTP", () => {
     let errors = ""; transport.stderr?.on("data", data => { errors += String(data); });
     cleanup.push(() => client.close());
     await client.connect(transport);
-    expect((await client.listTools()).tools).toHaveLength(43);
+    expect((await client.listTools()).tools).toHaveLength(44);
     expect(errors).not.toContain(token);
   });
   it("requires a usable configured token before opening a listener", async () => {

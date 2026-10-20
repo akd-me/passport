@@ -244,6 +244,7 @@ class SQLiteStore implements Store {
       const equal = (column: string, value: string | undefined) => {
         if (value !== undefined) { where.push(`e.${column} = ?`); params.push(value); }
       };
+      if (!q.includeDeleted) where.push("NOT EXISTS (SELECT 1 FROM json_each(e.data, '$.keywords') k WHERE k.key = '$deleted' AND k.type = 'true')");
       equal("account_id", q.accountId);
       equal("thread_id", q.threadId);
       equal("category", q.category);

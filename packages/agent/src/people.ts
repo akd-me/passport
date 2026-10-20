@@ -21,7 +21,7 @@ export async function resolvePeople(opts: {
   const selfAddresses = new Set([...opts.selfAddresses, ...(await store.people.list({ relationship: "self", limit: 2_147_483_647 })).filter(person => person.verifiedSelf).flatMap(person => person.emails)].map(normalizeAddress));
   const addresses = new Map([...email.from, ...email.to, ...email.cc].map(address => [normalizeAddress(address.email), address]));
   const senders = new Set(email.from.map(address => normalizeAddress(address.email)));
-  const stored = [...new Map([...(await allEmails(store)), email].map(item => [item.id, item])).values()]
+  const stored = [...new Map([...(await allEmails(store, { includeDeleted: true })), email].map(item => [item.id, item])).values()]
     .filter(item => item.receivedAt <= email.receivedAt && !item.keywords.$draft);
   const sentBoxes = new Set((await Promise.all((await store.accounts.list()).map(account => store.mailboxes.list(account.id)))).flat().filter(box => box.role === "sent").map(box => box.id));
   const isSent = (item: Email) => !item.keywords.$draft && (item.provenance === "sent" || item.mailboxIds.some(id => sentBoxes.has(id)));

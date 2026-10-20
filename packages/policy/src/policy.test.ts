@@ -66,19 +66,17 @@ describe('policy decision matrix', () => {
     expect((await policy.evaluate(request('draft_create', { draft }, { category: 'legal' }))).outcome).toBe('ask');
   });
 
-  it('F5 exempts internal bookkeeping and harmless labels, while trash/junk/inbox removal still ask', async () => {
+  it('R1 exempts internal bookkeeping but all always-ask mailbox edits require approval', async () => {
     const { policy, store } = await setup();
     await policy.pinLevel('legal', 'full_access');
     for (const operation of [
       request('matter_update', { matterId: 'matter', patch: {} }, { category: 'legal' }),
       request('person_update', { personId: 'person', patch: {} }, { category: 'legal' }),
       request('snooze', { emailIds: ['email'], until: '2099-01-01T00:00:00.000Z' }, { category: 'legal' }),
-      request('label', { emailIds: ['email'], label: 'tag' }, { category: 'legal' }),
-      request('unlabel', { emailIds: ['email'], label: 'tag' }, { category: 'legal' }),
     ]) expect((await policy.evaluate(operation)).outcome).toBe('allow');
     const trash = (await store.mailboxes.get('trash'))!;
     await store.mailboxes.upsertMany([{ ...trash, id: 'junk', providerId: 'remote-junk', name: 'Junk', role: 'junk' }]);
-    for (const label of ['trash', 'remote-trash', 'Junk', 'inbox']) {
+    for (const label of ['tag', 'trash', 'remote-trash', 'Junk', 'inbox']) {
       expect((await policy.evaluate(request(label === 'inbox' ? 'unlabel' : 'label', { emailIds: ['email'], label }, { category: 'legal' }))).outcome).toBe('ask');
     }
   });

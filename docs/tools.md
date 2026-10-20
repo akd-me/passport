@@ -1,6 +1,6 @@
 # Passport tools
 
-`@passport/tools` owns the 43 tool definitions, JSON Schemas, validation, inference
+`@passport/tools` owns the 44 tool definitions, JSON Schemas, validation, inference
 and handlers consumed by both the built-in agent and the MCP server. Clients see
 the same mailbox, calendar, people, matters and tool inputs. Reads use the local
 Store; availability can prefer a host-injected connected calendar provider. No tool reads account
@@ -20,6 +20,7 @@ Read tools do not submit actions and therefore have no write policy category.
 | --- | --- | --- | --- |
 | `search_emails` | read | FTS5 and structured EmailQuery filters, previews and cursors | — |
 | `get_email` | read | One message with clipped or full bodies | — |
+| `get_email_body` | read | Body chunks with offset, length and continuation | — |
 | `get_thread` | read | Chronological message pages | — |
 | `list_mailboxes` | read | Account mailboxes and counts | — |
 | `list_matters` | read | Workspaces filtered by status, person or text | — |
@@ -88,6 +89,27 @@ submission: add `query.accountId` to scope them. `dryRun: true` returns count,
 known total, cap indicator and five sample previews without submitting. An empty
 query batch returns zero matches without an action.
 
+Every tool response has a total serialized UTF-8 byte budget of 512 KiB, configurable
+with `responseByteBudget` on the registry or MCP constructor (minimum 1024). `full: true`
+respects the budget, including across multiple emails. Truncated body views return
+`truncated: true` and a `continueFrom` offset. MCP accounts for protocol JSON escaping;
+resource contents use the same cap with truncation details in `_meta`. Oversized metadata
+returns `RESPONSE_TOO_LARGE`; request fewer results.
+
+`get_email_body({emailId,offset:0,length:16000})` returns `textBody`, sanitized `htmlBody`,
+`offset`, `totalLength`, `truncated`, and (when more remains) `continueFrom`. Offsets and
+lengths are UTF-16 code units. Length defaults
+to 16,000 and accepts 1–1,000,000. Continue at the returned offset until `truncated: false`.
+When the text and HTML chunks have different lengths, consume only through `continueFrom`
+in each format before advancing. No provider request is made.
+
+`search_emails`, `batch_archive_by_query`, and `apply_label_by_query` exclude provider
+tombstones by default. Set `includeDeleted: true` in the email query for history access.
+`get_email` by ID still returns a tombstone with `deleted: true`; thread/matter histories
+include tombstones. Triage screens money/legal/stranger requests before routine signals,
+preserves existing money/legal classifications, and only proposes playbooks for categories
+in `alwaysAsk`, explaining the approval requirement. Always-ask label edits also ask.
+
 Example query write:
 
 ```json
@@ -118,7 +140,9 @@ selected automatically. It exposes destination hosts/addresses, not token-bearin
 URLs. It does not infer body links or call a provider.
 
 Standing-rule writes replace the complete USER.md through a `profile_update`
-action, with the previous Markdown captured at execution for undo. A pending
+action, with the previous effective Markdown captured at execution for undo.
+`getEffectiveProfile(store)` supplies the complete default template when unset; reads,
+first rule edits, MCP resources, agent prompts and inverse capture share it. A pending
 proposal leaves USER.md unchanged. Review pending profile edits against subsequent
 human changes before approving a whole-document replacement.
 
@@ -134,7 +158,9 @@ changes trust, releases the outbox, or purges mail.
 
 A single `destinationGuard` covers `label`, `unlabel`, `move`, `archive`,
 `unarchive`, and `delete`, including query writes. It resolves label names/local
-IDs/provider IDs to mailbox roles. Adding a `trash` or `junk` mailbox, or removing
+IDs/provider IDs to mailbox roles and follows `parentId` through all ancestors. Role-less
+Trash, Deleted Items, Deleted Messages, Bin, Junk, Spam, [Gmail]/Trash and [Gmail]/Spam
+names match case-insensitively; descendants are also destructive. Adding a `trash` or `junk` mailbox, or removing
 the last safe mailbox so that only trash/junk remains, is destructive. Folder
 membership removals that would discard the last folder are also destructive.
 These actions escalate to `other` (preserving `money`/`legal`), carry trusted
@@ -171,8 +197,9 @@ Working-hours slot calculation still uses the requested IANA time zone.
 ## External and built-in agents
 
 The registry receives its actor from trusted host code. MCP always uses
-`{kind:"external-agent",id:clientName}` and respects `externalAgentCeiling`.
-Client names are audit labels. HTTP bearer auth authenticates access to the MCP
+`{kind:"external-agent",id:transportId}` and respects `externalAgentCeiling`.
+Stdio allocates a random identity at server startup; HTTP uses the authenticated session ID.
+Client names are audit labels in action reasons and cannot claim undo/cancellation ownership. HTTP bearer auth authenticates access to the MCP
 listener; it does not grant higher trust. Tools accept no actor/category override.
 Resources and prompts remain available at `passport://matters/{id}`,
 `passport://people/{id}`, `passport://user-profile`, `passport://decisions`,
@@ -323,7 +350,7 @@ Configuration references: [Claude Code](https://code.claude.com/docs/en/mcp),
 
 ## Host integration
 
-`createMailboxMcpServer({store,executor,policy,bus,clientName?,freeBusy?})`,
+`createMailboxMcpServer({store,executor,policy,bus,clientName?,freeBusy?,responseByteBudget?})`,
 `createAgentRuntime(...)`, and `createToolRegistry(...)` accept an optional
 `freeBusy(accountId,range)` resolver. Return provider intervals for a connected
 calendar account, or `null` when none is connected; an empty array means confirmed

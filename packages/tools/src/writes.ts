@@ -167,7 +167,7 @@ export function registerWrites(ctx: Context) {
     const action = required(await store.actions.get(actionId), "Action");
     if (action.status !== "executed" || !action.inverse) throw new ToolError("NOT_REVERSIBLE", "Only executed actions with a stored inverse can be undone.");
     await ctx.account(action.request.accountId);
-    return writeResult(await ctx.deps.executor.undo(actionId, { actor: ctx.actor(), reason }));
+    return writeResult(await ctx.deps.executor.undo(actionId, { actor: ctx.actor(), reason: ctx.auditReason(reason) }));
   });
   register(ctx, "cancel_held_action", "Cancel this MCP client's held outbox action before release, using executor.cancelHold(). No approval or outbox release capability is exposed.", {
     actionId: s.id,

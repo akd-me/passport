@@ -543,3 +543,19 @@ it("T9 availability can query old series masters and cancelled instances without
   expect(await store.events.query({ range })).toEqual([]);
   expect(await store.events.query({ range, includeRecurring: true, limit: 2_147_483_647 })).toEqual([expect.objectContaining({ id: "series" })]);
 });
+
+it("R11 excludes tombstones from queries, FTS, totals and pagination unless includeDeleted is explicit", async () => {
+  await store.emails.upsertMany([email("live"), email("deleted", { keywords: { $deleted: true } }), email("false", { keywords: { $deleted: false } })]);
+  for (const text of [undefined, "reservations"]) {
+    const first = await store.emails.query({ text, limit: 1 });
+    expect(first.total).toBe(2);
+    expect(first.items[0]?.id).toBe("live");
+    const second = await store.emails.query({ text, limit: 1, cursor: first.nextCursor });
+    expect(second.items.map(item => item.id)).toEqual(["false"]);
+    expect(second.nextCursor).toBeNull();
+    expect((await store.emails.query({ text, includeDeleted: true })).total).toBe(3);
+  }
+  expect((await store.emails.get("deleted"))?.keywords.$deleted).toBe(true);
+  await store.emails.patchMany(["deleted"], { keywords: { $deleted: false } });
+  expect((await store.emails.query({ text: "reservations" })).total).toBe(3);
+});

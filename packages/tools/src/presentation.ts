@@ -10,12 +10,14 @@ export function emailView(email: Email, full = false) {
   const body = (value: string | null | undefined) => value == null ? undefined : full ? value : clip(value);
   return {
     id, accountId, threadId, mailboxIds, keywords, from, to, cc, bcc, replyTo, subject, receivedAt, sentAt,
+    deleted: email.keywords.$deleted === true,
     preview: clip(email.preview, 240), size, matterId, personIds, category, verification,
     attachments: email.attachments.map(({ id, name, type, size, blobId }) => ({ id, name, type, size, blobId })),
     headers: { messageId: email.headers.messageId, inReplyTo: email.headers.inReplyTo, references: email.headers.references, listId: email.headers.listId },
     canUnsubscribe: Boolean(email.headers.listUnsubscribe),
     textBody: body(email.textBody), htmlBody: body(email.htmlBody == null ? email.htmlBody : stripTrackingPixels(email.htmlBody)),
-    truncated: !full && (email.textBody !== undefined || email.htmlBody !== undefined),
+    truncated: !full && ((email.textBody?.length ?? 0) > BODY_LIMIT || (email.htmlBody?.length ?? 0) > BODY_LIMIT),
+    ...(!full && ((email.textBody?.length ?? 0) > BODY_LIMIT || (email.htmlBody?.length ?? 0) > BODY_LIMIT) ? { continueFrom: BODY_LIMIT } : {}),
   };
 }
 
