@@ -62,11 +62,16 @@ export class HttpConnection {
     if (this.refreshing) return this.refreshing;
     this.refreshing = (async () => {
       if (!this.oauth) throw new ProviderError("AUTH_FAILED", "The provider token has expired");
-      const token = await exchangeToken(this.fetcher, this.oauth === "google" ? googleTokenUrl : microsoftTokenUrl(String(this.account.settings.tenantId ?? "common")), {
+      if (!this.credentials.refresh_token) throw new ProviderError("OAUTH_REFRESH_FAILED", "Re-authorize this account to renew access");
+      let token: AccountCredentials;
+      try { token = await exchangeToken(this.fetcher, this.oauth === "google" ? googleTokenUrl : microsoftTokenUrl(String(this.account.settings.tenantId ?? "common")), {
         grant_type: "refresh_token", refresh_token: required(this.credentials.refresh_token, "refresh_token"),
         client_id: required(this.account.settings.clientId ?? this.credentials.client_id, "clientId"),
         ...(this.credentials.clientSecret || this.credentials.client_secret ? { client_secret: this.credentials.clientSecret ?? this.credentials.client_secret! } : {}),
-      });
+      }); } catch (error) {
+        if (error instanceof ProviderError && [400, 401].includes(error.status ?? 0)) throw new ProviderError("OAUTH_REFRESH_FAILED", "Re-authorize this account to renew access");
+        throw error;
+      }
       this.credentials = { ...this.credentials, ...token };
       await this.options.onCredentials?.(this.account.id, { ...this.credentials });
     })();

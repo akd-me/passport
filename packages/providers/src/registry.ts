@@ -22,7 +22,7 @@ function oauthDescriptor(kind: ProviderKind, options: ProviderOptions): Provider
   const google = kind === "gmail" || kind === "google-calendar";
   const scopes = [...(kind === "gmail" ? GOOGLE_MAIL_SCOPES : kind === "google-calendar" ? GOOGLE_CALENDAR_SCOPES : kind === "graph" ? MICROSOFT_MAIL_SCOPES : MICROSOFT_CALENDAR_SCOPES)];
   return { kind, label: ({ gmail: "Gmail", graph: "Microsoft Outlook", "google-calendar": "Google Calendar", "graph-calendar": "Microsoft Calendar" } as Record<string, string>)[kind]!,
-    fields: [field("clientId", "Your OAuth client ID"), field("clientSecret", "Your OAuth client secret", true, google),
+    fields: [field("clientId", "Your OAuth client ID"), field("clientSecret", "Your OAuth client secret", true, false),
       ...(!google ? [field("tenantId", "Tenant ID", false, false, "Use common for personal and work accounts, or your directory tenant ID")] : []),
       ...(kind.includes("calendar") ? [field("calendarId", "Calendar ID", false, false, google ? "Defaults to primary; one calendar per account" : "Leave unset: v1.0 delta sync uses the primary calendar")] : []),
       field("codeVerifier", "PKCE code verifier", true, false, "Optional for confidential clients; required for public clients. Retain only for the current authorization attempt.")],
@@ -32,17 +32,17 @@ function oauthDescriptor(kind: ProviderKind, options: ProviderOptions): Provider
         required(state, "OAuth state");
         const tenant = encodeURIComponent(settings.tenantId ?? "common");
         const url = new URL(google ? "https://accounts.google.com/o/oauth2/v2/auth" : `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`);
-        url.search = new URLSearchParams({ client_id: required(settings.clientId, "clientId"), redirect_uri: redirectUri, response_type: "code", scope: scopes.join(" "), state,
-          ...(google ? { access_type: "offline", prompt: "consent", include_granted_scopes: "true" } : { response_mode: "query" }),
+        url.search = new URLSearchParams({ client_id: required(settings.clientId, "clientId"), redirect_uri: redirectUri, response_type: "code", scope: settings.scopes ?? scopes.join(" "), state,
+          ...(google ? { access_type: "offline", prompt: "consent" } : { response_mode: "query" }),
           ...(settings.codeVerifier ? { code_challenge: createHash("sha256").update(settings.codeVerifier).digest("base64url"), code_challenge_method: "S256" } : {}) }).toString();
         return url.href;
       },
       async exchangeCode(settings, redirectUri, code) {
         if (!google && !settings.clientSecret && !settings.codeVerifier) throw new ProviderError("CONFIG_REQUIRED", "Microsoft public clients require a PKCE codeVerifier");
-        if (google) required(settings.clientSecret, "clientSecret");
+        if (google && !settings.clientSecret && !settings.codeVerifier) throw new ProviderError("CONFIG_REQUIRED", "Google public clients require a PKCE codeVerifier");
         const credentials = await exchangeToken(options.fetch ?? globalThis.fetch, google ? googleTokenUrl : microsoftTokenUrl(settings.tenantId), {
           grant_type: "authorization_code", client_id: required(settings.clientId, "clientId"), redirect_uri: redirectUri, code: required(code, "authorization code"),
-          ...(settings.clientSecret ? { client_secret: settings.clientSecret } : {}), ...(settings.codeVerifier ? { code_verifier: settings.codeVerifier } : {}), ...(!google ? { scope: scopes.join(" ") } : {}) });
+          ...(settings.clientSecret ? { client_secret: settings.clientSecret } : {}), ...(settings.codeVerifier ? { code_verifier: settings.codeVerifier } : {}), ...(!google ? { scope: settings.scopes ?? scopes.join(" ") } : {}) });
         // Preserve the user's confidential client credential for refresh; never place it in Account.settings.
         return { ...credentials, ...(settings.clientSecret ? { clientSecret: settings.clientSecret } : {}) };
       },

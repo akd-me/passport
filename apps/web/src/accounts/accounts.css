@@ -1,0 +1,108 @@
+.account-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  margin-right: 0.2rem;
+  vertical-align: middle;
+}
+.account-filter-chip {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 2rem;
+  padding: 0.35rem 0.8rem;
+  margin-bottom: 1.3rem;
+  background: var(--panel);
+}
+.account-filter-chip select {
+  border: 0;
+  background: transparent;
+  max-width: 24rem;
+  font: inherit;
+  color: inherit;
+  padding: 0.2rem;
+}
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 25rem;
+}
+.account-row {
+  flex-wrap: wrap;
+}
+.account-main {
+  min-width: 12rem;
+  overflow-wrap: anywhere;
+}
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 0.65rem;
+}
+.checkbox-label input {
+  width: auto !important;
+}
+.oauth-guide {
+  display: block;
+  line-height: 1.6;
+}
+.oauth-guide p {
+  margin: 0.6rem 0;
+}
+.oauth-guide code {
+  overflow-wrap: anywhere;
+}
+.connection-progress {
+  padding: 1rem;
+  margin: 1rem 0;
+  background: var(--accent-deep);
+  border-radius: 0.6rem;
+}
+.backfill-control {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+}
+.backfill-control summary {
+  cursor: pointer;
+  text-align: right;
+}
+.backfill-control label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem;
+}
+.backfill-control input {
+  max-width: 6rem;
+  padding: 0.4rem;
+}
+.doctor-checks {
+  list-style: none;
+  padding: 0;
+}
+.doctor-checks li {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  border-top: 1px solid var(--line-soft);
+  padding: 0.7rem 0;
+}
+.doctor-checks p {
+  overflow-wrap: anywhere;
+  margin: 0.2rem 0;
+}
+@media (max-width: 700px) {
+  .account-actions {
+    justify-content: flex-start;
+    max-width: 100%;
+  }
+  .account-filter-chip select {
+    max-width: 16rem;
+  }
+}

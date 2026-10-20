@@ -8,7 +8,7 @@ describe("Microsoft Graph mail adapter", () => {
     let incremental = false;
     const fetcher = fixtureFetch((url, init) => {
       expect(new Headers(init.headers).get("Prefer")).toContain('IdType="ImmutableId"');
-      if (url.pathname.endsWith("/mailFolders")) return response({ value: [{ id: "folder-inbox", displayName: "Inbox" }] });
+      if (url.pathname.endsWith("/mailFolders/delta")) return response({ value: [{ id: "folder-inbox", displayName: "Inbox" }], "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/mailFolders/delta?token=folders" });
       if (/\/mailFolders\/(inbox|archive|drafts|sentitems|deleteditems|junkemail)$/.test(url.pathname)) return url.pathname.endsWith("/inbox") ? response({ id: "folder-inbox" }) : response({}, 404);
       if (url.pathname.endsWith("/delta")) return response({ value: incremental ? [{ id: "m", "@removed": { reason: "deleted" } }, { id: "gone", "@removed": {} }] : [{ id: "m" }], "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta?token=one" });
       if (url.pathname.includes("/messages/gone")) return response({}, 404);
@@ -24,7 +24,7 @@ describe("Microsoft Graph mail adapter", () => {
   it("reconciles messages from a deleted folder using persisted folder membership", async () => {
     let removed = false;
     const p = new GraphMailProvider({ fetch: fixtureFetch(url => {
-      if (url.pathname.endsWith("/mailFolders")) return response({ value: removed ? [] : [{ id: "folder-inbox", displayName: "Inbox" }] });
+      if (url.pathname.endsWith("/mailFolders/delta")) return response({ value: removed ? [{ id: "folder-inbox", "@removed": {} }] : [{ id: "folder-inbox", displayName: "Inbox" }], "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/mailFolders/delta?token=folders" });
       if (/\/mailFolders\/(inbox|archive|drafts|sentitems|deleteditems|junkemail)$/.test(url.pathname)) return response({}, 404);
       if (url.pathname.endsWith("/delta")) return response({ value: [{ id: "m" }], "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta" });
       return removed ? response({}, 404) : response({ ...sample, id: "m", hasAttachments: false, attachments: [] });

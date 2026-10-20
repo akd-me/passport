@@ -107,6 +107,7 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
     }
     yield { kind: "cursor", cursor: state };
   }
+  async checkConnection(): Promise<void> { await this.json(`${base}/profile`); }
   async getEmail(providerId: string): Promise<Email | null> {
     let message: GmailMessage;
     try { message = await this.json<GmailMessage>(`${base}/messages/${encodeURIComponent(providerId)}?format=full`); }

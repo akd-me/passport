@@ -28,7 +28,8 @@ import {
 } from "./config.js";
 import { ApiError } from "./errors.js";
 import { logger } from "./logger.js";
-import { SyncService } from "./sync/index.js";
+import { persistOAuthCredentials } from "./onboarding/oauth.js";
+import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
 import { ProviderConnections } from "./sync/connections.js";
 
 export interface RealBackendOptions {
@@ -96,11 +97,11 @@ export async function createRealBackend(
       options.providers ??
       createProviderRegistry({
         onCredentials: (id, credentials) =>
-          store.accounts.setCredentials(id, credentials),
+          persistOAuthCredentials(store, id, credentials),
         resolveEmail: (id) => store.emails.get(id, { includeBodies: true }),
         verifier: options.verifier,
       });
-    let sync: SyncService;
+    let sync: AccountSyncService;
     const connections = new ProviderConnections(
       store,
       providers,
@@ -115,7 +116,7 @@ export async function createRealBackend(
         return result;
       },
     );
-    sync = new SyncService(store, bus, connections.mail, connections.calendar);
+    sync = new AccountSyncService(store, bus, connections.mail, connections.calendar, config);
     const policy = createPolicyEngine({ store, bus });
     const executor = createActionExecutor({
       store,
@@ -208,7 +209,7 @@ export async function createRealBackend(
     const dependencies = { store, executor, policy, bus };
     const mcp = createMailboxMcpServer(dependencies);
     const servers = new Set([mcp]);
-    return {
+    return attachAccountSync<RealBackend>({
       mode: "real",
       ...dependencies,
       providers,
@@ -265,7 +266,7 @@ export async function createRealBackend(
           await connections.close();
           await store.close();
         })()),
-    };
+    }, sync);
   } catch (error) {
     await store.close();
     throw error;

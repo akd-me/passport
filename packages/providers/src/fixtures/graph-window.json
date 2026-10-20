@@ -1,0 +1,30 @@
+{
+  "folderPages": [
+    {
+      "value": [
+        { "id": "inbox-id", "displayName": "Inbox", "childFolderCount": 1 }
+      ],
+      "@odata.nextLink": "https://graph.microsoft.com/v1.0/folder-page-2"
+    },
+    {
+      "value": [
+        {
+          "id": "child-id",
+          "displayName": "Projects",
+          "parentFolderId": "inbox-id"
+        }
+      ],
+      "@odata.deltaLink": "https://graph.microsoft.com/v1.0/folder-state"
+    }
+  ],
+  "messagePages": [
+    {
+      "value": [{ "id": "recent", "receivedDateTime": "2026-02-20T12:00:00Z" }],
+      "@odata.nextLink": "https://graph.microsoft.com/v1.0/message-page-2"
+    },
+    {
+      "value": [{ "id": "older", "receivedDateTime": "2025-01-01T00:00:00Z" }],
+      "@odata.deltaLink": "https://graph.microsoft.com/v1.0/message-state"
+    }
+  ]
+}

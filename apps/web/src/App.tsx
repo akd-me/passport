@@ -1,13 +1,21 @@
-import { NavLink, Route, Routes, Link } from "react-router";
+import {
+  NavLink,
+  Route,
+  Routes,
+  Link,
+  useSearchParams,
+  useLocation,
+} from "react-router";
 import type { ActionRecord, Page } from "@passport/types";
 import { useResource, useWorkspace } from "./state";
 import { Icon } from "./components/ui";
-import { Decisions } from "./views/Decisions";
 import { Matters, MatterPage } from "./views/Matters";
 import { People, PersonPage } from "./views/People";
 import { Trust } from "./views/Trust";
 import { Activity } from "./views/Activity";
 import { Accounts } from "./views/Accounts";
+import { AccountScope, AccountFilter } from "./accounts/AccountFilter";
+import { StartPage } from "./accounts/StartPage";
 const navigation = [
   ["/", "Decisions", "decisions"],
   ["/matters", "Matters", "matters"],
@@ -17,6 +25,15 @@ const navigation = [
   ["/accounts", "Accounts", "accounts"],
 ];
 export function App() {
+  return (
+    <AccountScope>
+      <WorkspaceShell />
+    </AccountScope>
+  );
+}
+function WorkspaceShell() {
+  const [params] = useSearchParams(),
+    location = useLocation();
   const { connection, notice } = useWorkspace(),
     decisions = useResource<Page<ActionRecord>>("/decisions"),
     health = useResource<{ mode: string }>("/health");
@@ -82,7 +99,7 @@ export function App() {
           {navigation.map(([path, label, icon]) => (
             <NavLink
               key={path}
-              to={path!}
+              to={`${path}${params.get("accountId") ? `?accountId=${encodeURIComponent(params.get("accountId")!)}` : ""}`}
               end={path === "/"}
               className={({ isActive }) =>
                 `nav-link ${isActive ? "active" : ""}`
@@ -133,8 +150,11 @@ export function App() {
           </div>
         </div>
         <main id="main">
+          {["/", "/matters", "/activity"].includes(location.pathname) && (
+            <AccountFilter />
+          )}
           <Routes>
-            <Route path="/" element={<Decisions />} />
+            <Route path="/" element={<StartPage />} />
             <Route path="/matters" element={<Matters />} />
             <Route path="/matters/:id" element={<MatterPage />} />
             <Route path="/people" element={<People />} />

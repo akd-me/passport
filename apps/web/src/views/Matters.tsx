@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 import type { Matter, MatterStatus } from "@passport/types";
 import { api, queryString, type MatterDetail } from "../api";
 import { useResource, useTask } from "../state";
+import { AccountDot, useAccountId } from "../accounts/AccountFilter";
 import {
   Avatar,
   Badge,
@@ -16,10 +17,11 @@ import {
   Verification,
 } from "../components/ui";
 export function Matters() {
+  const accountId = useAccountId();
   const [text, setText] = useState(""),
     [status, setStatus] = useState("");
-  const resource = useResource<Matter[]>(
-    `/matters${queryString({ text, status })}`,
+  const resource = useResource<Array<Matter & { accountIds?: string[] }>>(
+    `/matters${queryString({ text, status, accountId })}`,
   );
   return (
     <>
@@ -61,11 +63,16 @@ export function Matters() {
         <div className="matter-grid">
           {resource.data.map((matter, i) => (
             <Link
-              to={`/matters/${matter.id}`}
+              to={`/matters/${matter.id}${queryString({ accountId })}`}
               className="matter-tile"
               key={matter.id}
             >
               <div className="matter-tile-top">
+                <span>
+                  {matter.accountIds?.map((id) => (
+                    <AccountDot key={id} id={id} />
+                  ))}
+                </span>
                 <span className={`matter-symbol color-${i % 4}`}>
                   <Icon name="matters" size={23} />
                 </span>

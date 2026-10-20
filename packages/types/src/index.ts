@@ -755,6 +755,10 @@ export interface ProviderSetupDescriptor {
 // ---------------------------------------------------------------------------
 
 export type DomainEvent =
+  | { type: "account.changed"; accountId: Id }
+  | { type: "account.sync.started"; accountId: Id }
+  | { type: "account.sync.retry"; accountId: Id; attempt: number; delayMs: number }
+  | { type: "account.sync.failed"; accountId: Id; error: string }
   | { type: "account.synced"; accountId: Id; at: Timestamp; emailsUpserted: number }
   | { type: "email.received"; email: Email }
   | { type: "email.updated"; emailId: Id }
