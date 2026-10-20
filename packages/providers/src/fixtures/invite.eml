@@ -1,0 +1,36 @@
+From: =?UTF-8?Q?Sam_Rivera?= <SAM@example.com>
+To: Alex <alex@example.com>
+Subject: =?UTF-8?Q?Design_review_=E2=9C=93?=
+Date: Tue, 20 Jan 2026 09:00:00 -0500
+Message-ID: <review@example.com>
+In-Reply-To: <root@example.com>
+References: <root@example.com> <reply@example.com>
+Authentication-Results: mx.example;
+ dkim=pass header.d=example.com; spf=pass; dmarc=pass
+List-Unsubscribe: <https://example.com/unsubscribe>, <mailto:leave@example.com>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="passport-test-boundary"
+
+--passport-test-boundary
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+<p>Let's meet at 2pm.</p>
+--passport-test-boundary
+Content-Type: text/calendar; method=REQUEST; charset=UTF-8
+Content-Disposition: attachment; filename="invite.ics"
+
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Passport//Fixture//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:review@example.com
+DTSTAMP:20260120T140000Z
+DTSTART:20260120T140000Z
+DTEND:20260120T150000Z
+SUMMARY:Design review
+END:VEVENT
+END:VCALENDAR
+--passport-test-boundary--

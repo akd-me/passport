@@ -1,0 +1,10 @@
+{
+  "id": "jmap-message-1", "threadId": "jmap-thread-1", "mailboxIds": { "inbox": true },
+  "keywords": { "$seen": true, "$flagged": true }, "from": [{ "name": "Sam Rivera", "email": "SAM@example.com" }],
+  "to": [{ "email": "alex@example.com" }], "subject": "Design review", "sentAt": "2026-01-20T14:00:00Z", "receivedAt": "2026-01-20T14:00:01Z",
+  "size": 2048, "messageId": ["review@example.com"], "inReplyTo": ["root@example.com"],
+  "headers": [{ "name": "Authentication-Results", "value": "mx.example; dkim=pass header.d=example.com; spf=pass; dmarc=pass" }],
+  "textBody": [{ "partId": "text", "type": "text/plain" }], "htmlBody": [{ "partId": "html", "type": "text/html" }],
+  "bodyValues": { "text": { "value": "Let's meet at 2pm." }, "html": { "value": "<p>Let's meet at 2pm.</p>" } },
+  "attachments": [{ "partId": "file", "blobId": "blob-1", "name": "plan.pdf", "type": "application/pdf", "size": 100 }]
+}

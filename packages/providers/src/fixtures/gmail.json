@@ -1,0 +1,26 @@
+{
+  "id": "gmail-message-1",
+  "threadId": "gmail-thread-1",
+  "historyId": "12345",
+  "labelIds": ["INBOX", "UNREAD", "STARRED", "Label_work"],
+  "internalDate": "1768917600000",
+  "sizeEstimate": 2048,
+  "payload": {
+    "mimeType": "multipart/mixed",
+    "headers": [
+      { "name": "From", "value": "\"Rivera, Sam\" <SAM@example.com>" },
+      { "name": "To", "value": "Alex <alex@example.com>" },
+      { "name": "Subject", "value": "Design review" },
+      { "name": "Date", "value": "Tue, 20 Jan 2026 09:00:00 -0500" },
+      { "name": "Message-ID", "value": "<review@example.com>" },
+      { "name": "References", "value": "<root@example.com> <reply@example.com>" },
+      { "name": "Authentication-Results", "value": "mx.example; dkim=pass header.d=example.com; spf=pass; dmarc=pass" },
+      { "name": "List-Unsubscribe", "value": "<https://example.com/unsubscribe>, <mailto:leave@example.com>" }
+    ],
+    "parts": [
+      { "partId": "0", "mimeType": "text/plain", "body": { "size": 22, "data": "TGV0J3MgbWVldCBhdCAycG0u" } },
+      { "partId": "1", "mimeType": "text/html", "body": { "data": "PHA-TGV0J3MgbWVldCBhdCAycG0uPC9wPg" } },
+      { "partId": "2", "mimeType": "application/pdf", "filename": "plan.pdf", "body": { "attachmentId": "att-1", "size": 100 }, "headers": [{ "name": "Content-Disposition", "value": "attachment" }] }
+    ]
+  }
+}
