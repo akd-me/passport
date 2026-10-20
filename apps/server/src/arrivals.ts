@@ -1,6 +1,10 @@
 import { newId } from "@passport/store";
-import type { AgentRuntime, Email, EventBus, Store } from "@passport/types";
+import type { AgentRuntime, AgentTrigger, Email, EventBus, Store } from "@passport/types";
 import { logger } from "./logger.js";
+import { compareAndSetKv, mutateKv } from "./atomic-kv.js";
+import { calendarsReady } from "./calendar-safety.js";
+
+export type ArrivalTrigger = AgentTrigger & { runId?: string; availabilityUnverified?: boolean };
 
 export interface Arrival {
   accountId: string;
@@ -8,6 +12,9 @@ export interface Arrival {
   nextAttemptAt: string | null;
   lastError: string | null;
   attentionActionId?: string;
+  startedAt?: string;
+  completedAt?: string;
+  calendarWaitStartedAt?: string;
 }
 const INDEX = "arrival:pending";
 const delays = [60000, 300000, 900000, 3600000];
@@ -39,13 +46,11 @@ export async function persistArrival(
         nextAttemptAt: new Date().toISOString(),
         lastError: null,
       };
-      await store.kv.set(key, JSON.stringify(entry));
+      compareAndSetKv(store, key, null, JSON.stringify(entry));
     }
-    const index = await pending(store);
-    index[email.id] = email.accountId;
     // Both writes finish before sync stores the email, so interrupted ingestion
     // retries registration before the email can be considered already ingested.
-    await store.kv.set(INDEX, JSON.stringify(index));
+    mutateKv(store, INDEX, current => JSON.stringify({ ...JSON.parse(current ?? "{}"), [email.id]: email.accountId }));
   });
 }
 
@@ -63,9 +68,11 @@ export class ArrivalQueue {
 
   private async acknowledge(emailId: string, keepEntry = false) {
     await indexed(this.store, async () => {
-      const index = await pending(this.store);
-      delete index[emailId];
-      await this.store.kv.set(INDEX, JSON.stringify(index));
+      mutateKv(this.store, INDEX, current => {
+        const index = JSON.parse(current ?? "{}");
+        delete index[emailId];
+        return JSON.stringify(index);
+      });
       if (!keepEntry) await this.store.kv.delete(arrivalKey(emailId));
     });
   }
@@ -130,9 +137,42 @@ export class ArrivalQueue {
   }
   private async process(emailId: string) {
     if (!this.enabled()) return;
+    const claimKey = `arrival-claim:${emailId}`;
+    let claim = await this.store.kv.get(claimKey);
+    if (claim && Date.parse(JSON.parse(claim).expiresAt) > Date.now()) return;
+    const id = crypto.randomUUID();
+    const renewed = () => JSON.stringify({ id, pid: process.pid, expiresAt: new Date(Date.now() + 60000).toISOString() });
+    const next = renewed();
+    if (!compareAndSetKv(this.store, claimKey, claim, next)) return;
+    claim = next;
+    const timer = setInterval(() => {
+      try {
+        const next = renewed();
+        if (compareAndSetKv(this.store, claimKey, claim, next)) claim = next;
+        else clearInterval(timer);
+      } catch {
+        logger.warn("Arrival claim heartbeat failed; retrying at the next heartbeat");
+      }
+    }, 10000);
+    timer.unref();
+    try { await this.processClaimed(emailId); }
+    finally {
+      clearInterval(timer);
+      compareAndSetKv(this.store, claimKey, claim, null);
+    }
+  }
+  private async processClaimed(emailId: string) {
     const saved = await this.store.kv.get(arrivalKey(emailId));
     if (!saved) return;
     const entry: Arrival = JSON.parse(saved);
+    const runId = `arrival:${emailId}`;
+    const journal = await this.store.kv.get(`run:${runId}`);
+    const checkpoint = journal ? JSON.parse(journal) : null;
+    if (entry.completedAt || (checkpoint?.finishedAt && !checkpoint.error) ||
+        (await this.store.actions.query({ runId, limit: 1 })).items.length) {
+      await this.acknowledge(emailId);
+      return;
+    }
     const email = await this.store.emails.get(emailId);
     if (!email) {
       // An indexed arrival can precede its email if sync was interrupted.
@@ -150,7 +190,18 @@ export class ArrivalQueue {
     }
     if (!entry.nextAttemptAt || Date.parse(entry.nextAttemptAt) > Date.now())
       return;
+    const ready = await calendarsReady(this.store, email.accountId);
+    if (!ready) {
+      entry.calendarWaitStartedAt ??= new Date().toISOString();
+      const deadline = Date.parse(entry.calendarWaitStartedAt) + 600000;
+      if (Date.now() < deadline) {
+        entry.nextAttemptAt = new Date(Math.min(Date.now() + 30000, deadline)).toISOString();
+        await this.save(emailId, entry);
+        return;
+      }
+    }
     entry.attempts++;
+    entry.startedAt = new Date().toISOString();
     // Persist a claim before inference, including a retry deadline if the process
     // exits mid-run. The fifth interrupted attempt is surfaced on the next drain.
     entry.nextAttemptAt = new Date(
@@ -158,7 +209,8 @@ export class ArrivalQueue {
     ).toISOString();
     await this.save(emailId, entry);
     try {
-      const run = await this.agent.run({ kind: "email.received", emailId });
+      const trigger: ArrivalTrigger = { kind: "email.received", emailId, runId, ...(!ready ? { availabilityUnverified: true } : {}) };
+      const run = await this.agent.run(trigger);
       if (run.error) throw new Error(run.error);
     } catch (error) {
       const code = (error as { code?: unknown })?.code;
@@ -180,6 +232,8 @@ export class ArrivalQueue {
       logger.warn("Email triage failed; outcome recorded");
       return;
     }
+    entry.completedAt = new Date().toISOString();
+    await this.save(emailId, entry);
     await this.acknowledge(emailId);
   }
   enqueue(emailId: string, accountId: string): Promise<void> {

@@ -3,6 +3,7 @@ import { loadConfig } from "../config.js";
 import { createDemoBackend } from "../demo/index.js";
 import { ApiError } from "../errors.js";
 import { getSchedulerService } from "./service.js";
+import { serverClient } from "../cli/server-client.js";
 
 /** Use a running server when available; otherwise operate on the local store without timers. */
 export async function runJobsCommand(args: string[]) {
@@ -33,42 +34,20 @@ export async function runJobsCommand(args: string[]) {
     );
   const config = await loadConfig();
   if (!args.includes("--demo")) {
-    const base = `http://${config.host.includes(":") ? `[${config.host}]` : config.host}:${config.port}`;
-    let available = false;
-    try {
-      const health = await fetch(`${base}/api/health`, {
-        signal: AbortSignal.timeout(1000),
-      });
-      const body = (await health.json()) as { ok?: boolean; mode?: string };
-      available = health.ok && body.ok === true && body.mode === "real";
-    } catch {
-      /* No live server: the local command still works. */
-    }
-    if (available) {
+    const request = await serverClient(config);
+    if (request) {
       const path =
         command === "list" || command === "add-routine"
           ? "/api/jobs"
           : `/api/jobs/${encodeURIComponent(id!)}/${command}`;
-      const response = await fetch(`${base}${path}`, {
-        method: command === "list" ? "GET" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: command === "add-routine" ? JSON.stringify(routine) : undefined,
-      });
-      const result = (await response.json()) as {
-        error?: { code: string; message: string };
-      };
-      if (!response.ok)
-        throw new ApiError(
-          result.error?.code ?? "REQUEST_FAILED",
-          result.error?.message ?? "Job command failed",
-        );
+      const result = await request(path, command === "list" ? "GET" : "POST", command === "add-routine" ? routine : undefined);
       console.log(JSON.stringify(result, null, 2));
       return;
     }
   }
   const backend = args.includes("--demo")
     ? await createDemoBackend(config)
-    : await createRealBackend(config);
+    : await createRealBackend(config, { clientMode: true });
   const service = getSchedulerService(backend);
   try {
     await service.ready;

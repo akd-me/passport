@@ -161,6 +161,100 @@ describe("durable email arrivals", () => {
     expect(await entry(backend, email)).toBeNull();
   });
 
+  it("R2: acknowledges an action-bearing run after a journal failure instead of delivering twice", async () => {
+    const { backend, mail, run, scheduler } = await fixture();
+    await backend.policy.setConfig({ globalMode: "full_access" });
+    await backend.policy.pinLevel("scheduling", "full_access");
+    run.mockImplementationOnce(async trigger => {
+      const runId = (trigger as { runId?: string }).runId;
+      expect(runId).toBe(`arrival:${trigger.kind === "email.received" ? trigger.emailId : ""}`);
+      await backend.executor.submit({
+        type: "calendar_propose", accountId: account.id, category: "scheduling", runId,
+        actor: { kind: "agent", id: "fixture" }, reason: "Schedule a meeting",
+        params: { slots: [], draft: { accountId: account.id, to: [{ email: "sam@example.com" }], subject: "Meeting", textBody: "Can we meet?" } },
+      });
+      throw new Error("Journal write failed after proposal creation");
+    });
+    mail.injectEmail({ providerId: "new" });
+    await backend.syncAccount(account.id);
+    await backend.drainAgentQueue();
+    await vi.advanceTimersByTimeAsync(60000);
+    await scheduler.scheduler.runNow("agent.arrivals");
+    expect(run).toHaveBeenCalledTimes(1);
+    expect((await backend.store.actions.query({ runId: `arrival:${(await arrival(backend)).id}` })).items).toHaveLength(1);
+    await backend.executor.releaseDue("2099-01-01T00:00:00Z");
+    expect(mail.sentMail).toHaveLength(1);
+  });
+
+  it("R2: a crash before acknowledgement does not re-run a completed action-free arrival", async () => {
+    const { backend, mail, run } = await fixture(undefined, false);
+    mail.injectEmail({ providerId: "new" });
+    await backend.syncAccount(account.id);
+    const email = await arrival(backend);
+    const remove = vi.spyOn(backend.store.kv, "delete").mockRejectedValueOnce(new Error("Disk failure"));
+    const queue = new ArrivalQueue(backend.store, backend.bus, backend.agent, () => true);
+    await queue.enqueue(email.id, account.id);
+    expect(await entry(backend, email)).toMatchObject({ completedAt: at });
+    remove.mockRestore();
+    // Simulate recovery of the discovery index too (e.g. crash before its write).
+    await backend.store.kv.set("arrival:pending", JSON.stringify({ [email.id]: account.id }));
+    await queue.drainDue();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("R9: two independent SQLite connections claim an arrival only once and renew a long run", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "passport-claims-"));
+    directories.push(directory);
+    const first = await fixture(directory, false);
+    first.mail.injectEmail({ providerId: "new" });
+    await first.backend.syncAccount(account.id);
+    const second = await fixture(directory, false);
+    let finish!: (run: AgentRun) => void;
+    first.run.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const one = new ArrivalQueue(first.backend.store, first.backend.bus, first.backend.agent, () => true);
+    const two = new ArrivalQueue(second.backend.store, second.backend.bus, second.backend.agent, () => true);
+    const work = one.drainDue();
+    await vi.advanceTimersByTimeAsync(0);
+    await two.drainDue();
+    await vi.advanceTimersByTimeAsync(120000);
+    await two.drainDue();
+    expect(first.run).toHaveBeenCalledTimes(1);
+    expect(second.run).not.toHaveBeenCalled();
+    finish(successfulRun);
+    await work;
+  });
+
+  it("R5: defers unsynced companion calendars without consuming retries, then marks availability unverified after ten minutes", async () => {
+    const { backend, mail, run } = await fixture();
+    await backend.store.accounts.upsert({ ...account, id: "calendar", capabilities: { ...account.capabilities, mail: false, calendar: true }, settings: { mailAccountId: account.id } });
+    mail.injectEmail({ providerId: "new" });
+    await backend.syncAccount(account.id);
+    await backend.drainAgentQueue();
+    expect(run).not.toHaveBeenCalled();
+    const email = await arrival(backend);
+    expect(await entry(backend, email)).toMatchObject({ attempts: 0, calendarWaitStartedAt: at });
+    await vi.advanceTimersByTimeAsync(599999);
+    await backend.processArrivals!();
+    expect(run).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await backend.processArrivals!();
+    expect(run).toHaveBeenCalledExactlyOnceWith({ kind: "email.received", emailId: email.id, runId: `arrival:${email.id}`, availabilityUnverified: true });
+  });
+
+  it("R5: resumes deferred arrivals once the companion calendar has a completed sync", async () => {
+    const { backend, mail, run } = await fixture();
+    await backend.store.accounts.upsert({ ...account, id: "calendar", capabilities: { ...account.capabilities, mail: false, calendar: true } });
+    mail.injectEmail({ providerId: "new" });
+    await backend.syncAccount(account.id);
+    await backend.drainAgentQueue();
+    expect(run).not.toHaveBeenCalled();
+    await backend.store.syncState.set({ accountId: "calendar", cursor: "complete", updatedAt: at });
+    await backend.store.accounts.upsert({ ...(await backend.store.accounts.get("calendar"))!, lastSyncAt: at });
+    await vi.advanceTimersByTimeAsync(30000);
+    await backend.processArrivals!();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it.each([false, true])(
     "backs off for 1m, 5m, 15m, 1h and exposes one failure decision (existing matter: %s)",
     async (existingMatter) => {
@@ -247,6 +341,7 @@ describe("durable email arrivals", () => {
     expect(second.run).toHaveBeenCalledExactlyOnceWith({
       kind: "email.received",
       emailId: email.id,
+      runId: `arrival:${email.id}`,
     });
     expect(await entry(second.backend, email)).toBeNull();
   });

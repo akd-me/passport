@@ -15,3 +15,11 @@ A non-loopback `PASSPORT_HOST` requires an explicit `PASSPORT_API_TOKEN` or `--a
 A reverse proxy must terminate HTTPS, restrict who can reach the backend, preserve the intended Host and browser Origin, and pass WebSocket upgrades, Authorization, cookies, and `X-Requested-With`. Never rewrite arbitrary browser Origins to a trusted one. If setting `PASSPORT_TRUST_PROXY=true` (or `1`), the proxy must overwrite `X-Forwarded-Proto` with the actual external scheme and prevent direct untrusted access to that header. Forwarded HTTPS then produces Secure cookies. `X-Forwarded-Host` is ignored for trust decisions. Redact token query strings and Authorization/Cookie headers from proxy/access logs; keep the login redirect and auth responses uncached. Use TLS so tokens and cookies are not exposed in transit.
 
 This boundary covers the UI/API listener and its `/ws` upgrade. The separate MCP HTTP listener has its own authentication configuration and must be secured independently. The `passport mcp` stdio command starts no UI/API listener and is unaffected by Host validation.
+
+Only `serve`/`demo` owns background work for a data directory, using an atomic PID/start-time
+lock and a 10-second heartbeat (stale after 60 seconds, or when the PID exits). Stdio MCP is a
+client: it opens no listener, scheduler or arrival queue. CLI jobs/trust/decisions/sync/triage
+use the running server's bearer-authenticated API; authentication failures never fall back
+to a separate local execution. MCP installer previews recursively redact values under
+authorization/token/secret/key/password keys, including existing unrelated client entries.
+Actual configs and backups can contain credentials and must remain private.

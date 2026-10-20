@@ -30,6 +30,9 @@ function terminalPrompts(): InitPrompts {
     output,
     terminal: !!stdout.isTTY,
   });
+  // Create the iterator before the first await: piped lines may all arrive
+  // while config/store initialization is running between questions.
+  const lines = !stdin.isTTY ? rl[Symbol.asyncIterator]() : undefined;
   return {
     async ask(label, secret = false) {
       if (secret && !stdin.isTTY)
@@ -42,6 +45,11 @@ function terminalPrompts(): InitPrompts {
         muted = true;
       }
       try {
+        if (lines) {
+          stdout.write(`${label}: `);
+          const line = await lines.next();
+          return line.done ? "" : line.value.trim();
+        }
         return (await rl.question(secret ? "" : `${label}: `)).trim();
       } finally {
         if (secret) {
@@ -58,15 +66,22 @@ function terminalPrompts(): InitPrompts {
 /** Own-client loopback setup; the existing one-shot listener validates state and PKCE. */
 export async function initializePassport(
   prompts: InitPrompts = terminalPrompts(),
+  args: string[] = [],
 ): Promise<void> {
   let backend: Awaited<ReturnType<typeof createRealBackend>> | undefined;
   try {
+    let llm: string | undefined, skipAccount = false;
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--skip-account") skipAccount = true;
+      else if (args[i] === "--llm" && args[i + 1] && !args[i + 1]!.startsWith("--")) llm = args[++i];
+      else throw new ApiError("INVALID_COMMAND", "Use passport init [--llm none|anthropic|openai|openai-compatible|ollama] [--skip-account]");
+    }
     const config = await loadConfig();
     prompts.log(`Passport setup → ${config.dataDir}`);
     const provider =
-      (await prompts.ask(
+      (llm ?? (await prompts.ask(
         "LLM provider (anthropic / openai / openai-compatible / ollama / none) [none]",
-      )) || "none";
+      ))) || "none";
     let enteredKey: string | undefined;
     if (provider !== "none") {
       if (
@@ -122,9 +137,9 @@ export async function initializePassport(
       });
       await rename(temp, target);
     }
-    backend = await createRealBackend(config);
+    backend = await createRealBackend(config, { clientMode: true });
     const kind =
-      (await prompts.ask(
+      (skipAccount ? "skip" : await prompts.ask(
         "First account (gmail / graph / imap / skip) [skip]",
       )) || "skip";
     if (kind === "gmail" || kind === "graph") {

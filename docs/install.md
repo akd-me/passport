@@ -149,21 +149,32 @@ from the container instead. See [deployment](deploy.md).
 
 ## Accounts and agents
 
-After stopping the backend writer, use `passport accounts add gmail`,
-`passport accounts add graph` or `passport accounts add imap`. See
-[accounts](accounts.md) for OAuth clients, scopes and provider fields. Then start
-`passport serve`, or run `passport sync` for one pass.
+Run `passport serve` and use **Accounts → Add account** in the browser. Gmail uses a
+Google Desktop app OAuth client; see [accounts](accounts.md) for scopes and setup.
+`passport init --llm none --skip-account` initializes a workspace unattended;
+`printf 'none\nskip\n' | passport init` also works. `passport sync` requests one
+sync pass from the running server, or uses the store directly when no owner is live.
 
-`passport mcp install --client claude-code` writes `.mcp.json` in the current
-project, preserving other entries. It refuses to replace a different existing
-Passport entry. The config refers to this installation's absolute executable
-path and includes an explicit data directory if set. Review before committing
-it because paths can be machine-specific. No model/provider secret is captured.
+`passport mcp install --client claude-code|codex|cursor|claude-desktop` merges the
+client config and preserves unrelated settings. `--http`, `--dry-run`, and
+Claude Code's `--user` are supported. Existing files receive a timestamped backup;
+previews redact secrets throughout the config. Stdio registrations include
+`PASSPORT_DATA_DIR` for nondefault workspaces. The installed shim delegates these
+options to the same CLI used from source. See [tools](tools.md#install-a-client).
 
-`passport mcp` starts a backend over stdio. Do not run it against a directory
-already owned by `serve`; connect your MCP client to
-http://127.0.0.1:4318/mcp instead. See the [root README](../README.md#use-it-from-claude-code-or-codex)
-and [tool catalogue](tools.md).
+Only `passport serve` (and `demo`) owns background work. It atomically publishes
+`<data-dir>/owner.lock` with PID, process start time and a heartbeat every 10 seconds.
+A heartbeat expires after 60 seconds; an exited PID also permits takeover. A second
+live owner fails. Shutdown removes only its own lock. Use one server per data directory.
+`passport mcp` shares the store in client mode without schedulers or arrival queues.
+It still supports reads and policy-controlled submissions without `serve`, printing
+a stderr notice that held/proposed actions wait for the server.
+
+`jobs`, `trust`, `decisions`, `sync`, and `triage` use the running server's HTTP API
+with `PASSPORT_API_TOKEN` or `<data-dir>/api-token`. A 401 is an error with recovery
+instructions, never a local fallback. Direct access is allowed only when no server
+responds and the owner lock is absent/stale; the command announces that fallback.
+A live owner with an unreachable listener is an error.
 
 Live provider/model validation is separate from the offline suite and package
 smoke checks. See [SECURITY.md](../SECURITY.md) before exposing a listener.

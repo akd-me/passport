@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runJobsCommand } from "./cli.js";
 vi.mock("../config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../config.js")>();
@@ -10,7 +10,9 @@ vi.mock("../config.js", async (importOriginal) => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
+beforeEach(() => vi.stubEnv("PASSPORT_API_TOKEN", "fixture-api-token"));
 describe("jobs CLI", () => {
   it("sends list/run/pause/resume to the live server", async () => {
     const fetcher = vi.fn(async (url: string) =>
@@ -91,5 +93,21 @@ describe("jobs CLI", () => {
       status: "ok",
     });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("R3: authenticates health and job requests with the API token", async () => {
+    const fetcher = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ ok: true, mode: "real" }));
+    vi.stubGlobal("fetch", fetcher);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    await runJobsCommand(["list"]);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetcher.mock.calls) expect(init?.headers).toHaveProperty("Authorization", "Bearer fixture-api-token");
+  });
+  it.each([0, 1])("R3: fails loudly on a reachable server's 401 at request %s without local fallback", async where => {
+    const fetcher = vi.fn();
+    if (where === 1) fetcher.mockResolvedValueOnce(Response.json({ ok: true, mode: "real" }));
+    fetcher.mockResolvedValueOnce(Response.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 }));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(runJobsCommand(["list"])).rejects.toThrow("PASSPORT_API_TOKEN");
+    expect(fetcher).toHaveBeenCalledTimes(where + 1);
   });
 });

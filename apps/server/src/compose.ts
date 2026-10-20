@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { chmod, mkdir, link, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { InMemoryEventBus, openStore } from "@passport/store";
@@ -10,11 +11,13 @@ import { createActionExecutor, createPolicyEngine } from "@passport/policy";
 import {
   createAgentRuntime,
   createLlmClient,
+  DEFAULT_USER_PROFILE,
   type LlmClient,
 } from "@passport/agent";
 import { createMailboxMcpServer } from "@passport/mcp";
 import type {
   AgentRuntime,
+  ActionExecutor,
   CalendarEvent,
   Email,
   ProviderRegistry,
@@ -31,9 +34,12 @@ import { logger } from "./logger.js";
 import { persistOAuthCredentials } from "./onboarding/oauth.js";
 import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
 import { ProviderConnections } from "./sync/connections.js";
-import { ArrivalQueue } from "./arrivals.js";
+import { ArrivalQueue, type ArrivalTrigger } from "./arrivals.js";
+import { calendarSafeStore } from "./calendar-safety.js";
 
 export interface RealBackendOptions {
+  /** Client processes may submit Actions, but never run automatic arrivals/jobs. */
+  clientMode?: boolean;
   /** Isolated SQLite and dependency injection for offline integration tests. */
   storePath?: string;
   providers?: ProviderRegistry;
@@ -89,6 +95,7 @@ export async function createRealBackend(
   });
   try {
     await store.migrate();
+    if (await store.kv.get("user_profile") === null) await store.kv.set("user_profile", DEFAULT_USER_PROFILE);
     for (const account of config.accounts)
       if (!(await store.accounts.get(account.id)))
         await store.accounts.upsert(account);
@@ -119,24 +126,60 @@ export async function createRealBackend(
     );
     sync = new AccountSyncService(store, bus, connections.mail, connections.calendar, config);
     const policy = createPolicyEngine({ store, bus });
+    const evaluate = policy.evaluate.bind(policy);
+    policy.evaluate = async request => {
+      const decision = await evaluate(request);
+      if (options.clientMode && ["send", "calendar_propose"].includes(request.type) &&
+          (decision.outcome === "allow" || decision.outcome === "hold") &&
+          (await policy.getConfig()).outboxHoldMinutes <= 0)
+        return { ...decision, outcome: "ask", reason: "Start passport serve and approve this outward action; client mode has no delayed outbox owner." };
+      return request.type === "profile_update" && request.actor.kind === "human"
+        ? { ...decision, outcome: "allow", reason: "Human profile edit; reversible and logged." }
+        : decision;
+    };
+    const releasing = new AsyncLocalStorage<boolean>();
     const executor = createActionExecutor({
-      store,
+      store: calendarSafeStore(store, bus, () => releasing.getStore() === true),
       bus,
       policy,
       mailProviderFor: connections.mail,
       calendarProviderFor: connections.calendar,
     });
+    const releaseDue = executor.releaseDue;
+    executor.releaseDue = at => releasing.run(true, () => releaseDue(at));
     const agentJobs = new Set<Promise<unknown>>();
     let closing: Promise<void> | undefined;
     let stopped = false;
     let runtime: AgentRuntime;
     let runQueue: Promise<unknown> = Promise.resolve();
     let enabled = false;
+    let currentTrigger: ArrivalTrigger | undefined;
+    const agentExecutor: ActionExecutor = {
+      ...executor,
+      submit: request => executor.submit({
+        ...request,
+        ...(currentTrigger?.runId ? { runId: currentTrigger.runId } : {}),
+        ...(currentTrigger?.availabilityUnverified && request.category === "scheduling"
+          ? { reason: `${request.reason}\ncalendar not synced, availability unverified` } : {}),
+      }),
+    };
+    // Mirror runtime checkpoints under the caller's stable identity as well as
+    // its generated ID, without depending on a cross-package signature change.
+    const runtimeStore = Object.assign(Object.create(store), {
+      kv: {
+        ...store.kv,
+        async set(key: string, value: string) {
+          await store.kv.set(key, value);
+          if (currentTrigger?.runId && key.startsWith("run:"))
+            await store.kv.set(`run:${currentTrigger.runId}`, value);
+        },
+      },
+    });
     const configureAgent = () => {
       enabled = !!options.llm || llmConfigured(config.llm);
       runtime = createAgentRuntime({
-        store,
-        executor,
+        store: runtimeStore,
+        executor: agentExecutor,
         policy,
         bus,
         llm:
@@ -176,7 +219,11 @@ export async function createRealBackend(
             new ApiError("LLM_NOT_CONFIGURED", "LLM not configured"),
           );
         // Keep one serialization boundary even when account/model settings replace the runtime.
-        const job = runQueue.then(() => runtime.run(trigger));
+        const job = runQueue.then(async () => {
+          currentTrigger = trigger as ArrivalTrigger;
+          try { return await runtime.run(trigger); }
+          finally { currentTrigger = undefined; }
+        });
         runQueue = job.catch(() => undefined);
         agentJobs.add(job);
         void job.then(
@@ -186,13 +233,13 @@ export async function createRealBackend(
         return job;
       },
     };
-    const arrivals = new ArrivalQueue(store, bus, agent, () => enabled && !stopped);
-    const unsubscribe = bus.on("email.received", ({ email }) => {
+    const arrivals = options.clientMode ? undefined : new ArrivalQueue(store, bus, agent, () => enabled && !stopped);
+    const unsubscribe = options.clientMode ? () => {} : bus.on("email.received", ({ email }) => {
       if (!enabled || stopped) return;
-      void arrivals.enqueue(email.id, email.accountId);
+      void arrivals!.enqueue(email.id, email.accountId);
     });
     const drainAgentQueue = async () => {
-      await arrivals.drain();
+      await arrivals?.drain();
       while (agentJobs.size) await Promise.allSettled([...agentJobs]);
     };
     const dependencies = { store, executor, policy, bus };
@@ -243,7 +290,7 @@ export async function createRealBackend(
           });
       },
       drainAgentQueue,
-      processArrivals: (signal) => arrivals.drainDue(signal),
+      processArrivals: (signal) => arrivals?.drainDue(signal) ?? Promise.resolve(),
       close: () =>
         (closing ??= (async () => {
           await sync.drain();

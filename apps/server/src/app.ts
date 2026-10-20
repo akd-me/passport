@@ -370,8 +370,14 @@ export function createApp(
       markdown = string(body.markdown, "markdown");
     if (markdown.length > 100000)
       throw new ApiError("INVALID_FIELD", "Profile is too large");
-    await backend.agent.setUserProfile(markdown);
-    return c.json({ markdown });
+    return c.json(await backend.executor.submit({
+      type: "profile_update",
+      accountId: (await backend.store.accounts.list())[0]?.id ?? "profile",
+      params: { markdown },
+      actor: { kind: "human", id: "user" },
+      category: "matters",
+      reason: "You updated your profile.",
+    }));
   });
   app.get("/api/accounts", async (c) => {
     const { apiKey, ...llm } = backend.config.llm;
@@ -434,6 +440,10 @@ export function createApp(
     await backend.updateConfig({ llm });
     const { apiKey, ...publicLlm } = llm;
     return c.json({ ...publicLlm, apiKeyConfigured: !!apiKey });
+  });
+  app.post("/api/agent/triage/:id", async (c) => {
+    const email = required(await backend.store.emails.get(c.req.param("id")), "Email");
+    return c.json(await backend.agent.run({ kind: "email.received", emailId: email.id }));
   });
   app.post("/api/agent/run", async (c) => {
     const body = await jsonBody(c.req.raw, true);

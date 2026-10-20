@@ -311,7 +311,7 @@ export async function doctorCommand(demo = false): Promise<void> {
   }
   const backend = demo
     ? await (await import("./demo/index.js")).createDemoBackend(config)
-    : await (await import("./compose.js")).createRealBackend(config);
+    : await (await import("./compose.js")).createRealBackend(config, { clientMode: true });
   try {
     const report = await runDoctor(backend);
     printDoctor(report);

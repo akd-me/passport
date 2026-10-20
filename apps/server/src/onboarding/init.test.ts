@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initializePassport } from "./init.js";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 describe("passport init", () => {
   const paths: string[] = [];
@@ -53,5 +55,20 @@ describe("passport init", () => {
       apiKey: "my-private-key",
     });
     expect(JSON.stringify(log.mock.calls)).not.toContain("my-private-key");
+  });
+  it.each([true, false])("INIT: works unattended with flags (%s) or buffered piped answers", async flags => {
+    const dataDir = await mkdtemp(join(tmpdir(), "passport-init-pipe-"));
+    paths.push(dataDir);
+    const child = spawn(process.execPath, ["--import", "tsx", fileURLToPath(new URL("../cli.ts", import.meta.url)), "init", ...(flags ? ["--llm", "none", "--skip-account"] : [])], {
+      env: { ...process.env, PASSPORT_DATA_DIR: dataDir, PASSPORT_LLM_API_KEY: "", ANTHROPIC_API_KEY: "", OPENAI_API_KEY: "" }, stdio: ["pipe", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout.on("data", chunk => { output += String(chunk); });
+    child.stderr.on("data", chunk => { output += String(chunk); });
+    child.stdin.end(flags ? "" : "none\nskip\n");
+    const code = await new Promise<number | null>((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });
+    expect(code, output).toBe(0);
+    expect(JSON.parse(await readFile(join(dataDir, "passport.config.json"), "utf8")).accounts).toEqual([]);
+    expect(output).toContain("Configuration saved");
   });
 });

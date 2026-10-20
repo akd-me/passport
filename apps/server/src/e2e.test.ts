@@ -6,7 +6,7 @@ import {
   MockMailProvider,
   MockCalendarProvider,
 } from "@passport/providers";
-import type { CompleteOptions, LlmClient } from "@passport/agent";
+import type { CompleteOptions, LlmClient, LlmCompletion } from "@passport/agent";
 import type { ActionRecord, ActionRequest, DomainEvent } from "@passport/types";
 import { createRealBackend, type RealBackend } from "./compose.js";
 import { defaultConfig } from "./config.js";
@@ -15,7 +15,7 @@ import { createApp } from "./auth.test-client.js";
 
 /** The agent's testing FakeLlm is not exported; implement its public LlmClient contract here. */
 class FixtureLlm implements LlmClient {
-  async complete(options: CompleteOptions) {
+  async complete(options: CompleteOptions): Promise<LlmCompletion> {
     const properties = options.json?.properties;
     const json = properties?.category
       ? {
@@ -243,6 +243,102 @@ describe("real backend end to end", () => {
     } finally {
       await client.close();
     }
+  });
+  it.each(["supervised", "auto_accept_edits", "auto", "full_access"] as const)("R13: human profile edits execute and undo under %s", async globalMode => {
+    const { backend, app } = await fixture();
+    await backend.policy.setConfig({ globalMode, alwaysAsk: ["matters"] });
+    const before = await backend.agent.getUserProfile();
+    const response = await app.request("/api/user-profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markdown: "# New preferences" }) });
+    expect(response.status).toBe(200);
+    const action = await response.json() as ActionRecord;
+    expect(action).toMatchObject({ status: "executed", request: { type: "profile_update", actor: { kind: "human", id: "user" } } });
+    expect(action.inverse).toBeTruthy();
+    expect(await backend.agent.getUserProfile()).toBe("# New preferences");
+    await backend.executor.undo(action.id);
+    expect(await backend.agent.getUserProfile()).toBe(before);
+  });
+
+  it("R5: a new conflict returns a held calendar proposal to review without sending", async () => {
+    const { backend, account, mail } = await fixture();
+    await backend.syncAccount(account.id);
+    const slot = { start: "2090-01-01T10:00:00Z", end: "2090-01-01T11:00:00Z" };
+    const proposed = await backend.executor.submit({
+      type: "calendar_propose", accountId: account.id, category: "scheduling", actor: { kind: "agent", id: "run" }, reason: "Offer a time",
+      params: { slots: [slot], draft: { accountId: account.id, to: [{ email: "sam@example.com" }], subject: "Meeting", textBody: "Does this time work?" } },
+    });
+    const held = await backend.executor.approve(proposed.id);
+    expect(held.status).toBe("held");
+    const calendar = (await backend.store.calendars.list(account.id))[0]!;
+    await backend.store.events.upsertMany([{ ...slot, id: "new-conflict", accountId: account.id, calendarId: calendar.id, providerId: "new-conflict", title: "Another meeting", allDay: false, status: "confirmed", participants: [], updatedAt: new Date().toISOString() }]);
+    expect(await backend.executor.releaseDue("2099-01-01T00:00:00Z")).toEqual([]);
+    expect(await backend.store.actions.get(held.id)).toMatchObject({ status: "proposed", error: "AVAILABILITY_CHANGED", decision: { reason: "AVAILABILITY_CHANGED" } });
+    expect(mail.sentMail).toHaveLength(0);
+    await backend.store.events.deleteMany(["new-conflict"]);
+    await backend.executor.approve(held.id);
+    await backend.executor.releaseDue("2099-01-01T00:00:00Z");
+    expect(mail.sentMail).toHaveLength(1);
+  });
+
+  it("R2/R5: runtime actions retain the stable arrival identity and unverified availability note through a late journal failure", async () => {
+    const slot = { start: new Date(Date.now() + 86400000).toISOString(), end: new Date(Date.now() + 90000000).toISOString() };
+    const llm = new FixtureLlm();
+    const complete = llm.complete.bind(llm);
+    vi.spyOn(llm, "complete").mockImplementation(async options => {
+      if (!options.json?.properties?.slots) return complete(options);
+      const result = await complete(options);
+      return { ...result, json: { status: "tentative", textBody: "Can we meet?", slots: [slot] } };
+    });
+    const backend = await createRealBackend(defaultConfig(), { storePath: ":memory:", clientMode: true, llm });
+    backends.push(backend);
+    const account = await addAccount(backend, { kind: "mock", emailAddress: "alex@example.com", fields: {} });
+    await backend.syncAccount(account.id);
+    const email = (await backend.store.emails.query({ limit: 1 })).items[0]!;
+    await backend.store.emails.upsertMany([{ ...email, subject: "Meeting request", headers: { ...email.headers, listUnsubscribe: null }, preview: "Let's talk" }]);
+    await backend.policy.setConfig({ globalMode: "full_access" });
+    await backend.policy.pinLevel("scheduling", "full_access");
+    const set = backend.store.kv.set.bind(backend.store.kv);
+    vi.spyOn(backend.store.kv, "set").mockImplementation(async (key, value) => {
+      if (key.startsWith("agent:journal:") && (await backend.store.actions.query({ category: "scheduling", status: ["held"] })).items.length) throw new Error("Journal unavailable");
+      await set(key, value);
+    });
+    const trigger = { kind: "email.received" as const, emailId: email.id, runId: `arrival:${email.id}`, availabilityUnverified: true };
+    await expect(backend.agent.run(trigger)).rejects.toThrow("Journal unavailable");
+    const actions = (await backend.store.actions.query({ runId: trigger.runId, limit: 100 })).items;
+    const proposal = actions.find(action => action.request.type === "calendar_propose")!;
+    expect(proposal).toMatchObject({ status: "held" });
+    expect(proposal.request.reason).toContain("calendar not synced, availability unverified");
+  });
+
+  it.each(["conflict", "expired", "cancelled", "declined", "override"])("R5: release checks recurring availability (%s) and still permits cancellation", async scenario => {
+    const { backend, account, mail } = await fixture();
+    await backend.syncAccount(account.id);
+    const slot = { start: "2090-01-01T10:00:00.000Z", end: "2090-01-01T11:00:00.000Z" };
+    const request: ActionRequest = {
+      type: "calendar_propose", accountId: account.id, category: "scheduling", actor: { kind: "agent", id: "run" }, reason: "Offer a time",
+      params: { slots: [slot], draft: { accountId: account.id, to: [{ email: "sam@example.com" }], subject: "Meeting", textBody: "Does this time work?" } },
+    };
+    const action = await backend.executor.submit(request);
+    await backend.executor.approve(action.id);
+    const calendarId = (await backend.store.calendars.list(account.id))[0]!.id;
+    const master = { id: "series", accountId: account.id, calendarId, providerId: "series-provider", title: "Daily meeting", start: "2089-12-31T10:00:00.000Z", end: "2089-12-31T11:00:00.000Z", allDay: false, status: scenario === "cancelled" ? "cancelled" as const : "confirmed" as const, myStatus: scenario === "declined" ? "declined" as const : "accepted" as const, participants: [], recurrenceRule: `FREQ=DAILY;COUNT=${scenario === "expired" ? 1 : 3}`, updatedAt: new Date().toISOString() };
+    await backend.store.events.upsertMany([master]);
+    if (scenario === "override") await backend.store.events.upsertMany([{ ...master, ...slot, id: "override", providerId: "override-provider", recurringEventId: master.providerId, originalStart: slot.start, recurrenceRule: null, status: "cancelled" }]);
+    const cancelled = await backend.executor.submit(request);
+    await backend.executor.approve(cancelled.id);
+    expect((await backend.executor.cancelHold(cancelled.id)).status).toBe("rejected");
+    await backend.executor.releaseDue("2099-01-01T00:00:00Z");
+    expect((await backend.store.actions.get(action.id))!.status).toBe(scenario === "conflict" ? "proposed" : "executed");
+    expect(mail.sentMail).toHaveLength(scenario === "conflict" ? 0 : 1);
+  });
+
+  it("R9: client mode queues outward submissions even when the configured hold is zero", async () => {
+    const backend = await createRealBackend(defaultConfig(), { storePath: ":memory:", clientMode: true });
+    backends.push(backend);
+    const account = await addAccount(backend, { kind: "mock", emailAddress: "alex@example.com", fields: {} });
+    await backend.policy.setConfig({ globalMode: "full_access", outboxHoldMinutes: 0 });
+    await backend.policy.pinLevel("scheduling", "full_access");
+    const action = await backend.executor.submit({ type: "calendar_propose", accountId: account.id, category: "scheduling", actor: { kind: "agent", id: "run" }, reason: "Schedule", params: { slots: [], draft: { accountId: account.id, to: [{ email: "sam@example.com" }], subject: "Meeting", textBody: "Can we meet?" } } });
+    expect(action.status).toBe("proposed");
   });
   it("creates an MCP reply draft through the default registry using remapped store IDs and the original thread", async () => {
     const backend = await createRealBackend(defaultConfig(), {

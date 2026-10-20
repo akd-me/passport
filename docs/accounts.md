@@ -11,7 +11,8 @@ From a built checkout, run `passport init` (during development:
 Cloud API keys are entered without terminal echo; explicitly entered keys are saved in the private
 config file. You can instead set `PASSPORT_LLM_API_KEY` in the environment. `none` leaves mail usable
 without an agent. The wizard creates the data directory, `master.key` and `passport.config.json`.
-Keep the master key with any encrypted database backup.
+Keep the master key with any encrypted database backup. For unattended setup use
+`passport init --llm none --skip-account`, or pipe `none\nskip\n` to `passport init`.
 
 The CLI can connect a first mailbox with a one-shot callback listener on
 `http://127.0.0.1:53682/oauth/callback`. It prints the URL and waits up to ten minutes. For a different
@@ -135,6 +136,18 @@ fresh account:
 ```json
 { "sync": { "initialDays": 30 } }
 ```
+
+Incremental cursors are retained across restarts. Calendar cursor-expiry recovery upserts existing
+events by provider identity, preserving local links, and removes unseen events only after a successful
+full pass. Interrupted replacement retains existing events and retries from a null cursor. Sent mail,
+drafts and self mail outside Inbox are ingested for history without triggering arrival triage.
+
+Arrivals wait for related calendars to complete a full sync (30-second retries, up to ten minutes).
+After that deadline, scheduling proposal reasons include “calendar not synced, availability unverified”.
+Combined mail/calendar accounts keep a calendar-only sync checkpoint before emitting mail arrivals.
+At delayed-outbox release a new event conflict returns a calendar proposal to Decisions with
+`AVAILABILITY_CHANGED`, requiring review. Recurring events use the same supported rule expansion as scheduling; unsupported rules
+return to review as `AVAILABILITY_UNVERIFIED`.
 
 Incremental cursors are retained across restarts. Use **Load older mail → Days of history → Backfill**
 or `POST /api/accounts/<id>/backfill?days=365` to widen a mail snapshot. Existing local messages stay
