@@ -61,6 +61,8 @@ function actionQuery(q: Record<string, string>): ActionQuery {
 function emailQuery(q: Record<string, string>): EmailQuery {
   if (q.includeBodies && !["true", "false"].includes(q.includeBodies))
     throw new ApiError("INVALID_QUERY", "includeBodies must be true or false");
+  if (q.includeDeleted && !["true", "false"].includes(q.includeDeleted))
+    throw new ApiError("INVALID_QUERY", "includeDeleted must be true or false");
   return {
     accountId: q.accountId,
     mailboxId: q.mailboxId,
@@ -79,6 +81,7 @@ function emailQuery(q: Record<string, string>): EmailQuery {
       ? member(q.sort, ["receivedAt_desc", "receivedAt_asc"], "sort")
       : undefined,
     includeBodies: q.includeBodies === "true",
+    includeDeleted: q.includeDeleted === "true",
     keywords: q.has || q.not ? { has: csv(q.has), not: csv(q.not) } : undefined,
   };
 }
@@ -197,6 +200,7 @@ export function createApp(
       emails: await backend.store.emails.query({
         threadId: thread.id,
         includeBodies: true,
+        includeDeleted: true,
         limit: 500,
         sort: "receivedAt_asc",
       }),
@@ -223,6 +227,7 @@ export function createApp(
       backend.store.emails.query({
         matterId: matter.id,
         includeBodies: true,
+        includeDeleted: true,
         limit: 500,
       }),
       backend.store.events.query({ matterId: matter.id }),
