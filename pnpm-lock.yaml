@@ -60,15 +60,6 @@ importers:
 
   packages/agent:
     dependencies:
-      '@passport/policy':
-        specifier: workspace:*
-        version: link:../policy
-      '@passport/providers':
-        specifier: workspace:*
-        version: link:../providers
-      '@passport/store':
-        specifier: workspace:*
-        version: link:../store
       '@passport/types':
         specifier: workspace:*
         version: link:../types
@@ -82,15 +73,6 @@ importers:
 
   packages/mcp:
     dependencies:
-      '@passport/policy':
-        specifier: workspace:*
-        version: link:../policy
-      '@passport/providers':
-        specifier: workspace:*
-        version: link:../providers
-      '@passport/store':
-        specifier: workspace:*
-        version: link:../store
       '@passport/types':
         specifier: workspace:*
         version: link:../types

@@ -60,3 +60,11 @@ and accept dependencies via constructor injection.
 - `send` is never executed synchronously when `outboxHoldMinutes > 0`; it is `held` first.
 - External agents (MCP clients) are capped by `externalAgentCeiling`.
 - Verification state (blue/green) is derived from headers/signatures, never from message content.
+
+## Parallel-build rule (wave 1)
+
+`store`, `providers`, `policy`, `mcp`, `agent`, and `server`+`web` are built concurrently in separate
+worktrees. During this wave **every package depends only on `@passport/types`** and receives its
+collaborators (Store, ActionExecutor, PolicyEngine, ProviderRegistry, AgentRuntime, EventBus) through
+constructor injection. Tests use small in-memory fakes of those interfaces. The composition root in
+`apps/server` is wired to the real implementations in the integration step that follows.
