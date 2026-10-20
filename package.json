@@ -1,0 +1,23 @@
+{
+  "name": "passport",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Agent-native email: a harness that lets agents operate on your mail, calendar and contacts under a trust policy. Bring your own providers and models.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' --filter './apps/**' run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint",
+    "dev": "pnpm --filter @passport/server dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0",
+    "tsx": "^4.19.0"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@passport/web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'web: scaffold pending'",
+    "typecheck": "echo 'web: scaffold pending'",
+    "test": "echo 'web: scaffold pending'",
+    "lint": "echo 'web: scaffold pending'",
+    "dev": "echo 'web: scaffold pending'"
+  },
+  "dependencies": { "@passport/types": "workspace:*" }
+}
