@@ -15,6 +15,7 @@ import { startSchedulers } from "./schedulers/index.js";
 import { authorizeOAuth } from "./oauth.js";
 import { Writable } from "node:stream";
 import { runJobsCommand } from "./schedulers/cli.js";
+import { apiToken, checkBind, getAuth } from "./auth.js";
 
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
@@ -22,7 +23,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (command === "jobs") return runJobsCommand(args.slice(1));
   if (command === "--help" || command === "help") {
     console.log(
-      "passport serve | demo | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo]",
+      "passport serve [--allow-remote] | demo [--allow-remote] | token [--rotate] | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo]",
     );
     return;
   }
@@ -36,17 +37,24 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       "accounts",
       "trust",
       "decisions",
+      "token",
     ].includes(command)
   )
     throw new ApiError(
       "INVALID_COMMAND",
       "Unknown command. Run passport --help.",
     );
-  const config = await loadConfig(),
-    backend =
-      command === "demo" || (command !== "mcp" && args.includes("--demo"))
-        ? await createDemoBackend(config)
-        : await createRealBackend(config);
+  const config = await loadConfig();
+  if (command === "token") {
+    console.log(apiToken(config.dataDir, { rotate: args.includes("--rotate") }));
+    return;
+  }
+  if (command === "serve" || command === "demo")
+    checkBind(config.host, args.includes("--allow-remote"), process.env, false);
+  const backend =
+    command === "demo" || (command !== "mcp" && args.includes("--demo"))
+      ? await createDemoBackend(config)
+      : await createRealBackend(config);
   if (command === "mcp") {
     const server = backend.createMcpServer!();
     const schedulers = startSchedulers(backend);
@@ -77,7 +85,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === "serve" || command === "demo") {
-    const handle = startServer(backend);
+    const handle = startServer(backend, {
+      allowRemote: args.includes("--allow-remote"),
+    });
     void handle.ready.catch(() => {
       process.exitCode = 1;
       void handle.close();
@@ -85,7 +95,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     handle.server.on("listening", () => {
       const address = handle.server.address();
       logger.info(
-        `${backend.mode} workspace → http://${config.host}:${typeof address === "object" && address ? address.port : config.port}`,
+        `${backend.mode} workspace → ${getAuth(backend).loginUrl(config.host, typeof address === "object" && address ? address.port : config.port)}`,
       );
     });
     handle.server.on("error", () => {

@@ -8,7 +8,7 @@ import type {
   Page,
   Person,
 } from "@passport/types";
-import { createApp } from "./app.js";
+import { createApp } from "./auth.test-client.js";
 import { createDemoBackend } from "./demo/index.js";
 import type { Backend } from "./backend.js";
 

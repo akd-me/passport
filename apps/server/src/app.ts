@@ -27,6 +27,7 @@ import {
 } from "./validation.js";
 import { logger } from "./logger.js";
 import { installJobRoutes } from "./schedulers/routes.js";
+import { getAuth, installAuth, type PassportAuth } from "./auth.js";
 
 const csv = (value?: string) => value?.split(",").filter(Boolean);
 const limit = (value?: string) =>
@@ -95,7 +96,7 @@ async function jsonBody(
 }
 export function createApp(
   backend: Backend,
-  options: { staticDir?: string } = {},
+  options: { staticDir?: string; auth?: PassportAuth } = {},
 ) {
   const app = new Hono();
   app.onError((error, c) => {
@@ -126,23 +127,7 @@ export function createApp(
       500,
     );
   });
-  app.use("/api/*", async (c, next) => {
-    if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method)) {
-      const origin = c.req.header("origin");
-      if (origin && origin !== new URL(c.req.url).origin)
-        return c.json(
-          {
-            error: {
-              code: "INVALID_ORIGIN",
-              message: "Cross-origin changes are not allowed",
-            },
-          },
-          403,
-        );
-    }
-    c.header("Cache-Control", "no-store");
-    await next();
-  });
+  installAuth(app, options.auth ?? getAuth(backend));
   installJobRoutes(app, backend);
   app.get("/api/health", (c) => c.json({ ok: true, mode: backend.mode }));
   app.get("/api/decisions", async (c) =>

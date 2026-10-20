@@ -20,6 +20,7 @@ import type {
   TrustLevel,
   TrustState,
 } from "@passport/types";
+import { authHeaders, handleUnauthorized } from "./auth";
 export interface TrustData {
   config: GlobalPolicyConfig;
   categories: TrustState[];
@@ -60,11 +61,14 @@ export class ApiError extends Error {
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...init,
+    credentials: "same-origin",
     headers: {
+      ...authHeaders,
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
   });
+  handleUnauthorized(response);
   const body = await response.json();
   if (!response.ok)
     throw new ApiError(

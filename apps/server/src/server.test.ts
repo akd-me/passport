@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import { WebSocket } from "ws";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDemoBackend } from "./demo/index.js";
 import { defaultConfig } from "./config.js";
 import { startServer } from "./server.js";
@@ -9,6 +9,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 describe("HTTP + WebSocket listener", () => {
+  const token = "server-integration-test-token";
+  const headers = { Authorization: `Bearer ${token}` };
+  beforeEach(() => vi.stubEnv("PASSPORT_API_TOKEN", token));
+  afterEach(() => vi.unstubAllEnvs());
   it("starts the real UI/API without an LLM key and exposes HTTP MCP on its own loopback listener", async () => {
     const backend = await createRealBackend(
       { ...defaultConfig(), port: 0, mcpPort: 0 },
@@ -26,12 +30,12 @@ describe("HTTP + WebSocket listener", () => {
       const root = `http://127.0.0.1:${address.port}`;
       expect(
         (
-          (await fetch(`${root}/api/health`).then((response) =>
+          (await fetch(`${root}/api/health`, { headers }).then((response) =>
             response.json(),
           )) as { mode: string }
         ).mode,
       ).toBe("real");
-      const accounts = (await fetch(`${root}/api/accounts`).then((response) =>
+      const accounts = (await fetch(`${root}/api/accounts`, { headers }).then((response) =>
         response.json(),
       )) as { llm: { configured: boolean } };
       expect(accounts.llm.configured).toBe(false);
@@ -53,7 +57,7 @@ describe("HTTP + WebSocket listener", () => {
     const address = handle.server.address();
     if (!address || typeof address === "string")
       throw new Error("Expected TCP listener");
-    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { headers });
     try {
       await once(socket, "open");
       const message = once(socket, "message");
@@ -64,7 +68,7 @@ describe("HTTP + WebSocket listener", () => {
       });
       expect(
         (
-          (await fetch(`http://127.0.0.1:${address.port}/api/health`).then(
+          (await fetch(`http://127.0.0.1:${address.port}/api/health`, { headers }).then(
             (r) => r.json(),
           )) as { mode: string }
         ).mode,
