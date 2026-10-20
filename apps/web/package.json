@@ -4,11 +4,26 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "echo 'web: scaffold pending'",
-    "typecheck": "echo 'web: scaffold pending'",
-    "test": "echo 'web: scaffold pending'",
-    "lint": "echo 'web: scaffold pending'",
-    "dev": "echo 'web: scaffold pending'"
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "dev": "vite"
   },
-  "dependencies": { "@passport/types": "workspace:*" }
+  "dependencies": {
+    "@passport/types": "workspace:*",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router": "^7.9.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "vite": "^6.4.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0",
+    "jsdom": "^26.1.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/jest-dom": "^6.9.0"
+  }
 }
