@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-cli.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit",
@@ -39,6 +39,7 @@
     }
   },
   "bin": {
-    "passport": "./dist/cli.js"
-  }
+    "passport": "bin/passport.js"
+  },
+  "files": ["bin/", "dist/", "web/", "README.md", "LICENSE"]
 }

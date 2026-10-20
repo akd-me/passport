@@ -22,3 +22,5 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm --dir apps/server/dist/package pack --pack-destination ..
+      - run: node scripts/smoke-package.mjs apps/server/dist/*.tgz
