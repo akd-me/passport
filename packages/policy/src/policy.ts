@@ -25,6 +25,16 @@ export function createPolicyEngine({ store, bus, now = () => new Date().toISOStr
   const metaKey = (category: ActionCategory) => `policy:trust:${category}`;
   const readMeta = async (category: ActionCategory): Promise<Metadata> => JSON.parse(await store.kv.get(metaKey(category)) ?? '{}') as Metadata;
   const getConfig = async () => structuredClone(await store.trust.getConfig() ?? DEFAULT_POLICY_CONFIG);
+  const hasHeldSend = async (draftEmailId: string, accountId: string) => {
+    let cursor: string | null | undefined;
+    do {
+      const page = await store.actions.query({ status: ['held'], limit: 100, cursor });
+      if (page.items.some(action => action.request.accountId === accountId && action.request.type === 'send' &&
+        (action.request.params as { draftEmailId?: string }).draftEmailId === draftEmailId)) return true;
+      cursor = page.nextCursor;
+    } while (cursor);
+    return false;
+  };
   const getTrustFor = async (category: ActionCategory): Promise<TrustState> => {
     const state = await store.trust.get(category) ?? { category, level: 'supervised', score: 0.3, stage: 'learning', approvals: 0, approvalsUnchanged: 0, edits: 0, rejections: 0, lastActivityAt: null };
     state.stage = stageFor(state);
@@ -80,12 +90,23 @@ export function createPolicyEngine({ store, bus, now = () => new Date().toISOStr
         if (emails.some(email => email && (email.keywords.$flagged || !email.keywords.$seen))) riskIndex++;
       }
       const risk = risks[Math.min(risks.length - 1, riskIndex)]!;
+      let bookkeeping = request.type.startsWith('matter_') || ['person_update', 'snooze'].includes(request.type);
+      if (request.type === 'label' || request.type === 'unlabel') {
+        const name = (request.params as { label: string }).label;
+        const box = (await store.mailboxes.list(request.accountId)).find(box => [box.id, box.providerId, box.name].includes(name));
+        // Removing inbox membership archives mail; trash/junk labels are destructive.
+        bookkeeping = !!box && !['trash', 'junk'].includes(box.role ?? '') && !(request.type === 'unlabel' && box.role === 'inbox');
+      }
+      const heldDraft = (request.type === 'draft_update' || request.type === 'draft_delete') &&
+        await hasHeldSend((request.params as { draftEmailId: string }).draftEmailId, request.accountId);
       let outcome: PolicyOutcome = 'ask';
       let reason = 'Human approval is required at this trust level.';
       if (external && (['delete', 'unsubscribe', 'calendar_delete'].includes(request.type) || (config.externalAgentCeiling === 'supervised' && reversibility !== 'reversible'))) {
         outcome = 'deny'; reason = 'The external agent ceiling forbids this action.';
-      } else if (config.alwaysAsk.includes(request.category) && reversibility !== 'reversible') {
-        reason = 'This category always requires approval for outward-facing actions.';
+      } else if (heldDraft) {
+        reason = 'This draft is referenced by a held send and requires approval to change.';
+      } else if (config.alwaysAsk.includes(request.category) && !bookkeeping) {
+        reason = 'This category always requires approval.';
       } else if (trustLevel === 'supervised') {
         if (reversibility === 'reversible' && (request.category === 'matters' || request.category === 'triage') && ['matter_create', 'matter_update', 'matter_attach', 'person_update', 'snooze'].includes(request.type)) outcome = 'allow';
       } else if (reversibility === 'reversible') outcome = 'allow';

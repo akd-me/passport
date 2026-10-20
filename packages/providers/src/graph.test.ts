@@ -33,11 +33,30 @@ describe("Microsoft Graph mail adapter", () => {
   it("updates read, flag, and categories, and implements move/copy/trash", async () => {
     const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
     const p = new GraphMailProvider({ fetch: fixtureFetch((url, init) => {
-      if (!init.method) return response(sample); calls.push({ path: url.pathname, body: jsonBody(init) }); return response(null, 204);
+      if (!init.method) return response(sample); calls.push({ path: url.pathname, body: jsonBody(init) });
+      return init.method === "PATCH" ? response(null, 204) : response({ id: "m", parentFolderId: jsonBody(init).destinationId });
     }) }); await p.connect(account, { access_token: "token" });
     await p.applyChanges([{ op: "setKeywords", providerIds: ["m"], add: ["$seen", "$flagged", "label:New"], remove: ["label:Work"] }, { op: "move", providerIds: ["m"], toMailboxProviderId: "archive" }, { op: "addToMailbox", providerIds: ["m"], mailboxProviderId: "copy-folder" }, { op: "delete", providerIds: ["m"] }]);
     expect(calls[0]?.body).toEqual({ isRead: true, flag: { flagStatus: "flagged" }, categories: ["New"] }); expect(calls[1]?.path).toMatch(/\/move$/); expect(calls[2]?.path).toMatch(/\/copy$/); expect(calls[3]?.body).toEqual({ destinationId: "deleteditems" });
     await expect(p.applyChanges([{ op: "removeFromMailbox", providerIds: ["m"], mailboxProviderId: "inbox" }])).rejects.toMatchObject({ code: "NOT_IMPLEMENTED" });
+  });
+  it.each(["move", "delete"] as const)("F6 returns Graph replacement IDs for %s even when the server changes an immutable ID", async op => {
+    let currentId = "original";
+    const p = new GraphMailProvider({ fetch: fixtureFetch((url, init) => {
+      expect(new Headers(init.headers).get("Prefer")).toContain('IdType="ImmutableId"');
+      if (init.method === "POST") {
+        expect(url.pathname).toContain(`/messages/${currentId}/move`);
+        currentId = `replacement-${currentId}`;
+        return response({ id: currentId, parentFolderId: "folder-trash" });
+      }
+      return url.pathname.endsWith(`/${currentId}`) ? response({ ...sample, id: currentId, hasAttachments: false, attachments: [] }) : response({}, 404);
+    }) });
+    await p.connect(account, { access_token: "token" });
+    const results = await p.applyChanges([op === "move" ? { op, providerIds: ["original"], toMailboxProviderId: "folder-trash" } : { op, providerIds: ["original"] }]);
+    expect(results).toEqual([{ op, providerId: "original", newProviderId: "replacement-original", newMailboxProviderId: "folder-trash" }]);
+    expect(await p.getEmail("original")).toBeNull();
+    expect((await p.getEmail(results[0]!.newProviderId!))?.providerId).toBe("replacement-original");
+    expect((await p.applyChanges([{ op: "move", providerIds: [results[0]!.newProviderId!], toMailboxProviderId: "inbox" }]))[0]?.newProviderId).toBe("replacement-replacement-original");
   });
   it("creates drafts and submits their actual immutable IDs", async () => {
     let sent = false;

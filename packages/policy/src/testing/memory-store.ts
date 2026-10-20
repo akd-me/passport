@@ -82,6 +82,12 @@ export function createMemoryStore(): Store {
       async upsert(matter) { matters.set(matter.id, clone(matter)); return clone(matter); }, async delete(id) { matters.delete(id); },
     },
     actions: {
+      async claim(id, from, to, now) {
+        const record = actions.get(id);
+        if (!record || record.status !== from) return null;
+        const updated = { ...record, status: to, decidedAt: now };
+        actions.set(id, updated); return clone(updated);
+      },
       async get(id) { return read(actions, id); },
       async query(q: ActionQuery) { return page(values(actions).filter(item => (!q.status || q.status.includes(item.status)) && (!q.category || item.request.category === q.category) && (!q.actorKind || item.request.actor.kind === q.actorKind) && (!q.runId || item.request.runId === q.runId) && (!q.matterId || item.request.matterId === q.matterId) && (!q.after || item.createdAt > q.after) && (!q.before || item.createdAt < q.before)).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)), q.limit, q.cursor); },
       async insert(record) { if (actions.has(record.id)) throw new PolicyError('DUPLICATE_ACTION', 'Action already exists'); actions.set(record.id, clone(record)); return clone(record); },

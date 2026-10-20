@@ -1,4 +1,4 @@
-import type { AccountCapabilities, DraftInput, Email, MailboxRole, MailChange, MailProvider, SendResult, SyncDelta } from "@passport/types";
+import type { AccountCapabilities, DraftInput, Email, MailboxRole, MailChange, MailChangeResult, MailProvider, SendResult, SyncDelta } from "@passport/types";
 import { assertSend, decodeCursor, encodeCursor, localId, NotImplementedError, ProviderError, required } from "./errors.js";
 import { HttpConnection, type ProviderOptions } from "./http.js";
 import { generatePreview, htmlToText, normalizeAddresses, normalizeHeaders, toIso } from "./normalize/index.js";
@@ -118,7 +118,8 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
     if (a["@odata.type"] === "#microsoft.graph.referenceAttachment") throw new NotImplementedError("Graph cloud reference attachments must be downloaded through their owning service");
     return { type: a.contentType ?? "message/rfc822", data: new Uint8Array(await (await this.http(`${url}/$value`, { headers: { Prefer: 'IdType="ImmutableId"' } })).arrayBuffer()) };
   }
-  async applyChanges(changes: MailChange[]): Promise<void> {
+  async applyChanges(changes: MailChange[]): Promise<MailChangeResult[]> {
+    const results: MailChangeResult[] = [];
     for (const c of changes) for (const id of c.providerIds) {
       const path = `${graphBase}/me/messages/${encodeURIComponent(id)}`;
       if (c.op === "setKeywords") {
@@ -134,8 +135,14 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
         }
         if (Object.keys(patch).length) await this.empty(path, this.body(patch, "PATCH"));
       } else if (c.op === "removeFromMailbox") throw new NotImplementedError("Graph messages require one folder; use move with a destination folder");
-      else await this.empty(`${path}/${c.op === "addToMailbox" ? "copy" : "move"}`, this.body({ destinationId: c.op === "delete" ? "deleteditems" : c.op === "move" ? c.toMailboxProviderId : c.mailboxProviderId }));
+      else {
+        const destinationId = c.op === "delete" ? "deleteditems" : c.op === "move" ? c.toMailboxProviderId : c.mailboxProviderId;
+        const moved = await this.api<GraphMessage>(`${path}/${c.op === "addToMailbox" ? "copy" : "move"}`, this.body({ destinationId }));
+        if (!moved?.id) throw new ProviderError("INVALID_RESPONSE", "Graph did not return the moved message identity; resync before retrying");
+        results.push({ op: c.op, providerId: id, newProviderId: moved.id, newMailboxProviderId: moved.parentFolderId ?? destinationId });
+      }
     }
+    return results;
   }
   private async draftBody(draft: DraftInput): Promise<Record<string, unknown>> {
     this.check(); if (draft.accountId !== this.account.id) throw new ProviderError("ACCOUNT_MISMATCH", "Draft belongs to another account");

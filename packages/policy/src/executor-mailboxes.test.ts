@@ -41,6 +41,31 @@ async function mailboxFixture(labels: boolean) {
 }
 
 describe('provider-aware mailbox actions', () => {
+  it.each(['archive', 'move', 'delete'] as const)('F6 persists replacement provider IDs for %s and moves the replacement back on undo', async type => {
+    const { executor, store, mail } = await setup({ labels: false });
+    await store.emails.upsertMany([email({ mailboxIds: ['inbox'] })]);
+    const live = new Set(['remote-email']);
+    let sequence = 0;
+    mail.applyChanges = async changes => {
+      mail.changes.push(structuredClone(changes));
+      return changes.flatMap(change => change.providerIds.map(providerId => {
+        expect(live.has(providerId)).toBe(true);
+        if (change.op !== 'move') throw new Error('Expected a move');
+        live.delete(providerId);
+        const newProviderId = `replacement-${++sequence}`;
+        live.add(newProviderId);
+        return { op: change.op, providerId, newProviderId, newMailboxProviderId: change.toMailboxProviderId };
+      }));
+    };
+    const action = await executor.submit(request(type, { emailIds: ['email'], toMailboxId: 'trash' }));
+    expect((await store.emails.get('email'))?.providerId).toBe('replacement-1');
+    expect(action.inverse?.params).toMatchObject({ __passportPolicyInverse: { emails: [{ providerId: 'replacement-1', mailboxIds: ['inbox'] }] } });
+    // Undo reads its durable snapshot, including after a process restart.
+    await store.actions.update(action.id, { inverse: JSON.parse(JSON.stringify(action.inverse)) });
+    await executor.undo(action.id);
+    expect(mail.changes[1]).toEqual([{ op: 'move', providerIds: ['replacement-1'], toMailboxProviderId: 'remote-inbox' }]);
+    expect(await store.emails.get('email')).toMatchObject({ providerId: 'replacement-2', mailboxIds: ['inbox'] });
+  });
   it('archives label mail without an archive mailbox and restores every prior label', async () => {
     const { executor, store, mail, expectMirror } = await mailboxFixture(true);
     await store.mailboxes.deleteMany(['archive']);

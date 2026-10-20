@@ -1,7 +1,7 @@
 import { ImapFlow, type FetchMessageObject, type ImapFlowOptions } from "imapflow";
 import nodemailer, { type SendMailOptions } from "nodemailer";
 import type SMTPTransport from "nodemailer/lib/smtp-transport/index.js";
-import type { Account, AccountCapabilities, AccountCredentials, DraftInput, Email, MailboxRole, MailChange, MailProvider, SendResult, SyncDelta } from "@passport/types";
+import type { Account, AccountCapabilities, AccountCredentials, DraftInput, Email, MailboxRole, MailChange, MailChangeResult, MailProvider, SendResult, SyncDelta } from "@passport/types";
 import { assertSend, decodeCursor, encodeCursor, localId, ProviderError, required, SubmissionAcceptedError } from "./errors.js";
 import { composeMime, decodeMimeBlob, mimeAttachment, normalizeMime } from "./normalize/index.js";
 import type { ProviderOptions } from "./http.js";
@@ -131,21 +131,26 @@ export class ImapMailProvider implements MailProvider {
     const names: Record<string, string> = { drafts: "\\Drafts", sent: "\\Sent", trash: "\\Trash" };
     const found = (await this.check().list()).find(f => f.specialUse === names[role]); if (!found) throw new ProviderError("MAILBOX_NOT_FOUND", `Configure ${role}Folder for this IMAP server`); return found.path;
   }
-  async applyChanges(changes: MailChange[]): Promise<void> {
+  async applyChanges(changes: MailChange[]): Promise<MailChangeResult[]> {
+    const results: MailChangeResult[] = [];
     for (const c of changes) {
       const destination = c.op === "delete" ? await this.folder("trash") : c.op === "move" ? c.toMailboxProviderId : c.op === "addToMailbox" ? c.mailboxProviderId : undefined;
       for (const id of c.providerIds) await this.withMessage(id, async (client, path, _validity, uid) => {
         if (c.op === "setKeywords") {
           if (c.add?.length && !await client.messageFlagsAdd(uid, c.add.map(k => flagMap[k] ?? k), { uid: true })) throw new ProviderError("IMAP_ERROR", "IMAP flag update failed");
           if (c.remove?.length && !await client.messageFlagsRemove(uid, c.remove.map(k => flagMap[k] ?? k), { uid: true })) throw new ProviderError("IMAP_ERROR", "IMAP flag update failed");
-        } else if (c.op === "removeFromMailbox") {
-          if (path === c.mailboxProviderId && !await client.messageMove(uid, await this.folder("trash"), { uid: true })) throw new ProviderError("IMAP_ERROR", "IMAP move to trash failed");
-        } else if (destination && path !== destination) {
-          const result = c.op === "addToMailbox" ? await client.messageCopy(uid, destination, { uid: true }) : await client.messageMove(uid, destination, { uid: true });
+        } else {
+          const target = c.op === "removeFromMailbox" ? path === c.mailboxProviderId ? await this.folder("trash") : undefined : destination;
+          if (!target || path === target) return;
+          const result = c.op === "addToMailbox" ? await client.messageCopy(uid, target, { uid: true }) : await client.messageMove(uid, target, { uid: true });
           if (!result) throw new ProviderError("IMAP_ERROR", "IMAP copy or move failed");
+          const newUid = result.uidMap?.get(uid);
+          if (!result.uidValidity || !newUid) throw new ProviderError("IMAP_UIDPLUS_REQUIRED", "Mail changed folders without COPYUID; resync before retrying");
+          results.push({ op: c.op, providerId: id, newProviderId: identity(target, String(result.uidValidity), newUid), newMailboxProviderId: target });
         }
       });
     }
+    return results;
   }
   private async raw(draft: DraftInput): Promise<Buffer> {
     this.check();

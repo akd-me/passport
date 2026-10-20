@@ -1,10 +1,10 @@
 import type {
   AccountCapabilities, ActionCategory, ActionParams, ActionRecord, ActionRequest, ActionType, CalendarEvent,
-  CalendarProvider, DraftInput, Email, MailChange, MailProvider, Matter, Person, SendResult, TrustState,
+  CalendarProvider, DraftInput, Email, MailChange, MailChangeResult, MailProvider, Matter, Person, SendResult, TrustState,
 } from '@passport/types';
 import { createMemoryEventBus, createMemoryStore } from './memory-store.js';
 import { createPolicyEngine } from '../policy.js';
-import { createActionExecutor } from '../executor.js';
+import { createActionExecutor, type ActionExecutorOptions } from '../executor.js';
 
 export const at = '2026-10-20T12:00:00.000Z';
 export const capabilities: AccountCapabilities = { mail: true, calendar: true, contacts: false, push: false, labels: true, submit: true };
@@ -39,7 +39,7 @@ export class FakeMailProvider implements MailProvider {
   async *sync() { yield { kind: 'cursor' as const, cursor: 'test' }; }
   async getEmail() { return this.sentEmail; }
   async getBlob() { return { type: 'text/plain', data: new Uint8Array() }; }
-  async applyChanges(changes: MailChange[]) { this.changes.push(structuredClone(changes)); if (this.failure) throw this.failure; }
+  async applyChanges(changes: MailChange[]): Promise<void | MailChangeResult[]> { this.changes.push(structuredClone(changes)); if (this.failure) throw this.failure; }
   async createDraft(input: DraftInput) { this.drafts.push({ operation: 'create', draft: input }); return email({ ...input, attachments: [], id: `draft-${++this.count}`, providerId: `remote-draft-${this.count}`, keywords: { $draft: true }, mailboxIds: ['drafts'] }); }
   async updateDraft(providerId: string, input: DraftInput) { this.drafts.push({ operation: 'update', providerId, draft: input }); return email({ ...input, attachments: [], providerId, keywords: { $draft: true } }); }
   async deleteDraft(providerId: string) { this.drafts.push({ operation: 'delete', providerId }); }
@@ -57,13 +57,13 @@ export class FakeCalendarProvider implements CalendarProvider {
   async freeBusy() { return []; }
 }
 
-export async function setup({ labels = true, ...options }: { fetch?: typeof globalThis.fetch; labels?: boolean } = {}) {
+export async function setup({ labels = true, ...options }: Pick<ActionExecutorOptions, 'fetch' | 'resolveDns'> & { labels?: boolean } = {}) {
   const store = createMemoryStore(), bus = createMemoryEventBus();
   let time = at;
   const now = () => time;
   const policy = createPolicyEngine({ store, bus, now });
   const mail = new FakeMailProvider(labels), calendar = new FakeCalendarProvider();
-  const executor = createActionExecutor({ store, bus, policy, now, mailProviderFor: () => mail, calendarProviderFor: () => calendar, ...options });
+  const executor = createActionExecutor({ store, bus, policy, now, mailProviderFor: () => mail, calendarProviderFor: () => calendar, resolveDns: async () => [{ address: '93.184.216.34', family: 4 }], ...options });
   await store.accounts.upsert({ id: 'account', kind: 'mock', displayName: 'Test', emailAddress: 'me@example.com', capabilities: mail.capabilities, settings: {}, createdAt: at, updatedAt: at });
   await store.emails.upsertMany([email()]);
   await store.mailboxes.upsertMany(['inbox', 'archive', 'trash', 'drafts', 'sent', 'tag'].map(id => ({ id, accountId: 'account', providerId: `remote-${id}`, name: id, role: id === 'tag' ? null : id as 'inbox', totalEmails: 0, unreadEmails: 0 })));

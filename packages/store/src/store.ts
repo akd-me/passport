@@ -489,6 +489,11 @@ class SQLiteStore implements Store {
       return this.get<ActionRecord>("actions", id)!;
     }),
     dueHeld: async now => this.rows("SELECT data FROM actions WHERE status = 'held' AND hold_until <= ? ORDER BY hold_until, id", [now]),
+    claim: async (id, from, to, now) => {
+      const row = this.one(`UPDATE actions SET status = ?, data = json_set(data, '$.status', ?, '$.decidedAt', ?)
+        WHERE id = ? AND status = ? RETURNING data`, [to, to, now, id, from]);
+      return row ? this.parse<ActionRecord>(row) : null;
+    },
   };
 
   trust: Store["trust"] = {
