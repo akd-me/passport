@@ -22,6 +22,7 @@ describe("backend schedulers", () => {
   it("syncs accounts on startup and at the configured interval, discovering newly added accounts", async () => {
     const sync = vi.spyOn(backend, "syncAccount").mockResolvedValue();
     handle = startSchedulers(backend);
+    await handle.ready;
     await vi.advanceTimersByTimeAsync(0);
     expect(sync).toHaveBeenCalledTimes(1);
     const account = (await backend.store.accounts.list())[0]!;
@@ -35,6 +36,7 @@ describe("backend schedulers", () => {
       .spyOn(backend.executor, "releaseDue")
       .mockResolvedValue([]);
     handle = startSchedulers(backend);
+    await handle.ready;
     await vi.advanceTimersByTimeAsync(29999);
     expect(release).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -46,11 +48,14 @@ describe("backend schedulers", () => {
     await vi.advanceTimersByTimeAsync(90000);
     expect(release).toHaveBeenCalledTimes(2);
   });
-  it("applies decay daily, independent of sync frequency", async () => {
+  it("applies decay at 03:00 daily, independent of sync frequency", async () => {
     const decay = vi.spyOn(backend.policy, "applyDecay").mockResolvedValue([]);
     backend.config.syncIntervalSeconds = 604800;
     handle = startSchedulers(backend);
-    vi.advanceTimersByTime(86399999);
+    await handle.ready;
+    const untilThree =
+      Date.parse(handle.scheduler.get("trust.decay")!.nextRunAt!) - Date.now();
+    await vi.advanceTimersByTimeAsync(untilThree - 1);
     await vi.advanceTimersByTimeAsync(0);
     expect(decay).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -63,6 +68,7 @@ describe("backend schedulers", () => {
     const run = vi.spyOn(backend.agent, "run");
     backend.config.syncIntervalSeconds = 604800;
     handle = startSchedulers(backend);
+    await handle.ready;
     await vi.advanceTimersByTimeAsync(999);
     expect(run).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -100,6 +106,7 @@ describe("backend schedulers", () => {
     );
     backend.config.syncIntervalSeconds = 1;
     handle = startSchedulers(backend);
+    await handle.ready;
     await vi.advanceTimersByTimeAsync(60000);
     expect(sync).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledTimes(1);
@@ -131,6 +138,7 @@ describe("backend schedulers", () => {
     );
     backend.waitForChanges = wait;
     handle = startSchedulers(backend);
+    await handle.ready;
     await vi.advanceTimersByTimeAsync(0);
     expect(wait).toHaveBeenCalledTimes(1);
     change();
@@ -142,6 +150,28 @@ describe("backend schedulers", () => {
     expect(wait.mock.calls[1]?.[1].aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it("keeps automatic push notifications from running a paused sync job", async () => {
+    const account = (await backend.store.accounts.list())[0]!;
+    await backend.store.accounts.upsert({
+      ...account,
+      capabilities: { ...account.capabilities, push: true },
+    });
+    let change!: () => void;
+    backend.waitForChanges = (_id, signal) =>
+      new Promise<void>((resolve) => {
+        change = resolve;
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    const sync = vi.spyOn(backend, "syncAccount").mockResolvedValue();
+    handle = startSchedulers(backend);
+    await handle.ready;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sync).toHaveBeenCalledTimes(1);
+    await handle.scheduler.pause(`sync:${account.id}`);
+    change();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sync).toHaveBeenCalledTimes(1);
+  });
   it("recovers from a failed scheduled operation on the next interval", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const release = vi
@@ -149,7 +179,8 @@ describe("backend schedulers", () => {
       .mockRejectedValueOnce(new Error("provider error"))
       .mockResolvedValue([]);
     handle = startSchedulers(backend);
-    await vi.advanceTimersByTimeAsync(60000);
+    await handle.ready;
+    await vi.advanceTimersByTimeAsync(66000);
     expect(release).toHaveBeenCalledTimes(2);
     expect(warning).toHaveBeenCalledTimes(1);
   });

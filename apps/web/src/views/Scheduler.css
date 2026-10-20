@@ -1,0 +1,144 @@
+.scheduler-table {
+  padding: 0;
+}
+.scheduler-table table {
+  min-width: 880px;
+  white-space: normal;
+}
+.scheduler-table th,
+.scheduler-table td {
+  padding: 16px 12px;
+}
+.scheduler-table th[scope="row"] {
+  max-width: 250px;
+  text-align: left;
+  font-weight: normal;
+  color: var(--text);
+  vertical-align: top;
+  border-bottom: 1px solid var(--line-soft);
+}
+.scheduler-table td {
+  max-width: 270px;
+  vertical-align: top;
+}
+.scheduler-table small {
+  display: block;
+  margin-top: 7px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.scheduler-table th[scope="row"] strong {
+  display: block;
+  font-size: 14px;
+}
+.scheduler-table th[scope="row"] .badge {
+  margin-top: 8px;
+}
+.job-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.job-failure {
+  margin-top: 10px;
+}
+.job-failure small {
+  color: var(--amber);
+}
+.scheduler-overlay {
+  position: fixed;
+  inset: 0;
+  background: #0008;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+}
+.scheduler-drawer {
+  width: min(600px, 100%);
+  background: var(--bg);
+  padding: 28px;
+  overflow-y: auto;
+  box-shadow: -10px 0 50px #172c2520;
+}
+.scheduler-drawer:focus {
+  outline: none;
+}
+.routine-form {
+  display: grid;
+  gap: 18px;
+}
+.routine-form > label {
+  display: grid;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.routine-form input,
+.routine-form select,
+.routine-form textarea {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--raised);
+}
+.routine-form textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+.routine-form fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+.weekday-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.weekday-picker label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.weekday-picker input {
+  width: auto;
+}
+.routine-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.routine-instruction {
+  padding: 16px;
+  margin: 20px 0;
+  background: var(--panel);
+  border-radius: 8px;
+}
+.routine-instruction p {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.job-history {
+  list-style: none;
+  padding: 0;
+  margin: 24px 0;
+}
+.job-history li {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.job-history li > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+}
+.job-history p {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}

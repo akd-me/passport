@@ -781,7 +781,10 @@ export type DomainEvent =
   | { type: "matter.updated"; matter: Matter }
   | { type: "person.downgraded"; person: Person; emailId: Id }
   | { type: "agent.run.started"; runId: Id; trigger: string }
-  | { type: "agent.run.finished"; runId: Id; proposed: number; executed: number; error?: string | null };
+  | { type: "agent.run.finished"; runId: Id; proposed: number; executed: number; error?: string | null }
+  | { type: "job.started"; jobId: Id; runId: Id }
+  | { type: "job.finished"; jobId: Id; runId: Id; status: "ok" | "error" | "skipped"; durationMs: number; summary?: string }
+  | { type: "job.updated"; jobId: Id };
 
 export interface EventBus {
   emit(event: DomainEvent): void;
