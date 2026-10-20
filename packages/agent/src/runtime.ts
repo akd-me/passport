@@ -1,5 +1,6 @@
-import type { ActionRequest, ActionType, AgentRun, AgentRuntime, AgentTrigger } from "@passport/types";
-import type { AgentRuntimeOptions, RunContext } from "./context.js";
+import { createToolRegistry } from "@passport/tools";
+import type { AgentRuntime, AgentTrigger } from "@passport/types";
+import type { AgentRuntimeOptions, RunContext, AgentRunResult, RegistryAgentRuntime } from "./context.js";
 import { normalizeAddress } from "./data.js";
 import { AgentError } from "./errors.js";
 import { newAgentId } from "./id.js";
@@ -27,19 +28,19 @@ class PersonalAgentRuntime implements AgentRuntime {
   getUserProfile(): Promise<string> { return getUserProfile(this.options.store); }
   setUserProfile(markdown: string): Promise<void> { return setUserProfile(this.options.store, markdown); }
 
-  run(trigger: AgentTrigger): Promise<AgentRun> {
+  run(trigger: AgentTrigger): Promise<AgentRunResult> {
     // Serialize per-runtime inference and KV journals without subscribing to the bus implicitly.
     const pending = this.queue.then(() => this.runInternal(trigger));
     this.queue = pending.catch(() => undefined);
     return pending;
   }
 
-  private async runInternal(trigger: AgentTrigger): Promise<AgentRun> {
+  private async runInternal(trigger: AgentTrigger): Promise<AgentRunResult> {
     const { store, executor, policy, bus } = this.options;
-    const run: AgentRun = { id: newAgentId(), trigger, startedAt: this.now(), actionIds: [], summary: "Started." };
+    const run: AgentRunResult = { toolBudget: { callsMade: 0, llmCalls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 }, id: newAgentId(), trigger, startedAt: this.now(), actionIds: [], summary: "Started." };
     const ctx: RunContext = {
       run, store, now: this.now, profile: "", selfAddresses: new Set(this.options.selfAddresses.map(normalizeAddress)), drafts: this.options.drafts ?? {},
-      actions: [], decisions: [], downgrades: [], notes: [], usages: [],
+      tools: [], toolCalls: 0, actions: [], decisions: [], downgrades: [], notes: [], usages: [],
       complete: async opts => {
         const response = await this.llm.complete(opts);
         ctx.usages.push(response.usage);
@@ -55,20 +56,36 @@ class PersonalAgentRuntime implements AgentRuntime {
         return response;
       },
       structured: async (schema, content, model = "main") => {
-        const response = await ctx.complete({ system: systemPrompt(ctx.profile, ctx.drafts), messages: [{ role: "user", content }], json: schema, model });
+        const response = await ctx.complete({ system: systemPrompt(ctx.profile, ctx.drafts, ctx.tools.map(tool => tool.name)), messages: [{ role: "user", content }], json: schema, model });
         if (!isObject(response.json)) throw new AgentError("Expected structured object output", "LLM_SCHEMA");
         return response.json;
       },
-      submit: async <T extends ActionType>(request: Omit<ActionRequest<T>, "actor" | "runId">) => {
-        const record = await executor.submit({ ...request, actor: { kind: "agent", id: run.id }, runId: run.id });
-        run.actionIds.push(record.id);
-        ctx.actions.push(record);
-        // Persist action correlation immediately so a later failure retains the partial run.
-        await store.kv.set(`run:${run.id}`, JSON.stringify(run));
-        if (record.status === "failed") throw new AgentError("Action executor reported a failed action", "ACTION_FAILED");
-        return record;
+      callTool: async (name, input, context) => {
+        const tool = ctx.tools.find(tool => tool.name === name);
+        if (!tool) throw new AgentError("Unknown registry tool", "INPUT_TOOL");
+        ctx.toolCalls++;
+        const result = await tool.handler(input, { ...context, runId: run.id });
+        const data = result;
+        if (data.error === "DEPENDENCY_ERROR" || data.status === "failed") throw new AgentError("Tool dependency failed", "ACTION_FAILED");
+        if (result.isError && data.error) throw new AgentError(typeof data.reason === "string" ? data.reason : "Invalid tool input", "INPUT_TOOL");
+        return result;
       },
     };
+    ctx.tools = createToolRegistry({ store, policy, bus, selfAddresses: this.options.selfAddresses, now: this.now,
+      actor: { kind: "agent", id: run.id }, executor: {
+        ...executor,
+        submit: async request => {
+          const record = await executor.submit(request);
+          run.actionIds.push(record.id);
+          ctx.actions.push(record);
+          await store.kv.set(`run:${run.id}`, JSON.stringify(run));
+          if (record.status === "failed") throw new AgentError("Action executor reported a failed action", "ACTION_FAILED");
+          return record;
+        },
+        approve: (...args) => executor.approve(...args), reject: (...args) => executor.reject(...args),
+        cancelHold: (...args) => executor.cancelHold(...args), undo: (...args) => executor.undo(...args), releaseDue: (...args) => executor.releaseDue(...args),
+      },
+    });
     await store.kv.set(`run:${run.id}`, JSON.stringify(run));
     let failure: AgentError | undefined;
     let journal: Journal | undefined;
@@ -98,6 +115,10 @@ class PersonalAgentRuntime implements AgentRuntime {
       failure = error instanceof AgentError ? error : new AgentError("Agent operation failed", "AGENT_COLLABORATOR");
       run.error = failure.message;
     }
+    run.toolBudget = { callsMade: ctx.toolCalls, llmCalls: ctx.usages.length,
+      inputTokens: ctx.usages.reduce((sum, usage) => sum + usage.inputTokens, 0),
+      outputTokens: ctx.usages.reduce((sum, usage) => sum + usage.outputTokens, 0),
+      totalTokens: ctx.usages.reduce((sum, usage) => sum + usage.totalTokens, 0) };
     run.finishedAt = this.now();
     run.summary = `${ctx.notes.join(" ") || (failure ? "Run failed." : "Run completed.")} ${ctx.actions.length} actions submitted; ${ctx.usages.length} LLM calls.`;
     await store.kv.set(`run:${run.id}`, JSON.stringify(run));
@@ -114,6 +135,6 @@ class PersonalAgentRuntime implements AgentRuntime {
 }
 
 /** Build an injected personal agent. The composition root owns subscriptions and scheduling. */
-export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
+export function createAgentRuntime(options: AgentRuntimeOptions): RegistryAgentRuntime {
   return new PersonalAgentRuntime(options);
 }

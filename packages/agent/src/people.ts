@@ -1,4 +1,4 @@
-import type { ActionRecord, ActionRequest, Email, EventBus, Person, Relationship, Store } from "@passport/types";
+import type { Email, EventBus, Person, Relationship, Store } from "@passport/types";
 import { allEmails, normalizeAddress } from "./data.js";
 import { newAgentId } from "./id.js";
 
@@ -15,7 +15,7 @@ export interface PeopleResult {
 /** Projects inferred people for prompts; only the executor may persist them. */
 export async function resolvePeople(opts: {
   email: Email; store: Store; bus: EventBus; selfAddresses: Set<string>; now: string;
-  submit: (request: Omit<ActionRequest<"person_update">, "actor" | "runId">) => Promise<ActionRecord>;
+  savePerson: (person: Person, reason: string) => Promise<void>;
 }): Promise<PeopleResult> {
   const { email, store, bus, selfAddresses, now } = opts;
   const addresses = new Map([...email.from, ...email.to, ...email.cc].map(address => [normalizeAddress(address.email), address]));
@@ -46,7 +46,7 @@ export async function resolvePeople(opts: {
       stats: { sent: sent + (outgoing && !selfAddresses.has(address) ? 1 : 0), received: received + (!outgoing && isSender ? 1 : 0), lastContactAt: [existing?.stats.lastContactAt, email.receivedAt].filter((at): at is string => Boolean(at)).sort().at(-1) ?? null },
       createdAt: existing?.createdAt ?? now, updatedAt: now,
     };
-    await opts.submit({ type: "person_update", accountId: email.accountId, category: "matters", params: { personId: person.id, patch: person }, reason: `Resolve ${address} as ${relationship}${downgrade ? "; previously blue sender is now green" : ""}`, counterparty: { emails: [address], ...(existing ? { personId: existing.id } : {}), class: relationship === "self" ? "self" : downgrade ? "stranger" : blue ? "blue" : relationship === "service" ? "service" : relationship === "known" ? "green_known" : "stranger" } });
+    await opts.savePerson(person, `Resolve ${address} as ${relationship}${downgrade ? "; previously blue sender is now green" : ""}`);
     result.people.push(person);
     if (await store.people.get(person.id)) result.persistedIds.push(person.id);
     if (downgrade) {

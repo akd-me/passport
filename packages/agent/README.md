@@ -1,7 +1,7 @@
 # @passport/agent
 
 Personal email triage, people inference, matter organization, policy-controlled playbooks,
-manual tool use, USER.md, and daily digests. Runtime dependencies: `@passport/types` only;
+manual tool use, USER.md, and daily digests. Runtime dependencies: `@passport/types` and `@passport/tools`;
 LLM requests use Node's `fetch`. No mail/calendar provider is accessed by this package.
 
 ```ts
@@ -96,14 +96,19 @@ when enabled. This switch applies to triage, calendar response drafts, and manua
 
 ## Manual tools and schedules
 
-The manual loop offers `search_mail`, `read_email`, `read_matter`, `list_matters`, `free_busy`,
-`draft`, `send`, `archive`, `label`, `matter_create`, `matter_update`, and `matter_attach`.
-Reads and writes both count toward an absolute 12-tool-call limit, including batched calls.
-Writes validate existing references/account ownership and bind the agent actor in code.
-`send` submits to the executor's outbox; it never delivers synchronously here. Recoverable input
-errors return to the model; executor/LLM failures finish and persist the failed run before throwing.
-Runs on one runtime instance are serialized. The composition root must avoid duplicate event
-delivery and concurrent runtimes over the same mailbox; there is no distributed lock or replay cache.
+The manual loop offers all 43 tools from `@passport/tools`, using the same names,
+JSON Schemas, account checks and handlers as MCP. Triage playbook writes and matter
+reviews invoke those handlers too. The system prompt lists registry tool names, so
+new tools become available automatically. The full [catalogue](../../docs/tools.md)
+describes inputs, results and policy categories.
+
+Reads and writes both count toward an absolute 12-tool-call manual limit, including
+batched calls. Recoverable input errors return to the model; dependency/LLM failures
+persist the failed run before throwing. `run()` returns an `AgentRunResult` with
+`toolBudget: {callsMade,llmCalls,inputTokens,outputTokens,totalTokens}`, also persisted
+with the run. Triage calls count in that budget too. Token counts use reported usage.
+Sends use the policy-controlled outbox. Runs on one runtime instance are serialized;
+the composition root still owns event deduplication and cross-runtime coordination.
 
 `daily_digest` writes UTC `digest:YYYY-MM-DD` Markdown covering completed/failed work, pending
 actions/outbox items, attention summaries, matters updated that day, and observed trust/verification
@@ -115,7 +120,8 @@ mail/event activity, and submits evidence-based summary/nextStep/status updates 
 
 ## Integrator requirements: frozen contract adaptations
 
-No shared types were changed. Three package-local conventions bridge gaps in the frozen interfaces:
+The shared contract appends reversible `profile_update` for USER.md edits. Three
+package-local conventions bridge the remaining interface gaps:
 
 - **Person creation:** `person_update` with a complete `Person` patch and a new ULID means upsert.
   The executor must support creation and log/undo it; a partial patch for a missing person should fail.
@@ -145,9 +151,9 @@ client and keeps all mail/calendar credentials in its own provider/executor comp
 ## Extending playbooks and verification
 
 Add deterministic rules to `heuristicCategory`, a new branch in `triage`, and short prompt/schema
-functions when needed. Submit typed ActionRequests through the run context; keep provider access
-and policy overrides out of playbooks. Extend the manual tool schema/dispatcher together so new
-tools retain validation and the call cap. Add fixture tests with `src/testing/memory-store.ts`'s `MemoryStore`,
+functions when needed. Invoke the shared registry through the run context; keep provider access
+and policy overrides out of playbooks. Add tools in `@passport/tools` so both MCP and the agent receive them with shared
+validation; retain the manual call cap. Add fixture tests with `src/testing/memory-store.ts`'s `MemoryStore`,
 `FakeExecutor`, `FakePolicy`, `MemoryBus`, and scripted `FakeLlm`; no network is used in tests.
 
 Run `pnpm --filter @passport/agent typecheck`, `pnpm --filter @passport/agent test`, and

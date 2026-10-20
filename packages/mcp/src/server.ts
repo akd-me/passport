@@ -1,8 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Context, type MailboxMcpDependencies } from "./context.js";
-import { registerReads } from "./reads.js";
+import { createToolRegistry, toMcpTools } from "@passport/tools";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { registerPrompts, registerResources } from "./resources.js";
-import { registerWrites } from "./writes.js";
+
 import { MailboxMcpError } from "./presentation.js";
 
 const dependencies = new WeakMap<McpServer, MailboxMcpDependencies>();
@@ -15,8 +16,17 @@ export function createMailboxMcpServer(deps: MailboxMcpDependencies): McpServer 
     maxToolInputElements: 10_000,
   });
   const context = new Context(deps, server);
-  registerReads(context);
-  registerWrites(context);
+  const tools = createToolRegistry({ ...deps, selfAddresses: [], actor: {
+    kind: "external-agent", get id() { return deps.clientName ?? server.server.getClientVersion()?.name ?? "mcp-client"; },
+  } });
+  server.server.registerCapabilities({ tools: {} });
+  server.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toMcpTools(tools) }));
+  server.server.setRequestHandler(CallToolRequestSchema, async request => {
+    const tool = tools.find(tool => tool.name === request.params.name);
+    if (!tool) return { content: [{ type: "text", text: JSON.stringify({ error: "UNKNOWN_TOOL", reason: "Unknown Passport tool." }) }], isError: true };
+    const result = await tool.handler(request.params.arguments ?? {});
+    return { content: [{ type: "text", text: JSON.stringify(result) }], ...(result.isError ? { isError: true } : {}) };
+  });
   registerResources(context);
   registerPrompts(context);
   dependencies.set(server, deps);

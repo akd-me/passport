@@ -89,6 +89,7 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     if (!request.params || typeof request.params !== 'object' || Object.prototype.hasOwnProperty.call(request.params, marker)) throw new PolicyError('INVALID_PARAMS', 'Private inverse data cannot be submitted');
     if (!['human', 'agent', 'external-agent'].includes(request.actor?.kind)) throw new PolicyError('INVALID_ACTOR', 'Unknown actor kind');
     const params = request.params as unknown as { draft?: DraftInput; event?: CalendarEvent; patch?: { accountId?: string; id?: string; providerId?: string; verification?: unknown; relationship?: unknown } };
+    if (request.type === 'profile_update' && (request.category !== 'matters' || typeof (request.params as ActionParams['profile_update']).markdown !== 'string')) throw new PolicyError('INVALID_PARAMS', 'Profile updates require matters category and markdown');
     const personParams = request.type === 'person_update' ? request.params as ActionParams['person_update'] : null;
     const completePerson = personParams && isCompletePerson(personParams.patch);
     const personSnapshot = completePerson && request.actor.kind !== 'external-agent';
@@ -392,6 +393,10 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
         }
         await store.people.upsert({ ...prior, ...request.params.patch, id: prior.id, createdAt: prior.createdAt, updatedAt: now() }); return { personId: prior.id };
       }
+      case 'profile_update': {
+        await store.kv.set('user_profile', request.params.markdown);
+        return {};
+      }
       case 'snooze': {
         if (request.params.matterId) { const matter = await matterFor(request.params.matterId); await mirrorMatter({ ...matter, status: 'snoozed', snoozedUntil: request.params.until, updatedAt: now() }); }
         for (const email of await allEmails(request.params.emailIds ?? [], request.accountId)) await store.kv.set(`policy:snooze:${email.id}`, request.params.until);
@@ -404,7 +409,9 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     try {
       const request = action.request as Request;
       const snapshot = snapshotOf(request) ? null : await capture(request);
-      const inverseParams = snapshot ? { ...request.params, [marker]: snapshot } : null;
+      const inverseParams = request.type === 'profile_update'
+        ? { markdown: await store.kv.get('user_profile') ?? '' }
+        : snapshot ? { ...request.params, [marker]: snapshot } : null;
       const inverse: ActionRequest | null = undoOf ? undoOf.request : inverseParams ? { ...structuredClone(request), actor: { kind: 'human', id: 'undo' }, reason: `Undo: ${request.reason}`, params: inverseParams } : null;
       const reversibility = undoOf ? 'reversible' : BASE_REVERSIBILITY[request.type] === 'delayed' ? 'irreversible' : BASE_REVERSIBILITY[request.type];
       const decision = { ...action.decision, reversibility };

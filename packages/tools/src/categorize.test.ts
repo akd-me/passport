@@ -47,7 +47,7 @@ describe("categorize", () => {
   });
   it.each([
     ["unsubscribe", "unsubscribe"], ["calendar_respond", "scheduling"], ["calendar_propose", "scheduling"],
-    ["matter_create", "matters"], ["matter_update", "matters"], ["matter_attach", "matters"], ["person_update", "matters"],
+    ["profile_update", "matters"], ["matter_create", "matters"], ["matter_update", "matters"], ["matter_attach", "matters"], ["person_update", "matters"],
   ] as const)("assigns %s to %s", (type, category) => {
     expect(categorize({ type }).category).toBe(category);
   });

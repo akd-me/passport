@@ -342,7 +342,8 @@ export type ActionType =
   | "matter_update"
   | "matter_attach"
   | "person_update"
-  | "snooze";
+  | "snooze"
+  | "profile_update"; // whole USER.md, logged and reversible
 
 export type CounterpartyClass = "self" | "blue" | "green_known" | "stranger" | "service";
 
@@ -379,6 +380,7 @@ export interface ActionParams {
   matter_attach: { matterId: Id; emailIds?: Id[]; eventIds?: Id[]; personIds?: Id[] };
   person_update: { personId: Id; patch: Partial<Person> };
   snooze: { emailIds?: Id[]; matterId?: Id; until: Timestamp };
+  profile_update: { markdown: string };
 }
 
 export interface ActionRequest<T extends ActionType = ActionType> {
@@ -892,6 +894,7 @@ export const BASE_RISK: Record<ActionType, RiskLevel> = {
   matter_attach: "low",
   person_update: "low",
   snooze: "low",
+  profile_update: "low",
 };
 
 export const BASE_REVERSIBILITY: Record<ActionType, Reversibility> = {
@@ -920,4 +923,5 @@ export const BASE_REVERSIBILITY: Record<ActionType, Reversibility> = {
   matter_attach: "reversible",
   person_update: "reversible",
   snooze: "reversible",
+  profile_update: "reversible",
 };

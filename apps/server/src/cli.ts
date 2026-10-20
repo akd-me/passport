@@ -18,6 +18,7 @@ import { Writable } from "node:stream";
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const [command = "serve", subcommand, kind] = args;
+  if (command === "mcp" && (subcommand === "install" || subcommand === "proxy")) return (await import("./cli/mcp-install.js")).handleMcpCommand(args);
   if (command === "--help" || command === "help") {
     console.log(
       "passport serve | demo | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo]",

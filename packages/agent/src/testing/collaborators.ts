@@ -106,6 +106,10 @@ export class FakeExecutor implements ActionExecutor {
         }
         return {};
       }
+      case "profile_update": {
+        await this.store.kv.set("user_profile", params(request, "profile_update").markdown);
+        return {};
+      }
       case "calendar_respond": return {};
       default: throw new AgentError(`Fake executor does not execute ${request.type}`, "FAKE_UNSUPPORTED");
     }

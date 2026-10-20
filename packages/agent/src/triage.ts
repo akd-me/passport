@@ -1,3 +1,4 @@
+import { categorize } from "@passport/tools";
 import type { ActionCategory, Counterparty, DraftInput, Email, Matter, Person, Store, TimeRange } from "@passport/types";
 import type { RunContext } from "./context.js";
 import { allEmails, normalizeAddress, overlaps } from "./data.js";
@@ -20,9 +21,8 @@ export function heuristicCategory(email: Email): ActionCategory | undefined {
 }
 
 export function emailCounterparty(email: Email, people: Person[], downgraded = false): Counterparty {
-  const sender = people.find(person => email.from.some(address => person.emails.some(item => normalizeAddress(item) === normalizeAddress(address.email))));
-  const cls = downgraded ? "stranger" : sender?.relationship === "self" ? "self" : email.verification.passport === "blue" ? "blue" : sender?.relationship === "service" ? "service" : sender?.relationship === "known" ? "green_known" : "stranger";
-  return { emails: email.from.map(address => address.email), personId: sender?.id ?? null, class: cls };
+  const counterparty = categorize({ type: "archive", emails: [email], people }).counterparty ?? { emails: [], class: "stranger" as const };
+  return downgraded ? { ...counterparty, class: "stranger" } : counterparty;
 }
 
 async function candidates(store: Store, email: Email, personIds: string[]): Promise<Matter[]> {
@@ -59,13 +59,14 @@ async function attachMatter(ctx: RunContext, email: Email, category: ActionCateg
   const emailPatch = { category, personIds };
   if (selected) {
     const params: AgentMatterAttachParams = { matterId: selected.id, emailIds: [email.id], personIds, emailPatch };
-    await ctx.submit({ type: "matter_attach", accountId: email.accountId, params, category: "matters", reason: `Organize “${email.subject}” in ${selected.title}`, matterId: selected.id, counterparty });
+    await ctx.callTool("attach_to_matter", { accountId: email.accountId, matterId: params.matterId, emailIds: params.emailIds, personIds: params.personIds, reason: `Organize “${email.subject}” in ${selected.title}` }, { emailPatch, matterId: selected.id });
     return { id: selected.id, summary };
   }
   const params: AgentMatterCreateParams = {
     matter: { title: category === "receipts" ? purchaseTitle : String(proposal.title), kind: category === "receipts" ? "purchase" : String(proposal.kind), summary, nextStep: String(proposal.nextStep), status: "active", personIds, emailIds: [email.id], eventIds: [] }, emailPatch,
   };
-  const record = await ctx.submit({ type: "matter_create", accountId: email.accountId, params, category: "matters", reason: `Create matter: ${params.matter.title}. ${summary}`, counterparty });
+  await ctx.callTool("create_matter", { accountId: email.accountId, matter: params.matter, reason: `Create matter: ${params.matter.title}. ${summary}` }, { emailPatch });
+  const record = ctx.actions.at(-1)!;
   if (record.status !== "executed") return { summary };
   const result = record.result;
   const resultMatter = isObject(result?.matter) ? result.matter : undefined;
@@ -92,14 +93,14 @@ export function replyDraft(ctx: RunContext, email: Email, textBody: string): Dra
 async function scheduling(ctx: RunContext, email: Email, counterparty: Counterparty, matterId?: string): Promise<void> {
   const start = ctx.now();
   const range = { start, end: new Date(Date.parse(start) + 14 * 86_400_000).toISOString() };
-  const events = await ctx.store.events.query({});
+  const events = await ctx.store.events.query({ limit: 2_147_483_647 });
   const event = events.find(item => item.sourceEmailId === email.id && item.status !== "cancelled");
   const busy = events.filter(item => item.id !== event?.id && item.status !== "cancelled" && item.myStatus !== "declined" && overlaps(item, range)).map(item => ({ start: item.start, end: item.end }));
   const response = await ctx.structured(scheduleSchema, schedulingPrompt(email, busy, range, event));
   if (event) {
     const conflict = busy.some(slot => overlaps(slot, event));
     const status = response.status === "accepted" && conflict ? "tentative" : response.status as "accepted" | "tentative" | "declined";
-    await ctx.submit({ type: "calendar_respond", accountId: event.accountId, category: "scheduling", counterparty, matterId, reason: `Propose ${status} for “${event.title}”${conflict ? "; calendar conflict requires review" : ""}`, params: { eventId: event.id, status, comment: formatDraft(String(response.textBody), ctx.profile, ctx.drafts) } });
+    await ctx.callTool("respond_to_event", { eventId: event.id, status, comment: formatDraft(String(response.textBody), ctx.profile, ctx.drafts), reason: `Propose ${status} for “${event.title}”${conflict ? "; calendar conflict requires review" : ""}` }, { matterId });
   } else {
     const slots = response.slots as TimeRange[];
     for (const slot of slots) {
@@ -108,14 +109,20 @@ async function scheduling(ctx: RunContext, email: Email, counterparty: Counterpa
         throw new AgentError("Model proposed an invalid or busy meeting slot", "LLM_SCHEDULE");
       }
     }
-    await ctx.submit({ type: "calendar_propose", accountId: email.accountId, category: "scheduling", counterparty, matterId, reason: `Draft a scheduling proposal for “${email.subject}”`, params: { draft: replyDraft(ctx, email, String(response.textBody)), slots } });
+    if (!slots.length) {
+      await ctx.callTool("create_draft", { draft: replyDraft(ctx, email, String(response.textBody)), reason: `Draft scheduling response without available slots: ${email.subject}` }, { classification: "scheduling", matterId });
+      return;
+    }
+    await ctx.callTool("propose_meeting", { draft: replyDraft(ctx, email, String(response.textBody)), slots, reason: `Draft a scheduling proposal for “${email.subject}”` }, { matterId });
   }
 }
 
 export async function triage(ctx: RunContext, emailId: string, bus: import("@passport/types").EventBus): Promise<void> {
   const email = await ctx.store.emails.get(emailId, { includeBodies: true });
   if (!email) throw new AgentError("Received email was not found in the store", "EMAIL_NOT_FOUND");
-  const resolved = await resolvePeople({ email, store: ctx.store, bus, selfAddresses: ctx.selfAddresses, now: ctx.now(), submit: ctx.submit });
+  const resolved = await resolvePeople({ email, store: ctx.store, bus, selfAddresses: ctx.selfAddresses, now: ctx.now(), savePerson: async (person, reason) => {
+    await ctx.callTool("update_person", { accountId: email.accountId, personId: person.id, patch: { displayName: person.displayName }, reason }, { personSnapshot: person, projectedPeople: [person] });
+  } });
   ctx.downgrades.push(...resolved.downgraded);
   let category = heuristicCategory(email);
   if (!category) category = (await ctx.structured(classificationSchema, classificationPrompt(email, resolved.people), "fast")).category as ActionCategory;
@@ -125,18 +132,19 @@ export async function triage(ctx: RunContext, emailId: string, bus: import("@pas
   const knownSender = resolved.people.some(person => (person.relationship === "known" || person.relationship === "self") && email.from.some(address => person.emails.includes(normalizeAddress(address.email))));
   if (category === "replies_known" && (!knownSender || downgraded)) category = "replies_stranger";
   const matter = await attachMatter(ctx, email, category, resolved.persistedIds, counterparty);
-  const common = { accountId: email.accountId, category, counterparty, matterId: matter.id };
+  const common = { accountId: email.accountId, emailIds: [email.id] };
+  const toolContext = { classification: category, projectedPeople: resolved.people, matterId: matter.id };
   if (category === "newsletters" || category === "receipts") {
-    await ctx.submit({ ...common, type: "label", params: { emailIds: [email.id], label: category === "receipts" ? "Receipts" : "Newsletters" }, reason: `Label ${category}: ${email.subject}` });
-    await ctx.submit({ ...common, type: "archive", params: { emailIds: [email.id] }, reason: `Archive routine ${category}: ${email.subject}` });
+    await ctx.callTool("label_emails", { ...common, label: category === "receipts" ? "Receipts" : "Newsletters", reason: `Label ${category}: ${email.subject}` }, toolContext);
+    await ctx.callTool("archive_emails", { ...common, reason: `Archive routine ${category}: ${email.subject}` }, toolContext);
   } else if (category === "notifications") {
-    await ctx.submit({ ...common, type: "mark_read", params: { emailIds: [email.id] }, reason: `Mark routine notification read: ${email.subject}` });
-    await ctx.submit({ ...common, type: "archive", params: { emailIds: [email.id] }, reason: `Archive routine notification: ${email.subject}` });
+    await ctx.callTool("mark_read", { ...common, reason: `Mark routine notification read: ${email.subject}` }, toolContext);
+    await ctx.callTool("archive_emails", { ...common, reason: `Archive routine notification: ${email.subject}` }, toolContext);
   } else if (category === "scheduling") {
     await scheduling(ctx, email, counterparty, matter.id);
   } else if (category === "replies_known") {
     const response = await ctx.structured(replySchema, replyPrompt(email, await readThread(ctx.store, email)));
-    await ctx.submit({ ...common, type: "draft_create", params: { draft: replyDraft(ctx, email, String(response.textBody)) }, reason: `Draft a reply for review: ${email.subject}` });
+    await ctx.callTool("create_draft", { draft: replyDraft(ctx, email, String(response.textBody)), reason: `Draft a reply for review: ${email.subject}` }, toolContext);
   } else {
     const decision = { emailId: email.id, ...(matter.id ? { matterId: matter.id } : {}), summary: matter.summary };
     ctx.decisions.push(decision);

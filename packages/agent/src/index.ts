@@ -1,5 +1,5 @@
 export { createAgentRuntime } from "./runtime.js";
-export type { AgentRuntimeOptions } from "./context.js";
+export type { AgentRuntimeOptions, AgentRunResult, RegistryAgentRuntime } from "./context.js";
 export { getUserProfile, setUserProfile, DEFAULT_USER_PROFILE } from "./profile.js";
 export type { DraftSettings } from "./profile.js";
 export { createLlmClient, AnthropicClient, OpenAiCompatibleClient } from "./llm/client.js";

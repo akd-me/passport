@@ -29,7 +29,8 @@ export function categorize(input: CategorizeInput): { category: ActionCategory; 
     const person = people.find(candidate => candidate.emails.some(address => normalize(address) === email)
       || normalize(candidate.primaryEmail) === email);
     const senderMessages = emails.filter(message => message.from.some(address => normalize(address.email) === email));
-    const downgraded = senderMessages.some(message => message.verification.passport === "downgraded");
+    const downgraded = senderMessages.some(message => message.verification.passport === "downgraded")
+      || Boolean(person?.lastSeenBlueAt && person.verification !== "blue");
     const blue = senderMessages.length ? senderMessages.every(message => message.verification.passport === "blue") : person?.verification === "blue";
     let kind: Counterparty["class"] = "stranger";
     if (self.has(email) || person?.relationship === "self") kind = "self";
@@ -47,7 +48,7 @@ export function categorize(input: CategorizeInput): { category: ActionCategory; 
   } : null;
 
   let category: ActionCategory;
-  if (["matter_create", "matter_update", "matter_attach", "person_update"].includes(input.type)
+  if (["matter_create", "matter_update", "matter_attach", "person_update", "profile_update"].includes(input.type)
     || (input.type === "snooze" && input.matterId && emails.length === 0)) category = "matters";
   else if (input.type === "unsubscribe") category = "unsubscribe";
   else if (input.type.startsWith("calendar_")) category = "scheduling";
