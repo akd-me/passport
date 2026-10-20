@@ -446,6 +446,25 @@ describe("people and matters", () => {
 });
 
 describe("actions and trust", () => {
+  it("F2 conditionally claims a row once across independent database connections", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "passport-claims-"));
+    const path = join(directory, "store.sqlite");
+    const first = openStore({ path, masterKey: "test" }), second = openStore({ path, masterKey: "test" });
+    try {
+      await first.migrate(); await second.migrate();
+      const record = action("held", { status: "held", holdUntil: at, approvedSnapshot: { subject: "Approved" } });
+      await first.actions.insert(record);
+      const results = await Promise.all([first.actions.claim!(record.id, "held", "executing", at), second.actions.claim!(record.id, "held", "executing", at)]);
+      expect(results.filter(Boolean)).toHaveLength(1);
+      expect(results.find(Boolean)).toEqual({ ...record, status: "executing", decidedAt: at });
+      expect((await second.actions.query({ status: ["executing"] })).items).toHaveLength(1);
+      expect(await first.actions.dueHeld(at)).toEqual([]);
+      expect(await first.actions.claim!("missing", "held", "executing", at)).toBeNull();
+      expect(await first.actions.claim!(record.id, "held", "executing", at)).toBeNull();
+    } finally {
+      await first.close(); await second.close(); await rm(directory, { recursive: true, force: true });
+    }
+  });
   it("inserts, gets and updates complete nested action records", async () => {
     expect(await store.actions.get("missing")).toBeNull();
     expect(await store.actions.insert(action())).toEqual(action());

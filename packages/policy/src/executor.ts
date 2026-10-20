@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import {
   BASE_REVERSIBILITY,
   type ActionCategory, type ActionExecutor, type ActionParams, type ActionRecord, type ActionRequest, type ActionType,
@@ -7,7 +8,7 @@ import {
 import { PolicyError } from './errors.js';
 import { editDistanceRatio } from './helpers.js';
 import { newId } from './id.js';
-import { parseListUnsubscribe, requestUnsubscribe } from './unsubscribe.js';
+import { parseListUnsubscribe, requestUnsubscribe, type ResolveDns } from './unsubscribe.js';
 
 /** Providers may be resolved synchronously or asynchronously, and must already be connected. */
 export interface ActionExecutorOptions {
@@ -18,6 +19,8 @@ export interface ActionExecutorOptions {
   calendarProviderFor(accountId: string): CalendarProvider | Promise<CalendarProvider>;
   /** HTTP transport for header/link unsubscribe; defaults to the global fetch. */
   fetch?: typeof globalThis.fetch;
+  /** Resolve all addresses before each unsubscribe request, including redirect hops. */
+  resolveDns?: ResolveDns;
   now?: () => Timestamp;
 }
 type Request = { [K in ActionType]: ActionRequest<K> }[ActionType];
@@ -33,6 +36,7 @@ const marker = '__passportPolicyInverse';
 const snapshotOf = (request: ActionRequest) => (request.params as unknown as Record<string, Snapshot>)[marker];
 const patchOf = (email: Email): EmailPatch => ({ id: email.id, matterId: email.matterId ?? null, personIds: [...email.personIds], category: email.category ?? null });
 const draftOf = (email: Email): DraftInput => ({ accountId: email.accountId, to: email.to, cc: email.cc, bcc: email.bcc, subject: email.subject, textBody: email.textBody ?? '', htmlBody: email.htmlBody, attachments: email.attachments.map(({ name, type, blobId }) => ({ name, type, blobId })) });
+const normalizedDraft = (draft: DraftInput): DraftInput => structuredClone({ ...draft, inReplyToEmailId: draft.inReplyToEmailId ?? null, cc: draft.cc ?? [], bcc: draft.bcc ?? [], htmlBody: draft.htmlBody ?? null, attachments: draft.attachments ?? [] });
 
 const isCompletePerson = (patch: Partial<Person>): patch is Person =>
   typeof patch.id === 'string' && patch.id.length > 0 && typeof patch.displayName === 'string' &&
@@ -56,7 +60,7 @@ const agentEmailPatchOf = (request: ActionRequest): Partial<Pick<Email, 'categor
 };
 
 /** Persist, authorize, execute, hold, and undo all mutations through a single serialized gate. */
-export function createActionExecutor({ store, bus, policy, mailProviderFor, calendarProviderFor, fetch: fetcher = globalThis.fetch, now = () => new Date().toISOString() }: ActionExecutorOptions): ActionExecutor {
+export function createActionExecutor({ store, bus, policy, mailProviderFor, calendarProviderFor, fetch: fetcher = globalThis.fetch, resolveDns, now = () => new Date().toISOString() }: ActionExecutorOptions): ActionExecutor {
   let queue = Promise.resolve();
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = queue.then(operation); queue = result.then(() => undefined, () => undefined); return result;
@@ -66,6 +70,15 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     if (!action) throw new PolicyError('ACTION_NOT_FOUND', `Action ${id} does not exist`);
     if (!statuses.includes(action.status)) throw new PolicyError('INVALID_ACTION_STATE', `Cannot perform this operation on a ${action.status} action`);
     return action;
+  };
+  const claim = async (action: ActionRecord, to: ActionRecord['status'] = 'executing'): Promise<ActionRecord | null> => {
+    if (!store.actions.claim) throw new PolicyError('ACTION_CLAIM_UNSUPPORTED', 'Store.actions.claim is required for shared action transitions');
+    return store.actions.claim(action.id, action.status, to, now());
+  };
+  const requireClaim = async (action: ActionRecord): Promise<ActionRecord> => {
+    const claimed = await claim(action);
+    if (!claimed) throw new PolicyError('INVALID_ACTION_STATE', 'Another executor already claimed this action');
+    return claimed;
   };
   const emailFor = async (id: string, accountId: string): Promise<Email> => {
     const email = await store.emails.get(id, { includeBodies: true });
@@ -85,6 +98,25 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     return matter;
   };
   const allEmails = (ids: string[], accountId: string) => Promise.all([...new Set(ids)].map(id => emailFor(id, accountId)));
+  const resolvedDraft = async (request: ActionRequest): Promise<DraftInput> => {
+    const { draft, draftEmailId } = request.params as ActionParams['send'];
+    if (!!draft === !!draftEmailId) throw new PolicyError('INVALID_PARAMS', 'Send requires exactly one draft or draftEmailId');
+    if (draft) return normalizedDraft(draft);
+    const email = await emailFor(draftEmailId!, request.accountId);
+    if (!email.keywords.$draft) throw new PolicyError('NOT_A_DRAFT', 'Only draft emails can be sent');
+    const resolved = draftOf(email);
+    if (email.headers.inReplyTo) {
+      let cursor: string | null | undefined;
+      do {
+        const page = await store.emails.query({ accountId: email.accountId, threadId: email.threadId, limit: 100, cursor });
+        const source = page.items.find(source => source.id !== email.id && source.headers.messageId === email.headers.inReplyTo);
+        if (source) { resolved.inReplyToEmailId = source.id; break; }
+        cursor = page.nextCursor;
+      } while (cursor);
+      if (!resolved.inReplyToEmailId) throw new PolicyError('REPLY_NOT_FOUND', 'The saved draft reply source is unavailable; sync before approving this send');
+    }
+    return normalizedDraft(resolved);
+  };
   const assertPublic = (request: ActionRequest) => {
     if (!request.params || typeof request.params !== 'object' || Object.prototype.hasOwnProperty.call(request.params, marker)) throw new PolicyError('INVALID_PARAMS', 'Private inverse data cannot be submitted');
     if (!['human', 'agent', 'external-agent'].includes(request.actor?.kind)) throw new PolicyError('INVALID_ACTOR', 'Unknown actor kind');
@@ -137,8 +169,12 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       default: return null;
     }
   };
-  const mirrorEmail = async (id: string, patch: Parameters<Store['emails']['patchMany']>[1]) => {
-    await store.emails.patchMany([id], patch); bus.emit({ type: 'email.updated', emailId: id });
+  const mirrorEmail = async (id: string, patch: Parameters<Store['emails']['patchMany']>[1] & { providerId?: string }) => {
+    if (patch.providerId !== undefined) {
+      const email = await store.emails.get(id, { includeBodies: true });
+      if (email) await store.emails.upsertMany([{ ...email, ...patch }]);
+    } else await store.emails.patchMany([id], patch);
+    bus.emit({ type: 'email.updated', emailId: id });
   };
   const mirrorMatter = async (matter: Matter) => { await store.matters.upsert(matter); bus.emit({ type: 'matter.updated', matter }); };
   const mailboxFor = async (accountId: string, id: string) => {
@@ -151,6 +187,15 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     const account = await store.accounts.get(accountId);
     if (!account) throw new PolicyError('ACCOUNT_NOT_FOUND', `Account ${accountId} does not exist`);
     return account.capabilities.labels;
+  };
+  const applyMailChanges = async (accountId: string, changes: MailChange[], emails: Email[]) => {
+    if (!changes.length) return;
+    const results = await (await mailProviderFor(accountId)).applyChanges(changes);
+    for (const result of results ?? []) {
+      // Copy adds another message; it does not replace the original identity.
+      if (result.op === 'addToMailbox' || !result.newProviderId) continue;
+      for (const email of emails) if (email.providerId === result.providerId) email.providerId = result.newProviderId;
+    }
   };
   const changeMail = async (request: Request, snapshot: Extract<Snapshot, { kind: 'mail' }>) => {
     const boxes = await store.mailboxes.list(request.accountId);
@@ -205,8 +250,8 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       }
       patches.push({ id: email.id, patch: { mailboxIds, keywords } });
     }
-    if (changes.length) await (await mailProviderFor(request.accountId)).applyChanges(changes);
-    for (const { id, patch } of patches) await mirrorEmail(id, patch);
+    await applyMailChanges(request.accountId, changes, snapshot.emails);
+    for (const { id, patch } of patches) await mirrorEmail(id, { ...patch, providerId: snapshot.emails.find(email => email.id === id)!.providerId });
     return { emailIds: patches.map(item => item.id) };
   };
   const restore = async (request: ActionRequest, snapshot: Snapshot): Promise<Record<string, unknown>> => {
@@ -214,8 +259,10 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       case 'mail': {
         const labels = await usesLabels(request.accountId);
         const changes: MailChange[] = [];
+        const currents: Email[] = [];
         for (const prior of snapshot.emails) {
           const current = await emailFor(prior.id, request.accountId);
+          currents.push(current);
           const add = Object.keys(prior.keywords).filter(key => prior.keywords[key] && !current.keywords[key]);
           const remove = Object.keys(current.keywords).filter(key => current.keywords[key] && !prior.keywords[key]);
           // Apply flags before a folder move, which may change the provider's message ID.
@@ -228,8 +275,8 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
             changes.push({ op: 'move', providerIds: [current.providerId], toMailboxProviderId: (await mailboxFor(request.accountId, prior.mailboxIds[0]!)).providerId });
           }
         }
-        if (changes.length) await (await mailProviderFor(request.accountId)).applyChanges(changes);
-        for (const prior of snapshot.emails) await mirrorEmail(prior.id, { mailboxIds: prior.mailboxIds, keywords: prior.keywords });
+        await applyMailChanges(request.accountId, changes, currents);
+        for (const prior of snapshot.emails) await mirrorEmail(prior.id, { mailboxIds: prior.mailboxIds, keywords: prior.keywords, providerId: currents.find(email => email.id === prior.id)!.providerId });
         return { emailIds: snapshot.emails.map(email => email.id) };
       }
       case 'draft': {
@@ -291,7 +338,20 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     for (const email of snapshot.emails) bus.emit({ type: 'email.updated', emailId: email.id });
     return saved;
   };
-  const dispatch = async (request: Request, snapshot: Snapshot | null): Promise<Record<string, unknown>> => {
+  const settleUnsubscribeParent = async (child: ActionRecord) => {
+    const parentId = await store.kv.get(`policy:unsubscribe-parent:${child.id}`);
+    if (!parentId || !['executed', 'failed', 'rejected'].includes(child.status)) return;
+    const parent = await store.actions.get(parentId);
+    if (parent?.status !== 'executing' || parent.result?.childActionId !== child.id) return;
+    const status = child.status;
+    if (!await claim(parent, status)) return;
+    const updated = await store.actions.update(parentId, {
+      status, ...(status === 'executed' ? { executedAt: now() } : { error: child.error ?? 'Unsubscribe send was rejected' }),
+      result: { ...parent.result, status: status === 'executed' ? 'sent' : status, ...(child.result?.warning ? { warning: child.result.warning } : {}) },
+    });
+    bus.emit({ type: status === 'executed' ? 'action.executed' : status === 'failed' ? 'action.failed' : 'action.decided', action: updated });
+  };
+  const dispatch = async (request: Request, snapshot: Snapshot | null, action: ActionRecord): Promise<Record<string, unknown>> => {
     const inverse = snapshotOf(request);
     if (inverse) return restore(request, inverse);
     switch (request.type) {
@@ -318,10 +378,15 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
         const draft = request.params.draft;
         if (!prior && !draft) throw new PolicyError('INVALID_PARAMS', 'Send requires a draft or draftEmailId');
         const provider = await mailProviderFor(request.accountId);
-        const result = await provider.send({ ...(prior ? { draftProviderId: prior.providerId } : {}), ...(draft ? { draft } : {}) });
-        if (prior) { await store.emails.deleteMany([prior.id]); bus.emit({ type: 'email.updated', emailId: prior.id }); }
-        const sent = await provider.getEmail(result.providerId);
-        if (sent) { await store.emails.upsertMany([{ ...sent, accountId: request.accountId }]); bus.emit({ type: 'email.updated', emailId: sent.id }); }
+        // Submit the authorized content, so a draft edit racing the transport cannot change the send.
+        const result = await provider.send({ draft: prior ? action.approvedSnapshot as DraftInput : draft! });
+        try {
+          if (prior) { await provider.deleteDraft(prior.providerId); await store.emails.deleteMany([prior.id]); bus.emit({ type: 'email.updated', emailId: prior.id }); }
+          const sent = await provider.getEmail(result.providerId);
+          if (sent) { await store.emails.upsertMany([{ ...sent, accountId: request.accountId }]); bus.emit({ type: 'email.updated', emailId: sent.id }); }
+        } catch {
+          return { ...result, warning: 'SUBMISSION_ACCEPTED: message submitted; sent-copy or draft cleanup failed' };
+        }
         return { ...result };
       }
       case 'unsubscribe': {
@@ -329,7 +394,7 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
         const email = await emailFor(emailId, request.accountId);
         const { https, mailto, oneClick } = parseListUnsubscribe(email.headers.listUnsubscribe, email.headers.listUnsubscribePost);
         if ((method === 'header' && oneClick || method === 'link') && https) {
-          return { method, ...await requestUnsubscribe(fetcher, https, method === 'header' ? 'POST' : 'GET') };
+          return { method, ...await requestUnsubscribe(fetcher, https, method === 'header' ? 'POST' : 'GET', resolveDns) };
         }
         let draft: DraftInput;
         if (method === 'header' && mailto) {
@@ -343,8 +408,17 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
         } else {
           throw new PolicyError('UNSUBSCRIBE_UNSUPPORTED', `No supported unsubscribe target for method ${method}`);
         }
-        await (await mailProviderFor(request.accountId)).send({ draft });
-        return { method, target: draft.to[0]!.email, status: 'sent' };
+        const child = await submitAction({
+          type: 'send', accountId: request.accountId, params: { draft }, actor: request.actor,
+          category: 'unsubscribe', reason: `Unsubscribe email for action ${action.id}: ${request.reason}`,
+          matterId: request.matterId, runId: request.runId, counterparty: request.counterparty,
+        }, async child => {
+          await store.actions.update(action.id, { result: { method, target: draft.to[0]!.email, status: 'pending', childActionId: child.id } });
+          await store.kv.set(`policy:unsubscribe-parent:${child.id}`, action.id);
+        });
+        const latestChild = await store.actions.get(child.id) ?? child;
+        await settleUnsubscribeParent(latestChild);
+        return { method, target: draft.to[0]!.email, status: latestChild.status === 'executed' ? 'sent' : 'pending', childActionId: child.id };
       }
       case 'calendar_create': {
         const event = await (await calendarProviderFor(request.accountId)).createEvent(request.params.event);
@@ -403,6 +477,19 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     let current = action;
     try {
       const request = action.request as Request;
+      if (!undoOf && (request.type === 'send' || request.type === 'calendar_propose')) {
+        let resolved: DraftInput | undefined;
+        try { resolved = await resolvedDraft(request); } catch (error) {
+          if (!(error instanceof PolicyError) || !['EMAIL_NOT_FOUND', 'NOT_A_DRAFT', 'REPLY_NOT_FOUND'].includes(error.code)) throw error;
+        }
+        if (!action.approvedSnapshot || !isDeepStrictEqual(resolved, action.approvedSnapshot)) {
+          const proposed = await store.actions.update(action.id, {
+            status: 'proposed', holdUntil: null, error: 'DRAFT_CHANGED_SINCE_APPROVAL',
+            decision: { ...action.decision, outcome: 'ask', reason: 'DRAFT_CHANGED_SINCE_APPROVAL', holdUntil: null },
+          });
+          bus.emit({ type: 'action.proposed', action: proposed }); return proposed;
+        }
+      }
       const snapshot = snapshotOf(request) ? null : await capture(request);
       const inverseParams = snapshot ? { ...request.params, [marker]: snapshot } : null;
       const inverse: ActionRequest | null = undoOf ? undoOf.request : inverseParams ? { ...structuredClone(request), actor: { kind: 'human', id: 'undo' }, reason: `Undo: ${request.reason}`, params: inverseParams } : null;
@@ -410,15 +497,35 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       const decision = { ...action.decision, reversibility };
       if (decision.reversibility === 'reversible' && !inverse) throw new PolicyError('MISSING_INVERSE', 'Reversible actions must capture an inverse before execution');
       current = await store.actions.update(action.id, { status: 'executing', decision, inverse, holdUntil: null });
-      const result = await dispatch(request, snapshot);
+      const result = await dispatch(request, snapshot, action);
+      if (request.type === 'unsubscribe' && result.childActionId) return (await store.actions.get(action.id))!;
       current = await store.actions.update(action.id, { status: 'executed', executedAt: now(), result, inverse });
-      bus.emit({ type: 'action.executed', action: current }); return current;
+      bus.emit({ type: 'action.executed', action: current });
+      await settleUnsubscribeParent(current); return current;
     } catch (error) {
+      // A post-execution notification/parent write must not turn a delivered send into a retryable failure.
+      if (current.status === 'executed') throw error;
+      if (['send', 'calendar_propose'].includes(action.request.type) && (error as { code?: string } | null)?.code === 'SUBMISSION_ACCEPTED') {
+        current = await store.actions.update(action.id, {
+          status: 'executed', executedAt: now(), holdUntil: null, inverse: null,
+          decision: { ...action.decision, reversibility: 'irreversible' },
+          result: { warning: error instanceof Error ? error.message : 'SUBMISSION_ACCEPTED', code: 'SUBMISSION_ACCEPTED', messageId: (error as { messageId?: string }).messageId ?? null },
+        });
+        bus.emit({ type: 'action.executed', action: current }); await settleUnsubscribeParent(current); return current;
+      }
       current = await store.actions.update(action.id, { status: 'failed', error: error instanceof Error ? error.message : String(error) });
-      bus.emit({ type: 'action.failed', action: current }); throw error;
+      bus.emit({ type: 'action.failed', action: current }); await settleUnsubscribeParent(current); throw error;
     }
   };
   const holdOrExecute = async (action: ActionRecord): Promise<ActionRecord> => {
+    if (action.request.type === 'send' || action.request.type === 'calendar_propose') {
+      try {
+        action = await store.actions.update(action.id, { approvedSnapshot: await resolvedDraft(action.request), error: null });
+      } catch (error) {
+        const failed = await store.actions.update(action.id, { status: 'failed', error: error instanceof Error ? error.message : String(error) });
+        bus.emit({ type: 'action.failed', action: failed }); await settleUnsubscribeParent(failed); throw error;
+      }
+    }
     const config = await policy.getConfig();
     if (BASE_REVERSIBILITY[action.request.type] === 'delayed' && config.outboxHoldMinutes > 0) {
       const holdUntil = new Date(Date.parse(now()) + config.outboxHoldMinutes * 60_000).toISOString();
@@ -426,16 +533,19 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     }
     return execute(action);
   };
+  // Internal submission avoids re-entering this executor's queue for unsubscribe child sends.
+  const submitAction = async (request: ActionRequest, onCreated?: (action: ActionRecord) => Promise<void>): Promise<ActionRecord> => {
+    assertPublic(request);
+    const decision = await policy.evaluate(request), at = now();
+    const record = await store.actions.insert({ id: newId(at), request: structuredClone(request), decision, status: decision.outcome === 'deny' ? 'rejected' : decision.outcome === 'ask' ? 'proposed' : 'approved', createdAt: at, ...(decision.outcome !== 'ask' ? { decidedAt: at } : {}), ...(decision.outcome === 'deny' ? { error: decision.reason } : {}) });
+    await onCreated?.(record);
+    if (decision.outcome === 'ask') { bus.emit({ type: 'action.proposed', action: record }); return record; }
+    bus.emit({ type: 'action.decided', action: record });
+    if (decision.outcome === 'deny') return record;
+    return holdOrExecute(record);
+  };
   return {
-    submit: request => serial(async () => {
-      assertPublic(request);
-      const decision = await policy.evaluate(request), at = now();
-      const record = await store.actions.insert({ id: newId(at), request: structuredClone(request), decision, status: decision.outcome === 'deny' ? 'rejected' : decision.outcome === 'ask' ? 'proposed' : 'approved', createdAt: at, ...(decision.outcome !== 'ask' ? { decidedAt: at } : {}), ...(decision.outcome === 'deny' ? { error: decision.reason } : {}) });
-      if (decision.outcome === 'ask') { bus.emit({ type: 'action.proposed', action: record }); return record; }
-      bus.emit({ type: 'action.decided', action: record });
-      if (decision.outcome === 'deny') return record;
-      return holdOrExecute(record);
-    }),
+    submit: request => serial(() => submitAction(request)),
     approve: (actionId, edited) => serial(async () => {
       const original = await requireAction(actionId, ['proposed']);
       let distance = 0;
@@ -451,27 +561,33 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       }
       const decision = await policy.evaluate(edited ?? original.request);
       if (decision.outcome === 'deny') throw new PolicyError('ACTION_DENIED', decision.reason);
-      await policy.recordOutcome(actionId, edited ? 'approved_edited' : 'approved_unchanged', distance);
-      const approved = await store.actions.update(actionId, { status: 'approved', decision, decidedAt: now(), request: structuredClone(edited ?? original.request), editDistance: edited ? distance : null });
+      await requireClaim(original);
+      // A changed held draft needs reapproval, but feedback is still counted once per record.
+      if (!await store.kv.get(`policy:feedback:${actionId}`)) await policy.recordOutcome(actionId, edited ? 'approved_edited' : 'approved_unchanged', distance);
+      const approved = await store.actions.update(actionId, { decision, decidedAt: now(), request: structuredClone(edited ?? original.request), editDistance: edited ? distance : null });
       bus.emit({ type: 'action.decided', action: approved }); return holdOrExecute(approved);
     }),
     reject: (actionId, reason) => serial(async () => {
-      await requireAction(actionId, ['proposed']); await policy.recordOutcome(actionId, 'rejected');
+      await requireClaim(await requireAction(actionId, ['proposed']));
+      if (!await store.kv.get(`policy:feedback:${actionId}`)) await policy.recordOutcome(actionId, 'rejected');
       const rejected = await store.actions.update(actionId, { status: 'rejected', decidedAt: now(), ...(reason ? { error: reason } : {}) });
-      bus.emit({ type: 'action.decided', action: rejected }); return rejected;
+      bus.emit({ type: 'action.decided', action: rejected }); await settleUnsubscribeParent(rejected); return rejected;
     }),
     cancelHold: actionId => serial(async () => {
-      await requireAction(actionId, ['held']);
+      await requireClaim(await requireAction(actionId, ['held']));
       const cancelled = await store.actions.update(actionId, { status: 'rejected', decidedAt: now(), holdUntil: null, error: 'Cancelled during outbox hold' });
-      bus.emit({ type: 'action.decided', action: cancelled }); return cancelled;
+      bus.emit({ type: 'action.decided', action: cancelled }); await settleUnsubscribeParent(cancelled); return cancelled;
     }),
     undo: actionId => serial(async () => {
       const original = await requireAction(actionId, ['executed']);
       if (!original.inverse) throw new PolicyError('IRREVERSIBLE_ACTION', 'This action has no inverse');
+      await requireClaim(original);
       const at = now();
       const inverse = await store.actions.insert({ id: newId(at), request: structuredClone(original.inverse), decision: { ...original.decision, outcome: 'allow', reversibility: 'reversible', reason: `Human requested undo of ${actionId}` }, status: 'approved', createdAt: at, decidedAt: at });
       bus.emit({ type: 'action.decided', action: inverse });
-      await execute(inverse, original);
+      try { await execute(inverse, original); } catch (error) {
+        await store.actions.update(actionId, { status: 'executed' }); throw error;
+      }
       const undone = await store.actions.update(actionId, { status: 'undone', undoneAt: now() });
       bus.emit({ type: 'action.undone', action: undone }); return undone;
     }),
@@ -482,7 +598,13 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       for (const candidate of await store.actions.dueHeld(at)) {
         const current = await store.actions.get(candidate.id);
         if (current?.status !== 'held' || !current.holdUntil || current.holdUntil > at) continue;
-        try { executed.push(await execute(current)); } catch (error) { firstError ??= error; }
+        try {
+          const claimed = await claim(current);
+          if (claimed) {
+            const result = await execute(claimed);
+            if (result.status === 'executed') executed.push(result);
+          }
+        } catch (error) { firstError ??= error; }
       }
       if (firstError) throw firstError;
       return executed;

@@ -424,6 +424,8 @@ export interface ActionRecord {
   /** If a human edited a draft before approving, normalized edit distance 0..1. */
   editDistance?: number | null;
   error?: string | null;
+  /** Resolved draft content authorized for an outbox send; never part of the request params. */
+  approvedSnapshot?: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -649,6 +651,8 @@ export interface Store {
     update(id: Id, patch: Partial<ActionRecord>): Promise<ActionRecord>;
     /** Held actions whose holdUntil <= now, for the outbox scheduler. */
     dueHeld(now: Timestamp): Promise<ActionRecord[]>;
+    /** Atomically transition a matching status, recording the claim time in decidedAt. */
+    claim?(id: Id, from: ActionStatus, to: ActionStatus, now: Timestamp): Promise<ActionRecord | null>;
   };
 
   trust: {
@@ -686,6 +690,14 @@ export type MailChange =
   | { op: "removeFromMailbox"; providerIds: string[]; mailboxProviderId: string }
   | { op: "delete"; providerIds: string[] };
 
+/** Provider identity changes caused by a mail mutation (copies retain the source identity). */
+export type MailChangeResult = {
+  op: MailChange["op"];
+  providerId: string;
+  newProviderId?: string;
+  newMailboxProviderId?: string;
+};
+
 export interface SendResult {
   providerId: string;
   messageId: string | null;
@@ -702,7 +714,7 @@ export interface MailProvider {
   /** Fetch a full email including bodies. */
   getEmail(providerId: string): Promise<Email | null>;
   getBlob(blobId: string): Promise<{ type: string; data: Uint8Array }>;
-  applyChanges(changes: MailChange[]): Promise<void>;
+  applyChanges(changes: MailChange[]): Promise<void | MailChangeResult[]>;
   createDraft(draft: DraftInput): Promise<Email>;
   updateDraft(providerId: string, draft: DraftInput): Promise<Email>;
   deleteDraft(providerId: string): Promise<void>;

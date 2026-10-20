@@ -32,8 +32,9 @@ matching rather than SQLite FTS syntax. Its credentials are in-memory test data,
 `classifyCounterparty(person, emails, selfAddresses)`, `editDistanceRatio(a, b)`, and
 `describeDecision(decision)` are pure helpers. Both factories accept `now: () => Timestamp`
 for deterministic ISO UTC clocks. Provider resolvers may return a provider or a Promise.
-The executor accepts `fetch?: typeof globalThis.fetch` for unsubscribe HTTP requests;
-it defaults to the global transport. Tests inject a fake transport.
+The executor accepts `fetch?: typeof globalThis.fetch` and `resolveDns?` for unsubscribe
+HTTP requests. Defaults are global fetch and `dns.promises.lookup(host, { all: true })`.
+Tests inject both collaborators and never perform network or DNS requests.
 
 ## Decision matrix
 
@@ -44,13 +45,17 @@ approval/rejection/undo are explicit human operations that the caller must autho
 | Effective level | Reversible | Delayed | Irreversible |
 | --- | --- | --- | --- |
 | `supervised` | ask; allow internal work in matters/triage | ask | ask |
-| `auto_accept_edits` | allow | ask | ask |
-| `auto` | allow | hold at trusted/autonomous; otherwise ask | allow only at autonomous with risk ≤ medium; otherwise ask |
-| `full_access` | allow | hold | allow unless critical risk or alwaysAsk; otherwise ask |
+| `auto_accept_edits` | allow unless alwaysAsk | ask | ask |
+| `auto` | allow unless alwaysAsk | hold at trusted/autonomous; otherwise ask | allow only at autonomous with risk ≤ medium; otherwise ask |
+| `full_access` | allow unless alwaysAsk | hold unless alwaysAsk | allow unless critical risk or alwaysAsk; otherwise ask |
 
 Internal work means `matter_create`, `matter_update`, `matter_attach`, `person_update`, or
 `snooze`; an archive marked triage still needs approval when supervised. Categories in
-`alwaysAsk` require approval for delayed and irreversible actions at every level.
+`alwaysAsk` require approval for every action, including reversible delete/archive and draft
+edits, at every level. Pure bookkeeping (`matter_*`, `person_update`, `snooze`, and harmless
+label/unlabel) is exempt from alwaysAsk and follows the normal matrix. Trash/junk labels and
+removing inbox membership are not harmless. Editing or deleting a draft referenced by a held
+send always asks, even at full access.
 External agents are always denied `delete`, `unsubscribe`, and `calendar_delete`.
 An external ceiling of supervised denies all non-reversible external actions.
 Explicit deny takes precedence over the matrix and alwaysAsk.
@@ -107,6 +112,12 @@ JSON leaves (including added/removed leaves), independent of object key order.
   then rethrows the first error. Failed actions are not automatically retried. For released
   sends/calendar proposals, the persisted decision becomes irreversible and inverse is null:
   cancellation existed before release, but an executed send cannot be undone.
+- Approval, rejection, release, cancellation, and undo use optional `Store.actions.claim`
+  to atomically change the source status to executing before any dispatch or feedback. The
+  SQLite implementation uses a conditional UPDATE returning the changed row, so independent
+  executors/processes sharing a database cannot release or approve the same action twice.
+  Undo claims the original executed action before creating its inverse record. Stores without
+  this method fail these transitions with `ACTION_CLAIM_UNSUPPORTED`; there is no unsafe fallback.
 - Labels resolve existing mailboxes by local id, provider id, or name. For accounts with labels,
   archive removes inbox and adds an archive mailbox when present. Folder accounts archive by
   moving to the archive-role mailbox, then the all-role mailbox, then a folder named Archive;
@@ -114,7 +125,19 @@ JSON leaves (including added/removed leaves), independent of object key order.
   moves to the requested mailbox or inbox, and undo moves each message to its captured prior folder.
   Move replaces mailbox membership. Delete moves to trash; it never purges. Mail changes map local
   ids to provider ids and mirror full keyword and mailbox patches only after provider success.
-- Drafts use create/update/deleteDraft; `send` resolves draft ids before sending. Calendar
+  IMAP and Graph report replacement identities through `MailChangeResult`; moves persist the
+  new provider id in both the local email and its inverse snapshot. Undo uses the current id
+  and persists any replacement returned by the reverse move. Copies retain the source identity.
+- Drafts use create/update/deleteDraft. At approval/hold time, send and calendar proposals
+  save resolved recipients, subject, bodies, and attachment blob ids in `approvedSnapshot` on
+  the action record, preserving the original request params. Release rereads the draft and
+  compares it to the snapshot. Changed/missing drafts (and legacy holds without snapshots)
+  return to proposed with `DRAFT_CHANGED_SINCE_APPROVAL` and emit `action.proposed`; no mail
+  leaves until reapproval creates a fresh snapshot and hold. Feedback is counted once per record.
+  Saved draft sends submit the approved content, then remove the original provider draft,
+  preventing a concurrent draft edit from replacing the authorized content. Saved reply drafts
+  resolve their In-Reply-To message within the stored thread to retain threading; an unavailable
+  reply source requires syncing before approval. Calendar
   proposals send their supplied draft through the outbox; slots are context, not automatically
   converted to an iCalendar attachment. Event create/update/respond/delete use CalendarProvider
   and mirror the result. Sent mail is fetched through `getEmail`; if a provider cannot expose
@@ -131,11 +154,12 @@ JSON leaves (including added/removed leaves), independent of object key order.
   Undo creates its own ActionRecord before dispatch and then marks the original undone.
 - Every action domain event is emitted: proposed, decided, held, executed, undone, failed.
   Mirror changes also emit email.updated and matter.updated. `PolicyError` has a `code`;
-  provider errors are persisted as failed and rethrown unchanged.
-- Use one executor and policy engine per Store in the composition root. Each serializes its
-  writes so concurrent approve/release/cancel calls cannot dispatch an action twice. The Store
-  contract has no transaction/CAS or provider idempotency interface: crash recovery and multiple
-  independent writer processes require integration-level coordination. A provider-success /
+  provider errors are persisted as failed and rethrown unchanged, except `SUBMISSION_ACCEPTED`:
+  SMTP already accepted that message, so the send is executed with `result.warning` and is
+  never retried. Sent-copy/local draft cleanup failures after a successful send also become warnings.
+- Each executor serializes its own operations; Store claims coordinate independent writers.
+  Claims are not automatically recovered after a process crash because a provider may already
+  have accepted an operation. There is no provider idempotency interface. A provider-success /
   local-write failure can leave a partial remote change; reconcile through sync before retrying.
   IDs are locally generated ULIDs because the injected Store interface exposes no id allocator.
 
@@ -157,8 +181,9 @@ JSON leaves (including added/removed leaves), independent of object key order.
   mailbox/keyword edits. Writes share one logged, serialized action; failures compensate
   from its snapshot because Store has no cross-repository transaction API.
 
-The shared contract only appends optional `Store.people.delete?(id: Id): Promise<void>`;
-`ActionParams` and the agent package remain unchanged.
+Shared additions are optional `ActionRecord.approvedSnapshot`, optional `Store.actions.claim`,
+and `MailChangeResult` with a widened `MailProvider.applyChanges` result. Existing void-returning
+providers remain compatible. `ActionParams` and the agent package remain unchanged.
 
 ## Unsubscribe
 
@@ -175,18 +200,30 @@ types-only dependency boundary. Prefer `method: 'header'`:
 - `reply`: send to reply-to, falling back to from, with subject/body `unsubscribe` and
   `inReplyToEmailId` referencing the source email. Choose this only when a reply is intended.
 
-HTTP requests share a 10-second deadline across at most three redirects. Each redirect must
+HTTP requests and DNS resolution share a 10-second deadline across at most three redirects.
+Before every request, including same-host redirects, resolve all destination addresses and
+reject the entire set if any is loopback, private, link-local, unspecified, multicast, or
+reserved. Localhost and `.local`/`.internal` hostnames are blocked before transport, as are
+mixed public/private DNS answers and unresolvable/empty answers (`UNSUBSCRIBE_TARGET_BLOCKED`).
+Only public IPv4 and global unicast IPv6 are accepted; IPv4-mapped IPv6, documentation, and
+transition/reserved ranges are blocked. Fetch cannot pin a connection to the validated IP;
+DNS changes between validation and fetch remain a transport limitation. Each redirect must
 also use HTTPS, and one-click redirects preserve POST and its form body. HTTP targets and
 URLs containing credentials are unsupported. Missing targets fail with
 `UNSUBSCRIBE_UNSUPPORTED`; HTTP errors, timeout, network failure, and excess redirects also
 persist a failed action and emit action.failed. HTTP errors expose only the host and status,
 never token-bearing URL queries or response bodies.
 
-Success records `result: { method, target, status }`, where target is the destination host
-or mail address and status is the HTTP status number or `sent` for mail. Unsubscribe is
-irreversible (`inverse: null`), keeps its existing medium base risk and decision matrix,
-and sends immediately once permitted or approved, including mailto/reply. It creates no
-follow-up actions or mailbox changes; the agent must separately decide whether to archive.
+HTTP success records `result: { method, target, status }`, where target is the destination
+host and status is the HTTP status. One-click POST and link GET run immediately when permitted.
+Mailto/reply submits a child `send` action with the original actor, category `unsubscribe`, and
+a reason referencing the parent id. Child sends follow policy approval and the normal outbox
+hold. The parent remains executing with `result: { method, target, status: 'pending', childActionId }`
+until the child executes, then becomes executed with status `sent`. Child failures/rejections/
+cancellations propagate to the parent; accepted SMTP warnings also propagate. The durable
+parent/child link lets any executor settle the parent when releasing the child. Unsubscribe
+is irreversible (`inverse: null`) and retains its existing base risk. It creates no mailbox
+changes; the agent must separately decide whether to archive.
 All ActionTypes are implemented; there are no stubbed production paths.
 
 ## Validation

@@ -34,6 +34,32 @@ function imapServer() {
 const configured = { ...account, settings: { host: "imap.example", smtpHost: "smtp.example" } };
 
 describe("IMAP/SMTP adapter", () => {
+  it.each(["move", "delete"] as const)("F6 returns COPYUID replacement identities for %s and can move them back", async op => {
+    const server = imapServer(), p = new ImapMailProvider({ imapFactory: () => server.client });
+    await p.connect(configured, { password: "secret" });
+    const delta = (await collect(p.sync(null))).find(d => d.kind === "email" && d.op === "upsert");
+    if (delta?.kind !== "email" || delta.op !== "upsert") throw new Error("No fixture");
+    const original = delta.email;
+    const [moved] = await p.applyChanges([op === "move" ? { op, providerIds: [original.providerId], toMailboxProviderId: "Trash" } : { op, providerIds: [original.providerId] }]);
+    expect(moved).toMatchObject({ op, providerId: original.providerId, newMailboxProviderId: "Trash", newProviderId: expect.any(String) });
+    expect(moved!.newProviderId).not.toBe(original.providerId);
+    expect(await p.getEmail(original.providerId)).toBeNull();
+    expect(await p.getEmail(moved!.newProviderId!)).toMatchObject({ subject: original.subject });
+    const [restored] = await p.applyChanges([{ op: "move", providerIds: [moved!.newProviderId!], toMailboxProviderId: "INBOX" }]);
+    expect(await p.getEmail(restored!.newProviderId!)).toMatchObject({ mailboxIds: expect.any(Array), subject: original.subject });
+    expect(server.messages.get("INBOX")!.size).toBe(1);
+    await p.disconnect();
+  });
+
+  it("F6 fails explicitly if a move omits the COPYUID map", async () => {
+    const server = imapServer(), p = new ImapMailProvider({ imapFactory: () => server.client });
+    await p.connect(configured, { password: "secret" });
+    const delta = (await collect(p.sync(null))).find(d => d.kind === "email" && d.op === "upsert");
+    if (delta?.kind !== "email" || delta.op !== "upsert") throw new Error("No fixture");
+    server.fake.messageMove.mockResolvedValueOnce({ uidValidity: 10n, uidMap: new Map() });
+    await expect(p.applyChanges([{ op: "move", providerIds: [delta.email.providerId], toMailboxProviderId: "Trash" }])).rejects.toMatchObject({ code: "IMAP_UIDPLUS_REQUIRED" });
+    await p.disconnect();
+  });
   it.each(["store", "provider", "adapter"] as const)("resolves %s reply IDs through the registry before composing MIME", async kind => {
     const server = imapServer(), resolveEmail = vi.fn();
     const p = createProviderRegistry({ imapFactory: () => server.client, resolveEmail }).mail("imap");
@@ -71,7 +97,7 @@ describe("IMAP/SMTP adapter", () => {
     const p = new ImapMailProvider({ imapFactory: () => server.client, smtpFactory: () => ({ sendMail, close() {} }) }); await p.connect(configured, { password: "secret" }); const result = await p.send({ draft: { ...draft, bcc: [{ email: "hidden@example.com" }] } });
     expect(result.providerId).toMatch(/^imap:/); expect(result.messageId).toBe("<sent@example>"); const call = sendMail.mock.calls[0] as unknown as [{ raw: Buffer; envelope: { to: string[] } }]; expect(call[0].envelope.to).toContain("hidden@example.com"); expect(call[0].raw.toString()).not.toMatch(/^bcc:/im); expect(server.messages.get("Sent")!.size).toBe(1);
   });
-  it("reports accepted submission cleanup failures distinctly so callers cannot resend", async () => {
+  it("F7 reports accepted submission cleanup failures distinctly so callers cannot resend", async () => {
     const server = imapServer(), sendMail = vi.fn(async () => ({ messageId: "<accepted@example>" })); server.fake.append.mockRejectedValue(new Error("private server detail"));
     const p = new ImapMailProvider({ imapFactory: () => server.client, smtpFactory: () => ({ sendMail, close() {} }) }); await p.connect(configured, { password: "secret" }); await expect(p.send({ draft })).rejects.toMatchObject({ code: "SUBMISSION_ACCEPTED", messageId: "<accepted@example>" }); expect(sendMail).toHaveBeenCalledTimes(1);
   });

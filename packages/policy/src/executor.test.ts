@@ -110,12 +110,13 @@ describe('delayed outbox', () => {
     expect(mail.sends).toHaveLength(1);
   });
 
-  it('resolves a saved draft by provider id and removes the stale draft after sending', async () => {
+  it('F3 sends the saved draft snapshot and removes the stale provider draft after sending', async () => {
     const { executor, store, mail } = await setup();
     await store.emails.upsertMany([email({ id: 'draft', providerId: 'remote-draft', keywords: { $draft: true } })]);
     const held = await executor.submit(request('send', { draftEmailId: 'draft' }));
     await executor.releaseDue(held.holdUntil!);
-    expect(mail.sends).toEqual([{ draftProviderId: 'remote-draft' }]);
+    expect(mail.sends).toEqual([{ draft: held.approvedSnapshot }]);
+    expect(mail.drafts).toContainEqual({ operation: 'delete', providerId: 'remote-draft' });
     expect(await store.emails.get('draft')).toBeNull();
   });
 
@@ -131,7 +132,8 @@ describe('delayed outbox', () => {
 
   it('continues releasing later due actions after a failure, then rethrows', async () => {
     const { executor, store, mail } = await setup();
-    const invalid = await executor.submit(request('send', {}));
+    const invalid = await executor.submit(request('send', { draft }));
+    await store.actions.update(invalid.id, { request: request('send', {}) });
     const valid = await executor.submit(request('send', { draft }));
     await expect(executor.releaseDue(valid.holdUntil!)).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     expect((await store.actions.get(invalid.id))?.status).toBe('failed');
@@ -413,23 +415,29 @@ describe('unsubscribe execution', () => {
   it.each([
     { query: '?subject=Stop%20news&body=Please%20unsubscribe%0AThanks', subject: 'Stop news', textBody: 'Please unsubscribe\nThanks' },
     { query: '', subject: 'unsubscribe', textBody: 'unsubscribe' },
-  ])('sends a mailto unsubscribe with query $query through the mail provider', async ({ query, subject, textBody }) => {
+  ])('F4 holds a mailto unsubscribe child with query $query before provider submission', async ({ query, subject, textBody }) => {
     const fetcher = vi.fn<typeof globalThis.fetch>();
-    const { executor, store, mail } = await setup({ fetch: fetcher });
+    const { executor, store, mail, policy } = await setup({ fetch: fetcher });
+    await policy.pinLevel('unsubscribe', 'full_access');
     await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: `<https://lists.example/u>, <mailto:leave%2Bnews@example.com${query}>` } })]);
     const action = await executor.submit(request('unsubscribe', { emailId: 'email', method: 'header' }));
+    expect(mail.sends).toEqual([]);
+    expect(action.status).toBe('executing');
+    const child = (await store.actions.get(action.result!.childActionId as string))!;
+    expect(child.status).toBe('held');
+    await executor.releaseDue(child.holdUntil!);
     expect(mail.sends).toEqual([{ draft: { accountId: 'account', to: [{ email: 'leave+news@example.com' }], subject, textBody } }]);
     expect(fetcher).not.toHaveBeenCalled();
-    expect(action).toMatchObject({ status: 'executed', inverse: null, result: { method: 'header', target: 'leave+news@example.com', status: 'sent' } });
-    expect((await store.actions.query({})).items).toHaveLength(1);
+    expect(await store.actions.get(action.id)).toMatchObject({ status: 'executed', inverse: null, result: { method: 'header', target: 'leave+news@example.com', status: 'sent', childActionId: child.id } });
+    expect((await store.actions.query({})).items).toHaveLength(2);
   });
 
   it('falls back to mailto when one-click offers only an insecure web URL', async () => {
     const fetcher = vi.fn<typeof globalThis.fetch>();
     const { executor, store, mail } = await setup({ fetch: fetcher });
     await store.emails.upsertMany([email({ headers: { ...email().headers, listUnsubscribe: '<http://lists.example/u>, <mailto:leave@example.com>', listUnsubscribePost: 'List-Unsubscribe=One-Click' } })]);
-    expect((await executor.submit(request('unsubscribe', { emailId: 'email', method: 'header' }))).result).toEqual({ method: 'header', target: 'leave@example.com', status: 'sent' });
-    expect(mail.sends).toHaveLength(1); expect(fetcher).not.toHaveBeenCalled();
+    expect((await executor.submit(request('unsubscribe', { emailId: 'email', method: 'header' }))).result).toEqual({ method: 'header', target: 'leave@example.com', status: 'pending', childActionId: expect.any(String) });
+    expect(mail.sends).toHaveLength(0); expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('uses GET for the link method even with a one-click header', async () => {
@@ -466,14 +474,18 @@ describe('unsubscribe execution', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it.each([{ replyTo: [] }, { replyTo: [{ email: 'reply@example.com', name: 'List replies' }] }])('sends a threaded unsubscribe reply using reply-to or from ($replyTo)', async ({ replyTo }) => {
-    const { executor, store, mail } = await setup();
+  it.each([{ replyTo: [] }, { replyTo: [{ email: 'reply@example.com', name: 'List replies' }] }])('F4 holds a threaded unsubscribe reply using reply-to or from ($replyTo)', async ({ replyTo }) => {
+    const { executor, store, mail, policy } = await setup();
+    await policy.pinLevel('unsubscribe', 'full_access');
     await store.emails.upsertMany([email({ replyTo })]);
     const to = replyTo.length ? replyTo : email().from;
     const action = await executor.submit(request('unsubscribe', { emailId: 'email', method: 'reply' }));
+    expect(mail.sends).toEqual([]);
+    const child = (await store.actions.get(action.result!.childActionId as string))!;
+    await executor.releaseDue(child.holdUntil!);
     expect(mail.sends).toEqual([{ draft: { accountId: 'account', inReplyToEmailId: 'email', to, subject: 'unsubscribe', textBody: 'unsubscribe' } }]);
-    expect(action).toMatchObject({ status: 'executed', inverse: null, result: { method: 'reply', target: to[0]!.email, status: 'sent' } });
-    expect((await store.actions.query({})).items).toHaveLength(1); expect(mail.changes).toEqual([]);
+    expect(await store.actions.get(action.id)).toMatchObject({ status: 'executed', inverse: null, result: { method: 'reply', target: to[0]!.email, status: 'sent', childActionId: child.id } });
+    expect((await store.actions.query({})).items).toHaveLength(2); expect(mail.changes).toEqual([]);
   });
 
   it('fails a reply with no recipient instead of sending an empty draft', async () => {
@@ -551,19 +563,27 @@ describe('unsubscribe execution', () => {
   });
 
   it('persists provider send failures and rethrows the original error', async () => {
-    const { executor, store, mail, bus } = await setup();
+    const { executor, store, mail, bus, policy } = await setup();
+    await policy.pinLevel('unsubscribe', 'full_access');
+    await policy.setConfig({ outboxHoldMinutes: 0 });
     const failure = Object.assign(new Error('Unsubscribe send failed'), { code: 'REMOTE_FAILURE' }); mail.failure = failure;
     await expect(executor.submit(request('unsubscribe', { emailId: 'email', method: 'reply' }))).rejects.toBe(failure);
     expect((await store.actions.query({ status: ['failed'] })).items[0]?.error).toBe(failure.message);
     expect(bus.events.at(-1)?.type).toBe('action.failed');
   });
 
-  it('still asks under supervised policy and executes only on approval', async () => {
-    const { executor, policy, mail } = await setup();
+  it('F4 asks under supervised policy and queues a child for separate approval', async () => {
+    const { executor, policy, mail, store } = await setup();
     await policy.pinLevel('other', 'supervised');
     const proposed = await executor.submit(request('unsubscribe', { emailId: 'email', method: 'reply' }));
     expect(proposed.status).toBe('proposed'); expect(mail.sends).toEqual([]);
-    expect((await executor.approve(proposed.id)).status).toBe('executed'); expect(mail.sends).toHaveLength(1);
+    const pending = await executor.approve(proposed.id);
+    expect(pending.status).toBe('executing'); expect(mail.sends).toHaveLength(0);
+    const child = await executor.approve(pending.result!.childActionId as string);
+    expect(child.status).toBe('held');
+    await executor.releaseDue(child.holdUntil!);
+    expect((await store.actions.get(proposed.id))?.status).toBe('executed');
+    expect(mail.sends).toHaveLength(1);
   });
 });
 

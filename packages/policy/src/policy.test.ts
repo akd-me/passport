@@ -52,11 +52,35 @@ describe('policy decision matrix', () => {
     expect((await policy.evaluate({ ...examples.reversible, actor: { kind: 'external-agent', id: 'mcp' } })).outcome).toBe('ask');
   });
 
-  it('requires approval for non-reversible alwaysAsk work even at full access', async () => {
+  it('F5 requires approval for reversible and outward-facing alwaysAsk work even at full access', async () => {
     const { policy } = await setup();
     await policy.pinLevel('money', 'full_access');
     for (const example of [examples.delayed, examples.irreversible]) expect((await policy.evaluate({ ...example, category: 'money' })).outcome).toBe('ask');
-    expect((await policy.evaluate({ ...examples.reversible, category: 'money' })).outcome).toBe('allow');
+    expect((await policy.evaluate({ ...examples.reversible, category: 'money' })).outcome).toBe('ask');
+  });
+
+  it.each(TRUST_LEVELS)('F5 requires approval for legal delete and draft edits at %s', async level => {
+    const { policy } = await setup();
+    await policy.pinLevel('legal', level);
+    expect((await policy.evaluate(request('delete', { emailIds: ['email'] }, { category: 'legal' }))).outcome).toBe('ask');
+    expect((await policy.evaluate(request('draft_create', { draft }, { category: 'legal' }))).outcome).toBe('ask');
+  });
+
+  it('F5 exempts internal bookkeeping and harmless labels, while trash/junk/inbox removal still ask', async () => {
+    const { policy, store } = await setup();
+    await policy.pinLevel('legal', 'full_access');
+    for (const operation of [
+      request('matter_update', { matterId: 'matter', patch: {} }, { category: 'legal' }),
+      request('person_update', { personId: 'person', patch: {} }, { category: 'legal' }),
+      request('snooze', { emailIds: ['email'], until: '2099-01-01T00:00:00.000Z' }, { category: 'legal' }),
+      request('label', { emailIds: ['email'], label: 'tag' }, { category: 'legal' }),
+      request('unlabel', { emailIds: ['email'], label: 'tag' }, { category: 'legal' }),
+    ]) expect((await policy.evaluate(operation)).outcome).toBe('allow');
+    const trash = (await store.mailboxes.get('trash'))!;
+    await store.mailboxes.upsertMany([{ ...trash, id: 'junk', providerId: 'remote-junk', name: 'Junk', role: 'junk' }]);
+    for (const label of ['trash', 'remote-trash', 'Junk', 'inbox']) {
+      expect((await policy.evaluate(request(label === 'inbox' ? 'unlabel' : 'label', { emailIds: ['email'], label }, { category: 'legal' }))).outcome).toBe('ask');
+    }
   });
 
   it('forces novelty into learning and auto delayed work asks until trusted', async () => {
