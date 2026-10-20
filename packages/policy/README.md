@@ -107,10 +107,13 @@ JSON leaves (including added/removed leaves), independent of object key order.
   then rethrows the first error. Failed actions are not automatically retried. For released
   sends/calendar proposals, the persisted decision becomes irreversible and inverse is null:
   cancellation existed before release, but an executed send cannot be undone.
-- Labels resolve existing mailboxes by local id, provider id, or name. Archive removes inbox
-  and adds an archive mailbox when present. Move replaces mailbox membership. Delete moves to
-  trash; it never purges. Mail changes map local ids to provider ids and mirror full keyword
-  and mailbox patches only after provider success.
+- Labels resolve existing mailboxes by local id, provider id, or name. For accounts with labels,
+  archive removes inbox and adds an archive mailbox when present. Folder accounts archive by
+  moving to the archive-role mailbox, then the all-role mailbox, then a folder named Archive;
+  missing destinations fail with `ARCHIVE_MAILBOX_MISSING` before changing mail. Folder unarchive
+  moves to the requested mailbox or inbox, and undo moves each message to its captured prior folder.
+  Move replaces mailbox membership. Delete moves to trash; it never purges. Mail changes map local
+  ids to provider ids and mirror full keyword and mailbox patches only after provider success.
 - Drafts use create/update/deleteDraft; `send` resolves draft ids before sending. Calendar
   proposals send their supplied draft through the outbox; slots are context, not automatically
   converted to an iCalendar attachment. Event create/update/respond/delete use CalendarProvider

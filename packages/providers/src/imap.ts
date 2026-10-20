@@ -5,6 +5,7 @@ import type { Account, AccountCapabilities, AccountCredentials, DraftInput, Emai
 import { assertSend, decodeCursor, encodeCursor, localId, ProviderError, required, SubmissionAcceptedError } from "./errors.js";
 import { composeMime, decodeMimeBlob, mimeAttachment, normalizeMime } from "./normalize/index.js";
 import type { ProviderOptions } from "./http.js";
+import { resolveReplyEmail } from "./reply.js";
 
 export interface SmtpClient { sendMail(message: SendMailOptions): Promise<{ messageId?: string }>; close(): void }
 export interface ImapProviderOptions extends ProviderOptions {
@@ -148,9 +149,7 @@ export class ImapMailProvider implements MailProvider {
   }
   private async raw(draft: DraftInput): Promise<Buffer> {
     this.check();
-    const prefix = `${this.account.id}:email:`, id = draft.inReplyToEmailId;
-    const reply = !id ? null : this.options.resolveEmail ? await this.options.resolveEmail(id) : id.startsWith(prefix) ? await this.getEmail(decodeURIComponent(id.slice(prefix.length))) : null;
-    if (id && (!reply || reply.accountId !== this.account.id)) throw new ProviderError("REPLY_NOT_FOUND", "Provide resolveEmail for store IDs, or use an email ID returned by this adapter");
+    const reply = await resolveReplyEmail(this.account.id, draft.inReplyToEmailId, id => this.getEmail(id), this.options.resolveEmail);
     return composeMime(this.account, draft, id => this.getBlob(id), reply);
   }
   async createDraft(draft: DraftInput): Promise<Email> {

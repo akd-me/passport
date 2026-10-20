@@ -1,8 +1,10 @@
 import type { Account, AccountCapabilities, AccountCredentials, Calendar, CalendarEvent, CalendarProvider, DraftInput, Email, MailChange, MailProvider, ParticipationStatus, SendResult, SyncDelta, TimeRange } from "@passport/types";
 import { assertSend, decodeCursor, encodeCursor, localId, ProviderError } from "./errors.js";
 import { generatePreview, normalizeAddresses, normalizeHeaders, toIso } from "./normalize/index.js";
-import { parseAuthenticationResults, verifyHeaders, type PassportVerifier } from "./verification.js";
+import { parseAuthenticationResults, verifyHeaders } from "./verification.js";
 import { validateEvent, validateRange } from "./calendar-common.js";
+import type { ProviderOptions } from "./http.js";
+import { resolveReplyEmail } from "./reply.js";
 
 export const mockCapabilities: AccountCapabilities = { mail: true, calendar: true, contacts: false, push: true, labels: true, submit: true };
 const folderNames = ["Inbox", "Archive", "Drafts", "Sent", "Trash", "Junk", "Newsletters", "Receipts"];
@@ -47,7 +49,7 @@ function mockInvite(uid: string): string {
   return `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Passport//Mock//EN\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:${uid}@mock.passport\r\nDTSTAMP:20260115T090000Z\r\nDTSTART:20260120T140000Z\r\nDTEND:20260120T143000Z\r\nSUMMARY:Design review\r\nORGANIZER:mailto:sam@example.com\r\nATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:alex@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
 }
 
-interface MockMailOptions { fixtures?: boolean; now?: () => Date; verifier?: PassportVerifier }
+interface MockMailOptions extends Pick<ProviderOptions, "now" | "verifier" | "resolveEmail"> { fixtures?: boolean }
 
 /** In-memory provider; injectEmail and sentMail are intentionally public integration-test helpers. */
 export class MockMailProvider implements MailProvider {
@@ -137,13 +139,15 @@ export class MockMailProvider implements MailProvider {
       this.store(next);
     }
   }
-  private draftEmail(draft: DraftInput, providerId: string): Email {
+  private async draftEmail(draft: DraftInput, providerId: string): Promise<Email> {
     const account = this.check();
     if (draft.accountId !== account.id) throw new ProviderError("ACCOUNT_MISMATCH", "Draft belongs to a different account");
-    const reply = [...this.emails.values()].find(e => e.id === draft.inReplyToEmailId);
-    if (draft.inReplyToEmailId && !reply) throw new ProviderError("NOT_FOUND", "Reply email does not exist");
+    const reply = await resolveReplyEmail(account.id, draft.inReplyToEmailId, id => this.getEmail(id), this.options.resolveEmail);
+    // Store thread IDs have also been remapped; retain the provider's native thread here.
+    const nativeReply = reply ? await this.getEmail(reply.providerId) : null;
+    if (reply && !nativeReply) throw new ProviderError("NOT_FOUND", "Mock reply email does not exist");
     return { ...createMockEmails(account.id, account.emailAddress)[0]!, id: localId(account.id, "email", providerId), providerId,
-      threadId: reply?.threadId ?? localId(account.id, "thread", providerId), mailboxIds: [localId(account.id, "mailbox", "Drafts")], keywords: { $draft: true, $seen: true },
+      threadId: nativeReply?.threadId ?? localId(account.id, "thread", providerId), mailboxIds: [localId(account.id, "mailbox", "Drafts")], keywords: { $draft: true, $seen: true },
       from: [{ email: account.emailAddress }], to: normalizeAddresses(draft.to), cc: normalizeAddresses(draft.cc), bcc: normalizeAddresses(draft.bcc), replyTo: [],
       subject: draft.subject, textBody: draft.textBody, htmlBody: draft.htmlBody ?? null, preview: generatePreview(draft.textBody),
       headers: normalizeHeaders({ "message-id": `<${providerId}@mock.passport>`, ...(reply?.headers.messageId ? { "in-reply-to": reply.headers.messageId, references: [...reply.headers.references, reply.headers.messageId].join(" ") } : {}) }),
@@ -151,13 +155,13 @@ export class MockMailProvider implements MailProvider {
       attachments: (draft.attachments ?? []).map((a, i) => ({ ...a, id: localId(account.id, "attachment", `${providerId}:${i}`), size: 0 })) };
   }
   async createDraft(draft: DraftInput): Promise<Email> {
-    const email = this.draftEmail(draft, `draft-${++this.sequence}`);
+    const email = await this.draftEmail(draft, `draft-${++this.sequence}`);
     for (const a of email.attachments) a.size = (await this.getBlob(a.blobId)).data.byteLength;
     return this.store(email);
   }
   async updateDraft(providerId: string, draft: DraftInput): Promise<Email> {
     if (!this.emails.get(providerId)?.keywords.$draft) throw new ProviderError("NOT_FOUND", "Mock draft does not exist");
-    const email = this.draftEmail(draft, providerId);
+    const email = await this.draftEmail(draft, providerId);
     for (const a of email.attachments) a.size = (await this.getBlob(a.blobId)).data.byteLength;
     return this.store(email);
   }

@@ -1,8 +1,47 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MockCalendarProvider, MockMailProvider } from "./mock.js";
+import { createProviderRegistry } from "./registry.js";
 import { account, collect, draft, eventInput, lastCursor, range } from "./test/helpers.js";
 
 describe("MockMailProvider lifecycle", () => {
+  it("resolves store IDs through the registry for reply create, update, and send while preserving native threads", async () => {
+    const resolveEmail = vi.fn();
+    const p = createProviderRegistry({ resolveEmail }).mail("mock");
+    await p.connect(account, {});
+    const original = (await p.getEmail("fixture-19"))!;
+    const stored = { ...original, id: "store-email-ulid", threadId: "store-thread-ulid" };
+    resolveEmail.mockImplementation(async id => id === stored.id ? stored : null);
+    const input = { ...draft, inReplyToEmailId: stored.id };
+    const created = await p.createDraft(input);
+    const updated = await p.updateDraft(created.providerId, { ...input, textBody: "Updated reply" });
+    const sent = (await p.getEmail((await p.send({ draft: input })).providerId))!;
+    for (const reply of [created, updated, sent]) {
+      expect(reply.headers.inReplyTo).toBe(original.headers.messageId);
+      expect(reply.headers.references).toEqual([...original.headers.references, original.headers.messageId]);
+      expect(reply.threadId).toBe(original.threadId);
+      expect(reply.threadId).not.toBe(stored.threadId);
+    }
+    expect(resolveEmail).toHaveBeenCalledTimes(3);
+    expect(resolveEmail).toHaveBeenCalledWith(stored.id);
+    expect(p.capabilities.labels).toBe(true);
+  });
+  it.each(["provider", "adapter"] as const)("falls back to %s reply IDs when the store resolver misses", async kind => {
+    const resolveEmail = vi.fn(async () => null);
+    const p = new MockMailProvider({ resolveEmail }); await p.connect(account, {});
+    const original = (await p.getEmail("fixture-19"))!;
+    const id = kind === "provider" ? original.providerId : original.id;
+    const reply = await p.createDraft({ ...draft, inReplyToEmailId: id });
+    expect(resolveEmail).toHaveBeenCalledWith(id);
+    expect(reply).toMatchObject({ threadId: original.threadId, headers: { inReplyTo: original.headers.messageId } });
+  });
+  it("rejects a reply resolved from another account without creating a draft", async () => {
+    const resolveEmail = vi.fn();
+    const p = new MockMailProvider({ resolveEmail });
+    await p.connect(account, {});
+    resolveEmail.mockResolvedValue({ ...(await p.getEmail("fixture-19"))!, accountId: "other" });
+    await expect(p.createDraft({ ...draft, inReplyToEmailId: "fixture-19" })).rejects.toMatchObject({ code: "REPLY_NOT_FOUND" });
+    expect(await p.getEmail("draft-1")).toBeNull();
+  });
   it("has forty deterministic fixtures covering each promised scenario", async () => {
     const p = new MockMailProvider(); await p.connect(account, {}); const deltas = await collect(p.sync(null)), emails = deltas.filter(d => d.kind === "email" && d.op === "upsert").map(d => d.kind === "email" && d.op === "upsert" ? d.email : null).filter(e => e !== null);
     expect(emails).toHaveLength(40); expect(emails.filter(e => e.headers.listUnsubscribe)).toHaveLength(10); expect(emails.some(e => e.from[0]?.email === "sam@example.com")).toBe(true); expect(emails.some(e => e.from[0]?.email.includes("recruiting"))).toBe(true); expect(emails.some(e => e.verification.dkim === "fail")).toBe(true); expect(emails.filter(e => e.attachments.some(a => a.type === "text/calendar"))).toHaveLength(3);

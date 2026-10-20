@@ -191,7 +191,7 @@ build notifications, a scheduling exchange, three calendar attachments, and expl
 messages. Categories are represented by message content; the agent remains responsible for classification.
 There are six deterministic calendar fixtures. Mail/calendar changes have revision cursors.
 
-`MockMailProvider({ fixtures: false, now?, verifier? })` starts an empty inbox. `injectEmail(partialEmail)`
+`MockMailProvider({ fixtures: false, now?, verifier?, resolveEmail? })` starts an empty inbox. `injectEmail(partialEmail)`
 adds a message, `injectBlob(bytes, contentType)` adds attachment bytes, `sentMail` records submissions,
 and `waitForChanges(signal)` wakes on changes or cancellation. Returned mail, sent records and bytes are
 defensive copies. Mock helpers are for tests/development and do not apply policy themselves.
@@ -209,8 +209,10 @@ defensive copies. Mock helpers are for tests/development and do not apply policy
   identifiers so deletions can be reconciled after process restart.
 - Adapter IDs are stable account-scoped strings. If the store generates its own ULIDs, remap every
   mailbox/email/thread/calendar reference consistently; retain native `providerId` for provider calls.
-  Supply `resolveEmail` to resolve `DraftInput.inReplyToEmailId` from store IDs. Otherwise reply IDs must
-  be the account-scoped IDs returned by the adapter. Draft replacements may return a new provider ID.
+  Supply `resolveEmail` to resolve `DraftInput.inReplyToEmailId` from store IDs; the registry forwards it
+  to every mail adapter, including mock. When the resolver misses or is omitted, reply IDs may be native
+  provider IDs or the account-scoped IDs returned by the adapter. Mock replies retain the native thread
+  ID so ingestion maps them back to the original store thread. Draft replacements may return a new provider ID.
 - Mutations take **provider IDs**, not store IDs. Graph/IMAP addToMailbox copies a message; Graph
   removeFromMailbox throws because a message requires a destination folder. IMAP removal moves to Trash.
   Gmail supports `$seen`, `$flagged`, `$junk`, `$notjunk`, and `label:<label ID or name>`; Graph supports

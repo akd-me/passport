@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import sample from "./fixtures/gmail.json" with { type: "json" };
 import { GmailMailProvider } from "./gmail.js";
 import { normalizeGmail } from "./gmail.js";
+import { createProviderRegistry } from "./registry.js";
 import { account, collect, draft, fixtureFetch, jsonBody, lastCursor, response } from "./test/helpers.js";
 
 describe("Gmail API adapter", () => {
@@ -65,11 +66,13 @@ describe("Gmail API adapter", () => {
   it("sends new MIME messages and rejects unsupported keywords", async () => {
     const p = new GmailMailProvider({ fetch: fixtureFetch((url, init) => { expect(url.pathname).toMatch(/messages\/send$/); expect(jsonBody(init).raw).toBeTypeOf("string"); return response({ id: "sent" }); }) }); await p.connect(account, { access_token: "token" }); expect((await p.send({ draft })).providerId).toBe("sent"); await expect(p.applyChanges([{ op: "setKeywords", providerIds: ["m"], add: ["$draft"] }])).rejects.toMatchObject({ code: "UNSUPPORTED_KEYWORD" });
   });
-  it("resolves store IDs when composing replies without treating a store thread ID as a Gmail ID", async () => {
+  it.each(["store", "provider", "adapter"] as const)("resolves %s reply IDs without treating a store thread ID as a Gmail ID", async kind => {
     const stored = { ...await normalizeGmail(sample, account.id), id: "store-email-ulid", threadId: "store-thread-ulid" };
-    const p = new GmailMailProvider({ resolveEmail: async id => id === stored.id ? stored : null, fetch: fixtureFetch((url, init) => {
+    const p = createProviderRegistry({ resolveEmail: async id => id === stored.id ? stored : null, fetch: fixtureFetch((url, init) => {
       if (url.pathname.endsWith("/send")) { const body = jsonBody(init); expect(body.threadId).toBe(sample.threadId); expect(Buffer.from(String(body.raw), "base64url").toString()).toContain("In-Reply-To: <review@example.com>"); return response({ id: "sent" }); }
       return response(sample);
-    }) }); await p.connect(account, { access_token: "token" }); expect((await p.send({ draft: { ...draft, inReplyToEmailId: stored.id } })).providerId).toBe("sent");
+    }) }).mail("gmail"); await p.connect(account, { access_token: "token" });
+    const id = kind === "store" ? stored.id : kind === "provider" ? sample.id : `${account.id}:email:${encodeURIComponent(sample.id)}`;
+    expect((await p.send({ draft: { ...draft, inReplyToEmailId: id } })).providerId).toBe("sent");
   });
 });

@@ -27,7 +27,8 @@ export const action = (id: string, category: ActionCategory = 'other'): ActionRe
 
 export class FakeMailProvider implements MailProvider {
   readonly kind = 'mock' as const;
-  readonly capabilities = capabilities;
+  readonly capabilities: AccountCapabilities;
+  constructor(labels = true) { this.capabilities = { ...capabilities, labels }; }
   changes: MailChange[][] = [];
   sends: Array<Parameters<MailProvider['send']>[0]> = [];
   drafts: Array<{ operation: string; providerId?: string; draft?: DraftInput }> = [];
@@ -56,13 +57,14 @@ export class FakeCalendarProvider implements CalendarProvider {
   async freeBusy() { return []; }
 }
 
-export async function setup(options: { fetch?: typeof globalThis.fetch } = {}) {
+export async function setup({ labels = true, ...options }: { fetch?: typeof globalThis.fetch; labels?: boolean } = {}) {
   const store = createMemoryStore(), bus = createMemoryEventBus();
   let time = at;
   const now = () => time;
   const policy = createPolicyEngine({ store, bus, now });
-  const mail = new FakeMailProvider(), calendar = new FakeCalendarProvider();
+  const mail = new FakeMailProvider(labels), calendar = new FakeCalendarProvider();
   const executor = createActionExecutor({ store, bus, policy, now, mailProviderFor: () => mail, calendarProviderFor: () => calendar, ...options });
+  await store.accounts.upsert({ id: 'account', kind: 'mock', displayName: 'Test', emailAddress: 'me@example.com', capabilities: mail.capabilities, settings: {}, createdAt: at, updatedAt: at });
   await store.emails.upsertMany([email()]);
   await store.mailboxes.upsertMany(['inbox', 'archive', 'trash', 'drafts', 'sent', 'tag'].map(id => ({ id, accountId: 'account', providerId: `remote-${id}`, name: id, role: id === 'tag' ? null : id as 'inbox', totalEmails: 0, unreadEmails: 0 })));
   await store.trust.upsert(trustState({ pinnedLevel: 'full_access' }));
