@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRealBackend } from "../compose.js";
 import { createDemoBackend } from "../demo/index.js";
-import { createApp } from "../app.js";
+import { createApp } from "../auth.test-client.js";
 import { defaultConfig, validateConfig } from "../config.js";
 import type { ActionRecord, Matter, Page } from "@passport/types";
 import type { Backend } from "../backend.js";

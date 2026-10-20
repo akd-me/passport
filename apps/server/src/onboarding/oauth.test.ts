@@ -5,7 +5,7 @@ import type { ProviderRegistry } from "@passport/types";
 import { Hono } from "hono";
 import { createRealBackend, type RealBackend } from "../compose.js";
 import { defaultConfig } from "../config.js";
-import { createApp } from "../app.js";
+import { createApp } from "../auth.test-client.js";
 import { BrowserOAuth, persistOAuthCredentials } from "./oauth.js";
 import { registerOnboarding } from "./routes.js";
 import { ApiError } from "../errors.js";

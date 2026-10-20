@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRealBackend } from "../compose.js";
 import { defaultConfig } from "../config.js";
 import { addAccount } from "../accounts.js";
-import { createApp } from "../app.js";
+import { createApp } from "../auth.test-client.js";
 import { doctorCommand, runDoctor } from "../doctor.js";
 
 describe("passport doctor", () => {
