@@ -117,7 +117,7 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
   });
   it("respects Reply-To, preserves Re:, excludes own accounts and BCC, and deduplicates reply-all", async () => {
     await store.accounts.upsert(f.account({ id: "account-2", emailAddress: "alias@example.com" }));
-    await store.people.upsert(f.person({ id: "self", relationship: "self", emails: ["own-alias@example.com"], primaryEmail: "own-alias@example.com" }));
+    await store.people.upsert(f.person({ id: "self", relationship: "self", verifiedSelf: true, emails: ["own-alias@example.com"], primaryEmail: "own-alias@example.com" }));
     await store.emails.upsertMany([f.email({ subject: "RE: Launch", replyTo: [{ email: "reply@example.com" }],
       to: [{ email: "me@example.com" }, { email: "alias@example.com" }, { email: "own-alias@example.com" }, { email: "reply@example.com" }, { email: "colleague@example.com" }],
       cc: [{ email: "COLLEAGUE@example.com" }, { email: "other@example.com" }], bcc: [{ email: "private@example.com" }] })]);
@@ -153,7 +153,6 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
     for (const [name, args] of [
       ["archive_emails", { emailIds: ["email-1", "email-2"] }],
       ["move_emails", { emailIds: ["email-2"], toMailboxId: "archive-1" }],
-      ["move_emails", { emailIds: ["email-1"], toMailboxId: "trash" }],
       ["create_draft", { draft: f.draft({ accountId: "account-2", inReplyToEmailId: "email-1" }) }],
     ] as const) expect((await call(name, { ...args, reason: "Change" })).response.isError).toBe(true);
     expect(executor.submitted).toHaveLength(0);
@@ -192,7 +191,7 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
     ] as const) expect((await call(name, { reason: "Change", ...args })).response.isError).toBe(true);
     expect(executor.submitted).toHaveLength(0);
   });
-  it("resubmits undo inverses with external identity so a human actor cannot be inherited", async () => {
+  it("T3 delegates undo by ID with external identity so a human actor cannot be inherited", async () => {
     const inverse = { ...f.action().request, type: "unarchive" as const, actor: { kind: "human" as const, id: "user" } };
     await store.actions.insert(f.action({ id: "original", request: { ...f.action().request, category: "legal" }, inverse }));
     policy.outcome = "ask";

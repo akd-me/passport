@@ -252,3 +252,13 @@ pnpm --filter @passport/providers build
 Tests use hand-authored, recorded-style MIME/JSON/iCalendar fixtures and fake HTTP/IMAP/SMTP transports.
 The Vitest setup forbids global fetch. No credentials or live service access are required. The frozen
 `@passport/types` package is unchanged.
+
+Label creation is optional on `MailProvider.createMailbox(name)`. Gmail uses
+labels.create, JMAP uses Mailbox/set, and mock labels persist across sync. The
+executor invokes creation within a logged label action and keeps the new label
+when undo restores email membership. Current Graph and IMAP adapters advertise
+`labels:false`; routine triage attaches a matter and archives without labels.
+Stored recurrence expansion is implemented by the shared tools availability layer.
+Google/CalDAV adapters currently omit recurring exception identities, so local
+availability cannot apply their individual cancellation tombstones to a master;
+connected provider free/busy avoids this limitation.

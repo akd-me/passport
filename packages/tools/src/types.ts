@@ -31,4 +31,6 @@ export interface ToolRegistryOptions {
   actor: Actor;
   selfAddresses: readonly string[];
   now?: () => string;
+  /** Null means no connected calendar provider for this account. */
+  freeBusy?: import("./availability.js").FreeBusyResolver;
 }

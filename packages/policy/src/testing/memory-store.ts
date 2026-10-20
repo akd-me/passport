@@ -57,7 +57,7 @@ export function createMemoryStore(): Store {
     calendars: { async list(accountId) { return values(calendars).filter(item => item.accountId === accountId); }, async upsertMany(items) { setMany(calendars, items); } },
     events: {
       async get(id) { return read(events, id); },
-      async query(q) { return values(events).filter(item => (!q.accountId || item.accountId === q.accountId) && (!q.matterId || item.matterId === q.matterId) && (!q.range || item.start < q.range.end && item.end > q.range.start)).slice(0, q.limit); },
+      async query(q) { return values(events).filter(item => (!q.accountId || item.accountId === q.accountId) && (!q.matterId || item.matterId === q.matterId) && (!q.range || item.start < q.range.end && item.end > q.range.start || q.includeRecurring && (Boolean(item.recurringEventId) || Boolean(item.recurrenceRule) && item.start < q.range.end))).slice(0, q.limit); },
       async upsertMany(items) { setMany(events, items); }, async deleteMany(ids) { deleteMany(events, ids); },
     },
     people: {

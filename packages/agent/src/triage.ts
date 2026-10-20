@@ -1,4 +1,4 @@
-import { categorize } from "@passport/tools";
+import { availability, availabilityEvents, categorize } from "@passport/tools";
 import type { ActionCategory, Counterparty, DraftInput, Email, Matter, Person, Store, TimeRange } from "@passport/types";
 import type { RunContext } from "./context.js";
 import { allEmails, normalizeAddress, overlaps } from "./data.js";
@@ -93,9 +93,9 @@ export function replyDraft(ctx: RunContext, email: Email, textBody: string): Dra
 async function scheduling(ctx: RunContext, email: Email, counterparty: Counterparty, matterId?: string): Promise<void> {
   const start = ctx.now();
   const range = { start, end: new Date(Date.parse(start) + 14 * 86_400_000).toISOString() };
-  const events = await ctx.store.events.query({ limit: 2_147_483_647 });
+  const events = await availabilityEvents(ctx.store, range);
   const event = events.find(item => item.sourceEmailId === email.id && item.status !== "cancelled");
-  const busy = events.filter(item => item.id !== event?.id && item.status !== "cancelled" && item.myStatus !== "declined" && overlaps(item, range)).map(item => ({ start: item.start, end: item.end }));
+  const { busy } = await availability(ctx.store, range, { freeBusy: ctx.freeBusy, excludeEventId: event?.id });
   const response = await ctx.structured(scheduleSchema, schedulingPrompt(email, busy, range, event));
   if (event) {
     const conflict = busy.some(slot => overlaps(slot, event));
@@ -129,13 +129,13 @@ export async function triage(ctx: RunContext, emailId: string, bus: import("@pas
   const downgraded = resolved.downgraded.length > 0 || email.verification.passport === "downgraded";
   const counterparty = emailCounterparty(email, resolved.people, downgraded);
   if (counterparty.personId && !resolved.persistedIds.includes(counterparty.personId)) counterparty.personId = null;
-  const knownSender = resolved.people.some(person => (person.relationship === "known" || person.relationship === "self") && email.from.some(address => person.emails.includes(normalizeAddress(address.email))));
+  const knownSender = resolved.people.some(person => (person.relationship === "known" || person.relationship === "self" && (person.verifiedSelf || person.emails.every(address => ctx.selfAddresses.has(normalizeAddress(address))))) && email.from.some(address => person.emails.includes(normalizeAddress(address.email))));
   if (category === "replies_known" && (!knownSender || downgraded)) category = "replies_stranger";
   const matter = await attachMatter(ctx, email, category, resolved.persistedIds, counterparty);
   const common = { accountId: email.accountId, emailIds: [email.id] };
   const toolContext = { classification: category, projectedPeople: resolved.people, matterId: matter.id };
   if (category === "newsletters" || category === "receipts") {
-    await ctx.callTool("label_emails", { ...common, label: category === "receipts" ? "Receipts" : "Newsletters", reason: `Label ${category}: ${email.subject}` }, toolContext);
+    if ((await ctx.store.accounts.get(email.accountId))?.capabilities.labels) await ctx.callTool("label_emails", { ...common, label: category === "receipts" ? "Receipts" : "Newsletters", reason: `Label ${category}: ${email.subject}` }, toolContext);
     await ctx.callTool("archive_emails", { ...common, reason: `Archive routine ${category}: ${email.subject}` }, toolContext);
   } else if (category === "notifications") {
     await ctx.callTool("mark_read", { ...common, reason: `Mark routine notification read: ${email.subject}` }, toolContext);

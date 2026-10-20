@@ -1,4 +1,4 @@
-import type { AccountCapabilities, DraftInput, Email, Keyword, MailboxRole, MailChange, MailProvider, SendResult, SyncDelta, Timestamp } from "@passport/types";
+import type { AccountCapabilities, DraftInput, Email, Keyword, Mailbox, MailboxRole, MailChange, MailProvider, SendResult, SyncDelta, Timestamp } from "@passport/types";
 import { assertSend, decodeCursor, encodeCursor, localId, ProviderError, required } from "./errors.js";
 import { HttpConnection, type ProviderOptions } from "./http.js";
 import { composeMime, generatePreview, htmlToText, normalizeHeaders, normalizeMime, toIso } from "./normalize/index.js";
@@ -65,6 +65,12 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
   constructor(options: ProviderOptions = {}) { super(options, "google"); }
   override async disconnect(): Promise<void> { this.draftIds.clear(); this.labels = []; await super.disconnect(); }
   private async getLabels(): Promise<GmailLabel[]> { this.labels = (await this.json<{ labels?: GmailLabel[] }>(`${base}/labels`)).labels ?? []; return this.labels; }
+  async createMailbox(name: string): Promise<Mailbox> {
+    this.check();
+    const label = await this.json<GmailLabel>(`${base}/labels`, this.body({ name, labelListVisibility: "labelShow", messageListVisibility: "show" }));
+    this.labels.push(label);
+    return { id: localId(this.account.id, "mailbox", label.id), accountId: this.account.id, providerId: label.id, name: label.name, role: roles[label.id] ?? null, totalEmails: 0, unreadEmails: 0 };
+  }
   async *sync(cursor: string | null, opts: { maxEmails?: number; since?: Timestamp } = {}): AsyncIterable<SyncDelta> {
     this.check();
     for (const label of await this.getLabels()) {

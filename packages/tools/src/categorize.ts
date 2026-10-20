@@ -30,10 +30,12 @@ export function categorize(input: CategorizeInput): { category: ActionCategory; 
       || normalize(candidate.primaryEmail) === email);
     const senderMessages = emails.filter(message => message.from.some(address => normalize(address.email) === email));
     const downgraded = senderMessages.some(message => message.verification.passport === "downgraded")
-      || Boolean(person?.lastSeenBlueAt && person.verification !== "blue");
+      || Boolean(person?.lastSeenBlueAt && person.verification !== "blue" && (!person.downgradeAcknowledgedAt || person.downgradeAcknowledgedAt < person.lastSeenBlueAt));
+    const failedSelf = senderMessages.some(message => message.verification.dmarc === "fail" || message.verification.dkim === "fail");
     const blue = senderMessages.length ? senderMessages.every(message => message.verification.passport === "blue") : person?.verification === "blue";
     let kind: Counterparty["class"] = "stranger";
-    if (self.has(email) || person?.relationship === "self") kind = "self";
+    if ((self.has(email) || person?.relationship === "self" && person.verifiedSelf) && failedSelf) kind = "stranger";
+    else if (self.has(email) || person?.relationship === "self" && person.verifiedSelf) kind = "self";
     else if (downgraded) kind = "stranger";
     else if (person?.relationship === "service") kind = "service";
     else if (blue) kind = "blue";
@@ -56,8 +58,8 @@ export function categorize(input: CategorizeInput): { category: ActionCategory; 
     const sensitive = emails.map(email => email.category).filter((value): value is "money" | "legal" => value === "money" || value === "legal");
     if (sensitive.length) category = sensitive.includes("legal") ? "legal" : "money";
     else if (["draft_create", "draft_update", "send"].includes(input.type)) {
-      category = parties.length && parties.every(({ person, email }) => self.has(email)
-        || person?.relationship === "known" || person?.relationship === "self") ? "replies_known" : "replies_stranger";
+      category = parties.length && parties.every(({ person, kind }) => kind !== "stranger" && (kind === "self"
+        || person?.relationship === "known")) ? "replies_known" : "replies_stranger";
     } else {
       const categories = emails.map(email => email.headers.listUnsubscribe?.trim()
         ? "newsletters" as const : email.category ?? "triage");

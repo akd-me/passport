@@ -90,3 +90,16 @@ describe("MockCalendarProvider", () => {
   });
   it("delivers incremental events moving outside a requested range", async () => { const p = new MockCalendarProvider(); await p.connect(account, {}); const e = await p.createEvent(eventInput), cursor = lastCursor(await collect(p.sync(null))); await p.updateEvent(e.providerId, { start: "2027-01-01T00:00:00Z", end: "2027-01-01T01:00:00Z" }); const changes = await collect(p.sync(cursor, range)); expect(changes.some(d => d.kind === "event" && d.op === "upsert" && d.event.providerId === e.providerId)).toBe(true); });
 });
+
+it("T7 creates and syncs a previously missing mock label that can be applied and removed", async () => {
+  const provider = new MockMailProvider({ fixtures: false });
+  await provider.connect(account, {});
+  const created = await provider.createMailbox("Review receipts");
+  const email = provider.injectEmail();
+  await provider.applyChanges([{ op: "addToMailbox", providerIds: [email.providerId], mailboxProviderId: created.providerId }]);
+  expect((await provider.getEmail(email.providerId))?.mailboxIds).toContain(created.id);
+  expect(await collect(provider.sync(null))).toContainEqual({ kind: "mailbox", op: "upsert", mailbox: expect.objectContaining({ id: created.id, totalEmails: 1 }) });
+  await provider.applyChanges([{ op: "removeFromMailbox", providerIds: [email.providerId], mailboxProviderId: created.providerId }]);
+  expect((await provider.getEmail(email.providerId))?.mailboxIds).not.toContain(created.id);
+  expect((await collect(provider.sync(null))).some(delta => delta.kind === "mailbox" && delta.op === "upsert" && delta.mailbox.id === created.id)).toBe(true);
+});

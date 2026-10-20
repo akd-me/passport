@@ -1,4 +1,4 @@
-import type { Account, AccountCapabilities, AccountCredentials, DraftInput, Email, EmailAddress, MailboxRole, MailChange, MailProvider, SendResult, SyncDelta } from "@passport/types";
+import type { Account, AccountCapabilities, AccountCredentials, DraftInput, Email, EmailAddress, Mailbox, MailboxRole, MailChange, MailProvider, SendResult, SyncDelta } from "@passport/types";
 import { assertSend, localId, ProviderError, required } from "./errors.js";
 import { HttpConnection, type ProviderOptions } from "./http.js";
 import { generatePreview, htmlToText, normalizeAddresses, normalizeHeaders, toIso } from "./normalize/index.js";
@@ -72,6 +72,11 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
     return result;
   }
   private async mailboxes(): Promise<JmapMailbox[]> { return (await this.call<{ list: JmapMailbox[] }>("Mailbox/get")).list; }
+  async createMailbox(name: string): Promise<Mailbox> {
+    const result = await this.call<SetResult>("Mailbox/set", { create: { label: { name } } });
+    const id = required(result.created?.label?.id, "JMAP created mailbox id");
+    return { id: localId(this.account.id, "mailbox", id), accountId: this.account.id, providerId: id, name, role: null, totalEmails: 0, unreadEmails: 0 };
+  }
   async *sync(cursor: string | null, opts: { maxEmails?: number } = {}): AsyncIterable<SyncDelta> {
     for (const m of await this.mailboxes()) yield { kind: "mailbox", op: "upsert", mailbox: { id: localId(this.account.id, "mailbox", m.id), accountId: this.account.id, providerId: m.id, name: m.name, role: m.role ?? null,
       parentId: m.parentId ? localId(this.account.id, "mailbox", m.parentId) : null, totalEmails: m.totalEmails ?? 0, unreadEmails: m.unreadEmails ?? 0 } };

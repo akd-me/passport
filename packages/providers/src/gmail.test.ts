@@ -76,3 +76,22 @@ describe("Gmail API adapter", () => {
     expect((await p.send({ draft: { ...draft, inReplyToEmailId: id } })).providerId).toBe("sent");
   });
 });
+
+it("T7 creates a provider label with a stable local mailbox ID for executor membership", async () => {
+  const fetcher = fixtureFetch((url, init) => {
+    if (url.pathname.endsWith("/labels") && init.method === "POST") {
+      expect(jsonBody(init)).toMatchObject({ name: "Receipts" });
+      return response({ id: "Label_created", name: "Receipts" });
+    }
+    if (url.pathname.endsWith("/modify")) {
+      expect(jsonBody(init).addLabelIds).toEqual(["Label_created"]);
+      return response({});
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  });
+  const provider = new GmailMailProvider({ fetch: fetcher });
+  await provider.connect(account, { access_token: "token" });
+  const label = await provider.createMailbox("Receipts");
+  expect(label).toMatchObject({ accountId: account.id, providerId: "Label_created", name: "Receipts", role: null });
+  await provider.applyChanges([{ op: "addToMailbox", providerIds: ["message"], mailboxProviderId: label.providerId }]);
+});

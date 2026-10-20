@@ -42,3 +42,18 @@ describe("JMAP adapter", () => {
     const q = new JmapMailProvider({ fetch: fixtureFetch(() => response({ ...session, capabilities: {} })) }); await expect(q.connect(configured, { token: "token" })).rejects.toMatchObject({ code: "UNSUPPORTED_CAPABILITY" });
   });
 });
+
+it("T7 creates missing JMAP labels through Mailbox/set before applying membership", async () => {
+  const provider = new JmapMailProvider({ fetch: server((method, args) => {
+    if (method === "Mailbox/set") {
+      expect(args.create).toEqual({ label: { name: "Receipts" } });
+      return { created: { label: { id: "new-label" } } };
+    }
+    if (method === "Email/set") expect(args.update).toEqual({ message: { "mailboxIds/new-label": true } });
+    return undefined;
+  }) });
+  await provider.connect(configured, { token: "token" });
+  const label = await provider.createMailbox("Receipts");
+  expect(label).toMatchObject({ accountId: account.id, providerId: "new-label", name: "Receipts", role: null });
+  await provider.applyChanges([{ op: "addToMailbox", providerIds: ["message"], mailboxProviderId: label.providerId }]);
+});

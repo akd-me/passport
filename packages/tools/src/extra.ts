@@ -1,3 +1,4 @@
+import { availability } from "./availability.js";
 import type { ActionRecord, EmailQuery, TimeRange } from "@passport/types";
 import type { Context } from "./context.js";
 import { actionView, emailView, json, ToolError, required, writeResult } from "./presentation.js";
@@ -25,7 +26,7 @@ export function registerExtra(ctx: Context) {
     return json({ threadId, participants, timeline: page.items.map(email => ({ emailId: email.id, at: email.sentAt ?? email.receivedAt, from: email.from, preview: email.preview.slice(0, 240) })),
       openQuestions: questions, questionsAreHeuristic: true, lastMessage: last.items[0] ? emailView(last.items[0], full) : null, nextCursor: page.nextCursor ?? null, total: page.total });
   });
-  register(ctx, "find_free_slots", "Find duration-sized free slots from synced events, within a UTC window and IANA-zone working hours. Days use 0=Sunday. Availability reflects local sync only; maximum window 31 days.", {
+  register(ctx, "find_free_slots", "Find duration-sized free slots from synced events, within a UTC window and IANA-zone working hours. Days use 0=Sunday. Prefers connected provider availability; expands local recurring events as fallback; maximum window 31 days.", {
     accountId: s.id.optional(), durationMinutes: z.number().int().min(1).max(1440), window: s.range,
     workingHours: z.strictObject({ start: clock, end: clock, days: z.array(day).min(1).max(7).default([1, 2, 3, 4, 5]) }).default({ start: "09:00", end: "17:00", days: [1, 2, 3, 4, 5] }),
     timeZone: z.string().max(100).default("UTC"), limit: s.limit,
@@ -38,7 +39,7 @@ export function registerExtra(ctx: Context) {
       const parts = Object.fromEntries(formatter.formatToParts(time).map(part => [part.type, part.value]));
       return { date: `${parts.year}-${parts.month}-${parts.day}`, day: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.weekday!), minute: Number(parts.hour) * 60 + Number(parts.minute) };
     };
-    const busy = (await store.events.query({ accountId, range: window, limit: 2_147_483_647 })).filter(event => event.status !== "cancelled" && event.myStatus !== "declined");
+    const { busy, source } = await availability(store, window, { accountId, freeBusy: ctx.deps.freeBusy });
     const slots: TimeRange[] = [];
     const duration = durationMinutes * 60_000;
     for (let start = Math.ceil(Date.parse(window.start) / 60_000) * 60_000; start + duration <= Date.parse(window.end); start += 60_000) {
@@ -49,7 +50,7 @@ export function registerExtra(ctx: Context) {
       if (slots.length === limit) break;
       start += duration - 60_000;
     }
-    return json({ slots, timeZone, source: "local_store", limitReached: slots.length === limit });
+    return json({ slots, timeZone, source, limitReached: slots.length === limit });
   });
   register(ctx, "list_recent_from_person", "List recent incoming mail from a person's known addresses, excluding messages merely addressed to them.", {
     personId: s.id, accountId: s.id.optional(), limit: s.limit, cursor: z.string().nullable().optional(), full: s.full,

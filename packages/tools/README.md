@@ -27,8 +27,8 @@ the caller. Handlers validate every invocation, even when called without an SDK.
 Unknown fields, cross-account writes, protected contact fields and unsafe mailbox
 moves are rejected. Unexpected dependency failures are redacted.
 
-All writes submit `ActionRequest`s to the injected executor; cancellation uses its
-existing `cancelHold` lifecycle method after checking actor ownership. Dry-run and
+Writes submit `ActionRequest`s to the injected executor; undo and cancellation
+use its actor-aware `undo` and `cancelHold` lifecycle methods. Dry-run and
 empty query batches do not submit actions. Actor/category overrides never appear
 in tool input schemas. Optional trusted invocation context correlates `runId`;
 only built-in `agent` actors can supply projected triage evidence, person snapshots
@@ -41,10 +41,24 @@ settings are never read. Query writes cap at 200 matches and require one account
 Standing-rule edits submit a reversible `profile_update` action in `matters`;
 USER.md lives at `store.kv["user_profile"]`, including its other sections.
 
-See [the full catalogue and client setup](../../docs/tools.md). There are no
-production stubs. Availability depends on sync freshness; question extraction is
-heuristic. Undo submits public stored inverses under current policy; private
-executor snapshot inverses remain a human-UI operation.
+A shared destination guard escalates trash/junk additions and last-safe-mailbox
+removals to destructive actions before policy evaluation. External agents receive
+the delete ceiling for every mailbox mutation, including query writes. Self
+identities require configured addresses or `verifiedSelf` from human approval;
+self changes are denied externally and known-address additions ask for approval.
+
+`availability`, `availabilityEvents`, and `expandRecurringEvents` are shared with
+agent scheduling. Availability includes old recurring masters and all in-range
+events, preferring optional `freeBusy(accountId,range)` injection (`null` means
+no connected provider). Local expansion supports DAILY/WEEKLY/MONTHLY, INTERVAL,
+BYDAY, COUNT, UNTIL, and WKST, including event-zone DST and exposed cancelled
+instances. Unsupported rules fail explicitly. Providers that omit exception
+identities cannot supply local cancellation exclusions; live free/busy is preferred.
+
+See [the full catalogue and client setup](../../docs/tools.md), including label
+creation/undo behavior and host resolver wiring. There are no production stubs;
+question extraction is heuristic. Undo loads trusted private snapshots by ID,
+evaluates the current actor/ceiling, and marks the original undone after execution.
 
 `pnpm --filter @passport/tools build`, `typecheck`, and `test` validate the package.
 Tests use complete in-memory contract fakes and exercise every tool without network.

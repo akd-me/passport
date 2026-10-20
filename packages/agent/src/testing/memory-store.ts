@@ -57,7 +57,7 @@ export class MemoryStore implements Store {
   calendars: Store["calendars"] = { list: async id => copy([...this.data.calendars.values()].filter(item => item.accountId === id)), upsertMany: async items => { for (const item of items) this.data.calendars.set(item.id, copy(item)); } };
   events: Store["events"] = {
     get: async id => copy(this.data.events.get(id) ?? null),
-    query: async query => copy([...this.data.events.values()].filter(event => (!query.accountId || event.accountId === query.accountId) && (!query.matterId || event.matterId === query.matterId) && (!query.range || overlaps(event, query.range))).slice(0, query.limit)),
+    query: async query => copy([...this.data.events.values()].filter(event => (!query.accountId || event.accountId === query.accountId) && (!query.matterId || event.matterId === query.matterId) && (!query.range || overlaps(event, query.range) || query.includeRecurring && (Boolean(event.recurringEventId) || Boolean(event.recurrenceRule) && event.start < query.range.end))).slice(0, query.limit)),
     upsertMany: async items => { for (const item of items) this.data.events.set(item.id, copy(item)); }, deleteMany: async ids => { for (const id of ids) this.data.events.delete(id); },
   };
   people: Store["people"] = {

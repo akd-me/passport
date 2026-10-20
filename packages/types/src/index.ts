@@ -165,6 +165,8 @@ export interface Email {
   personIds: Id[];
   /** Agent classification, set by triage. */
   category?: ActionCategory | null;
+  /** Provider-derived sent provenance, never inferred from RFC From/Date headers. */
+  provenance?: "sent";
 }
 
 export interface Thread {
@@ -231,6 +233,9 @@ export interface CalendarEvent {
   matterId?: Id | null;
   recurrenceRule?: string | null;
   updatedAt: Timestamp;
+  /** Provider-exposed override/cancellation identity; absent when the adapter only exposes masters. */
+  recurringEventId?: string | null;
+  originalStart?: Timestamp | null;
 }
 
 export interface TimeRange {
@@ -264,6 +269,10 @@ export interface Person {
   };
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  /** Self identity/address set explicitly approved by a human; never inferred from mail. */
+  verifiedSelf?: boolean;
+  /** Human acknowledgement of a blue-to-green downgrade. A later blue message resets it. */
+  downgradeAcknowledgedAt?: Timestamp | null;
 }
 
 export type MatterStatus = "active" | "waiting" | "snoozed" | "done";
@@ -395,6 +404,8 @@ export interface ActionRequest<T extends ActionType = ActionType> {
   matterId?: Id | null;
   /** Correlates all actions proposed in one agent run. */
   runId?: Id | null;
+  /** Trusted destination analysis: this mutation adds trash/junk or removes the last safe mailbox. */
+  destructive?: boolean;
 }
 
 export type ActionStatus =
@@ -624,7 +635,7 @@ export interface Store {
 
   events: {
     get(id: Id): Promise<CalendarEvent | null>;
-    query(q: { accountId?: Id; range?: TimeRange; matterId?: Id; limit?: number }): Promise<CalendarEvent[]>;
+    query(q: { accountId?: Id; range?: TimeRange; matterId?: Id; limit?: number; includeRecurring?: boolean }): Promise<CalendarEvent[]>;
     upsertMany(events: CalendarEvent[]): Promise<void>;
     deleteMany(ids: Id[]): Promise<void>;
   };
@@ -724,6 +735,8 @@ export interface MailProvider {
   send(input: { draftProviderId?: string; draft?: DraftInput }): Promise<SendResult>;
   /** Optional push: resolves when the provider signals changes or the signal aborts. */
   waitForChanges?(signal: AbortSignal): Promise<void>;
+  /** Create a provider label/mailbox; executor retains it when undoing its first label action. */
+  createMailbox?(name: string): Promise<Mailbox>;
 }
 
 export interface CalendarProvider {
@@ -816,7 +829,7 @@ export interface ActionExecutor {
   /** Cancel a held (outbox) action before release. */
   cancelHold(actionId: Id): Promise<ActionRecord>;
   /** Execute the stored inverse. Fails if inverse is null. */
-  undo(actionId: Id): Promise<ActionRecord>;
+  undo(actionId: Id, context?: { actor: Actor; reason?: string }): Promise<ActionRecord>;
   /** Release due held actions. Call from a scheduler. Returns executed records. */
   releaseDue(now?: Timestamp): Promise<ActionRecord[]>;
 }

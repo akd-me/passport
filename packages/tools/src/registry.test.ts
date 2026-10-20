@@ -180,3 +180,31 @@ describe("new workflow tools", () => {
     expect(JSON.stringify(result)).not.toContain("secret"); expect(executor.submitted).toEqual([]);
   });
 });
+
+it.each(["trash", "junk"] as const)("T1 destinationGuard protects %s role aliases and removal of the last safe mailbox", async role => {
+  const box = f.mailbox({ id: "danger", providerId: "provider-danger", name: "Localized destination", role });
+  await store.mailboxes.upsertMany([box]);
+  for (const label of [box.id, box.providerId, box.name]) {
+    await call("label_emails", { emailIds: ["email-1"], label, reason: "Move" });
+    expect(executor.submitted.at(-1)).toMatchObject({ type: "label", category: "other", destructive: true });
+  }
+  await call("move_emails", { emailIds: ["email-1"], toMailboxId: box.id, reason: "Move" });
+  expect(executor.submitted.at(-1)).toMatchObject({ type: "move", destructive: true });
+  await store.emails.upsertMany([f.email({ mailboxIds: ["inbox-1", box.id] })]);
+  await call("label_emails", { emailIds: ["email-1"], label: "Inbox", remove: true, reason: "Remove inbox" });
+  expect(executor.submitted.at(-1)).toMatchObject({ type: "unlabel", category: "other", destructive: true });
+  // Archive adds a safe archive destination, so this message remains accessible there.
+  await call("archive_emails", { emailIds: ["email-1"], reason: "Archive" });
+  expect(executor.submitted.at(-1)?.destructive).not.toBe(true);
+  await store.mailboxes.deleteMany(["archive-1"]);
+  await call("archive_emails", { emailIds: ["email-1"], reason: "Archive" });
+  expect(executor.submitted.at(-1)).toMatchObject({ type: "archive", category: "other", destructive: true });
+});
+
+it("T3 undo_action passes only the ID and bound actor to executor.undo", async () => {
+  const original = (await store.actions.get("action-fixture"))!;
+  const undo = vi.spyOn(executor, "undo").mockResolvedValue({ ...original, status: "undone" });
+  await call("undo_action", { actionId: original.id, reason: "Restore" });
+  expect(undo).toHaveBeenCalledExactlyOnceWith(original.id, { actor: { kind: "external-agent", id: "test-client" }, reason: "Restore" });
+  expect(executor.submitted).toEqual([]);
+});

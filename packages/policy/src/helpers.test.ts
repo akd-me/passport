@@ -12,7 +12,7 @@ describe('classifyCounterparty', () => {
     { patch: { verification: 'blue' as const }, expected: 'blue' },
     { patch: { verification: 'green' as const }, expected: 'green_known' },
     { patch: { relationship: 'service' as const }, expected: 'service' },
-    { patch: { relationship: 'self' as const }, expected: 'self' },
+    { patch: { relationship: 'self' as const, verifiedSelf: true }, expected: 'self' },
     { patch: { relationship: 'stranger' as const }, expected: 'stranger' },
   ])('uses identity/relationship fields for $expected', ({ patch, expected }) => {
     expect(classifyCounterparty(person(patch), ['FRIEND@example.com'], [])).toBe(expected);
