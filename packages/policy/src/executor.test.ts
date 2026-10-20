@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { ActionParams, Email, Person } from '@passport/types';
 import { calendarEvent, draft, email, matter, person, request, setup, trustState } from './testing/fixtures.js';
 
 describe('mail action lifecycle', () => {
@@ -221,6 +222,126 @@ describe('calendar dispatch', () => {
 });
 
 describe('internal store actions', () => {
+  it('creates a person from an agent snapshot and persists a deletion inverse through JSON', async () => {
+    const { executor, store, mail, calendar } = await setup();
+    const input = person({ id: 'new-person', relationship: 'stranger', notes: 'New contact' });
+    const created = await executor.submit(request('person_update', { personId: input.id, patch: input }, { category: 'matters' }));
+    expect(created).toMatchObject({ status: 'executed', result: { personId: input.id }, decision: { reversibility: 'reversible' }, inverse: { type: 'person_update' } });
+    expect(await store.people.get(input.id)).toEqual(input);
+    await store.actions.update(created.id, { inverse: JSON.parse(JSON.stringify(created.inverse)) });
+    await executor.undo(created.id);
+    expect(await store.people.get(input.id)).toBeNull();
+    expect(await store.people.getByEmail(input.primaryEmail)).toBeNull();
+    expect(await store.people.list()).toEqual([]);
+    expect((await store.actions.query({})).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: created.id, status: 'undone' }),
+      expect.objectContaining({ status: 'executed', result: { deletedPersonId: input.id }, inverse: expect.any(Object) }),
+    ]));
+    expect(mail.changes).toEqual([]); expect(calendar.calls).toEqual([]);
+  });
+
+  it('restores an existing person exactly when a complete agent snapshot updates it without delete support', async () => {
+    const { executor, store, setTime } = await setup();
+    const original = person({ notes: 'Prior notes', avatarUrl: 'avatar.png' });
+    await store.people.upsert(original);
+    delete store.people.delete;
+    setTime('2026-10-21T12:00:00.000Z');
+    const updated = await executor.submit(request('person_update', { personId: original.id, patch: { ...original, notes: 'Updated notes', relationship: 'service', verification: 'blue', stats: { sent: 1, received: 5, lastContactAt: null } } }, { category: 'matters' }));
+    expect(await store.people.get(original.id)).toMatchObject({ relationship: 'service', verification: 'blue', notes: 'Updated notes' });
+    await executor.undo(updated.id);
+    expect(await store.people.get(original.id)).toEqual(original);
+  });
+
+  it('fails a partial patch for a missing person with a clear logged error', async () => {
+    const { executor, store } = await setup();
+    await expect(executor.submit(request('person_update', { personId: 'missing', patch: { displayName: 'Missing' } }))).rejects.toMatchObject({ code: 'PERSON_NOT_FOUND', message: expect.stringContaining('complete Person patch') });
+    expect(await store.people.get('missing')).toBeNull();
+    expect((await store.actions.query({ status: ['failed'] })).items[0]?.error).toContain('complete Person patch');
+  });
+
+  it.each(['stats', 'createdAt', 'emails'] as const)('does not treat a person missing %s as complete', async field => {
+    const { executor, store } = await setup();
+    const patch: Partial<Person> = person(); delete patch[field];
+    await expect(executor.submit(request('person_update', { personId: 'person', patch }))).rejects.toThrow();
+    expect(await store.people.list()).toEqual([]);
+  });
+
+  it('rejects person creation before mutation when a store cannot delete it on undo', async () => {
+    const { executor, store } = await setup(); delete store.people.delete;
+    await expect(executor.submit(request('person_update', { personId: 'person', patch: person() }))).rejects.toMatchObject({ code: 'PERSON_DELETE_UNSUPPORTED' });
+    expect(await store.people.list()).toEqual([]);
+  });
+
+  it('rejects mismatched person ids and external-agent identity snapshots', async () => {
+    const { executor, store } = await setup();
+    await expect(executor.submit(request('person_update', { personId: 'person', patch: person({ id: 'other' }) }))).rejects.toMatchObject({ code: 'ACCOUNT_MISMATCH' });
+    await expect(executor.submit(request('person_update', { personId: 'person', patch: person() }, { actor: { kind: 'external-agent', id: 'mcp' } }))).rejects.toMatchObject({ code: 'PROTECTED_IDENTITY' });
+    await expect(executor.submit(request('person_update', { personId: 'person', patch: { relationship: 'known' } }))).rejects.toMatchObject({ code: 'PROTECTED_IDENTITY' });
+    expect(await store.people.list()).toEqual([]);
+  });
+
+  it.each(['matter_create', 'matter_attach'] as const)('applies %s emailPatch and restores each email independently through a persisted inverse', async type => {
+    const { executor, store } = await setup();
+    const before = [
+      email({ matterId: 'previous-matter', category: 'scheduling', personIds: ['old-person'] }),
+      email({ id: 'second-email', providerId: 'remote-second', matterId: null, category: null, personIds: [] }),
+    ];
+    await store.emails.upsertMany(before);
+    await store.people.upsert(person());
+    const originalMatter = matter();
+    if (type === 'matter_attach') await store.matters.upsert(originalMatter);
+    const emailIds = before.map(email => email.id);
+    const emailPatch = { category: 'receipts', personIds: ['person'] } as const;
+    const params: (ActionParams['matter_create'] | ActionParams['matter_attach']) & { emailPatch: Partial<Pick<Email, 'category' | 'personIds'>> } = type === 'matter_create'
+      ? { matter: { title: 'Purchase', summary: 'Receipt', status: 'active', emailIds, eventIds: [], personIds: ['person'] }, emailPatch: { ...emailPatch, personIds: ['person'] } }
+      : { matterId: 'matter', emailIds, personIds: ['person'], emailPatch: { ...emailPatch, personIds: ['person'] } };
+    const created = await executor.submit(request(type, params, { category: 'matters' }));
+    const matterId = created.result!.matterId as string;
+    expect(created.status).toBe('executed'); expect(created.inverse).not.toBeNull();
+    expect(await store.matters.get(matterId)).toMatchObject({ emailIds, personIds: ['person'] });
+    if (type === 'matter_create') expect(created.result!.matter).toEqual(await store.matters.get(matterId));
+    for (const id of emailIds) expect(await store.emails.get(id)).toMatchObject({ matterId, ...emailPatch });
+    expect((await store.actions.get(created.id))?.result).toEqual(created.result);
+    await store.actions.update(created.id, { inverse: JSON.parse(JSON.stringify(created.inverse)) });
+    // Undo owns the matter metadata, so unrelated mail changes made later survive.
+    await store.emails.patchMany(['email'], { keywords: { $seen: true }, mailboxIds: ['archive'] });
+    await executor.undo(created.id);
+    expect(await store.emails.get('email')).toEqual({ ...before[0], keywords: { $seen: true }, mailboxIds: ['archive'] });
+    expect(await store.emails.get('second-email')).toEqual(before[1]);
+    expect(await store.matters.get(matterId)).toEqual(type === 'matter_create' ? null : originalMatter);
+  });
+
+  it.each(['matter_create', 'matter_attach'] as const)('rolls back %s when email metadata writes fail after a partial write', async type => {
+    const { executor, store } = await setup();
+    await store.emails.patchMany(['email'], { matterId: 'previous-matter', category: 'other', personIds: ['old-person'] });
+    const before = await store.emails.get('email');
+    const originalMatter = matter();
+    if (type === 'matter_attach') await store.matters.upsert(originalMatter);
+    const patchMany = store.emails.patchMany.bind(store.emails);
+    const failure = new Error('Email metadata write failed');
+    vi.spyOn(store.emails, 'patchMany').mockImplementationOnce(async (ids, patch) => { await patchMany(ids, patch); throw failure; });
+    const params = type === 'matter_create'
+      ? { matter: { title: 'Trip', summary: '', status: 'active' as const, emailIds: ['email'], eventIds: [], personIds: [] } }
+      : { matterId: 'matter', emailIds: ['email'] };
+    const extended = { ...params, emailPatch: { category: 'receipts' as const, personIds: [] } };
+    await expect(executor.submit(request(type, extended))).rejects.toBe(failure);
+    expect(await store.emails.get('email')).toEqual(before);
+    expect(await store.matters.list()).toEqual(type === 'matter_create' ? [] : [originalMatter]);
+    expect((await store.actions.query({ status: ['failed'] })).items[0]).toMatchObject({ error: failure.message, inverse: expect.any(Object) });
+  });
+
+  it('ignores unsupported emailPatch fields and preserves metadata that was omitted', async () => {
+    const { executor, store } = await setup();
+    await store.matters.upsert(matter());
+    await store.emails.patchMany(['email'], { category: 'scheduling', personIds: ['prior'] });
+    const params = { matterId: 'matter', emailIds: ['email'], emailPatch: { category: 'invalid', personIds: [42], matterId: 'injected', keywords: { $seen: true } } };
+    await executor.submit(request('matter_attach', params));
+    expect(await store.emails.get('email')).toMatchObject({ matterId: 'matter', category: 'scheduling', personIds: ['prior'], keywords: {} });
+    const clear: ActionParams['matter_attach'] & { emailPatch: { category: null; personIds: string[] } } = { matterId: 'matter', emailIds: ['email'], emailPatch: { category: null, personIds: [] } };
+    await executor.submit(request('matter_attach', clear));
+    expect(await store.emails.get('email')).toMatchObject({ matterId: 'matter', category: null, personIds: [] });
+  });
+
   it('creates a matter and deletes it on undo, with a separate undo ActionRecord', async () => {
     const { executor, store } = await setup();
     const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...input } = matter();

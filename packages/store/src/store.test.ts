@@ -326,6 +326,31 @@ describe("calendar events", () => {
 });
 
 describe("people and matters", () => {
+  it("deletes people and cascades email addresses and email/matter memberships", async () => {
+    await store.people.upsert(person());
+    await store.people.upsert(person("bob"));
+    await store.emails.upsertMany([email("email", { personIds: ["alice", "bob"] }), email("alice-only")]);
+    await store.matters.upsert(matter("matter", { personIds: ["alice", "bob"], eventIds: [] }));
+    await store.matters.upsert(matter("alice-only", { emailIds: [], eventIds: [] }));
+    await store.people.delete!("alice");
+    await store.people.delete!("alice"); // Missing people are an idempotent no-op.
+    expect(await store.people.get("alice")).toBeNull();
+    expect(await store.people.getByEmail("alice@example.com")).toBeNull();
+    expect(await store.people.list()).toEqual([person("bob")]);
+    expect((await store.emails.get("email"))?.personIds).toEqual(["bob"]);
+    expect((await store.emails.get("alice-only"))?.personIds).toEqual([]);
+    expect((await store.emails.query({ personId: "alice" })).total).toBe(0);
+    expect((await store.emails.query({ personId: "bob" })).total).toBe(1);
+    expect((await store.matters.get("matter"))?.personIds).toEqual(["bob"]);
+    expect((await store.matters.get("alice-only"))?.personIds).toEqual([]);
+    expect(await store.matters.list({ personId: "alice" })).toEqual([]);
+    expect((await store.matters.list({ personId: "bob" })).map(item => item.id)).toEqual(["matter"]);
+    // Reusing the id must not resurrect deleted joins.
+    await store.people.upsert(person());
+    expect((await store.emails.query({ personId: "alice" })).total).toBe(0);
+    expect(await store.matters.list({ personId: "alice" })).toEqual([]);
+  });
+
   it("creates and updates people with case-insensitive email lookup and deduplication", async () => {
     expect(await store.people.get("missing")).toBeNull();
     expect(await store.people.getByEmail("missing@example.com")).toBeNull();

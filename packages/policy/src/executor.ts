@@ -1,6 +1,6 @@
 import {
   BASE_REVERSIBILITY,
-  type ActionExecutor, type ActionRecord, type ActionRequest, type ActionType,
+  type ActionCategory, type ActionExecutor, type ActionParams, type ActionRecord, type ActionRequest, type ActionType,
   type CalendarEvent, type CalendarProvider, type DraftInput, type Email, type EventBus,
   type MailChange, type MailProvider, type Matter, type Person, type PolicyEngine, type Store, type Timestamp,
 } from '@passport/types';
@@ -18,18 +18,39 @@ export interface ActionExecutorOptions {
   now?: () => Timestamp;
 }
 type Request = { [K in ActionType]: ActionRequest<K> }[ActionType];
-type EmailPatch = Pick<Email, 'id' | 'mailboxIds' | 'keywords' | 'matterId' | 'personIds' | 'category'>;
+type EmailPatch = Pick<Email, 'id' | 'matterId' | 'personIds' | 'category'>;
 type Snapshot =
   | { kind: 'mail'; emails: Email[] }
   | { kind: 'draft'; email: Email | null; createdId?: string }
   | { kind: 'event'; event: CalendarEvent | null; createdId?: string }
   | { kind: 'matter'; matter: Matter | null; id: string; emails: EmailPatch[]; events: CalendarEvent[] }
-  | { kind: 'person'; person: Person }
+  | { kind: 'person'; person: Person | null; createdId?: string }
   | { kind: 'snooze'; matter: Matter | null; kv: Array<{ key: string; value: string | null }> };
 const marker = '__passportPolicyInverse';
 const snapshotOf = (request: ActionRequest) => (request.params as unknown as Record<string, Snapshot>)[marker];
-const patchOf = (email: Email): EmailPatch => ({ id: email.id, mailboxIds: email.mailboxIds, keywords: email.keywords, matterId: email.matterId ?? null, personIds: email.personIds, category: email.category ?? null });
+const patchOf = (email: Email): EmailPatch => ({ id: email.id, matterId: email.matterId ?? null, personIds: [...email.personIds], category: email.category ?? null });
 const draftOf = (email: Email): DraftInput => ({ accountId: email.accountId, to: email.to, cc: email.cc, bcc: email.bcc, subject: email.subject, textBody: email.textBody ?? '', htmlBody: email.htmlBody, attachments: email.attachments.map(({ name, type, blobId }) => ({ name, type, blobId })) });
+
+const isCompletePerson = (patch: Partial<Person>): patch is Person =>
+  typeof patch.id === 'string' && patch.id.length > 0 && typeof patch.displayName === 'string' &&
+  typeof patch.primaryEmail === 'string' && Array.isArray(patch.emails) && patch.emails.every(email => typeof email === 'string') &&
+  ['self', 'known', 'stranger', 'service'].includes(patch.relationship ?? '') &&
+  ['blue', 'green', 'unknown'].includes(patch.verification ?? '') &&
+  !!patch.stats && typeof patch.stats.sent === 'number' && typeof patch.stats.received === 'number' &&
+  (patch.stats.lastContactAt === null || typeof patch.stats.lastContactAt === 'string') &&
+  typeof patch.createdAt === 'string' && typeof patch.updatedAt === 'string';
+
+/** Mirrors the agent's package-local getAgentEmailPatch convention without a runtime dependency. */
+const agentEmailPatchOf = (request: ActionRequest): Partial<Pick<Email, 'category' | 'personIds'>> => {
+  const patch = (request.params as { emailPatch?: unknown }).emailPatch;
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return {};
+  const { category, personIds } = patch as Record<string, unknown>;
+  const categories: readonly ActionCategory[] = ['triage', 'newsletters', 'receipts', 'notifications', 'scheduling', 'replies_known', 'replies_stranger', 'money', 'legal', 'unsubscribe', 'matters', 'other'];
+  return {
+    ...(category === null || categories.includes(category as ActionCategory) ? { category: category as Email['category'] } : {}),
+    ...(Array.isArray(personIds) && personIds.every(id => typeof id === 'string') ? { personIds } : {}),
+  };
+};
 
 /** Persist, authorize, execute, hold, and undo all mutations through a single serialized gate. */
 export function createActionExecutor({ store, bus, policy, mailProviderFor, calendarProviderFor, now = () => new Date().toISOString() }: ActionExecutorOptions): ActionExecutor {
@@ -65,8 +86,11 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
     if (!request.params || typeof request.params !== 'object' || Object.prototype.hasOwnProperty.call(request.params, marker)) throw new PolicyError('INVALID_PARAMS', 'Private inverse data cannot be submitted');
     if (!['human', 'agent', 'external-agent'].includes(request.actor?.kind)) throw new PolicyError('INVALID_ACTOR', 'Unknown actor kind');
     const params = request.params as unknown as { draft?: DraftInput; event?: CalendarEvent; patch?: { accountId?: string; id?: string; providerId?: string; verification?: unknown; relationship?: unknown } };
-    if (params.draft && params.draft.accountId !== request.accountId || params.event && params.event.accountId !== request.accountId || params.patch?.accountId && params.patch.accountId !== request.accountId || params.patch?.id !== undefined || params.patch?.providerId !== undefined) throw new PolicyError('ACCOUNT_MISMATCH', 'Action edits cannot change identity or account');
-    if (request.type === 'person_update' && params.patch && ('verification' in params.patch || request.actor.kind !== 'human' && 'relationship' in params.patch)) throw new PolicyError('PROTECTED_IDENTITY', 'Verification must come from trusted identity data; only humans can change relationships');
+    const personParams = request.type === 'person_update' ? request.params as ActionParams['person_update'] : null;
+    const completePerson = personParams && isCompletePerson(personParams.patch);
+    const personSnapshot = completePerson && request.actor.kind !== 'external-agent';
+    if (params.draft && params.draft.accountId !== request.accountId || params.event && params.event.accountId !== request.accountId || params.patch?.accountId && params.patch.accountId !== request.accountId || params.patch?.id !== undefined && !(completePerson && params.patch.id === personParams.personId) || params.patch?.providerId !== undefined) throw new PolicyError('ACCOUNT_MISMATCH', 'Action edits cannot change identity or account');
+    if (request.type === 'person_update' && params.patch && !personSnapshot && ('verification' in params.patch || request.actor.kind !== 'human' && 'relationship' in params.patch)) throw new PolicyError('PROTECTED_IDENTITY', 'Verification must come from trusted identity data; only humans can change relationships');
   };
   const capture = async (request: Request): Promise<Snapshot | null> => {
     switch (request.type) {
@@ -81,7 +105,11 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       }
       case 'calendar_create': return { kind: 'event', event: null };
       case 'calendar_update': return { kind: 'event', event: await eventFor(request.params.eventId, request.accountId) };
-      case 'matter_create': return { kind: 'matter', matter: null, id: newId(now()), emails: [], events: [] };
+      case 'matter_create': {
+        const emails = await allEmails(request.params.matter.emailIds, request.accountId);
+        const events = await Promise.all(request.params.matter.eventIds.map(id => eventFor(id, request.accountId)));
+        return { kind: 'matter', matter: null, id: newId(now()), emails: emails.map(patchOf), events };
+      }
       case 'matter_update': case 'matter_attach': {
         const matter = await matterFor(request.params.matterId);
         const emails = request.type === 'matter_attach' ? await allEmails(request.params.emailIds ?? [], request.accountId) : [];
@@ -91,8 +119,11 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       }
       case 'person_update': {
         const person = await store.people.get(request.params.personId);
-        if (!person) throw new PolicyError('PERSON_NOT_FOUND', `Person ${request.params.personId} does not exist`);
-        return { kind: 'person', person };
+        if (!person) {
+          if (!isCompletePerson(request.params.patch)) throw new PolicyError('PERSON_NOT_FOUND', `Person ${request.params.personId} does not exist; creation requires a complete Person patch`);
+          if (!store.people.delete) throw new PolicyError('PERSON_DELETE_UNSUPPORTED', 'Creating a person requires Store.people.delete so it can be undone');
+        }
+        return { kind: 'person', person, ...(!person ? { createdId: request.params.personId } : {}) };
       }
       case 'snooze': {
         if (!Number.isFinite(Date.parse(request.params.until))) throw new PolicyError('INVALID_TIME', 'Snooze time must be an ISO timestamp');
@@ -199,12 +230,34 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
         if (snapshot.events.length) await store.events.upsertMany(snapshot.events);
         return { matterId: snapshot.id };
       }
-      case 'person': await store.people.upsert(snapshot.person); return { personId: snapshot.person.id };
+      case 'person': {
+        if (snapshot.person) { await store.people.upsert(snapshot.person); return { personId: snapshot.person.id }; }
+        if (!snapshot.createdId) throw new PolicyError('INVALID_INVERSE', 'Person inverse is missing its created id');
+        if (!store.people.delete) throw new PolicyError('PERSON_DELETE_UNSUPPORTED', 'Undoing person creation requires Store.people.delete');
+        await store.people.delete(snapshot.createdId); return { deletedPersonId: snapshot.createdId };
+      }
       case 'snooze':
         if (snapshot.matter) await mirrorMatter(snapshot.matter);
         for (const { key, value } of snapshot.kv) { if (value === null) await store.kv.delete(key); else await store.kv.set(key, value); }
         return {};
     }
+  };
+  const writeMatter = async (request: ActionRequest, snapshot: Extract<Snapshot, { kind: 'matter' }>, matter: Matter): Promise<Matter> => {
+    let saved: Matter;
+    try {
+      saved = await store.matters.upsert(matter);
+      if (snapshot.emails.length) await store.emails.patchMany(snapshot.emails.map(email => email.id), { matterId: matter.id, ...agentEmailPatchOf(request) });
+      if (snapshot.events.length) await store.events.upsertMany(snapshot.events.map(event => ({ ...event, matterId: matter.id, updatedAt: now() })));
+    } catch (error) {
+      // Store has no cross-repository transaction API; compensate within this serialized action.
+      try { await restore(request, snapshot); } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'Matter action failed and snapshot restoration failed');
+      }
+      throw error;
+    }
+    bus.emit({ type: 'matter.updated', matter: saved });
+    for (const email of snapshot.emails) bus.emit({ type: 'email.updated', emailId: email.id });
+    return saved;
   };
   const dispatch = async (request: Request, snapshot: Snapshot | null): Promise<Record<string, unknown>> => {
     const inverse = snapshotOf(request);
@@ -262,7 +315,7 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
       case 'matter_create': {
         if (snapshot?.kind !== 'matter') throw new PolicyError('INVALID_INVERSE', 'Matter snapshot is required');
         const at = now(), matter: Matter = { ...request.params.matter, id: snapshot.id, createdAt: at, updatedAt: at };
-        await mirrorMatter(matter); return { matterId: matter.id };
+        const saved = await writeMatter(request, snapshot, matter); return { matterId: saved.id, matter: saved };
       }
       case 'matter_update': {
         const prior = await matterFor(request.params.matterId);
@@ -270,17 +323,20 @@ export function createActionExecutor({ store, bus, policy, mailProviderFor, cale
         await mirrorMatter(matter); return { matterId: matter.id };
       }
       case 'matter_attach': {
+        if (snapshot?.kind !== 'matter') throw new PolicyError('INVALID_INVERSE', 'Matter snapshot is required');
         const prior = await matterFor(request.params.matterId);
         const unique = (a: string[], b: string[] = []) => [...new Set([...a, ...b])];
         const matter = { ...prior, emailIds: unique(prior.emailIds, request.params.emailIds), eventIds: unique(prior.eventIds, request.params.eventIds), personIds: unique(prior.personIds, request.params.personIds), updatedAt: now() };
-        await mirrorMatter(matter);
-        for (const email of await allEmails(request.params.emailIds ?? [], request.accountId)) await mirrorEmail(email.id, { matterId: matter.id });
-        for (const id of request.params.eventIds ?? []) await store.events.upsertMany([{ ...await eventFor(id, request.accountId), matterId: matter.id, updatedAt: now() }]);
+        await writeMatter(request, snapshot, matter);
         return { matterId: matter.id };
       }
       case 'person_update': {
-        const prior = await store.people.get(request.params.personId);
-        if (!prior) throw new PolicyError('PERSON_NOT_FOUND', 'Person does not exist');
+        if (snapshot?.kind !== 'person') throw new PolicyError('INVALID_INVERSE', 'Person snapshot is required');
+        const prior = snapshot.person;
+        if (!prior) {
+          if (!isCompletePerson(request.params.patch)) throw new PolicyError('PERSON_NOT_FOUND', 'Creation requires a complete Person patch');
+          await store.people.upsert(request.params.patch); return { personId: request.params.personId };
+        }
         await store.people.upsert({ ...prior, ...request.params.patch, id: prior.id, createdAt: prior.createdAt, updatedAt: now() }); return { personId: prior.id };
       }
       case 'snooze': {

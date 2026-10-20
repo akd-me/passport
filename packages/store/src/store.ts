@@ -375,6 +375,10 @@ class SQLiteStore implements Store {
       return this.rows(`SELECT p.data FROM people p ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY p.display_name COLLATE NOCASE, p.id LIMIT ?`, [...params, limitOf(q.limit)]);
     },
     upsert: async person => this.transaction(() => this.savePerson(person)),
+    delete: async id => this.transaction(() => {
+      for (const table of ["email_people", "matter_people", "person_emails"]) this.run(`DELETE FROM ${table} WHERE person_id = ?`, [id]);
+      this.run("DELETE FROM people WHERE id = ?", [id]);
+    }),
     merge: async (keepId, mergeId) => this.transaction(() => {
       const keep = this.get<Person>("people", keepId);
       const merge = this.get<Person>("people", mergeId);
