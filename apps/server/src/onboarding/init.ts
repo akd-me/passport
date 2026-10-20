@@ -79,7 +79,7 @@ export async function initializePassport(
           "Choose one of the listed LLM providers",
         );
       const defaults = {
-        anthropic: "claude-sonnet-4-5",
+        anthropic: "claude-sonnet-5-5",
         openai: "gpt-4.1",
         "openai-compatible": "local-model",
         ollama: "llama3.2",
@@ -107,7 +107,7 @@ export async function initializePassport(
         ...(baseUrl ? { baseUrl } : {}),
         ...(enteredKey ? { apiKey: enteredKey } : {}),
       };
-    } else config.llm = { provider: "anthropic", model: "claude-sonnet-4-5" };
+    } else config.llm = { provider: "anthropic", model: "claude-sonnet-5-5" };
     await saveConfig(config);
     // This key was explicitly entered for persistence; environment-only keys remain in the environment.
     if (

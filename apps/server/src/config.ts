@@ -32,7 +32,7 @@ export function defaultConfig(
     dailyDigestHour: 8,
     llm: {
       provider: "anthropic",
-      model: "claude-sonnet-4-5",
+      model: "claude-sonnet-5-5",
     },
     accounts: [],
   };
@@ -120,7 +120,7 @@ export async function loadConfig(
     delete config.llm.apiKey;
   if (!saved.llm?.model && !env.PASSPORT_LLM_MODEL)
     config.llm.model = {
-      anthropic: "claude-sonnet-4-5",
+      anthropic: "claude-sonnet-5-5",
       openai: "gpt-4.1",
       "openai-compatible": "local-model",
       ollama: "llama3.2",

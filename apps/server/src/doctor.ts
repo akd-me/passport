@@ -224,8 +224,19 @@ export async function runDoctor(
   });
   await check("MCP stdio", async () => {
     await access(process.execPath, constants.X_OK);
-    const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
-    await access(cli);
+    // Compiled package ships cli.js; a from-source run (tsx) has cli.ts next to this file.
+    const candidates = ["./cli.js", "./cli.ts"].map((rel) => fileURLToPath(new URL(rel, import.meta.url)));
+    let cli: string | null = null;
+    for (const candidate of candidates) {
+      try {
+        await access(candidate);
+        cli = candidate;
+        break;
+      } catch {
+        /* try next */
+      }
+    }
+    if (!cli) throw new Error(`CLI entry not found next to ${import.meta.url}`);
     return `${JSON.stringify(process.execPath)} ${JSON.stringify(cli)} mcp`;
   });
   return {
