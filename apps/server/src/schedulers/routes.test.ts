@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Backend } from "../backend.js";
-import { createApp } from "../app.js";
+import { createApp } from "../auth.test-client.js";
 import { createDemoBackend } from "../demo/index.js";
 import { getSchedulerService, type JobView } from "./service.js";
 
