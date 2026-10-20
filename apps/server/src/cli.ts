@@ -14,13 +14,15 @@ import { serveStdio } from "@passport/mcp";
 import { startSchedulers } from "./schedulers/index.js";
 import { authorizeOAuth } from "./oauth.js";
 import { Writable } from "node:stream";
+import { runJobsCommand } from "./schedulers/cli.js";
 
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const [command = "serve", subcommand, kind] = args;
+  if (command === "jobs") return runJobsCommand(args.slice(1));
   if (command === "--help" || command === "help") {
     console.log(
-      "passport serve | demo | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo]",
+      "passport serve | demo | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo]",
     );
     return;
   }

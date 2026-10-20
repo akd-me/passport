@@ -26,6 +26,7 @@ import {
   string,
 } from "./validation.js";
 import { logger } from "./logger.js";
+import { installJobRoutes } from "./schedulers/routes.js";
 
 const csv = (value?: string) => value?.split(",").filter(Boolean);
 const limit = (value?: string) =>
@@ -142,6 +143,7 @@ export function createApp(
     c.header("Cache-Control", "no-store");
     await next();
   });
+  installJobRoutes(app, backend);
   app.get("/api/health", (c) => c.json({ ok: true, mode: backend.mode }));
   app.get("/api/decisions", async (c) =>
     c.json(

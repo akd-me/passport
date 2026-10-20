@@ -22,7 +22,8 @@
     "@passport/types": "workspace:*",
     "hono": "^4.10.0",
     "@hono/node-server": "^1.19.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "@passport/scheduler": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.8.0",

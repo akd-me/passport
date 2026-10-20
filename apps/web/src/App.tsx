@@ -8,6 +8,7 @@ import { People, PersonPage } from "./views/People";
 import { Trust } from "./views/Trust";
 import { Activity } from "./views/Activity";
 import { Accounts } from "./views/Accounts";
+import { Scheduler } from "./views/Scheduler";
 const navigation = [
   ["/", "Decisions", "decisions"],
   ["/matters", "Matters", "matters"],
@@ -15,6 +16,7 @@ const navigation = [
   ["/trust", "Trust", "trust"],
   ["/activity", "Activity", "activity"],
   ["/accounts", "Accounts", "accounts"],
+  ["/scheduler", "Scheduler", "clock"],
 ];
 export function App() {
   const { connection, notice } = useWorkspace(),
@@ -142,6 +144,7 @@ export function App() {
             <Route path="/trust" element={<Trust />} />
             <Route path="/activity" element={<Activity />} />
             <Route path="/accounts" element={<Accounts />} />
+            <Route path="/scheduler" element={<Scheduler />} />
             <Route
               path="*"
               element={
