@@ -1,38 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { readFile, rename, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 const shimPath = realpathSync(fileURLToPath(import.meta.url));
-
-async function installMcp() {
-  if (args.length !== 4 || args[2] !== "--client" || args[3] !== "claude-code")
-    throw new Error("Usage: passport mcp install --client claude-code (writes .mcp.json in the current directory)");
-  const path = resolve(".mcp.json");
-  let config = {};
-  try {
-    config = JSON.parse(await readFile(path, "utf8"));
-  } catch (error) {
-    if (error instanceof SyntaxError) throw new Error("Could not parse .mcp.json. Repair it before registering Passport.");
-    if (error.code !== "ENOENT") throw error;
-  }
-  if (!config || typeof config !== "object" || Array.isArray(config) ||
-      (config.mcpServers && (typeof config.mcpServers !== "object" || Array.isArray(config.mcpServers))))
-    throw new Error("Existing .mcp.json must contain an object with an optional mcpServers object");
-  const entry = { command: process.execPath, args: [shimPath, "mcp"] };
-  if (process.env.PASSPORT_DATA_DIR) entry.env = { PASSPORT_DATA_DIR: resolve(process.env.PASSPORT_DATA_DIR) };
-  const existing = config.mcpServers?.passport;
-  if (existing && JSON.stringify(existing) !== JSON.stringify(entry))
-    throw new Error(".mcp.json already has a different passport entry. Edit it manually to replace it.");
-  config.mcpServers = { ...config.mcpServers, passport: entry };
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, JSON.stringify(config, null, 2) + "\n", { mode: 0o600, flag: "wx" });
-  await rename(temporary, path);
-  console.log(`Registered Passport in ${path}. Keep this CLI installation available. Use one backend writer per data directory.`);
-}
 
 async function run() {
   const [major, minor] = process.versions.node.split(".").map(Number);
@@ -41,11 +14,6 @@ async function run() {
     error.code = "PASSPORT_RUNTIME_REQUIRED";
     throw error;
   }
-  if (args[0] === "mcp" && args.slice(1).some((arg) => ["--help", "-h", "help"].includes(arg))) {
-    console.log("passport mcp — start the mailbox MCP server over stdio\npassport mcp install --client claude-code — register in .mcp.json in the current directory\nUse HTTP MCP at http://127.0.0.1:4318/mcp when passport serve already owns the data directory.");
-    return;
-  }
-  if (args[0] === "mcp" && args[1] === "install") return installMcp();
   // Early Node 22 releases gate node:sqlite behind this flag. Re-exec before
   // importing the bundle, whose static imports include SQLite.
   if (major === 22 && minor < 13 && !process.execArgv.includes("--experimental-sqlite")) {
@@ -85,6 +53,6 @@ async function run() {
 }
 
 run().catch((error) => {
-  console.error(["INVALID_COMMAND", "PASSPORT_RUNTIME_REQUIRED"].includes(error?.code) || args[1] === "install" ? error.message : "Passport failed. Check your Node version, configuration and provider credentials.");
+  console.error(["INVALID_COMMAND", "PASSPORT_RUNTIME_REQUIRED", "API_UNAUTHORIZED", "SERVER_UNAVAILABLE", "WRONG_SERVER", "OWNER_RUNNING", "OWNER_BUSY"].includes(error?.code) || args[1] === "install" ? error.message : "Passport failed. Check your Node version, configuration and provider credentials.");
   process.exitCode = 1;
 });

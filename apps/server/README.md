@@ -25,7 +25,7 @@ const app = createApp(backend); // app.request(...) works without a socket
 
 `src/backend.ts` is the injection contract: `Store`, `ActionExecutor`, `PolicyEngine`, `AgentRuntime`, `ProviderRegistry`, `EventBus`, config persistence, account sync, optional abortable push, and shutdown. `startServer(backend)` adds static serving, WebSockets, schedulers, and a draining `close()`.
 
-`createRealBackend(config, { storePath?, providers?, llm?, verifier? }?)` migrates the real SQLite Store,
+`createRealBackend(config, { storePath?, providers?, llm?, verifier?, clientMode? }?)` migrates the real SQLite Store,
 loads or creates a private master key, hydrates accounts, and composes the provider registry, policy,
 executor, agent and MCP server. Optional overrides support offline tests (`storePath: ":memory:"`).
 `src/sync/` persists local ID mappings, ingests mail/calendar deltas, commits opaque cursor envelopes
@@ -42,13 +42,23 @@ after a restart. After five failures, the Decisions feed shows “Needs your att
 as a proposed internal matter action. Approving it adds a manual-review next step to the existing
 matter or creates a review matter for an unattached email. Rejection dismisses the proposal;
 automatic triage stops after the fifth attempt. Without a configured model, entries remain pending
-without consuming attempts. A durable `arrival:pending` index provides discovery through `Store.kv`.
+without consuming attempts. A durable `arrival:pending` index provides discovery through `Store.kv`. SQLite transaction-backed
+compare-and-set claims protect against accidental double owners, with renewable 60-second leases.
+Arrivals carry `runId: arrival:<emailId>`; the server stamps runtime Actions and mirrors run checkpoints
+under that stable identity. A retry with logged Actions or a completed checkpoint is acknowledged.
+Related calendars defer inference for up to ten minutes; timed-out proposals visibly state that
+availability is unverified. Conflicting held calendar proposals return to review at release. The server keeps temporary local
+adapters for SQLite KV transactions, calendar provider-ID lookup and recurrence expansion so this
+change does not alter packages or the workspace dependency graph. The KV adapter uses SQLiteStore's
+existing connection synchronously; a future public Store CAS API can replace it.
 
 The HTTP host adds a loopback Streamable HTTP MCP listener on port 4318 (`mcpPort` /
-`PASSPORT_MCP_PORT`). `passport mcp` uses stdio with background jobs and stderr diagnostics, without
-an HTTP listener. Use HTTP MCP when the UI server is running; one writer owns each data directory.
+`PASSPORT_MCP_PORT`). `passport mcp` uses stdio in client mode, with stderr diagnostics and no
+schedulers, arrival queue or HTTP listener. Only `serve`/`demo` acquires `<data-dir>/owner.lock`
+(PID/start time, atomic writes, 10-second heartbeat, 60-second expiry or exited PID). Shutdown
+removes only its own lock. Both stdio and HTTP clients can coexist with that owner.
 
-Three explicit **policy seams** skips in `src/e2e.test.ts` cover complete-Person creation,
+The **policy seams** integration tests in `src/e2e.test.ts` cover complete-Person creation,
 newsletter/known-contact playbooks, and `emailPatch` metadata/undo. The server does not bypass
 these executor conventions. Real send approval/hold/release/cancel, archive undo, trust, digests,
 synchronization, OAuth callbacks, stdio and in-memory MCP are tested independently.

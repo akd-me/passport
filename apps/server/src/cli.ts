@@ -11,22 +11,27 @@ import { startServer } from "./server.js";
 import { logger } from "./logger.js";
 import { ApiError } from "./errors.js";
 import { serveStdio } from "@passport/mcp";
-import { startSchedulers } from "./schedulers/index.js";
 import { authorizeOAuth } from "./oauth.js";
 import { Writable } from "node:stream";
 import { runJobsCommand } from "./schedulers/cli.js";
 import { apiToken, checkBind, getAuth } from "./auth.js";
 import { initializePassport } from "./onboarding/init.js";
 import { doctorCommand } from "./doctor.js";
+import { acquireOwner, activeOwner } from "./owner-lock.js";
+import { serverClient } from "./cli/server-client.js";
 
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const [command = "serve", subcommand, kind] = args;
   if (command === "mcp" && (subcommand === "install" || subcommand === "proxy")) return (await import("./cli/mcp-install.js")).handleMcpCommand(args);
   if (command === "jobs") return runJobsCommand(args.slice(1));
-  if (command === "init") return initializePassport();
+  if (command === "init") return initializePassport(undefined, args.slice(1));
+  if (command === "mcp" && ["--help", "-h", "help"].includes(subcommand ?? "")) {
+    console.log("passport mcp — mailbox tools over stdio (no background jobs)\npassport mcp install --client claude-code|codex|cursor|claude-desktop [--http] [--dry-run] [--user]");
+    return;
+  }
   if (command === "doctor") return doctorCommand(args.includes("--demo"));
-  if (command === "--help" || command === "help") {
+  if (command === "--help" || command === "-h" || command === "help") {
     console.log(
       "passport init | doctor | serve [--allow-remote] | demo [--allow-remote] | token [--rotate] | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo]",
     );
@@ -56,17 +61,39 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   if (command === "serve" || command === "demo")
     checkBind(config.host, args.includes("--allow-remote"), process.env, false);
-  const backend =
-    command === "demo" || (command !== "mcp" && args.includes("--demo"))
-      ? await createDemoBackend(config)
-      : await createRealBackend(config);
+  if (["trust", "decisions", "sync", "triage"].includes(command) && !args.includes("--demo")) {
+    const request = await serverClient(config);
+    if (request) {
+      if (command === "triage" && !subcommand) throw new ApiError("INVALID_COMMAND", "Use triage <emailId>");
+      if (command === "sync") {
+        const { accounts } = await request("/api/accounts") as { accounts: { id: string }[] };
+        for (const account of accounts) await request(`/api/accounts/${encodeURIComponent(account.id)}/sync`, "POST");
+        console.log("Sync complete.");
+      } else console.log(JSON.stringify(await request(command === "triage" ? `/api/agent/triage/${encodeURIComponent(subcommand!)}` : `/api/${command}`, command === "triage" ? "POST" : "GET"), null, 2));
+      return;
+    }
+  }
+  let shutdownOwner: (() => void) | undefined;
+  const owner = ["serve", "demo"].includes(command) ? acquireOwner(config.dataDir, () => {
+    logger.error("Workspace owner lease lost; stopping background work.");
+    process.exitCode = 1;
+    shutdownOwner?.();
+  }) : undefined;
+  let backend: Awaited<ReturnType<typeof createDemoBackend>>;
+  try {
+    backend =
+      command === "demo" || (command !== "mcp" && args.includes("--demo"))
+        ? await createDemoBackend(config)
+        : await createRealBackend(config, { clientMode: command !== "serve" });
+  } catch (error) { owner?.release(); throw error; }
+  const closeBackend = backend.close.bind(backend);
+  backend.close = async () => { try { await closeBackend(); } finally { owner?.release(); } };
   if (command === "mcp") {
+    if (!activeOwner(config.dataDir)) console.error("Passport serve is not running; stdio has no background jobs. Held/proposed actions wait for serve.");
     const server = backend.createMcpServer!();
-    const schedulers = startSchedulers(backend);
     let closing: Promise<void> | undefined;
     const shutdown = () =>
       (closing ??= (async () => {
-        await schedulers.stop();
         await server.close();
         await backend.close();
       })());
@@ -114,6 +141,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         process.exitCode = 1;
       });
     };
+    shutdownOwner = shutdown;
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);
     return;

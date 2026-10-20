@@ -123,15 +123,20 @@ export class SyncService {
       headers: email.headers,
       size: email.size,
       verification: email.verification,
+      provenance: email.provenance,
     };
   }
   async event(accountId: string, event: CalendarEvent): Promise<CalendarEvent> {
     const calendars = await this.store.calendars.list(accountId);
+    // Server-local lookup until Store has getByProviderId for calendar events.
+    const byProvider = (await this.store.events.query({ accountId, limit: 2147483647 }))
+      .find(item => item.providerId === event.providerId);
     const id = await this.identity(
       accountId,
       "event",
       event.providerId,
       event.id,
+      byProvider?.id,
     );
     const existing = await this.store.events.get(id);
     return {
@@ -141,9 +146,9 @@ export class SyncService {
       calendarId: calendars.some((item) => item.id === event.calendarId)
         ? event.calendarId
         : await this.reference(accountId, "calendar", event.calendarId),
-      sourceEmailId: event.sourceEmailId
+      sourceEmailId: existing?.sourceEmailId ?? (event.sourceEmailId
         ? await this.reference(accountId, "email", event.sourceEmailId)
-        : null,
+        : null),
       matterId: existing?.matterId ?? null,
     };
   }
@@ -205,12 +210,19 @@ export class SyncService {
       cursor = page.nextCursor;
     } while (cursor);
   }
-  private async clearEvents(accountId: string) {
-    for (;;) {
-      const events = await this.store.events.query({ accountId, limit: 500 });
-      if (!events.length) break;
-      await this.store.events.deleteMany(events.map((event) => event.id));
-    }
+  private async reconcileEvents(accountId: string, seen: Set<string>) {
+    const events = await this.store.events.query({ accountId, limit: 2147483647 });
+    await this.store.events.deleteMany(events.filter(event => !seen.has(event.providerId)).map(event => event.id));
+  }
+  private async isArrival(email: Email): Promise<boolean> {
+    if (email.keywords.$draft) return false;
+    const roles = (await this.store.mailboxes.list(email.accountId))
+      .filter(box => email.mailboxIds.includes(box.id)).map(box => box.role);
+    if (roles.includes("drafts") || roles.includes("sent")) return false;
+    const self = new Set((await this.store.accounts.list()).map(account => account.emailAddress.trim().toLowerCase()));
+    for (const person of await this.store.people.list({ relationship: "self", limit: 2147483647 }))
+      if (person.verifiedSelf) for (const address of person.emails) self.add(address.trim().toLowerCase());
+    return roles.includes("inbox") || !email.from.some(address => self.has(address.email.trim().toLowerCase()));
   }
   private async sync(accountId: string) {
     const account = required(
@@ -235,7 +247,14 @@ export class SyncService {
       // Calendar data must be available before email.received can start scheduling playbooks.
       if (account.capabilities.calendar) {
         const provider = await this.calendarFor(accountId);
+        const reconcileKey = key("sync-reconcile", accountId, "calendar");
+        let reconcile = !!(await this.store.kv.get(reconcileKey));
+        if (reconcile) {
+          cursors.calendar = null;
+          await persist();
+        }
         const ingest = async () => {
+          const seen = new Set<string>(), deleted = new Set<string>();
           for (const calendar of await provider.listCalendars())
             await this.store.calendars.upsertMany([
               await this.calendar(accountId, calendar),
@@ -243,15 +262,16 @@ export class SyncService {
           let final: string | null = null;
           for await (const delta of provider.sync(cursors.calendar)) {
             final = delta.kind === "cursor" ? delta.cursor : null;
-            if (delta.kind === "event" && delta.op === "upsert")
+            if (delta.kind === "event" && delta.op === "upsert") {
+              seen.add(delta.event.providerId);
+              deleted.delete(delta.event.providerId);
               await this.store.events.upsertMany([
                 await this.event(accountId, delta.event),
               ]);
+            }
             if (delta.kind === "event" && delta.op === "delete") {
-              const id = await this.store.kv.get(
-                key("sync-provider", accountId, "event", delta.providerId),
-              );
-              if (id) await this.store.events.deleteMany([id]);
+              deleted.add(delta.providerId);
+              seen.delete(delta.providerId);
             }
           }
           if (final === null)
@@ -259,6 +279,9 @@ export class SyncService {
               "SYNC_INCOMPLETE",
               "Calendar sync did not finish with a cursor",
             );
+          if (reconcile) await this.reconcileEvents(accountId, seen);
+          const events = await this.store.events.query({ accountId, limit: 2147483647 });
+          await this.store.events.deleteMany(events.filter(event => deleted.has(event.providerId)).map(event => event.id));
           return final;
         };
         try {
@@ -267,10 +290,20 @@ export class SyncService {
           if ((error as { code?: string }).code !== "CURSOR_EXPIRED")
             throw error;
           cursors.calendar = null;
+          reconcile = true;
+          await this.store.kv.set(reconcileKey, "1");
           await persist();
-          await this.clearEvents(accountId);
           cursors.calendar = await ingest();
         }
+        if (reconcile) {
+          await persist();
+          await this.store.kv.delete(reconcileKey);
+        }
+        // A combined mail/calendar account can finish its calendar before mail
+        // emits arrivals. Keep an explicit calendar-only completion checkpoint.
+        await this.store.kv.set(`calendar-sync:${accountId}`, JSON.stringify({
+          syncState: { cursor: cursors.calendar }, lastSyncAt: new Date().toISOString(),
+        }));
       }
       if (account.capabilities.mail) {
         const provider = await this.mailFor(accountId);
@@ -310,7 +343,8 @@ export class SyncService {
                 const email = await this.email(accountId, delta.email);
                 const seenKey = key("sync-seen", accountId, email.providerId);
                 const isNew = !existing && !(await this.store.kv.get(seenKey));
-                if (isNew) await persistArrival(this.store, email);
+                const arrival = isNew && await this.isArrival(email);
+                if (arrival) await persistArrival(this.store, email);
                 await this.store.emails.upsertMany([email]);
                 if (existing && existing.threadId !== email.threadId) {
                   const previous = await this.store.threads.get(
@@ -338,7 +372,7 @@ export class SyncService {
                 ]);
                 await this.store.kv.set(seenKey, "1");
                 this.bus.emit(
-                  isNew
+                  arrival
                     ? { type: "email.received", email }
                     : { type: "email.updated", emailId: email.id },
                 );

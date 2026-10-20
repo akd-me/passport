@@ -51,7 +51,7 @@ chmod 600 .env
 docker compose up --build -d
 ```
 
-Open **http://127.0.0.1:3000**. Compose keeps data in a named volume and publishes only to host loopback. The API has **no authentication**; keep it on localhost or behind a private, authenticated boundary. After a release, `docker compose pull && docker compose up -d --no-build` uses `ghcr.io/akd-me/passport:latest`. See [deployment](docs/deploy.md) for home servers, NAS, backups and remote access.
+Open **http://127.0.0.1:3000**. Compose keeps data in a named volume and publishes only to host loopback. The API requires a bearer token or browser session. Open the login URL printed at startup; `passport token` prints the API token again. Keep it on localhost or behind a private boundary. After a release, `docker compose pull && docker compose up -d --no-build` uses `ghcr.io/akd-me/passport:latest`. See [deployment](docs/deploy.md) for home servers, NAS, backups and remote access.
 
 ### 3. From source
 
@@ -70,17 +70,17 @@ pnpm demo
 
 ## Connect Gmail
 
-Create your own Google OAuth web client, enable the Gmail API and register the exact callback `http://127.0.0.1:53682/oauth/callback`. Then run `passport accounts add gmail` and follow the browser authorization flow. Google Calendar is a separate `passport accounts add google-calendar` account. See [account setup and scopes](docs/accounts.md).
+Create your own Google **Desktop app** OAuth client and enable the Gmail API (and Google Calendar API if needed). Run `passport serve`, open **Accounts → Add account → Gmail**, and follow the browser authorization flow. **Connect calendar too** adds your primary calendar when permission is granted. See [account setup and scopes](docs/accounts.md).
 
 ## Connect Outlook
 
-Register your own Microsoft Entra application and loopback redirect URI, then run `passport accounts add graph`. Use `passport accounts add graph-calendar` for calendar access. Tenant settings, scopes and consent are covered in [account setup](docs/accounts.md).
+Register your own Microsoft Entra application and native loopback redirect URI, then use **Accounts → Add account → Outlook** in the browser. Calendar access is optional in the same consent flow. Tenant settings, scopes and consent are covered in [account setup](docs/accounts.md).
 
 ## Connect IMAP
 
 Run `passport accounts add imap` with your provider's IMAP/SMTP hosts and an app password. Prefer TLS; IMAP and SMTP credentials are stored separately from public account settings. See [account setup](docs/accounts.md) for implicit TLS versus STARTTLS and supported provider capabilities.
 
-OAuth setup is currently a CLI flow. Run account setup on the same machine as the browser, or use the documented SSH callback tunnel in [deployment](docs/deploy.md). Stop `serve` before running standalone commands that write to the same data directory.
+Account onboarding is browser-based; `passport init` also offers first-account setup. Use `passport init --llm none --skip-account` for unattended initialization. Run setup on the same machine as the browser, or use the SSH tunnel described in [deployment](docs/deploy.md).
 
 ## Use it from Claude Code or Codex
 
@@ -104,13 +104,21 @@ This preserves other MCP entries, records the installed executable's absolute pa
 }
 ```
 
-For Codex, an installed executable can be registered with `codex mcp add passport -- passport mcp`. Stdio starts its own backend; use one backend writer per data directory. When `passport serve` is already running, connect your client to the loopback Streamable HTTP endpoint **http://127.0.0.1:4318/mcp** instead. For example: `codex mcp add passport --url http://127.0.0.1:4318/mcp`. Docker keeps that listener inside the container; see [deployment](docs/deploy.md).
+For Codex, use `passport mcp install --client codex` for stdio or `passport mcp install --client codex --http` for the authenticated HTTP endpoint **http://127.0.0.1:4318/mcp**. A manual HTTP registration must include the MCP bearer token:
+
+```toml
+[mcp_servers.passport]
+url = "http://127.0.0.1:4318/mcp"
+http_headers = { Authorization = "Bearer <PASSPORT_MCP_TOKEN or contents of ~/.passport/mcp-token>" }
+```
+
+The MCP token is separate from the UI/API token. Stdio shares the store in client mode and can coexist with `serve`; it starts no schedulers or arrival queue. Without `serve`, held/proposed work waits for the server. Docker keeps HTTP MCP inside the container; see [deployment](docs/deploy.md).
 
 External agents use the shared executor and their trust ceiling. Human approval, outbox cancellation and undo remain available in the UI/API. Mail and tool results are untrusted input; policy enforcement does not make prompt injection impossible.
 
 ## Scheduler and routines
 
-Periodic account sync, outbox release, trust decay, daily digests and matter reviews run alongside `serve` or stdio MCP. USER.md supplies standing instructions; model-backed routines require a configured model. See [scheduler and routines](docs/scheduler.md).
+Periodic account sync, outbox release, trust decay, daily digests and matter reviews run only in the `serve` (or `demo`) process that owns the data directory. USER.md supplies standing instructions; model-backed routines require a configured model. See [scheduler and routines](docs/scheduler.md).
 
 ## Tool catalogue
 
@@ -151,13 +159,13 @@ Passport is local-first: the database and action history live on your machine. P
 
 Mail/calendar providers receive the normal synchronization and action requests you authorize. Beyond those connections, the agent sends relevant context only to the LLM endpoint you choose; there is no Passport telemetry service or required hosted backend. External MCP clients can read mailbox content and have their own data handling policies. A local model can keep inference local.
 
-Trust gates and the external-agent ceiling constrain actions. Sends are held before delivery when a hold is configured; reversible changes are logged with undo. Sender verification is derived from headers/signatures, never message content; production Passport identity verification is not wired yet. Loopback defaults and origin checks help, but the HTTP API is unauthenticated. See [SECURITY.md](SECURITY.md) for the threat model and private reporting.
+Trust gates and the external-agent ceiling constrain actions. Sends are held before delivery when a hold is configured; reversible changes are logged with undo. Sender verification is derived from headers/signatures, never message content; production Passport identity verification is not wired yet. The HTTP API is authenticated with the startup token (`passport token`) or a browser session, with Host and Origin checks. See [SECURITY.md](SECURITY.md) for the threat model and private reporting.
 
 ## Status and roadmap
 
 This is an early **0.1.0, unreleased** implementation. The current offline suite passes, including the three server policy-seam integration cases. Live provider/model interoperability and hosted deployment must be validated in your environment.
 
-Near-term work includes authenticated remote access and live provider validation. **Hosted identity and SMTP+ are parked.** Gmail/Graph/JMAP push subscriptions and contacts sync are not implemented; periodic sync is available. See [CHANGELOG.md](CHANGELOG.md).
+Near-term work includes live provider validation and deployment verification. **Hosted identity and SMTP+ are parked.** Gmail/Graph/JMAP push subscriptions and contacts sync are not implemented; periodic sync is available. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 

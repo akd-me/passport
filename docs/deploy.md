@@ -1,10 +1,9 @@
 # Deploying Passport
 
-Passport currently assumes one user on a trusted machine. The API has **no
-authentication**: anyone who can reach it can read mail and request actions.
-Keep it on localhost, through SSH, or behind Tailscale with restrictive ACLs and
-an authenticating proxy. Do not expose port 3000 directly to the internet or a
-shared LAN. Origin checks and HTTPS do not replace authentication.
+Passport assumes one user on a trusted machine. The API requires its bearer token
+or a browser session; use the startup login URL or `passport token`. Keep the
+listener on localhost, through SSH, or behind a verified HTTPS proxy with restricted
+access. See [security](security.md) for token rotation, Host/Origin checks and proxies.
 
 ## Docker on a home server or NAS
 
@@ -39,7 +38,7 @@ On a NAS, use Compose/Container Manager with these same mount and port settings.
 If using a bind mount instead of a named volume, create a private directory
 writable by UID/GID 1000 before starting. Do not use world-writable permissions.
 The initial named volume is populated with the image directory's ownership.
-Use one replica per volume; there is no distributed writer lock.
+Use one replica per volume. The data-directory owner lock prevents a second live server; PID checks assume processes share the same host PID namespace, so do not share a data directory across containers/hosts.
 
 After the first release, pull the published image instead of building locally:
 
@@ -64,36 +63,17 @@ On Linux, configure an appropriate host gateway or an internal container service
 address. `localhost` inside the container points to the container itself.
 Limit model endpoint access to trusted clients too.
 
-OAuth uses a one-shot loopback listener on port 53682 by default. Do account
-setup while the main backend is stopped, using the same data directory.
+Run `passport serve` and use **Accounts → Add account** in the browser. Gmail
+uses your own Google **Desktop app** OAuth client; Outlook uses a native/public
+Microsoft registration. The browser callback uses the server's HTTP port at
+`http://127.0.0.1:3000/oauth/callback` (substitute your configured port).
+Google and Microsoft calendar permissions are optional in the same flow.
+See [accounts](accounts.md) for registrations, scopes, IMAP and consent.
 
-```sh
-docker compose stop passport
-docker compose run --rm passport accounts add imap
-docker compose up -d
-```
-
-**Current limitation:** the OAuth callback listener binds to loopback *inside*
-the container. A normal published Docker port does not forward to that listener,
-so publishing port 53682 cannot complete browser OAuth in a bridged container.
-For Gmail/Graph, use the native CLI on the Docker host against a private bind-mounted
-data directory while the container is stopped. Ensure the container UID can read
-that directory afterward. Another Linux-specific option is running the one-shot
-setup container with host networking and the same volume; audit your Docker/NAS
-networking before using it. Do not broaden callback binding by patching source.
-The IMAP setup command above does not need a callback. See [accounts](accounts.md)
-for provider fields and scopes.
-
-For a **native server** on a remote host, forward both the UI and the callback
-port to your laptop before running `passport accounts add gmail` in the remote
-shell. The browser callback remains the registered loopback URL:
-
-```sh
-ssh -N -L 3000:127.0.0.1:3000 -L 53682:127.0.0.1:53682 your-server
-```
-
-The SSH target must be running the callback listener natively or via an explicitly
-configured host-network setup. The public API does not accept OAuth setup flows.
+For a remote server, forward the UI port with SSH and keep Passport open on the
+same loopback address in your browser. Native CLI initialization also supports
+a one-shot callback on port 53682; that separate listener needs its own tunnel.
+`passport init --llm none --skip-account` initializes without prompts or account consent.
 
 ## Remote access and reverse proxies
 
@@ -106,24 +86,20 @@ ssh -N -L 3000:127.0.0.1:3000 your-server
 
 Then open http://127.0.0.1:3000. Tailscale can also provide private reachability;
 limit ACLs to you and keep the API behind a proxy with authentication. Never use
-public Tailscale Funnel for this unauthenticated service.
+public Tailscale Funnel without verifying the authenticated proxy deployment described in [security](security.md).
 
-A proxy must protect **all** routes, including `/api` and `/ws`, enforce
-trusted host/origin handling and forward WebSocket upgrades. The current
-WebSocket handler expects an `http://` origin matching the backend Host header;
-a TLS-terminating proxy must deliberately reconcile that trusted origin/host
-boundary. Do not strip arbitrary Origin headers to bypass checks. A generic
-HTTPS proxy recipe is not supplied because this path has not been live-tested.
-Use the local HTTP/SSH path until proxy authentication and WebSocket behavior
-are verified in your deployment.
+A proxy must preserve Authorization, cookies, browser Origin, the intended Host,
+WebSocket upgrades and `X-Requested-With`. Configure exact allowed hosts with
+`PASSPORT_ALLOWED_HOSTS`; never rewrite arbitrary browser Origins to trusted ones.
+For TLS termination, use `PASSPORT_TRUST_PROXY=true` only when the proxy overwrites
+`X-Forwarded-Proto` and direct access is restricted. See [security](security.md).
 
 HTTP MCP binds independently to **container loopback**, port 4318. Merely
 publishing that port will not make it reachable through Docker bridge networking.
 For native installs, an SSH tunnel to 4318 can reach the host loopback listener.
-Otherwise use a native `passport mcp` backend **instead of** the container backend
-for that data directory. `docker exec ... passport mcp` would start a second writer
-and is not a supported way to attach to the existing backend. Do not publish an
-unauthenticated MCP endpoint.
+A stdio client may also run `docker exec -i <container> passport mcp` in client mode against
+the same data directory; it starts no background jobs. HTTP MCP requires its separate bearer
+token from `PASSPORT_MCP_TOKEN` or `<data-dir>/mcp-token`. Do not expose that token publicly.
 
 ## Backups and upgrades
 

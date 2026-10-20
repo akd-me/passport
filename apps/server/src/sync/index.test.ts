@@ -391,6 +391,59 @@ describe("real provider ingestion", () => {
     await expect(first).rejects.toMatchObject({ code: "SYNC_INCOMPLETE" });
     expect(await store.syncState.get(account.id)).toBeNull();
   });
+  it("R7: failed calendar cursor recovery preserves unseen events and local links until a complete restart", async () => {
+    await service.syncAccount(account.id);
+    const before = await store.events.query({ accountId: account.id, limit: 100 });
+    const [kept, unseen] = before;
+    await annotate();
+    await store.events.upsertMany([{ ...kept!, matterId: "matter", sourceEmailId: "local-invite" }]);
+    let raw: typeof kept;
+    for await (const delta of calendar.sync(null))
+      if (delta.kind === "event" && delta.op === "upsert" && delta.event.providerId === kept!.providerId) raw = delta.event;
+    const pass = vi.spyOn(calendar, "sync")
+      .mockImplementationOnce(async function* () { throw Object.assign(new Error("expired"), { code: "CURSOR_EXPIRED" }); })
+      .mockImplementationOnce(async function* (cursor) {
+        expect(cursor).toBeNull();
+        yield { kind: "event", op: "upsert", event: { ...raw!, id: "changed-native-id", title: "Refreshed" } };
+        yield { kind: "event", op: "delete", providerId: unseen!.providerId };
+        throw new Error("Replacement failed");
+      });
+    await expect(service.syncAccount(account.id)).rejects.toThrow("Replacement failed");
+    expect(await store.events.get(unseen!.id)).not.toBeNull();
+    expect(await store.events.query({ accountId: account.id, limit: 100 })).toHaveLength(before.length);
+    expect(await store.events.get(kept!.id)).toMatchObject({ title: "Refreshed", matterId: "matter", sourceEmailId: "local-invite" });
+    service = new SyncService(store, new InMemoryEventBus(), async () => mail, async () => calendar);
+    pass.mockImplementationOnce(async function* (cursor) {
+      expect(cursor).toBeNull();
+      yield { kind: "event", op: "upsert", event: { ...raw!, id: "another-native-id" } };
+      yield { kind: "cursor", cursor: "full-replacement" };
+    });
+    await service.syncAccount(account.id);
+    expect(await store.events.query({ accountId: account.id, limit: 100 })).toHaveLength(1);
+    expect(await store.events.get(kept!.id)).toMatchObject({ matterId: "matter", sourceEmailId: "local-invite" });
+    expect((await store.matters.get("matter"))!.eventIds).toContain(kept!.id);
+  });
+  it("R16: ingests sent/draft/self mail but only queues genuine arrivals, including self inbox mail", async () => {
+    const raw = (await mail.getEmail("fixture-01"))!;
+    vi.spyOn(mail, "sync").mockImplementation(async function* () {
+      for (const [id, role] of [["in", "inbox"], ["sent", "sent"], ["drafts", "drafts"], ["archive", "archive"]] as const)
+        yield { kind: "mailbox", op: "upsert", mailbox: { id, accountId: account.id, providerId: id, role, name: role, totalEmails: 0, unreadEmails: 0 } };
+      for (const [id, box, draft, self] of [
+        ["incoming", "in", false, false], ["outgoing", "sent", false, false],
+        ["draft-role", "drafts", false, false], ["draft-keyword", "in", true, false],
+        ["self-archive", "archive", false, true], ["self-inbox", "in", false, true],
+      ] as const)
+        yield { kind: "email", op: "upsert", email: { ...raw, id, providerId: id, mailboxIds: [box], keywords: { $draft: draft }, from: [{ email: self ? account.emailAddress : "sender@example.com" }], ...(id === "outgoing" ? { provenance: "sent" as const } : {}) } };
+      yield { kind: "cursor", cursor: "complete" };
+    });
+    await service.syncAccount(account.id);
+    expect((await store.emails.query({ accountId: account.id })).items).toHaveLength(6);
+    expect((await store.emails.getByProviderId(account.id, "outgoing"))!.provenance).toBe("sent");
+    expect(events.filter(event => event.type === "email.received").map(event => event.type === "email.received" && event.email.providerId).sort()).toEqual(["incoming", "self-inbox"]);
+    expect(Object.keys(JSON.parse((await store.kv.get("arrival:pending"))!))).toHaveLength(2);
+    await service.syncAccount(account.id);
+    expect(events.filter(event => event.type === "email.received")).toHaveLength(2);
+  });
   it("keeps identical provider IDs isolated between accounts", async () => {
     await service.syncAccount(account.id);
     const second = { ...account, id: "another-account" };

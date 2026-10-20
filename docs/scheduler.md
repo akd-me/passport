@@ -1,6 +1,6 @@
 # Scheduler
 
-Passport's scheduler runs built-in background work and your own recurring agent routines.
+Passport's scheduler runs built-in background work and your own recurring agent routines only in the `serve` or `demo` owner process. Stdio MCP and one-shot CLI commands do not start background timers or arrival queues.
 Open **Scheduler** (`/scheduler`) to see jobs, their schedules, next-run countdowns, status,
 duration, failure details and the last 20 runs. Run now, pause/resume, inspect history, or
 create a routine. Changes arrive through the existing WebSocket event stream.
@@ -12,6 +12,7 @@ create a routine. Changes arrive through the existing WebSocket event stream.
 | `sync:<accountId>`       | Every 2 minutes (`syncIntervalSeconds`)                         | Incremental account sync, plus a first sync on fresh startup                                        |
 | `sync:<accountId>:watch` | Long poll, reconnect 1 second after completion                  | Optional provider `waitForChanges`; notifications run the account sync job                          |
 | `accounts.refresh`       | Same interval as sync                                           | Discover account additions/removals made outside the HTTP API                                       |
+| `agent.arrivals` | Every 30 seconds | Retry durable arrivals; defer unsynced calendars up to 10 minutes |
 | `outbox.release`         | Every 30 seconds                                                | Release due held actions through the existing executor                                              |
 | `trust.decay`            | Daily 03:00                                                     | Apply trust decay                                                                                   |
 | `agent.daily_digest`     | Daily `dailyDigestHour` (`PASSPORT_DIGEST_HOUR`, default 08:00) | Agent daily digest                                                                                  |
@@ -57,8 +58,9 @@ passport jobs add-routine --name "Morning triage" --daily 07:30 \
 Add `--demo` for an isolated, temporary demo. Commands use the running real server at the
 configured host/port when available, so pause/resume immediately affect its timers. With the
 server offline, they operate on the local store without starting recurring timers; changes
-are loaded on the next server startup. Run a single scheduler process per data directory:
-execution locks are process-local.
+are loaded on the next server startup. The CLI authenticates with `PASSPORT_API_TOKEN` or `<data-dir>/api-token`; a 401 fails with instructions. Direct-store fallback is announced and requires both an unreachable server and an absent/stale owner lock. A live owner with an unreachable server is an error.
+
+`<data-dir>/owner.lock` records PID, start time and a 10-second heartbeat. A live lock prevents another `serve`/`demo`; it expires after 60 seconds without a heartbeat or when its PID exits. Shutdown removes only its own lock. Arrivals additionally use SQLite compare-and-set claims, renewed every 10 seconds, and stable `arrival:<emailId>` run IDs. Existing logged Actions or a completed run checkpoint acknowledge a retry without re-running inference.
 
 ## API
 

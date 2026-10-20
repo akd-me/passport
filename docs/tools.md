@@ -213,7 +213,12 @@ Passport tool/time-out settings; unsupported inline/dotted Passport table forms
 fail without overwriting the file. Convert these to `[mcp_servers.passport]` first.
 
 Stdio uses the absolute current Node executable and built server entry; clients
-launch `passport mcp`, which keeps stdout exclusive to MCP. Example project
+launch `passport mcp`, which keeps stdout exclusive to MCP and opens the store in client mode
+without background jobs or an arrival queue. It can coexist with `serve`; without a live owner,
+it prints a stderr notice and held/proposed submissions wait for `serve`. Nondefault data
+directories are included as `env.PASSPORT_DATA_DIR` (Codex) or `env: { PASSPORT_DATA_DIR }`
+(JSON clients). Printed previews redact secret-bearing keys recursively, including unrelated
+existing entries; actual config and backups retain their values. Example project
 `.mcp.json` for Claude Code (user scope instead writes `~/.claude.json`):
 
 ```json

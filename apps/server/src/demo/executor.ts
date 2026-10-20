@@ -63,6 +63,12 @@ export function createDemoExecutor(
       actor: { kind: "human", id: "user" },
       reason: `Undo: ${r.reason}`,
     });
+    if (r.type === "profile_update") {
+      const old = (await store.kv.get("user-profile")) ?? "";
+      await store.kv.set("user-profile", params(r, "profile_update").markdown);
+      restorers.set(record.id, () => store.kv.set("user-profile", old));
+      return inverse("profile_update", { markdown: old });
+    }
     if (r.type === "matter_update") {
       const p = params(r, "matter_update"),
         old = required(await store.matters.get(p.matterId), "Matter");
