@@ -271,7 +271,7 @@ describe("real backend end to end", () => {
   });
   // Policy seams: agent person_update carries a complete new Person (including id and
   // verification); current executor rejects it before either triage playbook can run.
-  it.skip("policy seams: fixture newsletter produces an executed or proposed archive/label action", async () => {
+  it("policy seams: fixture newsletter produces an executed or proposed archive/label action", async () => {
     const { backend, account } = await fixture(true);
     await backend.syncAccount(account.id);
     await backend.drainAgentQueue();
@@ -287,7 +287,7 @@ describe("real backend end to end", () => {
       ),
     ).toBe(true);
   });
-  it.skip("policy seams: known-contact fixture reply produces a proposed draft_create/send visible at GET /api/decisions", async () => {
+  it("policy seams: known-contact fixture reply produces a proposed draft_create/send visible at GET /api/decisions", async () => {
     const { backend, account, app } = await fixture(true);
     await backend.policy.setConfig({ globalMode: "supervised" });
     await backend.syncAccount(account.id);
@@ -304,7 +304,7 @@ describe("real backend end to end", () => {
       ),
     ).toBe(true);
   });
-  it.skip("policy seams: matter_create/matter_attach apply emailPatch category/personIds and undo restores metadata", async () => {
+  it("policy seams: matter_create/matter_attach apply emailPatch category/personIds and undo restores metadata", async () => {
     const { backend, account } = await fixture(true);
     await backend.syncAccount(account.id);
     await backend.drainAgentQueue();
