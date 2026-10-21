@@ -12,7 +12,6 @@ import type {
   PromotionOffer,
 } from "@passport/types";
 import type { Backend } from "./backend.js";
-import { llmConfigured } from "./config.js";
 import { addAccount } from "./accounts.js";
 import { ApiError, required } from "./errors.js";
 import {
@@ -29,6 +28,8 @@ import { logger } from "./logger.js";
 import { installJobRoutes } from "./schedulers/routes.js";
 import { getAuth, installAuth, type PassportAuth } from "./auth.js";
 import { registerOnboarding } from "./onboarding/routes.js";
+import { installLlmRoutes } from "./llm-routes.js";
+import { publicLlm } from "./llm-selection.js";
 
 const csv = (value?: string) => value?.split(",").filter(Boolean);
 const limit = (value?: string) =>
@@ -134,6 +135,7 @@ export function createApp(
   installAuth(app, options.auth ?? getAuth(backend));
   installJobRoutes(app, backend);
   registerOnboarding(app, backend);
+  installLlmRoutes(app, backend);
   app.get("/api/health", (c) => c.json({ ok: true, mode: backend.mode }));
   app.get("/api/decisions", async (c) =>
     c.json(
@@ -385,14 +387,9 @@ export function createApp(
     }));
   });
   app.get("/api/accounts", async (c) => {
-    const { apiKey, ...llm } = backend.config.llm;
     return c.json({
       accounts: await backend.store.accounts.list(),
-      llm: {
-        ...llm,
-        apiKeyConfigured: !!apiKey,
-        configured: llmConfigured(backend.config.llm),
-      },
+      llm: publicLlm(backend.config),
       mode: backend.mode,
     });
   });
@@ -415,37 +412,6 @@ export function createApp(
       }),
     ),
   );
-  app.put("/api/settings/llm", async (c) => {
-    const body = await jsonBody(c.req.raw);
-    for (const key of Object.keys(body))
-      if (!["provider", "model", "baseUrl", "fastModel"].includes(key))
-        throw new ApiError(
-          "INVALID_FIELD",
-          `Unknown LLM setting ${key}; API keys use PASSPORT_LLM_API_KEY`,
-        );
-    const llm = { ...backend.config.llm };
-    if (body.provider !== undefined && body.provider !== llm.provider) {
-      delete llm.apiKey;
-      llm.apiKey =
-        process.env.PASSPORT_LLM_API_KEY ||
-        (body.provider === "anthropic"
-          ? process.env.ANTHROPIC_API_KEY
-          : body.provider === "openai" || body.provider === "openai-compatible"
-            ? process.env.OPENAI_API_KEY
-            : undefined);
-    }
-    if (body.provider !== undefined)
-      llm.provider = member(
-        body.provider,
-        ["anthropic", "openai", "openai-compatible", "ollama"],
-        "LLM provider",
-      );
-    for (const key of ["model", "baseUrl", "fastModel"] as const)
-      if (body[key] !== undefined) llm[key] = string(body[key], key);
-    await backend.updateConfig({ llm });
-    const { apiKey, ...publicLlm } = llm;
-    return c.json({ ...publicLlm, apiKeyConfigured: !!apiKey });
-  });
   app.post("/api/agent/triage/:id", async (c) => {
     const email = required(await backend.store.emails.get(c.req.param("id")), "Email");
     return c.json(await backend.agent.run({ kind: "email.received", emailId: email.id }));

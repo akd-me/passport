@@ -9,7 +9,9 @@ import type {
   MailProvider,
 } from "@passport/types";
 import type { Backend } from "./backend.js";
-import { llmConfigured, loadConfig, validateConfig } from "./config.js";
+import { isHostAgentProvider, llmConfigured, loadConfig, validateConfig } from "./config.js";
+import { hostAgentChecks, pingHostAgent, type HostAgentDoctorOptions } from "./doctor-host-agents.js";
+import { resolveLlmSelection } from "./llm-selection.js";
 
 export interface DoctorCheck {
   name: string;
@@ -61,7 +63,7 @@ export async function runDoctor(
     fetch?: typeof fetch;
     now?: () => number;
     probe?: typeof probeAccount;
-  } = {},
+  } & HostAgentDoctorOptions = {},
 ): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [],
     now = options.now?.() ?? Date.now();
@@ -109,6 +111,7 @@ export async function runDoctor(
     validateConfig(backend.config);
     return "Valid";
   });
+  if (backend.mode !== "demo") checks.push(...(await hostAgentChecks(backend.config, options)));
   if (backend.mode === "demo" || !llmConfigured(backend.config.llm))
     checks.push({
       name: "LLM",
@@ -116,8 +119,10 @@ export async function runDoctor(
       detail:
         backend.mode === "demo"
           ? "Demo agent; no network ping"
-          : "No model key configured. Mail sync remains available.",
+          : "No agent model: run `codex login` or `claude auth login` (no API key needed). Mail sync remains available.",
     });
+  else if (isHostAgentProvider(backend.config.llm.provider))
+    checks.push(await pingHostAgent(backend.config, options));
   else
     await check("LLM", async () => {
       const llm = backend.config.llm,
@@ -309,6 +314,7 @@ export async function doctorCommand(demo = false): Promise<void> {
       return;
     }
   }
+  if (!demo) await resolveLlmSelection(config);
   const backend = demo
     ? await (await import("./demo/index.js")).createDemoBackend(config)
     : await (await import("./compose.js")).createRealBackend(config, { clientMode: true });

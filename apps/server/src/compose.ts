@@ -188,7 +188,7 @@ export async function createRealBackend(
         llm:
           options.llm ??
           (enabled
-            ? createLlmClient(config.llm)
+            ? createLlmClient(config.llm, { hostAgentCwd: join(config.dataDir, "host-agent") })
             : {
                 complete: async () => {
                   throw new ApiError(

@@ -1,4 +1,4 @@
-import { accessSync, constants, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { HostAgentKind, HostAgentStatus } from "@passport/types";
@@ -88,13 +88,9 @@ async function probe(kind: HostAgentKind, env: NodeJS.ProcessEnv, exec: ProbeExe
   }
   const versionText = ver && ver.code === 0 ? version(ver.stdout) : null;
   return {
-    ...base, installed: true, binaryPath: realpathSafe(binaryPath), version: versionText, loggedIn, account, ready: loggedIn,
+    ...base, installed: true, binaryPath, version: versionText, loggedIn, account, ready: loggedIn,
     ...(loggedIn ? {} : { fix: HOST_AGENT_FIXES[kind].login }),
   };
-}
-
-function realpathSafe(path: string): string {
-  try { return realpathSync(path); } catch { return path; }
 }
 
 export interface DetectHostAgentsOptions {

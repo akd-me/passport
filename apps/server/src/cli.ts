@@ -19,6 +19,7 @@ import { initializePassport } from "./onboarding/init.js";
 import { doctorCommand } from "./doctor.js";
 import { acquireOwner, activeOwner } from "./owner-lock.js";
 import { serverClient } from "./cli/server-client.js";
+import { resolveLlmSelection } from "./llm-selection.js";
 
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
@@ -73,6 +74,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       return;
     }
   }
+  if (["serve", "sync", "triage"].includes(command) && !args.includes("--demo")) await resolveLlmSelection(config, { log: command === "serve" });
   let shutdownOwner: (() => void) | undefined;
   const owner = ["serve", "demo"].includes(command) ? acquireOwner(config.dataDir, () => {
     logger.error("Workspace owner lease lost; stopping background work.");

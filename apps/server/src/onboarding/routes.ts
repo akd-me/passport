@@ -4,7 +4,7 @@ import type { Backend } from "../backend.js";
 import { addAccount } from "../accounts.js";
 import { ApiError, required } from "../errors.js";
 import { object } from "../validation.js";
-import { llmConfigured } from "../config.js";
+import { publicLlm } from "../llm-selection.js";
 import { probeAccount, runDoctor } from "../doctor.js";
 import { BrowserOAuth, oauthCookie } from "./oauth.js";
 import { accountSync } from "./sync.js";
@@ -74,14 +74,9 @@ export function registerOnboarding(
         syncing: accountSync(backend)?.isSyncing(account.id) ?? false,
       })),
     );
-    const { apiKey, ...llm } = backend.config.llm;
     return c.json({
       accounts,
-      llm: {
-        ...llm,
-        apiKeyConfigured: !!apiKey,
-        configured: llmConfigured(backend.config.llm),
-      },
+      llm: publicLlm(backend.config),
       mode: backend.mode,
     });
   });

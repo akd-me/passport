@@ -3,7 +3,9 @@ import { Writable } from "node:stream";
 import { stdin, stdout } from "node:process";
 import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { LlmConfig, ProviderSetupDescriptor } from "@passport/types";
+import type { HostAgentStatus, LlmConfig, ProviderSetupDescriptor } from "@passport/types";
+import { HOST_AGENT_DEFAULT_MODELS } from "@passport/agent";
+import { describeLlm, hostAgentLlm, hostAgents, resolveLlmSelection } from "../llm-selection.js";
 import { createRealBackend } from "../compose.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { addAccount } from "../accounts.js";
@@ -63,6 +65,11 @@ function terminalPrompts(): InitPrompts {
   };
 }
 
+function describeAgent(agent: HostAgentStatus): string {
+  if (agent.ready) return `${agent.label}${agent.account ? ` (${agent.account} login)` : ""} ✓`;
+  return `${agent.label} ✗ ${agent.installed ? "not logged in" : "not installed"}`;
+}
+
 /** Own-client loopback setup; the existing one-shot listener validates state and PKCE. */
 export async function initializePassport(
   prompts: InitPrompts = terminalPrompts(),
@@ -74,16 +81,33 @@ export async function initializePassport(
     for (let i = 0; i < args.length; i++) {
       if (args[i] === "--skip-account") skipAccount = true;
       else if (args[i] === "--llm" && args[i + 1] && !args[i + 1]!.startsWith("--")) llm = args[++i];
-      else throw new ApiError("INVALID_COMMAND", "Use passport init [--llm none|anthropic|openai|openai-compatible|ollama] [--skip-account]");
+      else throw new ApiError("INVALID_COMMAND", "Use passport init [--llm auto|codex|claude-code|none|anthropic|openai|openai-compatible|ollama] [--skip-account]");
     }
     const config = await loadConfig();
     prompts.log(`Passport setup → ${config.dataDir}`);
-    const provider =
+    // The default agent is the Claude Code or Codex subscription already on this machine.
+    const agents = llm && !["auto", "codex", "claude-code"].includes(llm) ? [] : await hostAgents({ refresh: true });
+    if (agents.length) prompts.log(`Agents on this machine: ${agents.map(describeAgent).join(", ")}`);
+    const anyReady = agents.some((agent) => agent.ready);
+    let provider =
       (llm ?? (await prompts.ask(
-        "LLM provider (anthropic / openai / openai-compatible / ollama / none) [none]",
-      ))) || "none";
+        `Agent model (auto / codex / claude-code / advanced / none) [${anyReady ? "auto" : "none"}]`,
+      ))) || (anyReady ? "auto" : "none");
+    if (provider === "advanced")
+      provider =
+        (await prompts.ask("API provider (anthropic / openai / openai-compatible / ollama) [anthropic]")) || "anthropic";
     let enteredKey: string | undefined;
-    if (provider !== "none") {
+    if (provider === "auto") {
+      config.llmSelection = "auto";
+      const resolution = await resolveLlmSelection(config);
+      prompts.log(describeLlm(resolution));
+    } else if (provider === "codex" || provider === "claude-code") {
+      const status = agents.find((agent) => agent.kind === provider);
+      if (status && !status.ready) prompts.log(`${status.label} is not ready yet. ${status.fix ?? ""}`.trim());
+      const model = await prompts.ask(`Model [${HOST_AGENT_DEFAULT_MODELS[provider].main}]`);
+      config.llm = hostAgentLlm(provider, model);
+      config.llmSelection = "explicit";
+    } else if (provider !== "none") {
       if (
         !["anthropic", "openai", "openai-compatible", "ollama"].includes(
           provider,
@@ -122,7 +146,11 @@ export async function initializePassport(
         ...(baseUrl ? { baseUrl } : {}),
         ...(enteredKey ? { apiKey: enteredKey } : {}),
       };
-    } else config.llm = { provider: "anthropic", model: "claude-sonnet-5-5" };
+      config.llmSelection = "explicit";
+    } else {
+      config.llm = { provider: "anthropic", model: "claude-sonnet-5-5" };
+      config.llmSelection = "explicit";
+    }
     await saveConfig(config);
     // This key was explicitly entered for persistence; environment-only keys remain in the environment.
     if (
