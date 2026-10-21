@@ -17,11 +17,19 @@ Thanks for helping build an agent-native email harness.
 ```sh
 pnpm install
 pnpm build
-pnpm test
+pnpm typecheck
+pnpm lint
+pnpm format:check
+PASSPORT_SKIP_LIVE_HOST_AGENTS=1 pnpm test
+pnpm format                           # apply Biome formatting
 pnpm --filter @passport/server demo     # UI on fixture data
 ```
 
-Open a pull request against `main`. CI runs build, typecheck and tests on Node 22 and 24.
+Biome reads `biome.json`; the commented `biome-baseline.jsonc` records existing warning
+rules that need manual review without changing behavior. Package-local lint commands remain
+TypeScript checks.
+
+Open a pull request against `main`. CI runs build, typecheck, Biome checks and tests on Node 22 and 24.
 
 ## Reporting a security issue
 

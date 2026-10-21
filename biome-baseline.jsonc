@@ -1,0 +1,54 @@
+{
+  "linter": {
+    "rules": {
+      "suspicious": {
+        // Existing initialization and parser loops require manual expansion to preserve evaluation order.
+        "noAssignInExpressions": "warn",
+        // Existing forEach callbacks return ignored mutation results; expand manually with readability edits.
+        "useIterableCallbackReturn": "warn",
+        // These variables use TypeScript evolving inference; preserve types in the mechanical commit.
+        "noImplicitAnyLet": "warn",
+        // The existing sync test exports a collaborator; inspect consumers in the dead-code pass.
+        "noExportsInTest": "warn",
+        // Existing fixed and append-only presentation lists retain their reconciliation behavior.
+        "noArrayIndexKey": "warn",
+        // The provider uses a local escape helper; preserve its name in the mechanical commit.
+        "noShadowRestrictedNames": "warn"
+      },
+      "correctness": {
+        // Review existing effect lifecycles individually; automatic changes can repeat side effects.
+        "useExhaustiveDependencies": "warn",
+        // Test generators intentionally model empty streams and failures before the first item.
+        "useYield": "warn",
+        // Existing tests deliberately assume fixture lookup success; retain their assertions.
+        "noUnsafeOptionalChaining": "warn",
+        // The normalizer intentionally uses [^] to match any character, including newlines.
+        "noEmptyCharacterClassInRegex": "warn"
+      },
+      "a11y": {
+        // Existing buttons rely on their surrounding form context; preserve submission behavior.
+        "useButtonType": "warn",
+        // The existing favicon is a decorative asset; preserve its contents.
+        "noSvgWithoutTitle": "warn",
+        // Existing form markup is retained during this behavior-preserving pass.
+        "noLabelWithoutControl": "warn",
+        // Existing dialog and popover event propagation is retained.
+        "noStaticElementInteractions": "warn",
+        // Preserve the existing initial focus behavior.
+        "noAutofocus": "warn",
+        // Changing the existing custom widgets would change markup and styling.
+        "useSemanticElements": "warn",
+        // Preserve the command palette markup and keyboard interaction.
+        "noNoninteractiveElementToInteractiveRole": "warn",
+        // The command palette currently manages focus at the parent.
+        "useFocusableInteractive": "warn",
+        // Preserve existing pointer and keyboard event handling.
+        "useKeyWithClickEvents": "warn",
+        // Preserve existing accessible names during this code-quality pass.
+        "useAriaPropsSupportedByRole": "warn",
+        // Preserve the current decision-card focus behavior.
+        "noNoninteractiveTabindex": "warn"
+      }
+    }
+  }
+}
