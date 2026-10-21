@@ -54,12 +54,15 @@ function StepIcon({ status }: { status: SetupStep["status"] }) {
 export function TaskView({
   task,
   onUpdate,
+  onAnswered,
   onRetry,
   onManual,
   onDone,
 }: {
   task: SetupTask;
   onUpdate: (task: SetupTask) => void;
+  /** The server accepted an answer to this prompt. */
+  onAnswered?: (promptId: string) => void;
   onRetry: () => void;
   onManual: () => void;
   onDone: () => void;
@@ -68,11 +71,14 @@ export function TaskView({
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const { accounts } = useAccounts();
-  const act = async (fn: () => Promise<unknown>) => {
+  const act = async (fn: () => Promise<unknown>, answering?: string) => {
     setBusy(true);
     setError("");
     try {
       const next = asTask(await fn());
+      if (answering) {
+        onAnswered?.(answering);
+      }
       if (next) {
         onUpdate(next);
       }
@@ -86,7 +92,12 @@ export function TaskView({
       setBusy(false);
     }
   };
-  const respond = (value: string) => act(() => setupApi.respond(task.id, task.prompt!.id, value));
+  const respond = async (value: string) => {
+    const promptId = task.prompt?.id;
+    if (promptId) {
+      await act(() => setupApi.respond(task.id, promptId, value), promptId);
+    }
+  };
   const connected = accounts.filter((a) => task.result?.accountIds.includes(a.id));
   const name = providerNames[task.provider];
   function setupTitle() {

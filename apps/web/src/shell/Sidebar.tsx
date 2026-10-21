@@ -4,6 +4,7 @@ import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-
 import { AccountDot, useAccounts } from "../accounts/AccountFilter";
 import { needsReauthorization, syncSummary } from "../accounts/AccountRow";
 import { Icon, Kbd, mod } from "../components/ui";
+import { providerNames } from "../connect/setup-task-model";
 import { useResource, useWorkspace } from "../state";
 import { useUi } from "../ui-state";
 import { ModeMenu } from "../views/Trust";
@@ -48,6 +49,26 @@ function Group({
 }
 
 const scopedRoutes = ["/", "/matters", "/activity"];
+
+/** A setup waiting on the user stays reachable after its dialog is closed. */
+function SetupWaiting() {
+  const { connecting, setConnecting, setup } = useUi();
+  const task = setup.task;
+  if (connecting || task?.status !== "waiting_for_user") {
+    return null;
+  }
+  return (
+    <li>
+      <button type="button" className="side-row setup-waiting" onClick={() => setConnecting(true)}>
+        <Icon name="alert" size={14} />
+        <span className="side-label">
+          Setup needs you
+          <small>Connecting {providerNames[task.provider]}</small>
+        </span>
+      </button>
+    </li>
+  );
+}
 
 function AccountsGroup() {
   const { accounts } = useAccounts(),
@@ -106,6 +127,7 @@ function AccountsGroup() {
           </li>
         );
       })}
+      <SetupWaiting />
       <li>
         <button type="button" className="side-row quiet" onClick={() => setConnecting(true)}>
           <Icon name="plus" size={14} />

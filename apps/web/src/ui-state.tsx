@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { type SetupSession, useSetupSessionState } from "./connect/setup-session";
 import { logger } from "./logger";
 
 export type SettingsSection = "model" | "accounts" | "trust" | "routines" | "advanced";
@@ -19,6 +20,8 @@ interface UiState {
   closeSettings: () => void;
   connecting: boolean;
   setConnecting: (open: boolean) => void;
+  /** The account setup in progress; it outlives the connect dialog. */
+  setup: SetupSession;
   palette: boolean;
   setPalette: (open: boolean) => void;
   sidebar: boolean;
@@ -84,7 +87,8 @@ export function UiProvider({ children }: { children: ReactNode }) {
     [theme, setThemeState] = useState<ThemePreference>(() =>
       stored("passport.theme", "system", ["system", "light", "dark"]),
     ),
-    composer = useRef<HTMLTextAreaElement | null>(null);
+    composer = useRef<HTMLTextAreaElement | null>(null),
+    setup = useSetupSessionState();
   useEffect(() => applyTheme(theme), [theme]);
   const openSettings = useCallback(
       (section: SettingsSection = "model") => setSettings(section),
@@ -119,6 +123,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
       closeSettings,
       connecting,
       setConnecting,
+      setup,
       palette,
       setPalette,
       sidebar,
@@ -135,6 +140,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
       openSettings,
       closeSettings,
       connecting,
+      setup,
       palette,
       sidebar,
       toggleSidebar,
@@ -154,6 +160,7 @@ const fallback: UiState = {
   closeSettings: () => {},
   connecting: false,
   setConnecting: () => {},
+  setup: { update: () => {}, resolvePrompt: () => {} },
   palette: false,
   setPalette: () => {},
   sidebar: true,
