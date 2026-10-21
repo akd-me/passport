@@ -113,6 +113,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         ? await createDemoBackend(config)
         : await createRealBackend(config, { clientMode: command !== "serve" });
   } catch (error) {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     owner?.release();
     throw error;
   }
@@ -151,6 +153,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     try {
       await serveStdio(server);
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       await shutdown();
       throw error;
     }
@@ -161,6 +165,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       allowRemote: args.includes("--allow-remote"),
     });
     void handle.ready.catch(() => {
+      // MCP listener failed during startup.
+      logger.warn("MCP listener failed during startup");
+
       process.exitCode = 1;
       void handle.close();
     });
@@ -178,6 +185,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     });
     const shutdown = () => {
       void handle.close().catch(() => {
+        // MCP listener failed during shutdown.
+        logger.warn("MCP listener failed during shutdown");
+
         process.exitCode = 1;
       });
     };
@@ -321,6 +331,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   void main().catch((error: unknown) => {
+    // Keep the existing operational log and fallback; never include the caught payload.
+
     logger.error(
       error instanceof ApiError
         ? error.message

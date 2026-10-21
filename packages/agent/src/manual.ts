@@ -66,6 +66,8 @@ export async function manual(
           isError: result.isError,
         });
       } catch (error) {
+        // Input validation failures become tool feedback; unrelated agent failures propagate.
+
         if (!(error instanceof AgentError) || !error.code.startsWith("INPUT_")) {
           throw error;
         }

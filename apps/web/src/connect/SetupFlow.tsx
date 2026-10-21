@@ -3,6 +3,7 @@ import { useAccounts } from "../accounts/AccountFilter";
 import { AccountWizard } from "../accounts/AccountWizard";
 import { ApiError, type ProviderDescriptor } from "../api";
 import { Feedback, Icon, Loading } from "../components/ui";
+import { logger } from "../logger";
 import {
   isFinished,
   type SetupProvider,
@@ -88,6 +89,9 @@ function TaskView({
       }
       setAnswer("");
     } catch (e) {
+      // Setup response failed.
+      logger.warn("Setup response failed");
+
       setError(e instanceof Error ? e.message : "That did not go through.");
     } finally {
       setBusy(false);
@@ -334,6 +338,9 @@ export function SetupFlow({ onDone }: { onDone: () => void }) {
           setTask(next);
         }
       } catch {
+        // Setup status refresh failed; retaining the last state.
+        logger.warn("Setup status refresh failed; retaining the last state");
+
         /* Keep the last known state; the next tick retries. */
       }
     }, 1500);
@@ -354,6 +361,9 @@ export function SetupFlow({ onDone }: { onDone: () => void }) {
       const { id } = await setupApi.start({ provider, calendar });
       setTask(await setupApi.get(id));
     } catch (e) {
+      // Automatic setup could not start.
+      logger.warn("Automatic setup could not start");
+
       if (e instanceof ApiError && (e.status === 404 || e.status === 501)) {
         setManual({
           note: "Automatic setup is not available on this Passport server yet. Set the account up with your own OAuth client instead.",

@@ -174,6 +174,9 @@ function loopbackOrigin(origin: string): boolean {
       url.origin === origin
     );
   } catch {
+    // Setup owner process probe failed.
+    logger.warn("Setup owner process probe failed");
+
     return false;
   }
 }
@@ -267,6 +270,8 @@ export class SetupTaskRunner {
       `Setting up ${input.provider === "gmail" ? "Gmail" : "Microsoft"}${input.calendar ? " with calendar" : ""}.`,
     );
     void this.execute(run).catch(() => {
+      // Keep the existing operational log and fallback; never include the caught payload.
+
       run.state.fail("Setup stopped unexpectedly. Try again, or set up manually.");
       logger.error("Setup task failed unexpectedly");
     });
@@ -384,6 +389,9 @@ export class SetupTaskRunner {
       try {
         await this.browser.prepare(signal);
       } catch {
+        // Browser helper preparation failed.
+        logger.warn("Browser helper preparation failed");
+
         if (signal.aborted) {
           return;
         }
@@ -471,12 +479,24 @@ export class SetupTaskRunner {
           this.tickets.delete(ticket);
         }
       }
-      await release?.().catch(() => undefined);
+      await release?.().catch(() => {
+        // Browser helper release failed during cleanup.
+        logger.warn("Browser helper release failed during cleanup");
+        return undefined;
+      });
       if (browserStarted) {
-        await this.browser.close(this.profileDir).catch(() => undefined);
+        await this.browser.close(this.profileDir).catch(() => {
+          // Setup browser close failed during cleanup.
+          logger.warn("Setup browser close failed during cleanup");
+          return undefined;
+        });
         // Screenshots can show the client secret; they are not kept.
         await rm(join(this.workDir, "browser-output"), { recursive: true, force: true }).catch(
-          () => undefined,
+          () => {
+            // Setup browser output cleanup failed.
+            logger.warn("Setup browser output cleanup failed");
+            return undefined;
+          },
         );
       }
     }
@@ -672,6 +692,9 @@ export function describeBrowserCall(name: string, input: unknown): string | unde
         const url = new URL(String(args.url));
         return `Browser: opened ${url.origin}${url.pathname.startsWith("/oauth/setup/") ? "/oauth/setup/…" : url.pathname}`;
       } catch {
+        // Browser URL could not be summarized safely.
+        logger.warn("Browser URL could not be summarized safely");
+
         return "Browser: opened a page";
       }
     }

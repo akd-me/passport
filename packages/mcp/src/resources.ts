@@ -18,6 +18,8 @@ export function registerResources(ctx: Context) {
     try {
       return limitResponse((await list()) as object, ctx.deps.responseByteBudget) as T;
     } catch {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       throw new McpError(ErrorCode.InternalError, "Unable to list Passport resources.");
     }
   }
@@ -28,6 +30,8 @@ export function registerResources(ctx: Context) {
         ctx.deps.responseByteBudget,
       );
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       throw new McpError(
         ErrorCode.InvalidParams,
         error instanceof MailboxMcpError ? error.message : "Unable to read this Passport resource.",
@@ -122,7 +126,10 @@ export function registerResources(ctx: Context) {
           event.type.startsWith("action."))
       ) {
         // A disconnected notification recipient must not break the domain bus or action execution.
-        void server.server.sendResourceListChanged().catch(() => {});
+        void server.server.sendResourceListChanged().catch(() => {
+          // MCP resource notification failed; keeping domain event delivery active.
+          ctx.deps.log?.("MCP resource notification failed; keeping domain event delivery active");
+        });
       }
     });
   };

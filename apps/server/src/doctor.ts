@@ -11,6 +11,7 @@ import {
   pingHostAgent,
 } from "./doctor-host-agents.js";
 import { resolveLlmSelection } from "./llm-selection.js";
+import { logger } from "./logger.js";
 
 export interface DoctorCheck {
   name: string;
@@ -51,7 +52,11 @@ export async function probeAccount(
       }
     }
   } finally {
-    await provider.disconnect().catch(() => undefined);
+    await provider.disconnect().catch(() => {
+      // Provider diagnostic cleanup failed.
+      logger.warn("Provider diagnostic cleanup failed");
+      return undefined;
+    });
   }
 }
 
@@ -70,6 +75,9 @@ export async function runDoctor(
     try {
       checks.push({ name, status: "ok", detail: await operation(), accountId });
     } catch {
+      // Diagnostic check failed.
+      logger.warn("Diagnostic check failed");
+
       checks.push({
         name,
         status: "error",
@@ -231,6 +239,9 @@ export async function runDoctor(
         cli = candidate;
         break;
       } catch {
+        // Provider diagnostic failed; trying the next account.
+        logger.warn("Provider diagnostic failed; trying the next account");
+
         /* try next */
       }
     }
@@ -262,6 +273,9 @@ export async function doctorCommand(demo = false): Promise<void> {
   try {
     config = await loadConfig();
   } catch {
+    // Configuration diagnostics failed.
+    logger.warn("Configuration diagnostics failed");
+
     printDoctor({
       at: new Date().toISOString(),
       ok: false,
@@ -281,6 +295,9 @@ export async function doctorCommand(demo = false): Promise<void> {
     try {
       await access(config.dataDir, constants.W_OK);
     } catch {
+      // Data directory diagnostic failed.
+      logger.warn("Data directory diagnostic failed");
+
       checks.push({
         name: "Data directory",
         status: "error",
@@ -294,6 +311,9 @@ export async function doctorCommand(demo = false): Promise<void> {
           throw new Error();
         }
       } catch {
+        // Master key diagnostic failed.
+        logger.warn("Master key diagnostic failed");
+
         checks.push({
           name: "Master key",
           status: "error",

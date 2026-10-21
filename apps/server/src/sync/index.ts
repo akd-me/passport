@@ -284,6 +284,8 @@ export class SyncService {
         try {
           cursors.calendar = await ingest();
         } catch (error) {
+          // An expired calendar cursor requires full reconciliation; other provider errors propagate.
+
           if ((error as { code?: string }).code !== "CURSOR_EXPIRED") {
             throw error;
           }
@@ -420,6 +422,8 @@ export class SyncService {
         try {
           cursors.mail = await ingest();
         } catch (error) {
+          // An expired mail cursor requires full reconciliation; other provider errors propagate.
+
           if ((error as { code?: string }).code !== "CURSOR_EXPIRED") {
             throw error;
           }
@@ -446,6 +450,8 @@ export class SyncService {
       });
       this.bus.emit({ type: "account.synced", accountId, at, emailsUpserted });
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       // Provider errors can contain private data; persist only a bounded machine code.
       const code = (error as { code?: unknown }).code;
       const safeCode =

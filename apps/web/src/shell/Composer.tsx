@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useAccounts } from "../accounts/AccountFilter";
 import { api } from "../api";
 import { Icon, Kbd } from "../components/ui";
+import { logger } from "../logger";
 import { providerLabel } from "../settings/ModelSettings";
 import { useWorkspace } from "../state";
 import { useUi } from "../ui-state";
@@ -79,6 +80,9 @@ export function Composer({
       refresh();
       onRun?.(result);
     } catch (e) {
+      // Agent composition failed; restoring the instruction.
+      logger.warn("Agent composition failed; restoring the instruction");
+
       setText(instruction);
       setRun({
         state: "failed",

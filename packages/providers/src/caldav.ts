@@ -52,6 +52,8 @@ function parseCalendar(source: string): ICAL.Component {
     }
     return component;
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new ProviderError("INVALID_ICALENDAR", "CalDAV returned invalid iCalendar data");
   }
 }
@@ -295,6 +297,8 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
           `<?xml version="1.0"?><d:sync-collection xmlns:d="DAV:"><d:sync-token>${xmlEscape(previous.token!)}</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`,
         );
       } catch (e) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         if (e instanceof ProviderError && [403, 409, 410].includes(e.status ?? 0)) {
           throw new ProviderError(
             "CURSOR_EXPIRED",
@@ -436,6 +440,8 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
             ICAL.Recur.fromString(patch.recurrenceRule.replace(/^RRULE:/, "")),
           );
         } catch {
+          // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
           throw new ProviderError("INVALID_RRULE", "Invalid recurrence rule");
         }
       }
@@ -553,6 +559,8 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
           ),
       );
     } catch (e) {
+      // Unsupported free-busy REPORT uses bounded event fallback; other provider errors propagate.
+
       if (!(e instanceof ProviderError && [403, 405, 501].includes(e.status ?? 0))) {
         throw e;
       }

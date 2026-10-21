@@ -9,6 +9,7 @@ import {
 } from "react";
 import { type DomainEvent, request } from "./api";
 import { checkSession, websocketUrl } from "./auth";
+import { logger } from "./logger";
 /** Frames on /ws: domain events plus setup-task updates from the onboarding service. */
 export type WorkspaceEvent = DomainEvent | { type: "setup.task.updated"; task: unknown };
 type Listener = (event: WorkspaceEvent) => void;
@@ -66,6 +67,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           clearTimeout(debounce);
           debounce = setTimeout(refresh, 120);
         } catch {
+          // Workspace event frame could not be processed.
+          logger.warn("Workspace event frame could not be processed");
+
           /* An invalid frame must not interrupt the feed. */
         }
       };
@@ -127,6 +131,9 @@ export function useResource<T>(path: string | null) {
     request<T>(path, { signal: controller.signal })
       .then((data) => setState({ data, loading: false }))
       .catch((error) => {
+        // Resource request failed or was cancelled.
+        logger.warn("Resource request failed or was cancelled");
+
         if (!controller.signal.aborted) {
           setState({ error: error.message, loading: false });
         }
@@ -153,6 +160,9 @@ export function useTask() {
       notify(message);
       return true;
     } catch (e) {
+      // Workspace action failed.
+      logger.warn("Workspace action failed");
+
       setError(e instanceof Error ? e.message : "Please try again.");
       return false;
     } finally {

@@ -46,6 +46,8 @@ export function decodeCursor<T>(value: string): T {
     }
     return parsed as T;
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new ProviderError("INVALID_CURSOR", "Invalid provider cursor; request a full sync");
   }
 }

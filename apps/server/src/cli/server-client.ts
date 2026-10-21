@@ -11,6 +11,8 @@ export async function serverClient(config: PassportConfig) {
     try {
       token = (await readFile(join(config.dataDir, "api-token"), "utf8")).trim();
     } catch (error) {
+      // An absent token file means there is no authenticated server connection yet.
+
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
       }
@@ -42,6 +44,8 @@ export async function serverClient(config: PassportConfig) {
   try {
     health = await fetch(`${base}/api/health`, { headers, signal: AbortSignal.timeout(1000) });
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     if (activeOwner(config.dataDir)) {
       throw new ApiError(
         "SERVER_UNAVAILABLE",

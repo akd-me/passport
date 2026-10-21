@@ -164,7 +164,12 @@ export function createClaudeParser(): HostStreamParser {
       let message: Record<string, unknown> | undefined;
       try {
         message = record(JSON.parse(line));
-      } catch {
+      } catch (error) {
+        // Malformed JSON is expected here; retain the existing text or stream fallback.
+        if (!(error instanceof SyntaxError)) {
+          throw error;
+        }
+
         return [];
       }
       if (!message) {

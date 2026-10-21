@@ -86,6 +86,8 @@ async function jsonBody(request: Request, optional = false): Promise<Record<stri
   try {
     return object(JSON.parse(text));
   } catch (error) {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     if (error instanceof ApiError) {
       throw error;
     }

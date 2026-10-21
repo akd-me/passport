@@ -12,6 +12,7 @@ import type {
 } from "@passport/types";
 import { BASE_REVERSIBILITY } from "@passport/types";
 import { ApiError, NotImplementedError, required } from "../errors.js";
+import { logger } from "../logger.js";
 
 const now = () => new Date().toISOString();
 const params = <T extends ActionType>(r: ActionRequest, _type: T) => r.params as ActionParams[T];
@@ -289,6 +290,8 @@ export function createDemoExecutor(
       bus.emit({ type: "action.executed", action });
       return action;
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       const action = await store.actions.update(record.id, {
         status: "failed",
         error: error instanceof ApiError ? error.message : "Demo execution failed",
@@ -428,6 +431,9 @@ export function createDemoExecutor(
             try {
               released.push(await execute(record));
             } catch {
+              // Demo outbox action failed; continuing other due actions.
+              logger.warn("Demo outbox action failed; continuing other due actions");
+
               /* execute persisted failure and emitted action.failed. */
             }
           }

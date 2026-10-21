@@ -21,7 +21,13 @@ export interface MailboxHttpHandle {
 /** Authenticated Streamable HTTP; isolated sessions, loopback-bound unless host is explicit. */
 export async function serveHttp(
   server: McpServer,
-  options: { port: number; path?: string; token: string; host?: string },
+  options: {
+    port: number;
+    path?: string;
+    token: string;
+    host?: string;
+    log?: (message: string) => void;
+  },
 ): Promise<MailboxHttpHandle> {
   if (!options.token || /\s/.test(options.token)) {
     throw new MailboxMcpError(
@@ -143,6 +149,9 @@ export async function serveHttp(
         }
       }
     } catch {
+      // MCP HTTP request failed; returning the existing transport error.
+      options.log?.("MCP HTTP request failed; returning the existing transport error");
+
       fail(res, 500, "MCP transport failed.");
     }
   });

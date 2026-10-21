@@ -19,7 +19,11 @@ export function setHostAgentDetector(next: HostAgentDetector): HostAgentDetector
   return previous;
 }
 export function hostAgents(options?: { refresh?: boolean }): Promise<HostAgentStatus[]> {
-  return detector(options).catch(() => []);
+  return detector(options).catch(() => {
+    // Host-agent discovery failed; retaining the configured fallback.
+    logger.warn("Host-agent discovery failed; retaining the configured fallback");
+    return [];
+  });
 }
 
 const NAMES = { "claude-code": "Claude Code", codex: "Codex" } as const;

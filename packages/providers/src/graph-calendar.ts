@@ -182,6 +182,8 @@ export class GraphCalendarProvider extends HttpConnection implements CalendarPro
       try {
         page = await this.api(link);
       } catch (e) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         if (e instanceof ProviderError && e.status === 410) {
           throw new ProviderError(
             "CURSOR_EXPIRED",

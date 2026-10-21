@@ -116,7 +116,10 @@ export function createScheduler(options: {
     }
     const json = JSON.stringify({ ...e.state, running: false });
     const write = e.writes.then(() => options.store.kv.set(`job:${e.def.id}`, json));
-    e.writes = write.catch(() => {});
+    e.writes = write.catch(() => {
+      // Job state persistence failed; keeping the write queue available.
+      options.logger?.warn("Job state persistence failed; keeping the write queue available");
+    });
     return write;
   }
   function clear(e: Entry) {
@@ -152,9 +155,10 @@ export function createScheduler(options: {
         if (!interrupted) {
           e.state.nextRunAt = iso(nextOccurrence(e.state.schedule, now(), due));
         }
-        void execute(e, new Date(due).toISOString(), !!interrupted).catch(() =>
-          options.logger?.warn(`Job ${e.def.id} could not persist its run`),
-        );
+        void execute(e, new Date(due).toISOString(), !!interrupted).catch(() => {
+          // Keep the existing operational log and fallback; never include the caught payload.
+          return options.logger?.warn(`Job ${e.def.id} could not persist its run`);
+        });
         if (!interrupted) {
           arm(e);
         }
@@ -242,9 +246,10 @@ export function createScheduler(options: {
           }
           if (!e.detached && !e.removed && e.state.activeRun?.runId === run.runId) {
             e.state.activeRun = null;
-            void persist(e).catch(() =>
-              options.logger?.warn(`Job ${e.def.id} could not clear its active run`),
-            );
+            void persist(e).catch(() => {
+              // Keep the existing operational log and fallback; never include the caught payload.
+              return options.logger?.warn(`Job ${e.def.id} could not clear its active run`);
+            });
           }
         };
         void work.then(workSettled, workSettled);
@@ -284,6 +289,8 @@ export function createScheduler(options: {
           }
         }
       } catch (error) {
+        // Keep the existing operational log and fallback; never include the caught payload.
+
         run.status = "error";
         e.state.consecutiveFailures++;
         e.state.lastError = error instanceof Error ? error.message : "Job failed";
@@ -435,6 +442,8 @@ export function createScheduler(options: {
       try {
         await e.ready;
       } catch (error) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         entries.delete(def.id);
         throw error;
       }

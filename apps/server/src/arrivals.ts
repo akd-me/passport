@@ -28,7 +28,11 @@ function indexed<T>(store: Store, task: () => Promise<T>): Promise<T> {
   const result = (writes.get(store) ?? Promise.resolve()).then(task);
   writes.set(
     store,
-    result.catch(() => undefined),
+    result.catch(() => {
+      // Arrival queue operation failed; later work may continue.
+      logger.warn("Arrival queue operation failed; later work may continue");
+      return undefined;
+    }),
   );
   return result;
 }
@@ -167,6 +171,8 @@ export class ArrivalQueue {
           clearInterval(timer);
         }
       } catch {
+        // Keep the existing operational log and fallback; never include the caught payload.
+
         logger.warn("Arrival claim heartbeat failed; retrying at the next heartbeat");
       }
     }, 10000);
@@ -242,6 +248,8 @@ export class ArrivalQueue {
         throw new Error(run.error);
       }
     } catch (error) {
+      // Keep the existing operational log and fallback; never include the caught payload.
+
       // The runtime persists progress while inference runs; retain its latest steps.
       Object.assign(entry, JSON.parse((await this.store.kv.get(arrivalKey(emailId))) ?? "{}"));
       const code = (error as { code?: unknown })?.code;
@@ -270,6 +278,8 @@ export class ArrivalQueue {
     );
     // A persistence error leaves the entry available for a later scheduler pass.
     const settled = job.catch(() => {
+      // Keep the existing operational log and fallback; never include the caught payload.
+
       logger.warn("Arrival processing interrupted; entry retained for retry");
     });
     this.active.set(emailId, settled);

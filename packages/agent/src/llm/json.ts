@@ -10,7 +10,12 @@ export function extractJson(text: string): unknown {
   const source = text.replace(/^\uFEFF/, "").trim();
   try {
     return JSON.parse(source) as unknown;
-  } catch {
+  } catch (error) {
+    // Malformed JSON is expected here; retain the existing text or stream fallback.
+    if (!(error instanceof SyntaxError)) {
+      throw error;
+    }
+
     /* Try balanced embedded values. */
   }
   for (let start = 0; start < source.length; start++) {
@@ -41,7 +46,12 @@ export function extractJson(text: string): unknown {
         if (stack.length === 0) {
           try {
             return JSON.parse(source.slice(start, end + 1)) as unknown;
-          } catch {
+          } catch (error) {
+            // Malformed JSON is expected here; retain the existing text or stream fallback.
+            if (!(error instanceof SyntaxError)) {
+              throw error;
+            }
+
             break;
           }
         }

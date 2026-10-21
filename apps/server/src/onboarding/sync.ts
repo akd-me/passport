@@ -1,5 +1,6 @@
 import type { CalendarProvider, EventBus, MailProvider, Store } from "@passport/types";
 import { ApiError, required } from "../errors.js";
+import { logger } from "../logger.js";
 import { SyncService } from "../sync/index.js";
 import { initialDays } from "./config.js";
 
@@ -81,6 +82,8 @@ export class AccountSyncService extends SyncService {
         await super.syncAccount(id);
         return;
       } catch (error) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         const failure = error as { code?: string; status?: number };
         const transient =
           [429, 503].includes(failure.status ?? 0) ||
@@ -154,6 +157,8 @@ export class AccountSyncService extends SyncService {
           settings: { ...fresh.settings, syncDays: this.windows.get(id)! },
         });
       } catch (error) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         await this.accountStore.syncState.set(
           saved ?? {
             accountId: id,
@@ -171,7 +176,11 @@ export class AccountSyncService extends SyncService {
   }
   /** Explicit reconnect updates the retained provider after browser re-authorization. */
   async reconnect(id: string): Promise<void> {
-    await this.jobs.get(id)?.catch(() => undefined);
+    await this.jobs.get(id)?.catch(() => {
+      // Backfill job failed while pausing.
+      logger.warn("Backfill job failed while pausing");
+      return undefined;
+    });
     const account = required(await this.accountStore.accounts.get(id), "Account");
     const credentials = (await this.accountStore.accounts.getCredentials(id)) ?? {};
     for (const kind of ["mail", "calendar"] as const) {
@@ -179,20 +188,36 @@ export class AccountSyncService extends SyncService {
         const provider = await (kind === "mail"
           ? this.mailProvider(id)
           : this.calendarProvider(id));
-        await provider.disconnect().catch(() => undefined);
+        await provider.disconnect().catch(() => {
+          // Provider disconnect failed after backfill.
+          logger.warn("Provider disconnect failed after backfill");
+          return undefined;
+        });
         await provider.connect(account, credentials);
       }
     }
   }
   async remove(id: string): Promise<void> {
     this.retired.add(id);
-    await this.jobs.get(id)?.catch(() => undefined);
+    await this.jobs.get(id)?.catch(() => {
+      // Backfill job failed while removing the account.
+      logger.warn("Backfill job failed while removing the account");
+      return undefined;
+    });
     const account = required(await this.accountStore.accounts.get(id), "Account");
     if (account.capabilities.mail) {
-      await (await this.mailProvider(id)).disconnect().catch(() => undefined);
+      await (await this.mailProvider(id)).disconnect().catch(() => {
+        // Mail provider disconnect failed during removal.
+        logger.warn("Mail provider disconnect failed during removal");
+        return undefined;
+      });
     }
     if (account.capabilities.calendar) {
-      await (await this.calendarProvider(id)).disconnect().catch(() => undefined);
+      await (await this.calendarProvider(id)).disconnect().catch(() => {
+        // Calendar provider disconnect failed during removal.
+        logger.warn("Calendar provider disconnect failed during removal");
+        return undefined;
+      });
     }
   }
   override async drain(): Promise<void> {

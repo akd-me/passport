@@ -4,6 +4,7 @@ import { MailboxMcpError, required } from "./presentation.js";
 
 /** Collaborators are owned by the host; closing an MCP server never closes the store or bus. */
 export interface MailboxMcpDependencies {
+  log?: (message: string) => void;
   store: Store;
   executor: ActionExecutor;
   policy: PolicyEngine;

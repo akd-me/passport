@@ -73,6 +73,9 @@ export function createMailboxMcpServer(deps: MailboxMcpDependencies): McpServer 
       try {
         result = limitResponse(result, available);
       } catch {
+        // MCP response exceeds the configured budget; returning the bounded error.
+        deps.log?.("MCP response exceeds the configured budget; returning the bounded error");
+
         result = { isError: true, error: "RESPONSE_TOO_LARGE", reason: "Request fewer results." };
         break;
       }

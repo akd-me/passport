@@ -8,6 +8,7 @@ import { createRealBackend } from "../compose.js";
 import { loadConfig } from "../config.js";
 import { ApiError } from "../errors.js";
 import { resolveLlmSelection } from "../llm-selection.js";
+import { logger } from "../logger.js";
 import { setupTasks } from "./routes.js";
 import { parseSetupInput } from "./runner.js";
 
@@ -79,6 +80,8 @@ export async function followSetupTask(
       try {
         await client.respond(id, task.prompt.id, answer);
       } catch (error) {
+        // Stale prompts and finished tasks need no reply; all other failures propagate.
+
         if (
           !(error instanceof ApiError) ||
           !["PROMPT_STALE", "TASK_FINISHED"].includes(error.code)
@@ -132,6 +135,8 @@ export async function connectCommand(args: string[]): Promise<void> {
         server.once("error", reject);
       });
     } catch {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       await backend.close();
       throw new ApiError(
         "PORT_IN_USE",
@@ -168,7 +173,11 @@ export async function connectCommand(args: string[]): Promise<void> {
     console.log("\nCancelling…");
     interrupted.abort();
     if (id) {
-      void client.cancel(id).catch(() => undefined);
+      void client.cancel(id).catch(() => {
+        // Setup cancellation request failed.
+        logger.warn("Setup cancellation request failed");
+        return undefined;
+      });
     }
   };
   process.once("SIGINT", interrupt);
@@ -190,6 +199,9 @@ export async function connectCommand(args: string[]): Promise<void> {
           }
           await rl.question("Press Enter when done… ", { signal: interrupted.signal });
         } catch {
+          // Setup interaction interrupted; retaining the task state.
+          logger.warn("Setup interaction interrupted; retaining the task state");
+
           /* interrupted */
         }
         return "done";

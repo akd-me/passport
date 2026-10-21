@@ -8,6 +8,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { loadConfig } from "../config.js";
 import { ApiError } from "../errors.js";
+import { logger } from "../logger.js";
 import { loadMcpToken } from "../mcp-token.js";
 
 type Client = "claude-code" | "codex" | "cursor" | "claude-desktop";
@@ -47,6 +48,9 @@ function redactString(source: string): string {
           }
           return url.href;
         } catch {
+          // MCP URL could not be displayed safely.
+          logger.warn("MCP URL could not be displayed safely");
+
           return "<redacted-url>";
         }
       })
@@ -373,6 +377,8 @@ function httpUrl(raw: string): URL {
   try {
     url = new URL(raw);
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     return invalid("MCP URL must be an absolute HTTP URL.");
   }
   if (
@@ -470,6 +476,8 @@ export async function installMcp(
   try {
     before = await readFile(path, "utf8");
   } catch (error) {
+    // An absent client configuration starts empty; other filesystem errors propagate.
+
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
@@ -576,7 +584,8 @@ async function proxy(args: string[]): Promise<void> {
     await local.close();
   };
   const fail = () => {
-    console.error("Passport MCP HTTP bridge failed.");
+    // Both bridge directions share this explicit logged failure and shutdown path.
+    logger.warn("Passport MCP HTTP bridge failed.");
     process.exitCode = 1;
     void close();
   };

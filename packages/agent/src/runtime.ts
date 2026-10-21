@@ -31,7 +31,8 @@ class PersonalAgentRuntime implements AgentRuntime {
     ) {
       throw new AgentError("matterReviewDays must be positive", "AGENT_CONFIG");
     }
-    this.llm = "complete" in options.llm ? options.llm : createLlmClient(options.llm);
+    this.llm =
+      "complete" in options.llm ? options.llm : createLlmClient(options.llm, { log: options.log });
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -45,7 +46,11 @@ class PersonalAgentRuntime implements AgentRuntime {
   run(trigger: AgentTrigger): Promise<AgentRunResult> {
     // Serialize per-runtime inference and KV journals without subscribing to the bus implicitly.
     const pending = this.queue.then(() => this.runInternal(trigger));
-    this.queue = pending.catch(() => undefined);
+    this.queue = pending.catch(() => {
+      // Agent queue operation failed; later runs may continue.
+      this.options.log?.("Agent queue operation failed; later runs may continue");
+      return undefined;
+    });
     return pending;
   }
 
@@ -129,6 +134,7 @@ class PersonalAgentRuntime implements AgentRuntime {
       },
     };
     ctx.tools = createToolRegistry({
+      log: this.options.log,
       store,
       policy,
       bus,
@@ -194,6 +200,9 @@ class PersonalAgentRuntime implements AgentRuntime {
           throw new AgentError("Unknown agent trigger", "AGENT_TRIGGER");
       }
     } catch (error) {
+      // Agent operation failed; retaining the safe run error.
+      this.options.log?.("Agent operation failed; retaining the safe run error");
+
       // Unknown collaborators may include sensitive payloads in their errors. Keep them private.
       failure =
         error instanceof AgentError

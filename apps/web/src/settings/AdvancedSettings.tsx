@@ -4,6 +4,7 @@ import { useAccounts } from "../accounts/AccountFilter";
 import { type AccountData, api } from "../api";
 import { authHeaders } from "../auth";
 import { Feedback, Icon } from "../components/ui";
+import { logger } from "../logger";
 import { useTask } from "../state";
 import { type ThemePreference, useUi } from "../ui-state";
 
@@ -133,7 +134,10 @@ function DataAndAccess() {
     fetch("/api/auth/status", { credentials: "same-origin" })
       .then((r) => r.json() as Promise<{ tokenPath?: string }>)
       .then((s) => active && setTokenPath(s.tokenPath))
-      .catch(() => {});
+      .catch(() => {
+        // Authentication status unavailable in settings.
+        logger.warn("Authentication status unavailable in settings");
+      });
     return () => {
       active = false;
     };

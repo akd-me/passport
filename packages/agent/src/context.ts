@@ -19,6 +19,7 @@ import type {
 import type { DraftSettings } from "./profile.js";
 
 export interface AgentRuntimeOptions {
+  log?: (message: string) => void;
   store: Store;
   executor: ActionExecutor;
   policy: PolicyEngine;

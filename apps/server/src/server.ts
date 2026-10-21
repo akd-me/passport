@@ -46,6 +46,7 @@ export function startServer(backend: Backend, options: { allowRemote?: boolean }
   const mcp = backend.createMcpServer
     ? loadMcpToken(backend.config.dataDir).then((token) =>
         serveHttp(backend.createMcpServer!(), {
+          log: logger.warn,
           port: backend.config.mcpPort ?? 4318,
           token,
         }),
@@ -55,7 +56,10 @@ export function startServer(backend: Backend, options: { allowRemote?: boolean }
     logger.info(`Mailbox MCP → ${handle.url}`);
     return handle.url;
   });
-  void ready?.catch(() => logger.error("MCP HTTP listener failed"));
+  void ready?.catch(() => {
+    // Keep the existing operational log and fallback; never include the caught payload.
+    return logger.error("MCP HTTP listener failed");
+  });
   let closing: Promise<void> | undefined;
   return {
     app,

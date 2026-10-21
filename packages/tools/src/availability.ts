@@ -21,6 +21,8 @@ function recurrenceClock(zone: string) {
       hourCycle: "h23",
     });
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new ToolError(
       "UNSUPPORTED_RECURRENCE",
       "Unsupported recurrence time zone; connect live calendar availability.",

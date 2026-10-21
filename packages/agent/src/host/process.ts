@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 export interface CliRunOptions {
+  log?: (message: string) => void;
   binary: string;
   args: string[];
   /** Written to stdin, which is then closed. */
@@ -28,7 +29,7 @@ const live = new Set<number>();
 let exitHook = false;
 
 /** Detached groups do not receive the parent's Ctrl-C; stop them when Passport exits. */
-function track(pid: number | undefined): void {
+function track(pid: number | undefined, log?: (message: string) => void): void {
   if (!pid || process.platform === "win32") {
     return;
   }
@@ -42,6 +43,9 @@ function track(pid: number | undefined): void {
       try {
         process.kill(-group, "SIGTERM");
       } catch {
+        // Host-agent process group cleanup failed.
+        log?.("Host-agent process group cleanup failed");
+
         /* already gone */
       }
     }
@@ -63,7 +67,7 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
     detached: process.platform !== "win32",
     windowsHide: true,
   });
-  track(child.pid);
+  track(child.pid, options.log);
   const kill = () => {
     if (killed || child.exitCode !== null || child.signalCode !== null) {
       return;
@@ -77,6 +81,9 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
           child.kill(sig);
         }
       } catch {
+        // Host-agent process signal failed.
+        options.log?.("Host-agent process signal failed");
+
         /* already gone */
       }
     };

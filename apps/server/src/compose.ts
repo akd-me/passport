@@ -53,6 +53,8 @@ async function masterKey(dataDir: string): Promise<string> {
   try {
     await readFile(path);
   } catch (error) {
+    // An absent master key is initialized atomically; other filesystem errors propagate.
+
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
@@ -65,6 +67,8 @@ async function masterKey(dataDir: string): Promise<string> {
       try {
         await link(temp, path);
       } catch (error) {
+        // Another process installed the key first; keep its existing key.
+
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
           throw error;
         }
@@ -148,6 +152,7 @@ export async function createRealBackend(
     };
     const releasing = new AsyncLocalStorage<boolean>();
     const executor = createActionExecutor({
+      log: logger.warn,
       store: calendarSafeStore(
         store,
         bus,
@@ -210,6 +215,7 @@ export async function createRealBackend(
     const configureAgent = () => {
       enabled = !!options.llm || llmConfigured(config.llm);
       runtime = createAgentRuntime({
+        log: logger.warn,
         store,
         executor: agentExecutor,
         policy,
@@ -217,7 +223,10 @@ export async function createRealBackend(
         llm:
           options.llm ??
           (enabled
-            ? createLlmClient(config.llm, { hostAgentCwd: join(config.dataDir, "host-agent") })
+            ? createLlmClient(config.llm, {
+                log: logger.warn,
+                hostAgentCwd: join(config.dataDir, "host-agent"),
+              })
             : {
                 complete: async () => {
                   throw new ApiError("LLM_NOT_CONFIGURED", "LLM not configured");
@@ -309,7 +318,11 @@ export async function createRealBackend(
             currentTrigger = undefined;
           }
         });
-        runQueue = job.catch(() => undefined);
+        runQueue = job.catch(() => {
+          // Account sync failed; retaining its recorded failure.
+          logger.warn("Account sync failed; retaining its recorded failure");
+          return undefined;
+        });
         agentJobs.add(job);
         void job.then(
           () => agentJobs.delete(job),
@@ -335,7 +348,7 @@ export async function createRealBackend(
         await Promise.allSettled([...agentJobs]);
       }
     };
-    const dependencies = { store, executor, policy, bus };
+    const dependencies = { store, executor, policy, bus, log: logger.warn };
     const mcp = createMailboxMcpServer(dependencies);
     const servers = new Set([mcp]);
     return attachSetupTasks(
@@ -409,6 +422,8 @@ export async function createRealBackend(
       ),
     );
   } catch (error) {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     await store.close();
     throw error;
   }

@@ -3,6 +3,7 @@ import { newId } from "@passport/store";
 import type { Account, AccountCredentials, Store } from "@passport/types";
 import type { Backend } from "../backend.js";
 import { ApiError, required } from "../errors.js";
+import { logger } from "../logger.js";
 import { accountSync } from "./sync.js";
 
 export type OAuthKind = "gmail" | "graph";
@@ -203,6 +204,8 @@ export async function connectOAuthAccount(
       accounts: await backend.store.accounts.list(),
     });
   } catch (error) {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     for (const id of created.reverse()) {
       await backend.store.accounts.delete(id);
     }
@@ -215,6 +218,9 @@ export async function connectOAuthAccount(
     await accountSync(backend)?.reconnect(account.id);
     backend.bus.emit({ type: "account.changed", accountId: account.id });
     void backend.syncAccount(account.id).catch(() => {
+      // Initial account sync failed; retaining its recorded failure.
+      logger.warn("Initial account sync failed; retaining its recorded failure");
+
       /* Sync persists and broadcasts the bounded error code. */
     });
   }
@@ -396,6 +402,8 @@ export class BrowserOAuth {
       status.status = "connected";
       return account;
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       status.status = "failed";
       status.error =
         error instanceof ApiError

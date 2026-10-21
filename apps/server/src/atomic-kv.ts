@@ -32,6 +32,8 @@ export function mutateKv(
     }
     db.exec("COMMIT");
   } catch (error) {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     db.exec("ROLLBACK");
     throw error;
   }

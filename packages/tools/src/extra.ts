@@ -121,6 +121,8 @@ export function registerExtra(ctx: Context) {
           hourCycle: "h23",
         });
       } catch {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         throw new ToolError("INVALID_INPUT", "Unknown IANA time zone.");
       }
       const local = (time: number) => {
@@ -454,7 +456,12 @@ export function registerExtra(ctx: Context) {
           ) {
             mailto ??= decodeURIComponent(url.pathname);
           }
-        } catch {
+        } catch (error) {
+          // Malformed URL targets provide no capability; keep trying valid input.
+          if (!(error instanceof TypeError) && !(error instanceof URIError)) {
+            throw error;
+          }
+
           /* An invalid header target provides no capability. */
         }
       }

@@ -25,9 +25,15 @@ export function register<S extends Record<string, Schema<unknown>>>(
           ctx.deps.responseByteBudget,
         );
       } catch (error) {
+        // Tool request failed; returning the existing bounded error.
+        ctx.deps.log?.("Tool request failed; returning the existing bounded error");
+
         try {
           return limitResponse(errorResult(error, write), ctx.deps.responseByteBudget);
         } catch {
+          // Tool error exceeds the response budget; returning the minimal error.
+          ctx.deps.log?.("Tool error exceeds the response budget; returning the minimal error");
+
           return { isError: true, error: "RESPONSE_TOO_LARGE", reason: "Request fewer results." };
         }
       }

@@ -101,6 +101,8 @@ export async function addAccount(
       accounts: await backend.store.accounts.list(),
     });
   } catch (error) {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     await backend.store.accounts.delete(account.id);
     throw error;
   }

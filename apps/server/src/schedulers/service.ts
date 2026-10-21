@@ -74,16 +74,24 @@ export class SchedulerService {
     // Successful onboarding/sync outside the HTTP API also discovers new accounts.
     this.unsubscribe = backend.bus.on("account.synced", () => {
       if (!this.stopped) {
-        void this.reconcileAccounts().catch(() =>
-          logger.warn("Scheduler account discovery failed"),
-        );
+        void this.reconcileAccounts().catch(() => {
+          // Keep the existing operational log and fallback; never include the caught payload.
+          return logger.warn("Scheduler account discovery failed");
+        });
       }
     });
-    void this.ready.catch(() => logger.error("Scheduler initialization failed"));
+    void this.ready.catch(() => {
+      // Keep the existing operational log and fallback; never include the caught payload.
+      return logger.error("Scheduler initialization failed");
+    });
   }
   private exclusive<T>(task: () => Promise<T>): Promise<T> {
     const result = this.queue.then(task);
-    this.queue = result.catch(() => undefined);
+    this.queue = result.catch(() => {
+      // Scheduler update failed; later updates may continue.
+      logger.warn("Scheduler update failed; later updates may continue");
+      return undefined;
+    });
     return result;
   }
   private async register(def: JobDefinition) {
@@ -91,6 +99,8 @@ export class SchedulerService {
     try {
       await this.scheduler.register(def);
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       this.definitions.delete(def.id);
       throw error;
     }
@@ -312,7 +322,10 @@ export class SchedulerService {
     for (const id of this.bootRuns) {
       this.bootRuns.delete(id);
       if (this.scheduler.get(id)?.enabled) {
-        void this.scheduler.runNow(id).catch(() => logger.warn("Initial account job failed"));
+        void this.scheduler.runNow(id).catch(() => {
+          // Keep the existing operational log and fallback; never include the caught payload.
+          return logger.warn("Initial account job failed");
+        });
       }
     }
   }
@@ -371,7 +384,11 @@ export class SchedulerService {
     this.stopped = true;
     this.started = false;
     this.unsubscribe();
-    await this.ready.catch(() => undefined);
+    await this.ready.catch(() => {
+      // Scheduler initialization failed before shutdown.
+      logger.warn("Scheduler initialization failed before shutdown");
+      return undefined;
+    });
     await this.queue;
     await this.scheduler.stop();
     services.delete(this.backend);
@@ -405,6 +422,8 @@ export class SchedulerService {
         await this.saveRoutines();
         await this.registerRoutine(def);
       } catch (error) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         this.routines.delete(def.id);
         await this.saveRoutines();
         throw error;

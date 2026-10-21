@@ -202,6 +202,8 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
       try {
         page = await this.api(link, { headers: { Prefer: "odata.maxpagesize=100" } });
       } catch (error) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         if (error instanceof ProviderError && [404, 410].includes(error.status ?? 0)) {
           throw new ProviderError("CURSOR_EXPIRED", "Graph folder delta expired; run a full sync");
         }
@@ -252,6 +254,8 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
       try {
         roleIds.set((await this.api<GraphFolder>(`${graphBase}/me/mailFolders/${name}`)).id, role);
       } catch (e) {
+        // An absent folder delta is skipped while remaining folders are synchronized.
+
         if (!(e instanceof ProviderError && e.status === 404)) {
           throw e;
         }
@@ -299,6 +303,8 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
             },
           });
         } catch (e) {
+          // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
           if (e instanceof ProviderError && [410, 404].includes(e.status ?? 0)) {
             throw new ProviderError(
               "CURSOR_EXPIRED",
@@ -359,6 +365,8 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
         `${graphBase}/me/messages/${encodeURIComponent(providerId)}?$select=${properties}`,
       );
     } catch (e) {
+      // A provider 404 means the requested message no longer exists.
+
       if (e instanceof ProviderError && e.status === 404) {
         return null;
       }

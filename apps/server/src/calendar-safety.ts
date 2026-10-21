@@ -128,6 +128,8 @@ export function calendarSafeStore(
               try {
                 conflict ||= expandRecurringEvents(events, slot).length > 0;
               } catch (error) {
+                // Unsupported local recurrence is unverified; live provider availability remains required.
+
                 if (!(error instanceof ApiError)) {
                   throw error;
                 }

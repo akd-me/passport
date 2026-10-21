@@ -44,11 +44,14 @@ export class InMemoryEventBus implements EventBus {
         // The interface is synchronous; also isolate rejections from async consumers.
         const result: unknown = callback(event);
         if (result && typeof (result as PromiseLike<unknown>).then === "function") {
-          void Promise.resolve(result).catch(() =>
-            logger.error("Event handler rejected", { eventType: event.type }),
-          );
+          void Promise.resolve(result).catch(() => {
+            // Keep the existing operational log and fallback; never include the caught payload.
+            return logger.error("Event handler rejected", { eventType: event.type });
+          });
         }
       } catch {
+        // Keep the existing operational log and fallback; never include the caught payload.
+
         logger.error("Event handler failed", { eventType: event.type });
       }
     }

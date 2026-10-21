@@ -20,6 +20,8 @@ export async function loadMcpToken(
   try {
     return validate((await readFile(path, "utf8")).trim());
   } catch (error) {
+    // An absent MCP token is initialized below; other filesystem errors propagate.
+
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
@@ -32,6 +34,8 @@ export async function loadMcpToken(
   try {
     await writeFile(path, `${token}\n`, { mode: 0o600, flag: "wx" });
   } catch (error) {
+    // A concurrent token creator won; read its existing token.
+
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
       throw error;
     }

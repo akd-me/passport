@@ -33,6 +33,7 @@ export interface Tool {
   handler(input: unknown, ctx?: ToolContext): Promise<ToolResult>;
 }
 export interface ToolRegistryOptions {
+  log?: (message: string) => void;
   store: Store;
   executor: ActionExecutor;
   policy: PolicyEngine;

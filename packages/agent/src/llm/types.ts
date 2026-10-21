@@ -82,6 +82,7 @@ export interface ModelPricing {
 }
 
 export interface LlmClientOptions {
+  log?: (message: string) => void;
   fetch?: typeof globalThis.fetch;
   sleep?: (ms: number) => Promise<void>;
   maxRetries?: number;

@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import type { HostAgentMcpServer } from "@passport/types";
+import { logger } from "../logger.js";
 
 /** Pinned so a Playwright MCP release cannot change the agent's tools under us. */
 export const PLAYWRIGHT_MCP_PACKAGE = "@playwright/mcp@0.0.83";
@@ -85,6 +86,9 @@ export function detectSetupBrowser(options: BrowserDetectOptions = {}): SetupBro
       try {
         return readdirSync(dir);
       } catch {
+        // Browser process discovery failed; using an empty process list.
+        logger.warn("Browser process discovery failed; using an empty process list");
+
         return [];
       }
     });

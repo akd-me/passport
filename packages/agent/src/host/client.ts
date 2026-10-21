@@ -36,6 +36,7 @@ export const HOST_AGENT_MODELS: Record<HostAgentKind, readonly string[]> = {
 };
 
 export interface HostAgentLlmClientOptions {
+  log?: (message: string) => void;
   kind: HostAgentKind;
   model?: string;
   fastModel?: string;
@@ -157,6 +158,7 @@ export class HostAgentLlmClient implements LlmClient {
         completion: true,
       },
       {
+        log: this.options.log,
         env: this.options.env,
         binaryPath: this.options.binaryPath,
         timeoutMs: this.options.timeoutMs ?? 180_000,

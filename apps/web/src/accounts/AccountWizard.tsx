@@ -2,6 +2,7 @@ import type { Account } from "@passport/types";
 import { useEffect, useState } from "react";
 import { api, type ProviderDescriptor } from "../api";
 import { Feedback, Icon } from "../components/ui";
+import { logger } from "../logger";
 import { useTask, useWorkspace } from "../state";
 import {
   accountApi,
@@ -73,6 +74,9 @@ export function AccountWizard({
         }
         timer = setTimeout(poll, 2000);
       } catch {
+        // Authorization status refresh failed.
+        logger.warn("Authorization status refresh failed");
+
         if (!stopped) {
           setStatus({
             status: "failed",

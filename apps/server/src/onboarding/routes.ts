@@ -14,6 +14,8 @@ async function body(request: Request) {
   try {
     return object(await request.json());
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new ApiError("INVALID_JSON", "Expected a JSON object");
   }
 }
@@ -92,6 +94,8 @@ export function registerOnboarding(
     try {
       await probeAccount(backend, account, credentials);
     } catch {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       throw new ApiError(
         "CONNECTION_FAILED",
         "Connection failed. Check host, port, TLS, username and app password.",

@@ -212,7 +212,12 @@ export const schema = {
       try {
         new URL(value);
         return true;
-      } catch {
+      } catch (error) {
+        // Malformed URL targets provide no capability; keep trying valid input.
+        if (!(error instanceof TypeError)) {
+          throw error;
+        }
+
         return false;
       }
     }, "Expected URL."),

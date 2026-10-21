@@ -23,6 +23,7 @@ import type {
   TrustState,
 } from "@passport/types";
 import { authHeaders, handleUnauthorized } from "./auth";
+import { logger } from "./logger";
 export interface TrustData {
   config: GlobalPolicyConfig;
   categories: TrustState[];
@@ -85,6 +86,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // A proxy may answer an error with HTML; keep its status meaningful. Successful
   // responses (and aborted reads) must still fail loudly.
   const body = await response.json().catch((error: unknown) => {
+    // API error response did not contain a JSON envelope.
+    logger.warn("API error response did not contain a JSON envelope");
+
     if (response.ok) {
       throw error;
     }

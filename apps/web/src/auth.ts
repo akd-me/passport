@@ -1,3 +1,4 @@
+import { logger } from "./logger";
 /** Same-origin cookies authenticate both fetch and browser WebSocket upgrades. */
 export const authHeaders = { "X-Requested-With": "passport" };
 
@@ -20,6 +21,9 @@ export async function checkSession(): Promise<void> {
       window.location.replace("/");
     }
   } catch {
+    // Session refresh failed; retaining normal reconnect behavior.
+    logger.warn("Session refresh failed; retaining normal reconnect behavior");
+
     /* Reconnect normally while the server is unavailable. */
   }
 }
@@ -74,6 +78,9 @@ function loginPage(tokenPath: string): void {
         error.textContent = "That token was not accepted. Check the terminal and try again.";
       }
     } catch {
+      // Login request failed.
+      logger.warn("Login request failed");
+
       error.textContent = "Could not reach Passport. Please try again.";
     } finally {
       button.disabled = false;
@@ -115,6 +122,9 @@ export async function initializeAuth(render: () => void): Promise<void> {
       loginPage(status.tokenPath ?? "<data dir>/api-token");
     }
   } catch {
+    // Authentication status unavailable; showing login.
+    logger.warn("Authentication status unavailable; showing login");
+
     loginPage("<data dir>/api-token");
   }
 }

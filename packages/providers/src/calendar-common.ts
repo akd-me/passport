@@ -46,6 +46,8 @@ export function zonedToUtc(value: string, zone = "UTC"): string {
       result += diff;
     }
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new ProviderError("UNSUPPORTED_TIMEZONE", "Calendar returned an unsupported timezone");
   }
   throw new ProviderError("INVALID_DATE", "Calendar wall time does not exist in its timezone");
@@ -65,6 +67,8 @@ export function localDate(value: string, zone = "UTC"): string {
     );
     return `${parts.year}-${parts.month}-${parts.day}`;
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new ProviderError(
       "INVALID_DATE",
       "Cannot format calendar date in the requested timezone",

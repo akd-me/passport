@@ -9,6 +9,8 @@ async function body(request: Request) {
   try {
     return object(await request.json());
   } catch (error) {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     if (error instanceof ApiError) {
       throw error;
     }

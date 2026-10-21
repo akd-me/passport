@@ -1,5 +1,6 @@
 import type { CalendarProvider, MailProvider, ProviderRegistry, Store } from "@passport/types";
 import { ApiError, required } from "../errors.js";
+import { logger } from "../logger.js";
 
 type Provider = MailProvider | CalendarProvider;
 interface Entry {
@@ -47,15 +48,25 @@ export class ProviderConnections {
           const fresh = required(await this.store.accounts.get(id), "Account");
           await raw.connect(fresh, (await this.store.accounts.getCredentials(id)) ?? {});
         })().catch(async (error) => {
+          // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
           current.connected = undefined;
-          await raw.disconnect().catch(() => undefined);
+          await raw.disconnect().catch(() => {
+            // Provider disconnect failed after connection failure.
+            logger.warn("Provider disconnect failed after connection failure");
+            return undefined;
+          });
           throw error;
         });
         await current.connected;
       };
       const fail = async () => {
         current.connected = undefined;
-        await raw.disconnect().catch(() => undefined);
+        await raw.disconnect().catch(() => {
+          // Provider disconnect failed while invalidating a connection.
+          logger.warn("Provider disconnect failed while invalidating a connection");
+          return undefined;
+        });
       };
       current.proxy = new Proxy(raw, {
         get: (target, property) => {
@@ -69,6 +80,8 @@ export class ProviderConnections {
               try {
                 yield* value.apply(target, args);
               } catch (error) {
+                // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
                 await fail();
                 throw error;
               }
@@ -83,6 +96,8 @@ export class ProviderConnections {
               const result = await value.apply(target, args);
               return await this.normalize(id, String(property), result);
             } catch (error) {
+              // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
               // Invalidate for the next operation. Retrying a send here could deliver twice.
               await fail();
               throw error;
@@ -100,7 +115,11 @@ export class ProviderConnections {
     this.stopped = true;
     await Promise.allSettled(
       [...this.entries.values()].map(async (entry) => {
-        await entry.connected?.catch(() => undefined);
+        await entry.connected?.catch(() => {
+          // Provider connection failed before shutdown.
+          logger.warn("Provider connection failed before shutdown");
+          return undefined;
+        });
         await entry.raw.disconnect();
       }),
     );

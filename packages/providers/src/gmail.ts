@@ -100,6 +100,8 @@ function partText(part: GmailPart): string {
   try {
     return new TextDecoder(charset).decode(Buffer.from(part.body?.data ?? "", "base64url"));
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new ProviderError("INVALID_ENCODING", "Gmail returned an unsupported body charset");
   }
 }
@@ -281,6 +283,8 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
         try {
           page = await this.json(`${base}/history?${params}`);
         } catch (e) {
+          // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
           if (e instanceof ProviderError && e.status === 404) {
             throw new ProviderError(
               "CURSOR_EXPIRED",
@@ -353,6 +357,8 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
         `${base}/messages/${encodeURIComponent(providerId)}?format=full`,
       );
     } catch (e) {
+      // A provider 404 means the requested message no longer exists.
+
       if (e instanceof ProviderError && e.status === 404) {
         return null;
       }

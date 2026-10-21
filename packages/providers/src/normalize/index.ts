@@ -216,6 +216,7 @@ export function decodeMimeBlob(blobId: string): [string, number] {
       return [value[0], value[1]];
     }
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
     /* Report a safe, stable error below. */
   }
   throw new ProviderError("INVALID_BLOB_ID", "Invalid MIME blob handle");

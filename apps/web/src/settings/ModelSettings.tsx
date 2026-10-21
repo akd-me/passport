@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAccounts } from "../accounts/AccountFilter";
 import { ApiError, api, type HostAgent } from "../api";
 import { Feedback, Icon, Loading } from "../components/ui";
+import { logger } from "../logger";
 import { useTask } from "../state";
 import { useUi } from "../ui-state";
 
@@ -53,6 +54,9 @@ function useHostAgents(): Detection {
       .hostAgents()
       .then((agents) => active && setDetection({ state: "ready", agents }))
       .catch((error) => {
+        // Host-agent discovery failed in settings.
+        logger.warn("Host-agent discovery failed in settings");
+
         if (!active) {
           return;
         }

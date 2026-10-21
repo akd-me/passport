@@ -185,6 +185,8 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
         }
       }
     } catch (e) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       await this.disconnect();
       throw e;
     }

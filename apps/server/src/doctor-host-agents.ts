@@ -4,6 +4,7 @@ import type { HostAgentStatus } from "@passport/types";
 import { isHostAgentProvider, llmConfigured, type PassportConfig } from "./config.js";
 import type { DoctorCheck } from "./doctor.js";
 import { hostAgents } from "./llm-selection.js";
+import { logger } from "./logger.js";
 
 export interface HostAgentDoctorOptions {
   hostAgents?: () => Promise<HostAgentStatus[]>;
@@ -16,7 +17,11 @@ export async function hostAgentChecks(
   config: PassportConfig,
   options: HostAgentDoctorOptions = {},
 ): Promise<DoctorCheck[]> {
-  const statuses = await (options.hostAgents ?? hostAgents)().catch(() => []);
+  const statuses = await (options.hostAgents ?? hostAgents)().catch(() => {
+    // Host-agent discovery failed during diagnostics.
+    logger.warn("Host-agent discovery failed during diagnostics");
+    return [];
+  });
   const anyAgent = statuses.some((status) => status.ready) || llmConfigured(config.llm);
   return statuses.map((status): DoctorCheck => {
     const selected = config.llm.provider === status.kind;
@@ -70,6 +75,9 @@ export async function pingHostAgent(
       detail: `${name} (${llm.model}) answered a test request using your subscription`,
     };
   } catch (error) {
+    // Host-agent diagnostic request failed.
+    logger.warn("Host-agent diagnostic request failed");
+
     // Host-agent errors are composed by Passport (stderr is never included); keep them actionable.
     const code = (error as { code?: unknown }).code;
     const message =

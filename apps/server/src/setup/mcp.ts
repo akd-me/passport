@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { SetupPromptKind, SetupProvider } from "@passport/types";
 import { z } from "zod";
+import { logger } from "../logger.js";
 
 /** What the setup tools do for one task; implemented by the runner. */
 export interface SetupToolHost {
@@ -53,6 +54,9 @@ export function createSetupMcpServer(host: SetupToolHost, signal: AbortSignal): 
       try {
         return await handler(args);
       } catch (error) {
+        // Setup tool failed; returning the existing safe tool error.
+        logger.warn("Setup tool failed; returning the existing safe tool error");
+
         if (error instanceof SetupTaskEnded) {
           return text(error.message, true);
         }
@@ -194,6 +198,8 @@ export class SetupMcpListener {
     try {
       port = await this.listen();
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       this.bindings.delete(token);
       throw error;
     }
@@ -239,6 +245,8 @@ export class SetupMcpListener {
       this.server = server;
     });
     return this.listening.catch((error) => {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       this.listening = undefined;
       this.server = undefined;
       throw error;
@@ -289,6 +297,9 @@ export class SetupMcpListener {
       await mcp.connect(transport);
       await transport.handleRequest(req, res);
     } catch {
+      // Setup MCP transport failed.
+      logger.warn("Setup MCP transport failed");
+
       fail(500, "Setup MCP transport failed.");
     }
   }

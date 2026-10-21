@@ -28,6 +28,8 @@ import { parseListUnsubscribe, type ResolveDns, requestUnsubscribe } from "./uns
 
 /** Providers may be resolved synchronously or asynchronously, and must already be connected. */
 export interface ActionExecutorOptions {
+  /** Optional operational diagnostics; messages never include action payloads. */
+  log?: (message: string) => void;
   store: Store;
   bus: EventBus;
   policy: PolicyEngine;
@@ -141,6 +143,7 @@ export function createActionExecutor({
   calendarProviderFor,
   fetch: fetcher,
   resolveDns,
+  log,
   now = () => new Date().toISOString(),
 }: ActionExecutorOptions): ActionExecutor {
   let queue = Promise.resolve();
@@ -809,10 +812,14 @@ export function createActionExecutor({
         );
       }
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       // Store has no cross-repository transaction API; compensate within this serialized action.
       try {
         await restore(request, snapshot);
       } catch (rollbackError) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         throw new AggregateError(
           [error, rollbackError],
           "Matter action failed and snapshot restoration failed",
@@ -940,6 +947,9 @@ export function createActionExecutor({
             bus.emit({ type: "email.updated", emailId: sent.id });
           }
         } catch {
+          // Message submitted; sent-copy or draft cleanup failed.
+          log?.("Message submitted; sent-copy or draft cleanup failed");
+
           return {
             ...result,
             warning: "SUBMISSION_ACCEPTED: message submitted; sent-copy or draft cleanup failed",
@@ -1172,6 +1182,8 @@ export function createActionExecutor({
         try {
           resolved = await resolvedDraft(request);
         } catch (error) {
+          // Missing or changed draft references trigger reapproval; unrelated errors propagate.
+
           if (
             !(error instanceof PolicyError) ||
             !["EMAIL_NOT_FOUND", "NOT_A_DRAFT", "REPLY_NOT_FOUND"].includes(error.code)
@@ -1244,6 +1256,8 @@ export function createActionExecutor({
       await settleUnsubscribeParent(current);
       return current;
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       // A post-execution notification/parent write must not turn a delivered send into a retryable failure.
       if (current.status === "executed") {
         throw error;
@@ -1292,6 +1306,8 @@ export function createActionExecutor({
       bus.emit({ type: "action.undone", action: undone });
       return executed;
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       await store.actions.update(originalId, { status: "executed" });
       throw error;
     }
@@ -1308,6 +1324,8 @@ export function createActionExecutor({
           error: null,
         });
       } catch (error) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         const failed = await store.actions.update(action.id, {
           status: "failed",
           error: error instanceof Error ? error.message : String(error),
@@ -1567,6 +1585,9 @@ export function createActionExecutor({
               }
             }
           } catch (error) {
+            // Outbox release failed; retaining the first error while continuing due actions.
+            log?.("Outbox release failed; retaining the first error while continuing due actions");
+
             firstError ??= error;
           }
         }

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ApiError } from "./errors.js";
+import { logger } from "./logger.js";
 
 export const OWNER_HEARTBEAT_MS = 10_000;
 export const OWNER_STALE_MS = 60_000;
@@ -16,6 +17,8 @@ function readOwner(dataDir: string): OwnerRecord | null {
   try {
     return JSON.parse(readFileSync(join(dataDir, "owner.lock"), "utf8"));
   } catch (error) {
+    // Missing or malformed ownership metadata means there is no usable owner record.
+
     if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT") {
       return null;
     }
@@ -36,6 +39,9 @@ export function activeOwner(dataDir: string): OwnerRecord | null {
   try {
     process.kill(owner.pid, 0);
   } catch (error) {
+    // Owner process probe failed; retaining the conservative owner state.
+    logger.warn("Owner process probe failed; retaining the conservative owner state");
+
     if ((error as NodeJS.ErrnoException).code === "ESRCH") {
       return null;
     }
@@ -49,6 +55,8 @@ function guarded<T>(dataDir: string, task: () => T): T {
   try {
     mkdirSync(guard, { mode: 0o700 });
   } catch (error) {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
       throw error;
     }
@@ -105,6 +113,9 @@ export function acquireOwner(dataDir: string, onLost: () => void = () => {}) {
         publish(dataDir, owner);
       });
     } catch (error) {
+      // Owner heartbeat failed; checking the existing ownership fallback.
+      logger.warn("Owner heartbeat failed; checking the existing ownership fallback");
+
       if ((error as { code?: string }).code === "OWNER_BUSY") {
         return;
       }

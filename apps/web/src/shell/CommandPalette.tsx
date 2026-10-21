@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import { api } from "../api";
 import { Dialog } from "../components/Dialog";
 import { Icon, Kbd, mod } from "../components/ui";
+import { logger } from "../logger";
 import { settingsSections } from "../settings/SettingsDialog";
 import { useResource, useWorkspace } from "../state";
 import { useUi } from "../ui-state";
@@ -96,7 +97,11 @@ function useCommands(close: () => void): Command[] {
                   : "Review done. Nothing new needs you.",
               ),
             )
-            .catch((e: Error) => notify(e.message));
+            .catch((e: Error) => {
+              // Agent review command failed.
+              logger.warn("Agent review command failed");
+              return notify(e.message);
+            });
         }),
       },
       ...modes.map((mode) => ({
@@ -110,7 +115,11 @@ function useCommands(close: () => void): Command[] {
           api
             .setTrust({ globalMode: mode.id as TrustLevel })
             .then(() => notify(`Permission mode set to ${mode.label}.`))
-            .catch((e: Error) => notify(e.message));
+            .catch((e: Error) => {
+              // Permission mode command failed.
+              logger.warn("Permission mode command failed");
+              return notify(e.message);
+            });
         }),
       })),
       {

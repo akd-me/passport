@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { logger } from "./logger";
 
 export type SettingsSection = "model" | "accounts" | "trust" | "routines" | "advanced";
 export type ThemePreference = "system" | "light" | "dark";
@@ -38,6 +39,9 @@ function stored<T extends string>(key: string, fallback: T, allowed: T[]): T {
     const value = localStorage.getItem(key) as T | null;
     return value && allowed.includes(value) ? value : fallback;
   } catch {
+    // Stored preference could not be read; using the default.
+    logger.warn("Stored preference could not be read; using the default");
+
     return fallback;
   }
 }
@@ -45,6 +49,9 @@ function persist(key: string, value: string) {
   try {
     localStorage.setItem(key, value);
   } catch {
+    // Preference storage unavailable; retaining session state.
+    logger.warn("Preference storage unavailable; retaining session state");
+
     /* Private windows may refuse storage; the preference lasts for the session. */
   }
 }

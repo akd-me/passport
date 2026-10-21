@@ -12,6 +12,7 @@ import { runCli } from "./process.js";
 import type { HostRunOutcome, HostRunSpec } from "./types.js";
 
 export interface HostRunEnvironment {
+  log?: (message: string) => void;
   /** Source environment; only an allowlist reaches the child. */
   env?: NodeJS.ProcessEnv;
   /** Use this binary instead of resolving one. */
@@ -72,12 +73,15 @@ export function runHostAgent(
     try {
       onEvent(event);
     } catch {
+      // Host-agent event listener failed; continuing the run.
+      runtime.log?.("Host-agent event listener failed; continuing the run");
+
       /* a listener failure must not break the run */
     }
   };
   const done = (async (): Promise<HostRunResult> => {
     const source = runtime.env ?? process.env;
-    const binary = runtime.binaryPath ?? resolveHostAgentBinary(spec.kind, source);
+    const binary = runtime.binaryPath ?? resolveHostAgentBinary(spec.kind, source, runtime.log);
     if (!binary) {
       return {
         text: "",
@@ -110,6 +114,7 @@ export function runHostAgent(
         env: { ...hostAgentEnv(source, binary), ...invocation.env },
         timeoutMs: runtime.timeoutMs,
         signal,
+        log: runtime.log,
         onLine: (line) => {
           for (const event of parser.push(line)) {
             emit(event);
@@ -120,6 +125,9 @@ export function runHostAgent(
       try {
         result = await child.done;
       } catch {
+        // Host-agent process could not be started.
+        runtime.log?.("Host-agent process could not be started");
+
         return {
           text: "",
           finished: false,
@@ -140,9 +148,16 @@ export function runHostAgent(
       }
       return { ...outcome, schemaEnforced: invocation.schemaEnforced };
     } finally {
-      await invocation.cleanup().catch(() => undefined);
+      await invocation.cleanup().catch(() => {
+        // Host-agent private file cleanup failed.
+        runtime.log?.("Host-agent private file cleanup failed");
+        return undefined;
+      });
     }
   })().catch((error: unknown): HostRunResult => {
+    // Host-agent preparation failed; returning the bounded error.
+    runtime.log?.("Host-agent preparation failed; returning the bounded error");
+
     const code =
       typeof (error as { code?: unknown })?.code === "string" &&
       String((error as { code: string }).code).startsWith("HOST_AGENT")
@@ -171,12 +186,15 @@ export function runHostAgent(
 export function runHostAgentSession(
   request: HostAgentSessionRequest,
   onEvent: (event: HostAgentEvent) => void = () => {},
-  options: { env?: NodeJS.ProcessEnv; binaryPath?: string } = {},
+  options: { env?: NodeJS.ProcessEnv; binaryPath?: string; log?: (message: string) => void } = {},
 ): { done: Promise<HostAgentSessionResult>; cancel(): void } {
   const emit = (event: HostAgentEvent) => {
     try {
       onEvent(event);
     } catch {
+      // Host-agent session listener failed; continuing the session.
+      options.log?.("Host-agent session listener failed; continuing the session");
+
       /* ignore listener failures */
     }
   };

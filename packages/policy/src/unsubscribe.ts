@@ -81,6 +81,8 @@ async function validateTarget(url: URL, resolveDns: ResolveDns, signal: AbortSig
     ]);
     signal.throwIfAborted();
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new PolicyError(
       signal.aborted ? "UNSUBSCRIBE_TIMEOUT" : "UNSUBSCRIBE_TARGET_BLOCKED",
       `Unsubscribe ${signal.aborted ? "request timed out" : "target could not be resolved"} for ${url.host}`,
@@ -119,7 +121,12 @@ export function parseListUnsubscribe(value?: string | null, post?: string | null
           };
         }
       }
-    } catch {
+    } catch (error) {
+      // Malformed URL targets provide no capability; keep trying valid input.
+      if (!(error instanceof TypeError) && !(error instanceof URIError)) {
+        throw error;
+      }
+
       // Ignore malformed targets so another valid header target can still be used.
     }
   }
@@ -212,6 +219,8 @@ export async function requestUnsubscribe(
         : await pinnedRequest(url, init, addresses);
       await response.body?.cancel();
     } catch {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       // Fetch errors can include token-bearing URLs; expose only the destination host.
       throw new PolicyError(
         signal.aborted ? "UNSUBSCRIBE_TIMEOUT" : "UNSUBSCRIBE_FAILED",
@@ -233,6 +242,8 @@ export async function requestUnsubscribe(
         }
         next = new URL(location, url);
       } catch {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         throw new PolicyError(
           "UNSUBSCRIBE_FAILED",
           `Invalid unsubscribe redirect from ${url.host}`,

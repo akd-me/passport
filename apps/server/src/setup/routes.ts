@@ -60,6 +60,8 @@ async function body(request: Request): Promise<Record<string, unknown>> {
   try {
     return object(await request.json());
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new ApiError("INVALID_JSON", "Expected a JSON object");
   }
 }

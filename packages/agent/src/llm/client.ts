@@ -28,6 +28,8 @@ function endpoint(base: string, suffix: string): string {
   try {
     url = new URL(base);
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new LlmError("LLM base URL must be a valid HTTP URL", "LLM_CONFIG");
   }
   if (
@@ -118,6 +120,9 @@ abstract class HttpLlmClient implements LlmClient {
           redirect: "error",
         });
       } catch {
+        // LLM transport failed; applying the existing retry policy.
+        this.options.log?.("LLM transport failed; applying the existing retry policy");
+
         if (attempt >= retries) {
           throw new LlmError("LLM transport failed", "LLM_TRANSPORT");
         }
@@ -128,6 +133,8 @@ abstract class HttpLlmClient implements LlmClient {
         try {
           return object(await response.json());
         } catch (error) {
+          // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
           if (error instanceof LlmError) {
             throw error;
           }
@@ -419,6 +426,7 @@ export function createLlmClient(config: LlmConfig, options?: LlmClientOptions): 
     case "codex":
       return new HostAgentLlmClient({
         kind: config.provider,
+        log: options?.log,
         model: config.model,
         ...(config.fastModel ? { fastModel: config.fastModel } : {}),
         ...(options?.hostAgentCwd ? { cwd: options.hostAgentCwd } : {}),

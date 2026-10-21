@@ -224,7 +224,12 @@ function failure(raw: unknown): { message: string; code: string } {
     if (typeof inner?.message === "string") {
       message = inner.message;
     }
-  } catch {
+  } catch (error) {
+    // Malformed JSON is expected here; retain the existing text or stream fallback.
+    if (!(error instanceof SyntaxError)) {
+      throw error;
+    }
+
     /* plain text */
   }
   const lower = message.toLowerCase();
@@ -278,7 +283,12 @@ export function createCodexParser(): HostStreamParser {
       let message: Record<string, unknown> | undefined;
       try {
         message = record(JSON.parse(line));
-      } catch {
+      } catch (error) {
+        // Malformed JSON is expected here; retain the existing text or stream fallback.
+        if (!(error instanceof SyntaxError)) {
+          throw error;
+        }
+
         return [];
       }
       if (!message) {

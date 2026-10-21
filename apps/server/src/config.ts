@@ -124,6 +124,8 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
   try {
     saved = JSON.parse(await readFile(join(dataDir, "passport.config.json"), "utf8"));
   } catch (error) {
+    // An absent configuration uses defaults; other filesystem errors propagate.
+
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
@@ -232,6 +234,8 @@ export async function saveConfig(config: PassportConfig): Promise<void> {
       Object.assign(llm, { apiKey: saved.llm.apiKey });
     }
   } catch (error) {
+    // An absent configuration has no prior values to merge.
+
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }

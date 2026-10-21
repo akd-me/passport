@@ -26,6 +26,8 @@ export async function request(
       signal: init.signal ?? AbortSignal.timeout(30_000),
     });
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new ProviderError("NETWORK_ERROR", "Provider request failed or timed out");
   }
   if (!response.ok) {
@@ -50,6 +52,8 @@ export async function readJson<T>(response: Response): Promise<T> {
     }
     return value as T;
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new ProviderError("INVALID_RESPONSE", "Provider returned invalid JSON");
   }
 }
@@ -162,6 +166,8 @@ export class HttpConnection {
           },
         );
       } catch (error) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         if (error instanceof ProviderError && [400, 401].includes(error.status ?? 0)) {
           throw new ProviderError(
             "OAUTH_REFRESH_FAILED",
@@ -204,6 +210,8 @@ export class HttpConnection {
     try {
       return await request(this.fetcher, url, { ...init, headers });
     } catch (e) {
+      // Only an authenticated 401 with refresh credentials is retried after refresh.
+
       if (
         !(e instanceof ProviderError) ||
         e.status !== 401 ||

@@ -45,6 +45,8 @@ export function apiToken(
   try {
     readFileSync(path);
   } catch (error) {
+    // An absent token file is initialized below; other filesystem errors propagate.
+
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
@@ -63,6 +65,8 @@ export function apiToken(
         try {
           linkSync(temp, path);
         } catch (error) {
+          // A concurrent token creator owns the existing file; preserve that token.
+
           if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
             throw error;
           }
@@ -158,6 +162,9 @@ export class PassportAuth {
         this.allowsHost(url.host)
       );
     } catch {
+      // Session validation failed; rejecting authentication.
+      logger.warn("Session validation failed; rejecting authentication");
+
       return false;
     }
   }
@@ -239,6 +246,9 @@ export class PassportAuth {
       }
       return;
     } catch {
+      // WebSocket authentication failed; rejecting upgrade.
+      logger.warn("WebSocket authentication failed; rejecting upgrade");
+
       // Upgrade callbacks run outside Hono's error boundary. Fail closed here too.
       return 401;
     }
@@ -347,6 +357,9 @@ export function installAuth(app: Hono, auth: PassportAuth): void {
     try {
       body = await c.req.json();
     } catch {
+      // Login request JSON could not be read.
+      logger.warn("Login request JSON could not be read");
+
       return c.json({ error: { code: "INVALID_JSON", message: "Expected { token }" } }, 400);
     }
     const token = body && typeof body === "object" && "token" in body ? body.token : undefined;

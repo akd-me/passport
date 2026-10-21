@@ -28,11 +28,14 @@ export const HOST_AGENT_FIXES = {
   },
 } as const;
 
-function executable(path: string): boolean {
+function executable(path: string, log?: (message: string) => void): boolean {
   try {
     accessSync(path, constants.X_OK);
     return statSync(path).isFile();
   } catch {
+    // Host-agent executable probe failed.
+    log?.("Host-agent executable probe failed");
+
     return false;
   }
 }
@@ -41,10 +44,11 @@ function executable(path: string): boolean {
 export function resolveHostAgentBinary(
   kind: HostAgentKind,
   env: NodeJS.ProcessEnv = process.env,
+  log?: (message: string) => void,
 ): string | null {
   const override = env[OVERRIDE[kind]];
   if (override) {
-    return executable(override) ? override : null;
+    return executable(override, log) ? override : null;
   }
   const names =
     process.platform === "win32"
@@ -57,7 +61,7 @@ export function resolveHostAgentBinary(
   for (const dir of dirs) {
     for (const name of names) {
       const candidate = join(dir, name);
-      if (executable(candidate)) {
+      if (executable(candidate, log)) {
         return candidate;
       }
     }
@@ -90,9 +94,10 @@ async function probe(
   env: NodeJS.ProcessEnv,
   exec: ProbeExec,
   now: () => number,
+  log?: (message: string) => void,
 ): Promise<HostAgentStatus> {
   const base = { kind, label: LABEL[kind], checkedAt: new Date(now()).toISOString() };
-  const binaryPath = resolveHostAgentBinary(kind, env);
+  const binaryPath = resolveHostAgentBinary(kind, env, log);
   if (!binaryPath) {
     return {
       ...base,
@@ -107,12 +112,20 @@ async function probe(
   }
   const childEnv = hostAgentEnv(env, binaryPath);
   const [ver, auth] = await Promise.all([
-    exec(binaryPath, ["--version"], childEnv).catch(() => null),
+    exec(binaryPath, ["--version"], childEnv).catch(() => {
+      // Host-agent version probe failed.
+      log?.("Host-agent version probe failed");
+      return null;
+    }),
     exec(
       binaryPath,
       kind === "claude-code" ? ["auth", "status"] : ["login", "status"],
       childEnv,
-    ).catch(() => null),
+    ).catch(() => {
+      // Host-agent login probe failed.
+      log?.("Host-agent login probe failed");
+      return null;
+    }),
   ]);
   let loggedIn = false,
     account: string | null = null;
@@ -126,7 +139,12 @@ async function probe(
           typeof status.subscriptionType === "string" ? ` (${status.subscriptionType})` : "";
         account = `${method}${plan}`;
       }
-    } catch {
+    } catch (error) {
+      // Malformed JSON is expected here; retain the existing text or stream fallback.
+      if (!(error instanceof SyntaxError)) {
+        throw error;
+      }
+
       /* unknown output: treat as signed out */
     }
   } else if (auth) {
@@ -153,6 +171,7 @@ async function probe(
 }
 
 export interface DetectHostAgentsOptions {
+  log?: (message: string) => void;
   /** Ignore the 60-second cache. */
   refresh?: boolean;
   env?: NodeJS.ProcessEnv;
@@ -177,13 +196,16 @@ export function detectHostAgents(
   }
   const result = Promise.all(
     HOST_AGENT_KINDS.map((kind) =>
-      probe(kind, options.env ?? process.env, options.exec ?? defaultExec, now),
+      probe(kind, options.env ?? process.env, options.exec ?? defaultExec, now, options.log),
     ),
   );
   if (!custom) {
     const entry = { at: now(), result };
     cache = entry;
     result.catch(() => {
+      // Host-agent discovery failed; clearing the cached probe.
+      options.log?.("Host-agent discovery failed; clearing the cached probe");
+
       if (cache === entry) {
         cache = undefined;
       }

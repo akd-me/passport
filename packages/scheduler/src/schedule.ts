@@ -72,6 +72,8 @@ export function validateSchedule(value: unknown): Schedule {
     }
     new Intl.DateTimeFormat("en", { timeZone });
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     return invalid("Invalid IANA time zone");
   }
   if (s.type === "daily") {

@@ -10,6 +10,7 @@ import { api, type TrustData } from "../api";
 import { Popover } from "../components/Popover";
 import { Feedback, Icon, Loading } from "../components/ui";
 import { CATEGORIES, categoryLabel } from "../labels";
+import { logger } from "../logger";
 import { ProfileEditor } from "../settings/ProfileEditor";
 import { useResource, useTask } from "../state";
 import { useUi } from "../ui-state";
@@ -196,6 +197,9 @@ function readDismissed(): string[] {
   try {
     return JSON.parse(localStorage.getItem(DISMISSED) ?? "[]") as string[];
   } catch {
+    // Promotion dismissal storage could not be read.
+    logger.warn("Promotion dismissal storage could not be read");
+
     return [];
   }
 }
@@ -220,6 +224,9 @@ export function PromotionPrompts() {
     try {
       localStorage.setItem(DISMISSED, JSON.stringify(next));
     } catch {
+      // Promotion dismissal could not be persisted; retaining session state.
+      logger.warn("Promotion dismissal could not be persisted; retaining session state");
+
       /* Session-only dismissal is acceptable. */
     }
   };

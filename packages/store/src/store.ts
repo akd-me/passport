@@ -46,6 +46,8 @@ function decodeCursor(value: string, sort: string): Cursor {
     }
     return c as Cursor;
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new StoreError(
       "INVALID_CURSOR",
       "Invalid cursor or cursor sort does not match the query",
@@ -107,6 +109,8 @@ class SQLiteStore implements Store {
       this.run("COMMIT");
       return result;
     } catch (error) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       this.run("ROLLBACK");
       throw error;
     }
@@ -909,6 +913,8 @@ export function openStore(opts: { path: string | ":memory:"; masterKey?: string 
     );
     return new SQLiteStore(db, key);
   } catch (cause) {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     db?.close();
     key.fill(0);
     throw new StoreError("STORE_OPEN_FAILED", "Cannot open SQLite store", { cause });

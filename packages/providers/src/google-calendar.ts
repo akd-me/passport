@@ -208,6 +208,8 @@ export class GoogleCalendarProvider extends HttpConnection implements CalendarPr
       try {
         page = await this.json(`${this.calendarPath}/events?${params}`);
       } catch (e) {
+        // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
         if (e instanceof ProviderError && e.status === 410) {
           throw new ProviderError(
             "CURSOR_EXPIRED",

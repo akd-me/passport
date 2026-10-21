@@ -34,6 +34,8 @@ export function decryptCredentials(
       Buffer.concat([decipher.update(encrypted.subarray(29)), decipher.final()]).toString("utf8"),
     ) as AccountCredentials;
   } catch {
+    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
     throw new StoreError(
       "CREDENTIAL_DECRYPTION_FAILED",
       "Cannot decrypt credentials: master key is incorrect or the record is damaged",

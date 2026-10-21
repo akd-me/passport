@@ -150,6 +150,8 @@ export class ImapMailProvider implements MailProvider {
     try {
       await this.client.connect();
     } catch {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       this.client.close();
       this.client = undefined;
       throw new ProviderError("IMAP_CONNECT_FAILED", "IMAP connection or authentication failed");
@@ -190,6 +192,8 @@ export class ImapMailProvider implements MailProvider {
     try {
       return await fn();
     } catch (e) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       if (e instanceof ProviderError) {
         throw e;
       }
@@ -341,6 +345,8 @@ export class ImapMailProvider implements MailProvider {
       }
       yield { kind: "cursor", cursor: encodeCursor(next) };
     } catch (e) {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       if (e instanceof ProviderError) {
         throw e;
       }
@@ -376,6 +382,8 @@ export class ImapMailProvider implements MailProvider {
         return message ? this.normalize(message, path, validity) : null;
       });
     } catch (e) {
+      // A stale IMAP identity means the original message no longer exists.
+
       if (e instanceof ProviderError && e.code === "STALE_ID") {
         return null;
       }
@@ -568,6 +576,8 @@ export class ImapMailProvider implements MailProvider {
         envelope: { from: this.account.emailAddress, to: recipients.map((r) => r.email) },
       });
     } catch {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       throw new ProviderError("SMTP_SEND_FAILED", "SMTP submission failed");
     }
     // SMTP has already accepted the message: never report a retryable send failure for sent-copy cleanup.
@@ -583,6 +593,8 @@ export class ImapMailProvider implements MailProvider {
       }
       return { providerId: identity(path, String(appended.uidValidity), appended.uid), messageId };
     } catch {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+
       throw new SubmissionAcceptedError(messageId);
     }
   }
