@@ -1,8 +1,7 @@
+import type { Person } from "@passport/types";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
-import type { Person } from "@passport/types";
-import { queryString, type PersonDetail } from "../api";
-import { useResource } from "../state";
+import { type PersonDetail, queryString } from "../api";
 import {
   Avatar,
   Empty,
@@ -14,6 +13,7 @@ import {
   Verification,
 } from "../components/ui";
 import { Surface } from "../shell/Surface";
+import { useResource } from "../state";
 
 export function DowngradeWarning({ person }: { person: Person }) {
   return person.lastSeenBlueAt && person.verification === "green" ? (
@@ -22,8 +22,8 @@ export function DowngradeWarning({ person }: { person: Person }) {
       <div>
         <strong>Verification changed for {person.displayName}.</strong>
         <p>
-          Earlier messages were verified blue; the latest is green. Check with
-          them through a channel you trust before sharing anything sensitive.
+          Earlier messages were verified blue; the latest is green. Check with them through a
+          channel you trust before sharing anything sensitive.
         </p>
       </div>
     </div>
@@ -98,7 +98,9 @@ export function People() {
                       <span className="muted">{p.notes ?? p.primaryEmail}</span>
                     </span>
                     <span className="row-meta">
-                      <span className="muted">{relationshipLabel[p.relationship] ?? humanize(p.relationship)}</span>
+                      <span className="muted">
+                        {relationshipLabel[p.relationship] ?? humanize(p.relationship)}
+                      </span>
                       <Verification person={p} />
                       <span className="muted num" title="Received and sent">
                         {p.stats.received} in, {p.stats.sent} out
@@ -114,8 +116,8 @@ export function People() {
           )}
           <p className="footnote">
             <Icon name="trust" size={14} />
-            Verification comes from signatures and authentication headers.
-            Message content never sets it.
+            Verification comes from signatures and authentication headers. Message content never
+            sets it.
           </p>
         </>
       )}

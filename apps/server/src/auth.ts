@@ -8,9 +8,9 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";
 import { join } from "node:path";
-import type { IncomingMessage } from "node:http";
 import type { Hono } from "hono";
 import type { Backend } from "./backend.js";
 import { ApiError } from "./errors.js";
@@ -18,10 +18,8 @@ import { logger } from "./logger.js";
 
 const COOKIE = "passport_session";
 const safeMethods = new Set(["GET", "HEAD", "OPTIONS"]);
-const fingerprint = (value: string) =>
-  createHash("sha256").update(value).digest();
-const equal = (a: string, b: string) =>
-  timingSafeEqual(fingerprint(a), fingerprint(b));
+const fingerprint = (value: string) => createHash("sha256").update(value).digest();
+const equal = (a: string, b: string) => timingSafeEqual(fingerprint(a), fingerprint(b));
 
 /** Atomic publication prevents simultaneous first runs from choosing different tokens. */
 export function apiToken(
@@ -69,18 +67,12 @@ export function apiToken(
   chmodSync(path, 0o600);
   const token = readFileSync(path, "utf8").trim();
   if (!/^[a-f0-9]{64}$/.test(token))
-    throw new ApiError(
-      "INVALID_API_TOKEN",
-      "Invalid api-token file; run passport token --rotate.",
-    );
+    throw new ApiError("INVALID_API_TOKEN", "Invalid api-token file; run passport token --rotate.");
   return token;
 }
 
 function authority(value: string): { host: string; port?: string } | undefined {
-  const match =
-    /^(\[[a-f\d:]+\]|[a-z\d](?:[a-z\d.-]*[a-z\d])?)(?::(\d{1,5}))?$/i.exec(
-      value,
-    );
+  const match = /^(\[[a-f\d:]+\]|[a-z\d](?:[a-z\d.-]*[a-z\d])?)(?::(\d{1,5}))?$/i.exec(value);
   if (!match || (match[2] && Number(match[2]) > 65535)) return;
   return { host: match[1]!.toLowerCase(), port: match[2] };
 }
@@ -103,8 +95,7 @@ export class PassportAuth {
         : () => apiToken(dataDir, { env: {} });
     this.sessionToken = token;
     this.tokenPath = join(dataDir, "api-token");
-    this.trustProxy =
-      env.PASSPORT_TRUST_PROXY === "1" || env.PASSPORT_TRUST_PROXY === "true";
+    this.trustProxy = env.PASSPORT_TRUST_PROXY === "1" || env.PASSPORT_TRUST_PROXY === "true";
     this.allowed = [
       "127.0.0.1",
       "localhost",
@@ -138,8 +129,7 @@ export class PassportAuth {
       !!parsed &&
       this.allowed.some(
         (allowed) =>
-          allowed.host === parsed.host &&
-          (!allowed.port || allowed.port === parsed.port),
+          allowed.host === parsed.host && (!allowed.port || allowed.port === parsed.port),
       )
     );
   }
@@ -158,20 +148,15 @@ export class PassportAuth {
     }
   }
 
-  authenticate(
-    headers: Headers,
-    queryToken?: string | null,
-  ): "bearer" | "cookie" | undefined {
+  authenticate(headers: Headers, queryToken?: string | null): "bearer" | "cookie" | undefined {
     const token = this.token;
     const authorization = headers.get("authorization");
     // Never silently fall back to cookies when a caller supplies bad credentials.
     if (authorization !== null)
-      return /^Bearer /i.test(authorization) &&
-        equal(authorization.slice(7), token)
+      return /^Bearer /i.test(authorization) && equal(authorization.slice(7), token)
         ? "bearer"
         : undefined;
-    if (queryToken != null)
-      return equal(queryToken, token) ? "bearer" : undefined;
+    if (queryToken != null) return equal(queryToken, token) ? "bearer" : undefined;
     const session = this.session(headers);
     const expires = session ? this.sessions.get(session) : undefined;
     if (session && expires !== undefined) {
@@ -196,8 +181,7 @@ export class PassportAuth {
     const value = logout ? "" : randomBytes(32).toString("hex");
     if (!logout) {
       const now = Date.now();
-      for (const [id, expires] of this.sessions)
-        if (expires <= now) this.sessions.delete(id);
+      for (const [id, expires] of this.sessions) if (expires <= now) this.sessions.delete(id);
       this.sessions.set(value, now + 24 * 60 * 60 * 1000);
     }
     const secure =
@@ -217,8 +201,7 @@ export class PassportAuth {
         const value = request.headers[name];
         if (typeof value === "string") headers.set(name, value);
       }
-      if (!this.authenticate(headers, url.searchParams.get("token")))
-        return 401;
+      if (!this.authenticate(headers, url.searchParams.get("token"))) return 401;
       return;
     } catch {
       // Upgrade callbacks run outside Hono's error boundary. Fail closed here too.
@@ -244,12 +227,7 @@ export function getAuth(backend: Backend): PassportAuth {
   return auth;
 }
 
-export function checkBind(
-  host: string,
-  allowRemote = false,
-  env = process.env,
-  warn = true,
-): void {
+export function checkBind(host: string, allowRemote = false, env = process.env, warn = true): void {
   const loopback =
     host === "localhost" ||
     host === "::1" ||
@@ -283,16 +261,9 @@ export function installAuth(app: Hono, auth: PassportAuth): void {
       c.json({ error: { code, message } }, status);
     if (!auth.allowsHost(c.req.header("host") ?? new URL(c.req.url).host))
       return fail("INVALID_HOST", "Host is not allowed", 421);
-    if (
-      !safeMethods.has(c.req.method) &&
-      !auth.allowsOrigin(c.req.header("origin"))
-    )
+    if (!safeMethods.has(c.req.method) && !auth.allowsOrigin(c.req.header("origin")))
       return fail("INVALID_ORIGIN", "Origin is not allowed", 403);
-    if (
-      c.req.method === "GET" &&
-      c.req.path === "/" &&
-      c.req.query("token") !== undefined
-    ) {
+    if (c.req.method === "GET" && c.req.path === "/" && c.req.query("token") !== undefined) {
       if (!auth.allowsOrigin(c.req.header("origin")))
         return fail("INVALID_ORIGIN", "Origin is not allowed", 403);
       if (!equal(c.req.query("token")!, auth.token))
@@ -303,25 +274,15 @@ export function installAuth(app: Hono, auth: PassportAuth): void {
     const method = auth.authenticate(c.req.raw.headers);
     const publicAuth =
       (c.req.path === "/api/auth/login" && c.req.method === "POST") ||
-      (c.req.path === "/api/auth/status" &&
-        ["GET", "HEAD"].includes(c.req.method));
+      (c.req.path === "/api/auth/status" && ["GET", "HEAD"].includes(c.req.method));
     if (api && !publicAuth) {
-      if (!method)
-        return fail(
-          "UNAUTHORIZED",
-          "Sign in with your Passport API token",
-          401,
-        );
+      if (!method) return fail("UNAUTHORIZED", "Sign in with your Passport API token", 401);
       if (
         method === "cookie" &&
         !safeMethods.has(c.req.method) &&
         c.req.header("x-requested-with") !== "passport"
       )
-        return fail(
-          "CSRF_REQUIRED",
-          "X-Requested-With: passport is required",
-          403,
-        );
+        return fail("CSRF_REQUIRED", "X-Requested-With: passport is required", 403);
     }
     await next();
   });
@@ -336,20 +297,11 @@ export function installAuth(app: Hono, auth: PassportAuth): void {
     try {
       body = await c.req.json();
     } catch {
-      return c.json(
-        { error: { code: "INVALID_JSON", message: "Expected { token }" } },
-        400,
-      );
+      return c.json({ error: { code: "INVALID_JSON", message: "Expected { token }" } }, 400);
     }
-    const token =
-      body && typeof body === "object" && "token" in body
-        ? body.token
-        : undefined;
+    const token = body && typeof body === "object" && "token" in body ? body.token : undefined;
     if (typeof token !== "string" || !equal(token, auth.token))
-      return c.json(
-        { error: { code: "UNAUTHORIZED", message: "Invalid API token" } },
-        401,
-      );
+      return c.json({ error: { code: "UNAUTHORIZED", message: "Invalid API token" } }, 401);
     c.header("Set-Cookie", auth.cookie(c.req.raw.headers, c.req.url));
     return c.redirect("/", 303);
   });

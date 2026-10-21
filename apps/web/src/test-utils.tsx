@@ -27,13 +27,7 @@ export function stubApi(routes: Record<string, unknown>) {
   return fetchMock;
 }
 
-export function Harness({
-  children,
-  path = "/",
-}: {
-  children: ReactNode;
-  path?: string;
-}) {
+export function Harness({ children, path = "/" }: { children: ReactNode; path?: string }) {
   return (
     <MemoryRouter initialEntries={[path]}>
       <UiProvider>{children}</UiProvider>

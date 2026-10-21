@@ -1,5 +1,5 @@
-import { Hono } from "hono";
 import { SchedulerError } from "@passport/scheduler";
+import { Hono } from "hono";
 import type { Backend } from "../backend.js";
 import { ApiError, required } from "../errors.js";
 import { object } from "../validation.js";
@@ -29,17 +29,10 @@ export function installJobRoutes(app: Hono, backend: Backend) {
     if (error instanceof SchedulerError)
       return c.json(
         { error: { code: error.code, message: error.message } },
-        error.code === "JOB_NOT_FOUND"
-          ? 404
-          : error.code === "SYSTEM_JOB"
-            ? 409
-            : 400,
+        error.code === "JOB_NOT_FOUND" ? 404 : error.code === "SYSTEM_JOB" ? 409 : 400,
       );
     if (error instanceof ApiError)
-      return c.json(
-        { error: { code: error.code, message: error.message } },
-        error.status,
-      );
+      return c.json({ error: { code: error.code, message: error.message } }, error.status);
     throw error;
   });
   const service = async () => {
@@ -52,19 +45,14 @@ export function installJobRoutes(app: Hono, backend: Backend) {
     c.json(await (await service()).addRoutine(await body(c.req.raw)), 201),
   );
   routes.patch("/:id", async (c) =>
-    c.json(
-      await (await service()).update(c.req.param("id"), await body(c.req.raw)),
-    ),
+    c.json(await (await service()).update(c.req.param("id"), await body(c.req.raw))),
   );
   routes.delete("/:id", async (c) => {
     await (await service()).remove(c.req.param("id"));
     return c.json({ ok: true });
   });
   routes.get("/:id/history", async (c) =>
-    c.json(
-      required((await service()).scheduler.get(c.req.param("id")), "Job")
-        .history,
-    ),
+    c.json(required((await service()).scheduler.get(c.req.param("id")), "Job").history),
   );
   routes.post("/:id/run", async (c) =>
     c.json(await (await service()).scheduler.runNow(c.req.param("id"))),

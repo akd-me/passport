@@ -1,6 +1,6 @@
+import type { ActionRecord } from "@passport/types";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ActionRecord } from "@passport/types";
 import { api } from "../api";
 import { Harness, stubApi } from "../test-utils";
 import { groupProposals, WorkQueue } from "./Decisions";
@@ -147,9 +147,7 @@ describe("work queue", () => {
       </Harness>,
     );
     fireEvent.click(await screen.findByRole("radio", { name: "Newest" }));
-    const order = screen
-      .getAllByRole("article")
-      .map((a) => a.getAttribute("aria-label"));
+    const order = screen.getAllByRole("article").map((a) => a.getAttribute("aria-label"));
     expect(order).toEqual(["Reason p4", "Reason p2", "Reason p3", "Reason p1"]);
   });
 
@@ -169,7 +167,9 @@ describe("work queue", () => {
     );
     const input = await screen.findByLabelText("Instruction for Passport");
     // The selected proposal's source message rides along as context.
-    expect(await screen.findByRole("button", { name: "Don’t include Subject p1" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Don’t include Subject p1" }),
+    ).toBeInTheDocument();
     fireEvent.change(input, { target: { value: "Draft replies" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>

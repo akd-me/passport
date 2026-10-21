@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { type ReactNode, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./ui";
 
@@ -14,7 +14,10 @@ export function trapTab(event: React.KeyboardEvent, container: HTMLElement | nul
   const first = items[0],
     last = items[items.length - 1];
   if (!first || !last) return false;
-  if (event.shiftKey && (document.activeElement === first || document.activeElement === container)) {
+  if (
+    event.shiftKey &&
+    (document.activeElement === first || document.activeElement === container)
+  ) {
     event.preventDefault();
     last.focus();
     return true;
@@ -87,12 +90,7 @@ export function Dialog({
             <h2 id={titleId}>{title}</h2>
             {description && <p>{description}</p>}
           </div>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="Close"
-            onClick={onClose}
-          >
+          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
             <Icon name="close" />
           </button>
         </header>

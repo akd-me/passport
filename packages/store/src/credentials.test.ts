@@ -17,8 +17,13 @@ describe("credential envelope", () => {
   it("rejects wrong keys and moving a credential blob to a different account", () => {
     const key = randomBytes(32);
     const encrypted = encryptCredentials(key, "account", credentials);
-    for (const [candidate, accountId] of [[randomBytes(32), "account"], [key, "other"]] as const) {
-      expect(() => decryptCredentials(candidate, accountId, encrypted)).toThrow(expect.objectContaining({ code: "CREDENTIAL_DECRYPTION_FAILED" }));
+    for (const [candidate, accountId] of [
+      [randomBytes(32), "account"],
+      [key, "other"],
+    ] as const) {
+      expect(() => decryptCredentials(candidate, accountId, encrypted)).toThrow(
+        expect.objectContaining({ code: "CREDENTIAL_DECRYPTION_FAILED" }),
+      );
     }
   });
 
@@ -28,8 +33,12 @@ describe("credential envelope", () => {
     for (const offset of [0, 1, 13, 29, encrypted.length - 1]) {
       const damaged = Buffer.from(encrypted);
       damaged[offset] = damaged[offset]! ^ 0xff;
-      expect(() => decryptCredentials(key, "account", damaged)).toThrow(expect.objectContaining({ code: "CREDENTIAL_DECRYPTION_FAILED" }));
+      expect(() => decryptCredentials(key, "account", damaged)).toThrow(
+        expect.objectContaining({ code: "CREDENTIAL_DECRYPTION_FAILED" }),
+      );
     }
-    expect(() => decryptCredentials(key, "account", Buffer.alloc(0))).toThrow(expect.objectContaining({ code: "CREDENTIAL_DECRYPTION_FAILED" }));
+    expect(() => decryptCredentials(key, "account", Buffer.alloc(0))).toThrow(
+      expect.objectContaining({ code: "CREDENTIAL_DECRYPTION_FAILED" }),
+    );
   });
 });

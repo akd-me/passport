@@ -28,8 +28,7 @@ const categoryLabels: Record<ActionCategory, string> = {
   matters: "Matters and people",
   other: "Everything else",
 };
-export const categoryLabel = (category: ActionCategory) =>
-  categoryLabels[category] ?? category;
+export const categoryLabel = (category: ActionCategory) => categoryLabels[category] ?? category;
 
 const actionLabels: Partial<Record<ActionType, string>> = {
   send: "Send reply",
@@ -58,5 +57,4 @@ const actionLabels: Partial<Record<ActionType, string>> = {
   snooze: "Snooze",
   profile_update: "Update standing instructions",
 };
-export const actionLabel = (type: ActionType) =>
-  actionLabels[type] ?? type.replaceAll("_", " ");
+export const actionLabel = (type: ActionType) => actionLabels[type] ?? type.replaceAll("_", " ");

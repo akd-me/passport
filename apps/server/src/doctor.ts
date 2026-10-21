@@ -1,16 +1,15 @@
-import { access, stat, writeFile, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
+import { access, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-  Account,
-  AccountCredentials,
-  CalendarProvider,
-  MailProvider,
-} from "@passport/types";
+import type { Account, AccountCredentials, CalendarProvider, MailProvider } from "@passport/types";
 import type { Backend } from "./backend.js";
 import { isHostAgentProvider, llmConfigured, loadConfig, validateConfig } from "./config.js";
-import { hostAgentChecks, pingHostAgent, type HostAgentDoctorOptions } from "./doctor-host-agents.js";
+import {
+  type HostAgentDoctorOptions,
+  hostAgentChecks,
+  pingHostAgent,
+} from "./doctor-host-agents.js";
 import { resolveLlmSelection } from "./llm-selection.js";
 
 export interface DoctorCheck {
@@ -42,9 +41,7 @@ export async function probeAccount(
     if (provider.checkConnection) await provider.checkConnection();
     else if ("listCalendars" in provider) await provider.listCalendars();
     else {
-      const iterator = provider
-        .sync(null, { maxEmails: 1 })
-        [Symbol.asyncIterator]();
+      const iterator = provider.sync(null, { maxEmails: 1 })[Symbol.asyncIterator]();
       try {
         await iterator.next();
       } finally {
@@ -67,11 +64,7 @@ export async function runDoctor(
 ): Promise<DoctorReport> {
   const checks: DoctorCheck[] = [],
     now = options.now?.() ?? Date.now();
-  const check = async (
-    name: string,
-    operation: () => Promise<string>,
-    accountId?: string,
-  ) => {
+  const check = async (name: string, operation: () => Promise<string>, accountId?: string) => {
     try {
       checks.push({ name, status: "ok", detail: await operation(), accountId });
     } catch {
@@ -91,10 +84,7 @@ export async function runDoctor(
     });
   else {
     await check("Data directory", async () => {
-      const probe = join(
-        backend.config.dataDir,
-        `.doctor-${crypto.randomUUID()}`,
-      );
+      const probe = join(backend.config.dataDir, `.doctor-${crypto.randomUUID()}`);
       await writeFile(probe, "", { flag: "wx", mode: 0o600 });
       await unlink(probe);
       return "Writable";
@@ -102,8 +92,7 @@ export async function runDoctor(
     await check("Master key", async () => {
       if (process.env.PASSPORT_MASTER_KEY) return "Configured in environment";
       const key = await stat(join(backend.config.dataDir, "master.key"));
-      if (!key.isFile() || (key.mode & 0o777) !== 0o600 || key.size < 32)
-        throw new Error();
+      if (!key.isFile() || (key.mode & 0o777) !== 0o600 || key.size < 32) throw new Error();
       return "Present, mode 0600";
     });
   }
@@ -160,9 +149,7 @@ export async function runDoctor(
         body: JSON.stringify({
           model: llm.model,
           messages: [{ role: "user", content: "Reply OK" }],
-          ...(llm.provider === "openai"
-            ? { max_completion_tokens: 1 }
-            : { max_tokens: 1 }),
+          ...(llm.provider === "openai" ? { max_completion_tokens: 1 } : { max_tokens: 1 }),
         }),
       });
       await response.body?.cancel();
@@ -189,29 +176,20 @@ export async function runDoctor(
       await check(
         name,
         async () => {
-          const credentials =
-            (await backend.store.accounts.getCredentials(account.id)) ?? {};
+          const credentials = (await backend.store.accounts.getCredentials(account.id)) ?? {};
           await (options.probe ?? probeAccount)(backend, account, credentials);
-          return [
-            "gmail",
-            "graph",
-            "google-calendar",
-            "graph-calendar",
-          ].includes(account.kind)
+          return ["gmail", "graph", "google-calendar", "graph-calendar"].includes(account.kind)
             ? "Provider reachable; token valid or refreshed"
             : "Provider reachable; authentication accepted";
         },
         account.id,
       );
-    const age = account.lastSyncAt
-      ? now - Date.parse(account.lastSyncAt)
-      : Infinity;
+    const age = account.lastSyncAt ? now - Date.parse(account.lastSyncAt) : Infinity;
     checks.push({
       name: `${account.emailAddress} sync`,
       accountId: account.id,
       status:
-        age <= Math.max(600000, backend.config.syncIntervalSeconds * 3000) &&
-        !account.lastSyncError
+        age <= Math.max(600000, backend.config.syncIntervalSeconds * 3000) && !account.lastSyncError
           ? "ok"
           : "warning",
       detail:
@@ -230,7 +208,9 @@ export async function runDoctor(
   await check("MCP stdio", async () => {
     await access(process.execPath, constants.X_OK);
     // Compiled package ships cli.js; a from-source run (tsx) has cli.ts next to this file.
-    const candidates = ["./cli.js", "./cli.ts"].map((rel) => fileURLToPath(new URL(rel, import.meta.url)));
+    const candidates = ["./cli.js", "./cli.ts"].map((rel) =>
+      fileURLToPath(new URL(rel, import.meta.url)),
+    );
     let cli: string | null = null;
     for (const candidate of candidates) {
       try {
@@ -274,8 +254,7 @@ export async function doctorCommand(demo = false): Promise<void> {
         {
           name: "Configuration",
           status: "error",
-          detail:
-            "Cannot load passport.config.json; fix its JSON and configuration values.",
+          detail: "Cannot load passport.config.json; fix its JSON and configuration values.",
         },
       ],
     });
@@ -290,15 +269,13 @@ export async function doctorCommand(demo = false): Promise<void> {
       checks.push({
         name: "Data directory",
         status: "error",
-        detail:
-          "Missing or not writable. Run passport init to create a workspace.",
+        detail: "Missing or not writable. Run passport init to create a workspace.",
       });
     }
     if (!process.env.PASSPORT_MASTER_KEY) {
       try {
         const key = await stat(join(config.dataDir, "master.key"));
-        if (!key.isFile() || (key.mode & 0o777) !== 0o600 || key.size < 32)
-          throw new Error();
+        if (!key.isFile() || (key.mode & 0o777) !== 0o600 || key.size < 32) throw new Error();
       } catch {
         checks.push({
           name: "Master key",

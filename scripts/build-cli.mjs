@@ -1,6 +1,6 @@
-import { cp, mkdir, readFile, rm, writeFile, chmod } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import { createRequire, builtinModules } from "node:module";
+import { chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { builtinModules, createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import config from "../apps/server/esbuild.config.mjs";
@@ -68,7 +68,9 @@ await rm(packageDir, { recursive: true, force: true });
 await mkdir(packageDir, { recursive: true });
 // Keep two path segments beneath the package root: app.ts locates the UI via
 // ../../web/dist relative to import.meta.url. No source rewrite is needed.
-const result = await build(config({ serverDir, outdir: join(packageDir, "dist/server"), workspaceEntries }));
+const result = await build(
+  config({ serverDir, outdir: join(packageDir, "dist/server"), workspaceEntries }),
+);
 const builtins = new Set(builtinModules);
 for (const output of Object.values(result.metafile.outputs)) {
   for (const { path, external } of output.imports) {
@@ -80,24 +82,37 @@ for (const output of Object.values(result.metafile.outputs)) {
 const changelog = await readFile(join(root, "CHANGELOG.md"), "utf8");
 const version = changelog.match(/^## \[(\d+\.\d+\.\d+(?:-[\w.-]+)?)\]/m)?.[1];
 if (!version) throw new Error("CHANGELOG.md must start with a versioned release heading");
-await writeFile(join(packageDir, "package.json"), JSON.stringify({
-  name: "@akd-me/passport",
-  version,
-  description: "Local-first, agent-native mail and calendar with earned trust, undo and a delayed outbox.",
-  license: "MIT",
-  type: "module",
-  engines: { node: ">=22.16" },
-  bin: server.bin,
-  files: server.files,
-  repository: { type: "git", url: "git+https://github.com/akd-me/passport.git", directory: "apps/server" },
-  homepage: "https://github.com/akd-me/passport#readme",
-  bugs: { url: "https://github.com/akd-me/passport/issues" },
-  publishConfig: { access: "public" },
-  dependencies: Object.fromEntries(Object.entries(dependencies).sort(([a], [b]) => a.localeCompare(b))),
-}, null, 2) + "\n");
+await writeFile(
+  join(packageDir, "package.json"),
+  JSON.stringify(
+    {
+      name: "@akd-me/passport",
+      version,
+      description:
+        "Local-first, agent-native mail and calendar with earned trust, undo and a delayed outbox.",
+      license: "MIT",
+      type: "module",
+      engines: { node: ">=22.16" },
+      bin: server.bin,
+      files: server.files,
+      repository: {
+        type: "git",
+        url: "git+https://github.com/akd-me/passport.git",
+        directory: "apps/server",
+      },
+      homepage: "https://github.com/akd-me/passport#readme",
+      bugs: { url: "https://github.com/akd-me/passport/issues" },
+      publishConfig: { access: "public" },
+      dependencies: Object.fromEntries(
+        Object.entries(dependencies).sort(([a], [b]) => a.localeCompare(b)),
+      ),
+    },
+    null,
+    2,
+  ) + "\n",
+);
 await cp(join(serverDir, "bin"), join(packageDir, "bin"), { recursive: true });
 await chmod(join(packageDir, "bin/passport.js"), 0o755);
 await cp(join(root, "apps/web/dist"), join(packageDir, "web/dist"), { recursive: true });
-for (const name of ["README.md", "LICENSE"])
-  await cp(join(root, name), join(packageDir, name));
+for (const name of ["README.md", "LICENSE"]) await cp(join(root, name), join(packageDir, name));
 console.log(`Built @akd-me/passport@${version} in ${packageDir}`);

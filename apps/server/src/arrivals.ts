@@ -1,8 +1,8 @@
 import { newId } from "@passport/store";
 import type { AgentRuntime, AgentTrigger, Email, EventBus, Store } from "@passport/types";
-import { logger } from "./logger.js";
 import { compareAndSetKv, mutateKv } from "./atomic-kv.js";
 import { calendarsReady } from "./calendar-safety.js";
+import { logger } from "./logger.js";
 
 export type ArrivalTrigger = AgentTrigger & { runId?: string; availabilityUnverified?: boolean };
 
@@ -35,10 +35,7 @@ function indexed<T>(store: Store, task: () => Promise<T>): Promise<T> {
 async function pending(store: Store): Promise<Record<string, string>> {
   return JSON.parse((await store.kv.get(INDEX)) ?? "{}");
 }
-export async function persistArrival(
-  store: Store,
-  email: Email,
-): Promise<void> {
+export async function persistArrival(store: Store, email: Email): Promise<void> {
   await indexed(store, async () => {
     const key = arrivalKey(email.id);
     if (!(await store.kv.get(key))) {
@@ -52,7 +49,9 @@ export async function persistArrival(
     }
     // Both writes finish before sync stores the email, so interrupted ingestion
     // retries registration before the email can be considered already ingested.
-    mutateKv(store, INDEX, current => JSON.stringify({ ...JSON.parse(current ?? "{}"), [email.id]: email.accountId }));
+    mutateKv(store, INDEX, (current) =>
+      JSON.stringify({ ...JSON.parse(current ?? "{}"), [email.id]: email.accountId }),
+    );
   });
 }
 
@@ -70,7 +69,7 @@ export class ArrivalQueue {
 
   private async acknowledge(emailId: string, keepEntry = false) {
     await indexed(this.store, async () => {
-      mutateKv(this.store, INDEX, current => {
+      mutateKv(this.store, INDEX, (current) => {
         const index = JSON.parse(current ?? "{}");
         delete index[emailId];
         return JSON.stringify(index);
@@ -125,8 +124,7 @@ export class ArrivalQueue {
         },
         decision: {
           outcome: "ask",
-          reason:
-            "Review this email manually after five failed triage attempts",
+          reason: "Review this email manually after five failed triage attempts",
           risk: "low",
           reversibility: "reversible",
           trustLevel: "supervised",
@@ -143,7 +141,12 @@ export class ArrivalQueue {
     let claim = await this.store.kv.get(claimKey);
     if (claim && Date.parse(JSON.parse(claim).expiresAt) > Date.now()) return;
     const id = crypto.randomUUID();
-    const renewed = () => JSON.stringify({ id, pid: process.pid, expiresAt: new Date(Date.now() + 60000).toISOString() });
+    const renewed = () =>
+      JSON.stringify({
+        id,
+        pid: process.pid,
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+      });
     const next = renewed();
     if (!compareAndSetKv(this.store, claimKey, claim, next)) return;
     claim = next;
@@ -157,8 +160,9 @@ export class ArrivalQueue {
       }
     }, 10000);
     timer.unref();
-    try { await this.processClaimed(emailId); }
-    finally {
+    try {
+      await this.processClaimed(emailId);
+    } finally {
       clearInterval(timer);
       compareAndSetKv(this.store, claimKey, claim, null);
     }
@@ -170,15 +174,18 @@ export class ArrivalQueue {
     const runId = `arrival:${emailId}`;
     const journal = await this.store.kv.get(`run:${runId}`);
     const checkpoint = journal ? JSON.parse(journal) : null;
-    if (entry.completedAt || entry.checkpoints?.done || (checkpoint?.finishedAt && !checkpoint.error)) {
+    if (
+      entry.completedAt ||
+      entry.checkpoints?.done ||
+      (checkpoint?.finishedAt && !checkpoint.error)
+    ) {
       await this.acknowledge(emailId);
       return;
     }
     const email = await this.store.emails.get(emailId);
     if (!email) {
       // An indexed arrival can precede its email if sync was interrupted.
-      if (!(await this.store.accounts.get(entry.accountId)))
-        await this.acknowledge(emailId);
+      if (!(await this.store.accounts.get(entry.accountId))) await this.acknowledge(emailId);
       return;
     }
     if (email.keywords.$deleted) {
@@ -189,8 +196,7 @@ export class ArrivalQueue {
       await this.attention(email, entry);
       return;
     }
-    if (!entry.nextAttemptAt || Date.parse(entry.nextAttemptAt) > Date.now())
-      return;
+    if (!entry.nextAttemptAt || Date.parse(entry.nextAttemptAt) > Date.now()) return;
     const ready = await calendarsReady(this.store, email.accountId);
     if (!ready) {
       entry.calendarWaitStartedAt ??= new Date().toISOString();
@@ -205,12 +211,15 @@ export class ArrivalQueue {
     entry.startedAt = new Date().toISOString();
     // Persist a claim before inference, including a retry deadline if the process
     // exits mid-run. The fifth interrupted attempt is surfaced on the next drain.
-    entry.nextAttemptAt = new Date(
-      Date.now() + (delays[entry.attempts - 1] ?? 0),
-    ).toISOString();
+    entry.nextAttemptAt = new Date(Date.now() + (delays[entry.attempts - 1] ?? 0)).toISOString();
     await this.save(emailId, entry);
     try {
-      const trigger: ArrivalTrigger = { kind: "email.received", emailId, runId, ...(!ready ? { availabilityUnverified: true } : {}) };
+      const trigger: ArrivalTrigger = {
+        kind: "email.received",
+        emailId,
+        runId,
+        ...(!ready ? { availabilityUnverified: true } : {}),
+      };
       const run = await this.agent.run(trigger);
       if (run.error) throw new Error(run.error);
     } catch (error) {
@@ -218,18 +227,11 @@ export class ArrivalQueue {
       Object.assign(entry, JSON.parse((await this.store.kv.get(arrivalKey(emailId))) ?? "{}"));
       const code = (error as { code?: unknown })?.code;
       entry.lastError =
-        typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code)
-          ? code
-          : "TRIAGE_FAILED";
+        typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : "TRIAGE_FAILED";
       if (entry.attempts === 5)
-        await this.attention(
-          (await this.store.emails.get(emailId)) ?? email,
-          entry,
-        );
+        await this.attention((await this.store.emails.get(emailId)) ?? email, entry);
       else {
-        entry.nextAttemptAt = new Date(
-          Date.now() + delays[entry.attempts - 1]!,
-        ).toISOString();
+        entry.nextAttemptAt = new Date(Date.now() + delays[entry.attempts - 1]!).toISOString();
         await this.save(emailId, entry);
       }
       logger.warn("Email triage failed; outcome recorded");
@@ -253,8 +255,7 @@ export class ArrivalQueue {
     this.accounts.set(accountId, settled);
     void settled.then(() => {
       this.active.delete(emailId);
-      if (this.accounts.get(accountId) === settled)
-        this.accounts.delete(accountId);
+      if (this.accounts.get(accountId) === settled) this.accounts.delete(accountId);
     });
     return settled;
   }

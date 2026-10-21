@@ -1,20 +1,31 @@
-import { useEffect } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { api } from "../api";
 import { AccountScope } from "../accounts/AccountFilter";
+import { api } from "../api";
 import { Harness, stubApi } from "../test-utils";
-import { useUi, type SettingsSection } from "../ui-state";
+import { type SettingsSection, useUi } from "../ui-state";
 import { SettingsDialog } from "./SettingsDialog";
 
 const base = {
   "/accounts": {
     accounts: [],
     mode: "real",
-    llm: { provider: "anthropic", model: "claude-sonnet-5-5", apiKeyConfigured: false, configured: false },
+    llm: {
+      provider: "anthropic",
+      model: "claude-sonnet-5-5",
+      apiKeyConfigured: false,
+      configured: false,
+    },
   },
   "/trust": {
-    config: { globalMode: "supervised", outboxHoldMinutes: 5, decayAfterDays: 14, alwaysAsk: ["money"], externalAgentCeiling: "supervised" },
+    config: {
+      globalMode: "supervised",
+      outboxHoldMinutes: 5,
+      decayAfterDays: 14,
+      alwaysAsk: ["money"],
+      externalAgentCeiling: "supervised",
+    },
     categories: [],
     promotionOffers: [],
   },
@@ -45,12 +56,18 @@ describe("settings dialog", () => {
     renderSettings();
     const dialog = await screen.findByRole("dialog", { name: "Settings" });
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(
-      [...nav.querySelectorAll("button")].map((b) => b.textContent),
-    ).toEqual(["Model", "Accounts", "Trust & rules", "Routines", "Advanced"]);
+    expect([...nav.querySelectorAll("button")].map((b) => b.textContent)).toEqual([
+      "Model",
+      "Accounts",
+      "Trust & rules",
+      "Routines",
+      "Advanced",
+    ]);
     expect(screen.getByRole("button", { name: "Model" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("button", { name: "Trust & rules" }));
-    expect(await screen.findByRole("heading", { name: "Standing instructions" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Standing instructions" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("radiogroup", { name: "Permission mode" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Routines" }));
     expect(await screen.findByText("No routines yet")).toBeInTheDocument();
@@ -63,14 +80,22 @@ describe("settings dialog", () => {
     renderSettings();
     const note = await screen.findByText(/cannot detect host agents yet/);
     fireEvent.click(within(note).getByRole("button", { name: "Advanced" }));
-    expect(await screen.findByRole("heading", { name: "API-key model providers" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "API-key model providers" }),
+    ).toBeInTheDocument();
   });
 
   it("switches Passport to a signed-in host agent without an API key", async () => {
     stubApi({
       ...base,
       "/host-agents": [
-        { kind: "claude-code", installed: true, version: "2.1.0", loggedIn: true, account: "alex@example.com" },
+        {
+          kind: "claude-code",
+          installed: true,
+          version: "2.1.0",
+          loggedIn: true,
+          account: "alex@example.com",
+        },
         { kind: "codex", installed: true, loggedIn: false },
       ],
     });

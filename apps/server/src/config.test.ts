@@ -1,19 +1,17 @@
-import { mkdtemp, readFile, rm, writeFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { addAccount } from "./accounts.js";
+import { createApp } from "./auth.test-client.js";
+import { createRealBackend } from "./compose.js";
 import { defaultConfig, loadConfig, saveConfig } from "./config.js";
 import { createDemoBackend } from "./demo/index.js";
-import { createRealBackend } from "./compose.js";
-import { createApp } from "./auth.test-client.js";
-import { addAccount } from "./accounts.js";
 
 describe("configuration and composition", () => {
   const paths: string[] = [];
   afterEach(async () => {
-    await Promise.all(
-      paths.splice(0).map((p) => rm(p, { recursive: true, force: true })),
-    );
+    await Promise.all(paths.splice(0).map((p) => rm(p, { recursive: true, force: true })));
   });
   async function dataDir() {
     const path = await mkdtemp(join(tmpdir(), "passport-test-"));
@@ -23,8 +21,14 @@ describe("configuration and composition", () => {
   it("B2: loads and validates the calendar freshness setting", async () => {
     const path = await dataDir();
     expect((await loadConfig({ PASSPORT_DATA_DIR: path })).calendarMaxSyncAgeMinutes).toBe(10);
-    expect((await loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES: "20" })).calendarMaxSyncAgeMinutes).toBe(20);
-    for (const value of ["0", "-1", "NaN"]) await expect(loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES: value })).rejects.toThrow("calendarMaxSyncAgeMinutes");
+    expect(
+      (await loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES: "20" }))
+        .calendarMaxSyncAgeMinutes,
+    ).toBe(20);
+    for (const value of ["0", "-1", "NaN"])
+      await expect(
+        loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES: value }),
+      ).rejects.toThrow("calendarMaxSyncAgeMinutes");
   });
   it("loads file keys, applies environment overrides, and never persists environment keys", async () => {
     const path = await dataDir();
@@ -59,18 +63,16 @@ describe("configuration and composition", () => {
     const saved = await readFile(join(path, "passport.config.json"), "utf8");
     expect(saved).not.toContain("private-env-secret");
     expect(saved).toContain("ignore-file-secret");
-    expect((await loadConfig({ PASSPORT_DATA_DIR: path })).llm.apiKey).toBe(
-      "ignore-file-secret",
-    );
+    expect((await loadConfig({ PASSPORT_DATA_DIR: path })).llm.apiKey).toBe("ignore-file-secret");
   });
   it("rejects invalid config instead of silently substituting defaults", async () => {
     const path = await dataDir();
     await writeFile(join(path, "passport.config.json"), "{");
     await expect(loadConfig({ PASSPORT_DATA_DIR: path })).rejects.toThrow();
     await rm(join(path, "passport.config.json"));
-    await expect(
-      loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_PORT: "nope" }),
-    ).rejects.toThrow("port");
+    await expect(loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_PORT: "nope" })).rejects.toThrow(
+      "port",
+    );
     await expect(
       loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_DIGEST_HOUR: "24" }),
     ).rejects.toThrow("dailyDigestHour");
@@ -82,9 +84,7 @@ describe("configuration and composition", () => {
     await backend.updateConfig({
       llm: { provider: "ollama", model: "new-model" },
     });
-    await expect(
-      readFile(join(path, "passport.config.json")),
-    ).rejects.toThrow();
+    await expect(readFile(join(path, "passport.config.json"))).rejects.toThrow();
     await backend.close();
     const real = await createRealBackend(config);
     let accountId: string;
@@ -100,22 +100,16 @@ describe("configuration and composition", () => {
       });
       await real.syncAccount(account.id);
       expect((await stat(join(path, "master.key"))).mode & 0o777).toBe(0o600);
-      expect(
-        (await stat(join(path, "passport.config.json"))).mode & 0o777,
-      ).toBe(0o600);
+      expect((await stat(join(path, "passport.config.json"))).mode & 0o777).toBe(0o600);
     } finally {
       await real.close();
     }
-    const restarted = await createRealBackend(
-      await loadConfig({ PASSPORT_DATA_DIR: path }),
-    );
+    const restarted = await createRealBackend(await loadConfig({ PASSPORT_DATA_DIR: path }));
     try {
-      expect(await restarted.store.accounts.getCredentials(accountId!)).toEqual(
-        { token: "test-credential" },
-      );
-      expect(
-        (await restarted.store.emails.query({ limit: 100 })).items,
-      ).toHaveLength(40);
+      expect(await restarted.store.accounts.getCredentials(accountId!)).toEqual({
+        token: "test-credential",
+      });
+      expect((await restarted.store.emails.query({ limit: 100 })).items).toHaveLength(40);
     } finally {
       await restarted.close();
     }
@@ -136,9 +130,9 @@ describe("configuration and composition", () => {
       await backend.updateConfig({
         llm: { ...config.llm, apiKey: "file-key" },
       });
-      expect(
-        await (await createApp(backend).request("/api/accounts")).text(),
-      ).not.toContain("file-key");
+      expect(await (await createApp(backend).request("/api/accounts")).text()).not.toContain(
+        "file-key",
+      );
     } finally {
       await backend.close();
     }

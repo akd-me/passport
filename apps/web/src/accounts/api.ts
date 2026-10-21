@@ -39,17 +39,13 @@ export const accountApi = {
     accountId?: string;
   }) => post<ConnectionAttempt>("/accounts/oauth/start", input),
   status: (id: string) =>
-    request<ConnectionStatus>(
-      `/accounts/oauth/status/${encodeURIComponent(id)}`,
-    ),
+    request<ConnectionStatus>(`/accounts/oauth/status/${encodeURIComponent(id)}`),
   test: (input: unknown) => post<{ ok: boolean }>("/accounts/test", input),
   remove: (id: string) =>
     request<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
   backfill: (id: string, days: number) =>
-    post<{ ok: boolean }>(
-      `/accounts/${encodeURIComponent(id)}/backfill?days=${days}`,
-    ),
+    post<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}/backfill?days=${days}`),
   doctor: () => request<DoctorReport>("/doctor"),
 };

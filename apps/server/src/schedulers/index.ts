@@ -1,7 +1,8 @@
 import type { Backend } from "../backend.js";
 import { getSchedulerService, type SchedulerService } from "./service.js";
-export { getSchedulerService } from "./service.js";
+
 export type { JobView, RoutineDefinition } from "./service.js";
+export { getSchedulerService } from "./service.js";
 export interface SchedulerHandle {
   readonly ready: Promise<void>;
   readonly scheduler: SchedulerService["scheduler"];

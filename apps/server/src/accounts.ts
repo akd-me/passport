@@ -1,3 +1,4 @@
+import { newId } from "@passport/store";
 import type {
   Account,
   AccountCapabilities,
@@ -7,7 +8,6 @@ import type {
 import type { Backend } from "./backend.js";
 import { ApiError } from "./errors.js";
 import { member, object, string } from "./validation.js";
-import { newId } from "@passport/store";
 
 /** Descriptor fields marked secret are sent exclusively to the credential store. */
 export async function addAccount(
@@ -38,17 +38,11 @@ export async function addAccount(
       settings[field.id] = port;
     } else if (["tls", "smtpTls"].includes(field.id)) {
       if (!["true", "false"].includes(text))
-        throw new ApiError(
-          "INVALID_FIELD",
-          `${field.label} must be true or false`,
-        );
+        throw new ApiError("INVALID_FIELD", `${field.label} must be true or false`);
       settings[field.id] = text === "true";
     } else settings[field.id] = text;
   }
-  const emailAddress = string(
-    body.emailAddress ?? settings.emailAddress,
-    "emailAddress",
-  );
+  const emailAddress = string(body.emailAddress ?? settings.emailAddress, "emailAddress");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress))
     throw new ApiError("INVALID_FIELD", "Enter a valid email address");
   const capabilities: AccountCapabilities =
@@ -61,12 +55,7 @@ export async function addAccount(
           labels: true,
           submit: true,
         }
-      : [
-            "google-calendar",
-            "graph-calendar",
-            "caldav",
-            "jmap-calendar",
-          ].includes(kind)
+      : ["google-calendar", "graph-calendar", "caldav", "jmap-calendar"].includes(kind)
         ? {
             mail: false,
             calendar: true,

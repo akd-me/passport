@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createProviderRegistry } from "@passport/providers";
 import type { ProviderRegistry } from "@passport/types";
 import { Hono } from "hono";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createApp } from "../auth.test-client.js";
 import { createRealBackend, type RealBackend } from "../compose.js";
 import { defaultConfig } from "../config.js";
-import { createApp } from "../auth.test-client.js";
+import { ApiError } from "../errors.js";
 import { BrowserOAuth, persistOAuthCredentials } from "./oauth.js";
 import { registerOnboarding } from "./routes.js";
-import { ApiError } from "../errors.js";
 
 interface Attempt {
   authUrl: string;
@@ -17,9 +17,7 @@ interface Attempt {
 }
 
 describe("browser account OAuth", () => {
-  let backend: RealBackend,
-    fetcher: ReturnType<typeof vi.fn<typeof fetch>>,
-    now: number;
+  let backend: RealBackend, fetcher: ReturnType<typeof vi.fn<typeof fetch>>, now: number;
   beforeEach(async () => {
     now = Date.now();
     fetcher = vi.fn<typeof fetch>(async (url, init) => {
@@ -38,8 +36,7 @@ describe("browser account OAuth", () => {
     const registry = createProviderRegistry({ fetch: fetcher });
     const offline: ProviderRegistry = {
       ...registry,
-      mail: (kind) =>
-        registry.mail(kind === "gmail" || kind === "graph" ? "mock" : kind),
+      mail: (kind) => registry.mail(kind === "gmail" || kind === "graph" ? "mock" : kind),
       calendar: () => registry.calendar("mock"),
     };
     backend = await createRealBackend(defaultConfig(), {
@@ -61,10 +58,7 @@ describe("browser account OAuth", () => {
   function appFor(oauth: BrowserOAuth) {
     const app = new Hono();
     app.onError((error, c) =>
-      c.json(
-        { error: { code: error instanceof ApiError ? error.code : "FAILED" } },
-        400,
-      ),
+      c.json({ error: { code: error instanceof ApiError ? error.code : "FAILED" } }, 400),
     );
     registerOnboarding(app, backend, { oauth });
     return app;
@@ -72,9 +66,7 @@ describe("browser account OAuth", () => {
   it.each(["gmail", "graph"] as const)(
     "exchanges %s with a nonce-bound state and S256 verifier; creates mail/calendar with encrypted shared tokens",
     async (kind) => {
-      const app = appFor(
-        new BrowserOAuth(backend, { now: () => now, fetch: fetcher }),
-      );
+      const app = appFor(new BrowserOAuth(backend, { now: () => now, fetch: fetcher }));
       const response = await post(app, {
         kind,
         clientId: "own-client",
@@ -89,25 +81,17 @@ describe("browser account OAuth", () => {
       expect(auth.searchParams.get("scope")).toContain(
         kind === "gmail" ? "calendar.events" : "Calendars.ReadWrite",
       );
-      expect(auth.searchParams.get("scope")).toContain(
-        kind === "gmail" ? "email" : "User.Read",
-      );
+      expect(auth.searchParams.get("scope")).toContain(kind === "gmail" ? "email" : "User.Read");
       const callback = `http://127.0.0.1:3000/oauth/callback?state=${result.attemptId}&code=once`;
       const connected = await app.request(callback, { headers: { cookie } });
       expect(connected.status).toBe(303);
-      const exchange = fetcher.mock.calls.find(([url]) =>
-        String(url).includes("/token"),
-      )!;
+      const exchange = fetcher.mock.calls.find(([url]) => String(url).includes("/token"))!;
       const fields = new URLSearchParams(String(exchange[1]!.body));
       expect(fields.get("client_secret")).toBeNull();
-      expect(
-        createHash("sha256")
-          .update(fields.get("code_verifier")!)
-          .digest("base64url"),
-      ).toBe(auth.searchParams.get("code_challenge"));
-      expect(fields.get("redirect_uri")).toBe(
-        "http://127.0.0.1:3000/oauth/callback",
+      expect(createHash("sha256").update(fields.get("code_verifier")!).digest("base64url")).toBe(
+        auth.searchParams.get("code_challenge"),
       );
+      expect(fields.get("redirect_uri")).toBe("http://127.0.0.1:3000/oauth/callback");
       const accounts = await backend.store.accounts.list();
       expect(accounts).toHaveLength(2);
       const mail = accounts.find((a) => a.kind === kind)!,
@@ -124,12 +108,8 @@ describe("browser account OAuth", () => {
         await backend.store.accounts.getCredentials(mail.id),
       );
       expect(backend.syncAccount).toHaveBeenCalledWith(mail.id);
-      expect(connected.headers.get("location")).toBe(
-        `/accounts?connected=${mail.id}`,
-      );
-      expect(
-        (await app.request(callback, { headers: { cookie } })).status,
-      ).toBe(400);
+      expect(connected.headers.get("location")).toBe(`/accounts?connected=${mail.id}`);
+      expect((await app.request(callback, { headers: { cookie } })).status).toBe(400);
       await persistOAuthCredentials(backend.store, mail.id, {
         access_token: "rotated",
       });
@@ -139,9 +119,7 @@ describe("browser account OAuth", () => {
     },
   );
   it("rejects mismatched states, missing/foreign nonce cookies and expired attempts before exchanging a code", async () => {
-    const app = appFor(
-      new BrowserOAuth(backend, { now: () => now, fetch: fetcher }),
-    );
+    const app = appFor(new BrowserOAuth(backend, { now: () => now, fetch: fetcher }));
     const started = await post(app, { kind: "gmail", clientId: "client" }),
       result = (await started.json()) as Attempt;
     const callback = `http://127.0.0.1:3000/oauth/callback?state=${result.attemptId}&code=code`;
@@ -162,9 +140,7 @@ describe("browser account OAuth", () => {
       ).status,
     ).toBe(400);
     now += 600001;
-    expect((await app.request(callback, { headers: { cookie } })).status).toBe(
-      400,
-    );
+    expect((await app.request(callback, { headers: { cookie } })).status).toBe(400);
     expect(fetcher).not.toHaveBeenCalled();
   });
   it("keeps simultaneous accounts independent and handles denial without creating accounts", async () => {
@@ -184,14 +160,11 @@ describe("browser account OAuth", () => {
     expect(await backend.store.accounts.list()).toHaveLength(0);
     expect(
       (
-        await app.request(
-          `http://127.0.0.1:3000/api/accounts/oauth/status/${b.attemptId}`,
-          {
-            headers: {
-              cookie: second.headers.get("set-cookie")!.split(";")[0]!,
-            },
+        await app.request(`http://127.0.0.1:3000/api/accounts/oauth/status/${b.attemptId}`, {
+          headers: {
+            cookie: second.headers.get("set-cookie")!.split(";")[0]!,
           },
-        )
+        })
       ).status,
     ).toBe(200);
   });
@@ -212,9 +185,7 @@ describe("browser account OAuth", () => {
         calendar: false,
       }),
       result = (await response.json()) as Attempt;
-    expect(new URL(result.authUrl).searchParams.get("scope")).not.toContain(
-      "calendar",
-    );
+    expect(new URL(result.authUrl).searchParams.get("scope")).not.toContain("calendar");
     expect(
       (
         await app.request(
@@ -231,14 +202,9 @@ describe("browser account OAuth", () => {
   });
   it("re-authorizes in place, rejects a different identity, and pauses a calendar when consent is removed", async () => {
     const oauth = new BrowserOAuth(backend, { fetch: fetcher });
-    const first = await oauth.start(
-      { kind: "gmail", clientId: "client" },
-      "http://127.0.0.1:3000",
-    );
+    const first = await oauth.start({ kind: "gmail", clientId: "client" }, "http://127.0.0.1:3000");
     const mail = await oauth.callback(
-      new URL(
-        `http://127.0.0.1:3000/oauth/callback?state=${first.attemptId}&code=first`,
-      ),
+      new URL(`http://127.0.0.1:3000/oauth/callback?state=${first.attemptId}&code=first`),
       first.nonce,
     );
     const next = await oauth.start(
@@ -251,9 +217,7 @@ describe("browser account OAuth", () => {
       "http://127.0.0.1:3000",
     );
     const reconnected = await oauth.callback(
-      new URL(
-        `http://127.0.0.1:3000/oauth/callback?state=${next.attemptId}&code=second`,
-      ),
+      new URL(`http://127.0.0.1:3000/oauth/callback?state=${next.attemptId}&code=second`),
       next.nonce,
     );
     expect(reconnected.id).toBe(mail.id);
@@ -273,29 +237,22 @@ describe("browser account OAuth", () => {
     );
     await expect(
       oauth.callback(
-        new URL(
-          `http://127.0.0.1:3000/oauth/callback?state=${wrong.attemptId}&code=third`,
-        ),
+        new URL(`http://127.0.0.1:3000/oauth/callback?state=${wrong.attemptId}&code=third`),
         wrong.nonce,
       ),
     ).rejects.toMatchObject({ code: "OAUTH_IDENTITY_MISMATCH" });
-    expect((await backend.store.accounts.get(mail.id))?.emailAddress).toBe(
-      "alex@example.com",
-    );
+    expect((await backend.store.accounts.get(mail.id))?.emailAddress).toBe("alex@example.com");
   });
   it("rejects cross-origin start requests, malformed options and non-loopback redirects", async () => {
     const app = createApp(backend);
-    const cross = await app.request(
-      "http://127.0.0.1:3000/api/accounts/oauth/start",
-      {
-        method: "POST",
-        headers: {
-          origin: "https://evil.example",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ kind: "gmail", clientId: "client" }),
+    const cross = await app.request("http://127.0.0.1:3000/api/accounts/oauth/start", {
+      method: "POST",
+      headers: {
+        origin: "https://evil.example",
+        "content-type": "application/json",
       },
-    );
+      body: JSON.stringify({ kind: "gmail", clientId: "client" }),
+    });
     expect(cross.status).toBe(403);
     expect(
       (
@@ -308,10 +265,7 @@ describe("browser account OAuth", () => {
     ).toBe(400);
     const oauth = new BrowserOAuth(backend);
     await expect(
-      oauth.start(
-        { kind: "gmail", clientId: "client" },
-        "http://remote.example:3000",
-      ),
+      oauth.start({ kind: "gmail", clientId: "client" }, "http://remote.example:3000"),
     ).rejects.toMatchObject({ code: "INVALID_REDIRECT" });
   });
 });

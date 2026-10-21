@@ -15,7 +15,7 @@ export class InMemoryEventBus implements EventBus {
     let handlers = this.handlers.get(type);
     if (!handlers) this.handlers.set(type, (handlers = new Set()));
     // A wrapper keeps separate subscriptions independent even for the same callback.
-    const callback: Handler = event => handler(event as Extract<DomainEvent, { type: T }>);
+    const callback: Handler = (event) => handler(event as Extract<DomainEvent, { type: T }>);
     handlers.add(callback);
     return () => {
       handlers.delete(callback);
@@ -24,9 +24,11 @@ export class InMemoryEventBus implements EventBus {
   }
 
   onAny(handler: Handler): () => void {
-    const callback: Handler = event => handler(event);
+    const callback: Handler = (event) => handler(event);
     this.anyHandlers.add(callback);
-    return () => { this.anyHandlers.delete(callback); };
+    return () => {
+      this.anyHandlers.delete(callback);
+    };
   }
 
   emit(event: DomainEvent): void {
@@ -37,7 +39,9 @@ export class InMemoryEventBus implements EventBus {
         // The interface is synchronous; also isolate rejections from async consumers.
         const result: unknown = callback(event);
         if (result && typeof (result as PromiseLike<unknown>).then === "function") {
-          void Promise.resolve(result).catch(() => logger.error("Event handler rejected", { eventType: event.type }));
+          void Promise.resolve(result).catch(() =>
+            logger.error("Event handler rejected", { eventType: event.type }),
+          );
         }
       } catch {
         logger.error("Event handler failed", { eventType: event.type });

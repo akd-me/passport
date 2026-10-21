@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { request } from "./api";
-import { initializeAuth, handleUnauthorized, websocketUrl } from "./auth";
+import { handleUnauthorized, initializeAuth, websocketUrl } from "./auth";
 
 describe("web authentication", () => {
   const fetchMock = vi.fn<typeof fetch>();
@@ -11,8 +11,7 @@ describe("web authentication", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
   afterEach(() => vi.unstubAllGlobals());
-  const response = (body: unknown, status = 200) =>
-    new Response(JSON.stringify(body), { status });
+  const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
   it("shows the token form and server-provided file hint before mounting an unauthenticated workspace", async () => {
     fetchMock.mockResolvedValue(
@@ -39,9 +38,7 @@ describe("web authentication", () => {
     history.replaceState(null, "", "/?token=dev-test-token&view=mail#section");
     fetchMock.mockImplementation(async (input) => {
       expect(location.search).not.toContain("token");
-      return input === "/api/auth/login"
-        ? response({}, 200)
-        : response({ authenticated: true });
+      return input === "/api/auth/login" ? response({}, 200) : response({ authenticated: true });
     });
     const render = vi.fn();
     await initializeAuth(render);
@@ -61,18 +58,12 @@ describe("web authentication", () => {
   it("sends pasted tokens through login and displays rejected-token errors", async () => {
     fetchMock
       .mockResolvedValueOnce(response({ authenticated: false }))
-      .mockResolvedValueOnce(
-        response({ error: { code: "UNAUTHORIZED" } }, 401),
-      );
+      .mockResolvedValueOnce(response({ error: { code: "UNAUTHORIZED" } }, 401));
     await initializeAuth(vi.fn());
     document.querySelector("input")!.value = "incorrect";
-    document
-      .querySelector("form")!
-      .dispatchEvent(new Event("submit", { cancelable: true }));
+    document.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
     await vi.waitFor(() =>
-      expect(document.querySelector('[role="alert"]')?.textContent).toContain(
-        "not accepted",
-      ),
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain("not accepted"),
     );
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/auth/login",

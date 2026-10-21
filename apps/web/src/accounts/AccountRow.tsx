@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { api } from "../api";
-import { useTask } from "../state";
 import { Feedback, Icon, relativeTime } from "../components/ui";
-import { accountApi, type ConnectedAccount } from "./api";
+import { useTask } from "../state";
 import { AccountDot } from "./AccountFilter";
+import { accountApi, type ConnectedAccount } from "./api";
 
 const kindLabel: Record<string, string> = {
   gmail: "Gmail",
@@ -17,8 +17,7 @@ const kindLabel: Record<string, string> = {
 };
 export const providerName = (kind: string) => kindLabel[kind] ?? kind;
 export const needsReauthorization = (account: ConnectedAccount) =>
-  !!account.settings.reauthorizationRequired ||
-  account.lastSyncError === "REAUTHORIZE_REQUIRED";
+  !!account.settings.reauthorizationRequired || account.lastSyncError === "REAUTHORIZE_REQUIRED";
 export function syncSummary(account: ConnectedAccount) {
   if (needsReauthorization(account)) return "Sign-in expired";
   if (account.syncing) return "Syncing…";
@@ -38,12 +37,7 @@ export function AccountRow({
   const task = useTask(),
     [days, setDays] = useState(365);
   const needsAuth = needsReauthorization(account);
-  const oauth = [
-    "gmail",
-    "graph",
-    "google-calendar",
-    "graph-calendar",
-  ].includes(account.kind);
+  const oauth = ["gmail", "graph", "google-calendar", "graph-calendar"].includes(account.kind);
   return (
     <div className="account-row">
       <AccountDot id={account.id} />
@@ -86,17 +80,10 @@ export function AccountRow({
               <button
                 className="btn btn-sm"
                 disabled={
-                  task.busy ||
-                  account.syncing ||
-                  needsAuth ||
-                  !Number.isInteger(days) ||
-                  days < 1
+                  task.busy || account.syncing || needsAuth || !Number.isInteger(days) || days < 1
                 }
                 onClick={() =>
-                  task.run(
-                    () => accountApi.backfill(account.id, days),
-                    "Older mail synced.",
-                  )
+                  task.run(() => accountApi.backfill(account.id, days), "Older mail synced.")
                 }
               >
                 Backfill
@@ -118,9 +105,7 @@ export function AccountRow({
         <button
           className="btn btn-sm"
           disabled={task.busy || account.syncing || needsAuth}
-          onClick={() =>
-            task.run(() => api.sync(account.id), "Account synced.")
-          }
+          onClick={() => task.run(() => api.sync(account.id), "Account synced.")}
         >
           <Icon name="sync" size={14} />
           Sync now
@@ -136,10 +121,7 @@ export function AccountRow({
                 `Remove ${account.emailAddress} from Passport? This removes its local account data and linked calendar.`,
               )
             )
-              void task.run(
-                () => accountApi.remove(account.id),
-                "Account removed.",
-              );
+              void task.run(() => accountApi.remove(account.id), "Account removed.");
           }}
         >
           <Icon name="trash" size={15} />

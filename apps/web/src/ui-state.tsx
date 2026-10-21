@@ -1,20 +1,15 @@
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 
-export type SettingsSection =
-  | "model"
-  | "accounts"
-  | "trust"
-  | "routines"
-  | "advanced";
+export type SettingsSection = "model" | "accounts" | "trust" | "routines" | "advanced";
 export type ThemePreference = "system" | "light" | "dark";
 
 interface UiState {
@@ -71,14 +66,10 @@ export function UiProvider({ children }: { children: ReactNode }) {
     [connecting, setConnecting] = useState(false),
     [palette, setPalette] = useState(false),
     [sidebar, setSidebar] = useState(
-      () =>
-        !narrow() &&
-        stored("passport.sidebar", "open", ["open", "closed"]) === "open",
+      () => !narrow() && stored("passport.sidebar", "open", ["open", "closed"]) === "open",
     ),
     [details, setDetails] = useState(
-      () =>
-        !narrow(1180) &&
-        stored("passport.details", "open", ["open", "closed"]) === "open",
+      () => !narrow(1180) && stored("passport.details", "open", ["open", "closed"]) === "open",
     ),
     [theme, setThemeState] = useState<ThemePreference>(() =>
       stored("passport.theme", "system", ["system", "light", "dark"]),
@@ -171,7 +162,6 @@ export const useUi = () => useContext(Ui) ?? fallback;
 export function isTyping(target: EventTarget | null) {
   return (
     target instanceof HTMLElement &&
-    (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
-      target.isContentEditable)
+    (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable)
   );
 }

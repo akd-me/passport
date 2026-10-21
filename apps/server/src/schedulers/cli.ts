@@ -1,9 +1,9 @@
+import { serverClient } from "../cli/server-client.js";
 import { createRealBackend } from "../compose.js";
 import { loadConfig } from "../config.js";
 import { createDemoBackend } from "../demo/index.js";
 import { ApiError } from "../errors.js";
 import { getSchedulerService } from "./service.js";
-import { serverClient } from "../cli/server-client.js";
 
 /** Use a running server when available; otherwise operate on the local store without timers. */
 export async function runJobsCommand(args: string[]) {
@@ -24,9 +24,7 @@ export async function runJobsCommand(args: string[]) {
   if (
     command !== "list" &&
     command !== "add-routine" &&
-    (!["run", "pause", "resume"].includes(command ?? "") ||
-      !id ||
-      id.startsWith("--"))
+    (!["run", "pause", "resume"].includes(command ?? "") || !id || id.startsWith("--"))
   )
     throw new ApiError(
       "INVALID_COMMAND",
@@ -40,7 +38,11 @@ export async function runJobsCommand(args: string[]) {
         command === "list" || command === "add-routine"
           ? "/api/jobs"
           : `/api/jobs/${encodeURIComponent(id!)}/${command}`;
-      const result = await request(path, command === "list" ? "GET" : "POST", command === "add-routine" ? routine : undefined);
+      const result = await request(
+        path,
+        command === "list" ? "GET" : "POST",
+        command === "add-routine" ? routine : undefined,
+      );
       console.log(JSON.stringify(result, null, 2));
       return;
     }

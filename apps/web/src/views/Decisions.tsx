@@ -1,21 +1,8 @@
+import type { ActionRecord, DraftInput, Email, Matter, Page, TrustState } from "@passport/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
-import type {
-  ActionRecord,
-  DraftInput,
-  Email,
-  Matter,
-  Page,
-  TrustState,
-} from "@passport/types";
-import { api, queryString, type MatterDetail, type TrustData } from "../api";
-import {
-  AccountDot,
-  useAccountId,
-  useAccountScopeLink,
-} from "../accounts/AccountFilter";
-import { useResource, useTask } from "../state";
-import { isTyping, useUi } from "../ui-state";
+import { AccountDot, useAccountId, useAccountScopeLink } from "../accounts/AccountFilter";
+import { api, type MatterDetail, queryString, type TrustData } from "../api";
 import {
   Avatar,
   Empty,
@@ -28,9 +15,11 @@ import {
   Verification,
 } from "../components/ui";
 import { actionLabel, categoryLabel } from "../labels";
-import { modeLabel, PromotionPrompts, TrustLadder } from "./Trust";
-import { Surface } from "../shell/Surface";
 import { Composer } from "../shell/Composer";
+import { Surface } from "../shell/Surface";
+import { useResource, useTask } from "../state";
+import { isTyping, useUi } from "../ui-state";
+import { modeLabel, PromotionPrompts, TrustLadder } from "./Trust";
 
 export function Countdown({ until }: { until: string }) {
   const [now, setNow] = useState(Date.now());
@@ -47,10 +36,8 @@ export function Countdown({ until }: { until: string }) {
     </span>
   );
 }
-const draftOf = (action: ActionRecord) =>
-  (action.request.params as { draft?: DraftInput }).draft;
-const recipients = (draft: DraftInput) =>
-  draft.to.map((p) => p.name ?? p.email).join(", ");
+const draftOf = (action: ActionRecord) => (action.request.params as { draft?: DraftInput }).draft;
+const recipients = (draft: DraftInput) => draft.to.map((p) => p.name ?? p.email).join(", ");
 
 /** One proposal: what the agent wants to do, the draft if there is one, and the decision. */
 export function DecisionCard({
@@ -104,9 +91,7 @@ export function DecisionCard({
     >
       <div className="proposal-head">
         <AccountDot id={action.request.accountId} />
-        <span className="proposal-kind">
-          {actionLabel(action.request.type)}
-        </span>
+        <span className="proposal-kind">{actionLabel(action.request.type)}</span>
         {draft && <span className="proposal-to">to {recipients(draft)}</span>}
         <time dateTime={action.createdAt}>{relativeTime(action.createdAt)}</time>
       </div>
@@ -159,10 +144,7 @@ export function DecisionCard({
               data-action="cancel"
               disabled={task.busy}
               onClick={() =>
-                task.run(
-                  () => api.cancel(action.id),
-                  "Send cancelled. Nothing left your outbox.",
-                )
+                task.run(() => api.cancel(action.id), "Send cancelled. Nothing left your outbox.")
               }
             >
               Cancel send
@@ -198,10 +180,7 @@ export function DecisionCard({
               data-action="reject"
               disabled={task.busy}
               onClick={() =>
-                task.run(
-                  () => api.reject(action.id),
-                  "Rejected. Passport learns from that.",
-                )
+                task.run(() => api.reject(action.id), "Rejected. Passport learns from that.")
               }
             >
               Reject
@@ -234,9 +213,7 @@ export function CancelButton({ action }: { action: ActionRecord }) {
         className="btn btn-sm"
         disabled={task.busy}
         aria-label={`Cancel send: ${action.request.reason}`}
-        onClick={() =>
-          task.run(() => api.cancel(action.id), "Send cancelled.")
-        }
+        onClick={() => task.run(() => api.cancel(action.id), "Send cancelled.")}
       >
         Cancel send
       </button>
@@ -253,10 +230,7 @@ export function UndoButton({ action }: { action: ActionRecord }) {
         disabled={task.busy}
         aria-label={`Undo: ${action.request.reason}`}
         onClick={() =>
-          task.run(
-            () => api.undo(action.id),
-            "Undone. The reversal is in your activity.",
-          )
+          task.run(() => api.undo(action.id), "Undone. The reversal is in your activity.")
         }
       >
         <Icon name="undo" size={13} />
@@ -347,22 +321,17 @@ const reversibilityText: Record<string, string> = {
 export function ProposalDetails({ action }: { action?: ActionRecord }) {
   const draft = action && draftOf(action);
   const source = useResource<Email>(
-    draft?.inReplyToEmailId
-      ? `/emails/${encodeURIComponent(draft.inReplyToEmailId)}`
-      : null,
+    draft?.inReplyToEmailId ? `/emails/${encodeURIComponent(draft.inReplyToEmailId)}` : null,
   );
   const matter = useResource<MatterDetail>(
-    action?.request.matterId
-      ? `/matters/${encodeURIComponent(action.request.matterId)}`
-      : null,
+    action?.request.matterId ? `/matters/${encodeURIComponent(action.request.matterId)}` : null,
   );
   const trust = useResource<TrustData>("/trust"),
     { openSettings } = useUi();
   if (!action)
     return (
       <p className="details-empty">
-        Select a proposal to see the message it answers, its matter and why
-        Passport is asking.
+        Select a proposal to see the message it answers, its matter and why Passport is asking.
       </p>
     );
   const state: TrustState | undefined = trust.data?.categories.find(
@@ -395,11 +364,7 @@ export function ProposalDetails({ action }: { action?: ActionRecord }) {
             </>
           )}
         </dl>
-        <button
-          type="button"
-          className="link-btn"
-          onClick={() => openSettings("trust")}
-        >
+        <button type="button" className="link-btn" onClick={() => openSettings("trust")}>
           Adjust trust for this category
         </button>
       </section>
@@ -408,9 +373,7 @@ export function ProposalDetails({ action }: { action?: ActionRecord }) {
           <h3>In reply to</h3>
           <div className="source-mail">
             <div className="source-from">
-              <strong>
-                {source.data.from[0]?.name ?? source.data.from[0]?.email}
-              </strong>
+              <strong>{source.data.from[0]?.name ?? source.data.from[0]?.email}</strong>
               <MailVerification email={source.data} />
             </div>
             <div className="source-subject">{source.data.subject}</div>
@@ -421,9 +384,7 @@ export function ProposalDetails({ action }: { action?: ActionRecord }) {
                 minute: "2-digit",
               })}
             </time>
-            <p className="source-body">
-              {source.data.textBody ?? source.data.preview}
-            </p>
+            <p className="source-body">{source.data.textBody ?? source.data.preview}</p>
           </div>
         </section>
       )}
@@ -466,12 +427,7 @@ export function groupProposals(
   grouping: Grouping,
 ): Array<[string, ActionRecord[]]> {
   if (grouping === "newest")
-    return [
-      [
-        "newest",
-        [...proposed].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-      ],
-    ];
+    return [["newest", [...proposed].sort((a, b) => b.createdAt.localeCompare(a.createdAt))]];
   const grouped = new Map<string, ActionRecord[]>();
   for (const action of proposed) {
     const key = action.request.matterId ?? "unassigned";
@@ -479,11 +435,18 @@ export function groupProposals(
   }
   const unassigned = grouped.get("unassigned");
   grouped.delete("unassigned");
-  return [...grouped, ...(unassigned ? [["unassigned", unassigned] as [string, ActionRecord[]]] : [])];
+  return [
+    ...grouped,
+    ...(unassigned ? [["unassigned", unassigned] as [string, ActionRecord[]]] : []),
+  ];
 }
 
 /** j/k to move, a/r/e to decide on the selected proposal. */
-function useQueueKeys(ordered: ActionRecord[], selected: string | undefined, select: (id: string) => void) {
+function useQueueKeys(
+  ordered: ActionRecord[],
+  selected: string | undefined,
+  select: (id: string) => void,
+) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (
@@ -495,10 +458,16 @@ function useQueueKeys(ordered: ActionRecord[], selected: string | undefined, sel
       )
         return;
       if (!["j", "k", "a", "r", "e", "ArrowDown", "ArrowUp"].includes(event.key)) return;
-      if (event.key.startsWith("Arrow") && !(event.target as HTMLElement)?.closest?.("[data-decision]"))
+      if (
+        event.key.startsWith("Arrow") &&
+        !(event.target as HTMLElement)?.closest?.("[data-decision]")
+      )
         return;
       event.preventDefault();
-      const index = Math.max(0, ordered.findIndex((a) => a.id === selected));
+      const index = Math.max(
+        0,
+        ordered.findIndex((a) => a.id === selected),
+      );
       if (["j", "k", "ArrowDown", "ArrowUp"].includes(event.key)) {
         const down = event.key === "j" || event.key === "ArrowDown";
         const next = ordered[Math.max(0, Math.min(ordered.length - 1, index + (down ? 1 : -1)))];
@@ -528,9 +497,7 @@ function useQueueKeys(ordered: ActionRecord[], selected: string | undefined, sel
 export function WorkQueue() {
   const accountId = useAccountId(),
     scope = useAccountScopeLink();
-  const decisions = useResource<Page<ActionRecord>>(
-      `/decisions${queryString({ accountId })}`,
-    ),
+  const decisions = useResource<Page<ActionRecord>>(`/decisions${queryString({ accountId })}`),
     matters = useResource<Matter[]>(`/matters${queryString({ accountId })}`);
   const [selected, setSelected] = useState<string>(),
     [grouping, setGrouping] = useState<Grouping>("matter"),
@@ -545,8 +512,7 @@ export function WorkQueue() {
   }, [ordered, selected]);
   useQueueKeys(ordered, selected, setSelected);
   const current = ordered.find((a) => a.id === selected);
-  const matterTitle = (id: string) =>
-    matters.data?.find((m) => m.id === id)?.title ?? "Matter";
+  const matterTitle = (id: string) => matters.data?.find((m) => m.id === id)?.title ?? "Matter";
   return (
     <Surface
       title="Queue"
@@ -605,12 +571,22 @@ export function WorkQueue() {
           {held.length > 0 && <OutboxStrip held={held} />}
           {!proposed.length && (
             <Empty title="You’re clear for now.">
-              New proposals land here as mail arrives. Ask Passport for
-              something below, or press <Kbd>/</Kbd> to start typing.
+              New proposals land here as mail arrives. Ask Passport for something below, or press{" "}
+              <Kbd>/</Kbd> to start typing.
             </Empty>
           )}
           {groups.map(([id, actions]) => (
-            <section className="group" key={id} aria-label={id === "newest" ? "Newest first" : id === "unassigned" ? "Not in a matter" : matterTitle(id)}>
+            <section
+              className="group"
+              key={id}
+              aria-label={
+                id === "newest"
+                  ? "Newest first"
+                  : id === "unassigned"
+                    ? "Not in a matter"
+                    : matterTitle(id)
+              }
+            >
               {id !== "newest" && (
                 <div className="group-head">
                   <h2>

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { Email, Person } from "@passport/types";
 import {
   Activity,
   ArrowRight,
@@ -19,13 +19,14 @@ import {
   LoaderCircle,
   Lock,
   LockOpen,
+  type LucideIcon,
   Mail,
   Monitor,
   Moon,
   PanelLeft,
   PanelRight,
-  PenLine,
   Pencil,
+  PenLine,
   Plus,
   RefreshCw,
   Repeat,
@@ -39,9 +40,8 @@ import {
   Undo2,
   Users,
   X,
-  type LucideIcon,
 } from "lucide-react";
-import type { Email, Person } from "@passport/types";
+import type { ReactNode } from "react";
 
 const icons: Record<string, LucideIcon> = {
   decisions: Inbox,
@@ -107,13 +107,7 @@ export function Icon({
 }
 export const humanize = (value: string) =>
   value.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
-export function Badge({
-  children,
-  tone = "",
-}: {
-  children: ReactNode;
-  tone?: string;
-}) {
+export function Badge({ children, tone = "" }: { children: ReactNode; tone?: string }) {
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 const verificationText = {
@@ -133,10 +127,7 @@ export function Verification({
 }) {
   const [label, explanation] = verificationText[person.verification];
   return (
-    <span
-      className={`verification ${person.verification}`}
-      title={explanation}
-    >
+    <span className={`verification ${person.verification}`} title={explanation}>
       <span className="verification-dot" aria-hidden="true" />
       {label}
     </span>
@@ -145,13 +136,7 @@ export function Verification({
 export function MailVerification({ email }: { email: Email }) {
   return <Verification person={{ verification: email.verification.passport }} />;
 }
-export function Avatar({
-  name,
-  small = false,
-}: {
-  name: string;
-  small?: boolean;
-}) {
+export function Avatar({ name, small = false }: { name: string; small?: boolean }) {
   return (
     <span className={`avatar ${small ? "small" : ""}`} aria-hidden="true">
       {name
@@ -222,8 +207,7 @@ export function Empty({
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="kbd">{children}</kbd>;
 }
-export const isMac =
-  typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator.platform);
+export const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator.platform);
 export const mod = isMac ? "⌘" : "Ctrl+";
 export function relativeTime(at: string) {
   const delta = Math.floor((Date.now() - Date.parse(at)) / 60000);

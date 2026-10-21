@@ -5,11 +5,10 @@
  */
 :root {
   color-scheme: light dark;
-  --font-ui: "Public Sans Variable", "Public Sans", system-ui, -apple-system,
-    "Segoe UI", sans-serif;
+  --font-ui:
+    "Public Sans Variable", "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mail: "Source Serif 4 Variable", "Source Serif 4", Georgia, serif;
-  --font-code: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
-    monospace;
+  --font-code: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
   --bg: light-dark(#f6f6f8, #16171b);
   --sidebar-bg: light-dark(#ededf1, #111215);
@@ -238,7 +237,9 @@ input[type="radio"] {
   font-size: var(--t-s);
   font-weight: 560;
   white-space: nowrap;
-  transition: background-color 120ms, border-color 120ms;
+  transition:
+    background-color 120ms,
+    border-color 120ms;
 }
 .btn:hover:not(:disabled) {
   background: var(--surface-2);
@@ -337,7 +338,7 @@ input[type="radio"] {
   border-bottom-width: 2px;
   background: var(--surface);
   color: var(--muted);
-  font: 600 10.5px/1 var(--font-ui);
+  font: 600 10.5px / 1 var(--font-ui);
 }
 .badge {
   display: inline-flex;
@@ -627,7 +628,9 @@ input[type="radio"] {
   background: var(--sidebar-active);
   color: var(--text);
   font-weight: 580;
-  box-shadow: 0 0 0 1px var(--border), 0 1px 2px var(--shadow-color);
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 1px 2px var(--shadow-color);
 }
 .side-row .icon {
   color: var(--muted);
@@ -868,7 +871,9 @@ input[type="radio"] {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-l);
-  box-shadow: 0 16px 40px -12px var(--shadow-color), 0 2px 6px var(--shadow-color);
+  box-shadow:
+    0 16px 40px -12px var(--shadow-color),
+    0 2px 6px var(--shadow-color);
   animation: pop-in 140ms var(--ease);
 }
 .popover-below {
@@ -1284,7 +1289,9 @@ input[type="radio"] {
 .segmented button[aria-checked="true"] {
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 1px 2px var(--shadow-color), 0 0 0 1px var(--border);
+  box-shadow:
+    0 1px 2px var(--shadow-color),
+    0 0 0 1px var(--border);
 }
 .group {
   margin-top: 22px;
@@ -1327,7 +1334,9 @@ input[type="radio"] {
   background: var(--surface);
   border: 1px solid var(--border);
   outline: none;
-  transition: border-color 120ms, box-shadow 120ms;
+  transition:
+    border-color 120ms,
+    box-shadow 120ms;
 }
 .proposal:hover {
   border-color: var(--border-strong);
@@ -1590,12 +1599,18 @@ input[type="radio"] {
   border: 1px solid var(--border-strong);
   border-radius: var(--r-xl);
   padding: 10px 10px 8px 14px;
-  box-shadow: 0 14px 30px -20px var(--shadow-color), 0 1px 2px var(--shadow-color);
-  transition: border-color 120ms, box-shadow 120ms;
+  box-shadow:
+    0 14px 30px -20px var(--shadow-color),
+    0 1px 2px var(--shadow-color);
+  transition:
+    border-color 120ms,
+    box-shadow 120ms;
 }
 .composer:focus-within {
   border-color: var(--ink-line);
-  box-shadow: 0 0 0 3px var(--ink-soft), 0 14px 30px -20px var(--shadow-color);
+  box-shadow:
+    0 0 0 3px var(--ink-soft),
+    0 14px 30px -20px var(--shadow-color);
 }
 .composer textarea {
   display: block;
@@ -2026,7 +2041,9 @@ a.row:hover {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 14px;
-  box-shadow: 0 30px 70px -20px var(--shadow-color), 0 4px 12px var(--shadow-color);
+  box-shadow:
+    0 30px 70px -20px var(--shadow-color),
+    0 4px 12px var(--shadow-color);
   overflow: hidden;
   outline: none;
   animation: dialog-in 180ms var(--ease);
@@ -2211,7 +2228,9 @@ a.row:hover {
   background: var(--sidebar-active);
   color: var(--text);
   font-weight: 600;
-  box-shadow: 0 0 0 1px var(--border), 0 1px 2px var(--shadow-color);
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 1px 2px var(--shadow-color);
 }
 .settings-nav button[aria-current="page"] .icon {
   color: var(--ink);

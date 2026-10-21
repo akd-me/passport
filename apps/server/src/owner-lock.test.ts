@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { acquireOwner, activeOwner } from "./owner-lock.js";
 
@@ -9,7 +9,9 @@ const owners: ReturnType<typeof acquireOwner>[] = [];
 afterEach(async () => {
   for (const owner of owners.splice(0)) owner.release();
   vi.useRealTimers();
-  await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 it("R9: owner leases exclude a second owner, heartbeat every ten seconds and expire at sixty", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "passport-owner-"));
@@ -37,7 +39,8 @@ it("R9: a replaced owner stops work and cannot overwrite or unlink its successor
   const dataDir = await mkdtemp(join(tmpdir(), "passport-owner-"));
   directories.push(dataDir);
   vi.useFakeTimers();
-  const lost = vi.fn(), owner = acquireOwner(dataDir, lost);
+  const lost = vi.fn(),
+    owner = acquireOwner(dataDir, lost);
   owners.push(owner);
   const path = join(dataDir, "owner.lock");
   const replacement = { ...JSON.parse(await readFile(path, "utf8")), id: "successor" };

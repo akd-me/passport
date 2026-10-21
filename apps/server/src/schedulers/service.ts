@@ -1,10 +1,10 @@
 import {
   createScheduler,
-  validateSchedule,
   type JobDefinition,
   type JobState,
   type Schedule,
   type Scheduler,
+  validateSchedule,
 } from "@passport/scheduler";
 import type { Account, Store } from "@passport/types";
 import type { Backend } from "../backend.js";
@@ -29,10 +29,7 @@ const ROUTINES_KEY = "scheduler:routines";
 function text(value: unknown, name: string, max: number) {
   const result = string(value, name).trim();
   if (!result || result.length > max)
-    throw new ApiError(
-      "INVALID_FIELD",
-      `${name} must contain 1–${max} characters`,
-    );
+    throw new ApiError("INVALID_FIELD", `${name} must contain 1–${max} characters`);
   return result;
 }
 function instruction(value: unknown) {
@@ -79,9 +76,7 @@ export class SchedulerService {
           logger.warn("Scheduler account discovery failed"),
         );
     });
-    void this.ready.catch(() =>
-      logger.error("Scheduler initialization failed"),
-    );
+    void this.ready.catch(() => logger.error("Scheduler initialization failed"));
   }
   private exclusive<T>(task: () => Promise<T>): Promise<T> {
     const result = this.queue.then(task);
@@ -125,14 +120,9 @@ export class SchedulerService {
       },
       { concurrency: "single" },
     );
-    await system(
-      "trust.decay",
-      "Trust decay",
-      { type: "daily", at: "03:00" },
-      async () => ({
-        summary: `Reviewed ${(await backend.policy.applyDecay()).length} trust categories`,
-      }),
-    );
+    await system("trust.decay", "Trust decay", { type: "daily", at: "03:00" }, async () => ({
+      summary: `Reviewed ${(await backend.policy.applyDecay()).length} trust categories`,
+    }));
     await system(
       "agent.daily_digest",
       "Daily digest",
@@ -228,10 +218,7 @@ export class SchedulerService {
     });
   }
   private saveRoutines() {
-    return this.backend.store.kv.set(
-      ROUTINES_KEY,
-      JSON.stringify([...this.routines.values()]),
-    );
+    return this.backend.store.kv.set(ROUTINES_KEY, JSON.stringify([...this.routines.values()]));
   }
   private async addAccount(account: Account) {
     const id = `sync:${account.id}`;
@@ -283,9 +270,7 @@ export class SchedulerService {
             if (changed && !signal.aborted && this.scheduler.get(id)?.enabled)
               await this.scheduler.runNow(id);
             return {
-              summary: changed
-                ? "Provider signaled changes"
-                : "Long poll ended",
+              summary: changed ? "Provider signaled changes" : "Long poll ended",
               nextRunInMs: 1000,
             };
           } finally {
@@ -308,16 +293,13 @@ export class SchedulerService {
     for (const id of this.bootRuns) {
       this.bootRuns.delete(id);
       if (this.scheduler.get(id)?.enabled)
-        void this.scheduler
-          .runNow(id)
-          .catch(() => logger.warn("Initial account job failed"));
+        void this.scheduler.runNow(id).catch(() => logger.warn("Initial account job failed"));
     }
   }
   private async discoverAccounts() {
     const accounts = await this.backend.store.accounts.list();
     const ids = new Set(accounts.map((a) => a.id));
-    for (const id of this.accounts.keys())
-      if (!ids.has(id)) await this.dropAccount(id);
+    for (const id of this.accounts.keys()) if (!ids.has(id)) await this.dropAccount(id);
     for (const account of accounts) await this.addAccount(account);
   }
   private async dropAccount(accountId: string) {
@@ -375,11 +357,7 @@ export class SchedulerService {
   async addRoutine(input: unknown) {
     await this.ready;
     const body = object(input);
-    if (
-      Object.keys(body).some(
-        (k) => !["name", "schedule", "routine"].includes(k),
-      )
-    )
+    if (Object.keys(body).some((k) => !["name", "schedule", "routine"].includes(k)))
       throw new ApiError("INVALID_FIELD", "Unknown routine field");
     const def: RoutineDefinition = {
       id: `routine:${crypto.randomUUID()}`,
@@ -406,28 +384,16 @@ export class SchedulerService {
       const body = object(input),
         state = this.scheduler.get(id);
       if (!state) throw new ApiError("NOT_FOUND", "Job not found", 404);
-      if (
-        Object.keys(body).some(
-          (k) => !["schedule", "enabled", "name", "routine"].includes(k),
-        )
-      )
+      if (Object.keys(body).some((k) => !["schedule", "enabled", "name", "routine"].includes(k)))
         throw new ApiError("INVALID_FIELD", "Unknown job field");
       if (body.enabled !== undefined && typeof body.enabled !== "boolean")
         throw new ApiError("INVALID_FIELD", "enabled must be boolean");
-      const schedule =
-        body.schedule === undefined
-          ? undefined
-          : validateSchedule(body.schedule);
+      const schedule = body.schedule === undefined ? undefined : validateSchedule(body.schedule);
       const routine = this.routines.get(id);
       if (!routine && (body.name !== undefined || body.routine !== undefined))
-        throw new ApiError(
-          "INVALID_FIELD",
-          "System job names and handlers are fixed",
-        );
-      const name =
-        body.name === undefined ? undefined : text(body.name, "name", 200);
-      const nextInstruction =
-        body.routine === undefined ? undefined : instruction(body.routine);
+        throw new ApiError("INVALID_FIELD", "System job names and handlers are fixed");
+      const name = body.name === undefined ? undefined : text(body.name, "name", 200);
+      const nextInstruction = body.routine === undefined ? undefined : instruction(body.routine);
       if (routine) {
         if (name) {
           routine.name = name;

@@ -1,12 +1,12 @@
-import { useState } from "react";
 import type { ActionRecord, Page } from "@passport/types";
-import { queryString } from "../api";
-import { useResource } from "../state";
-import { Empty, Feedback, humanize, Icon, Loading } from "../components/ui";
-import { DecisionCard, UndoButton } from "./Decisions";
+import { useState } from "react";
 import { AccountDot, useAccountId } from "../accounts/AccountFilter";
+import { queryString } from "../api";
+import { Empty, Feedback, humanize, Icon, Loading } from "../components/ui";
 import { actionLabel, CATEGORIES, categoryLabel } from "../labels";
 import { Surface } from "../shell/Surface";
+import { useResource } from "../state";
+import { DecisionCard, UndoButton } from "./Decisions";
 
 const statusTone: Record<string, string> = {
   executed: "good",
@@ -118,9 +118,26 @@ export function Activity() {
         <ul className="rows log">
           {data.items.map((a) => (
             <li key={a.id} className="row log-row">
-              <span className="actor" title={a.request.actor.kind === "human" ? "You" : a.request.actor.kind === "agent" ? "Passport" : a.request.actor.id}>
+              <span
+                className="actor"
+                title={
+                  a.request.actor.kind === "human"
+                    ? "You"
+                    : a.request.actor.kind === "agent"
+                      ? "Passport"
+                      : a.request.actor.id
+                }
+              >
                 <Icon
-                  name={a.status === "undone" ? "undo" : a.request.actor.kind === "human" ? "check" : a.request.actor.kind === "agent" ? "sparkle" : "agent"}
+                  name={
+                    a.status === "undone"
+                      ? "undo"
+                      : a.request.actor.kind === "human"
+                        ? "check"
+                        : a.request.actor.kind === "agent"
+                          ? "sparkle"
+                          : "agent"
+                  }
                   size={13}
                 />
               </span>
@@ -131,7 +148,12 @@ export function Activity() {
                 </strong>
                 <span className="muted">
                   {actionLabel(a.request.type)}, {categoryLabel(a.request.category).toLowerCase()},{" "}
-                  by {a.request.actor.kind === "human" ? "you" : a.request.actor.kind === "agent" ? "Passport" : a.request.actor.id}
+                  by{" "}
+                  {a.request.actor.kind === "human"
+                    ? "you"
+                    : a.request.actor.kind === "agent"
+                      ? "Passport"
+                      : a.request.actor.id}
                 </span>
                 {a.error && <span className="error-text">{a.error}</span>}
               </span>
@@ -143,7 +165,11 @@ export function Activity() {
                     minute: "2-digit",
                   })}
                 </time>
-                {a.status === "executed" && a.inverse ? <UndoButton action={a} /> : <span className="undo-gap" />}
+                {a.status === "executed" && a.inverse ? (
+                  <UndoButton action={a} />
+                ) : (
+                  <span className="undo-gap" />
+                )}
               </span>
             </li>
           ))}

@@ -14,12 +14,9 @@ export function createApp(
   const app = unauthenticatedApp(backend, { ...options, auth });
   const request = app.request.bind(app);
   app.request = (input, init, env, executionCtx) => {
-    const headers = new Headers(
-      input instanceof Request ? input.headers : undefined,
-    );
+    const headers = new Headers(input instanceof Request ? input.headers : undefined);
     new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
-    if (!headers.has("Authorization"))
-      headers.set("Authorization", `Bearer ${auth.token}`);
+    if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${auth.token}`);
     return request(input, { ...init, headers }, env, executionCtx);
   };
   return app;

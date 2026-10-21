@@ -1,4 +1,10 @@
-import type { HostAgentEvent, HostAgentKind, HostAgentMcpServer, HostAgentReasoning, HostAgentUsage } from "@passport/types";
+import type {
+  HostAgentEvent,
+  HostAgentKind,
+  HostAgentMcpServer,
+  HostAgentReasoning,
+  HostAgentUsage,
+} from "@passport/types";
 import type { JsonSchema } from "../llm/types.js";
 
 /** Everything one CLI invocation needs; shared by sessions and completions. */
@@ -46,7 +52,14 @@ export interface HostStreamParser {
 }
 
 export function emptyUsage(): HostAgentUsage {
-  return { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, costUsd: null };
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    cachedInputTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: null,
+  };
 }
 
 export function count(value: unknown): number {
@@ -54,7 +67,9 @@ export function count(value: unknown): number {
 }
 
 export function record(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 /** MCP server names become tool-name prefixes and TOML keys; keep them simple. */

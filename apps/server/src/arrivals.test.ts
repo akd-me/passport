@@ -1,18 +1,14 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  createProviderRegistry,
-  MockMailProvider,
-  mockCapabilities,
-} from "@passport/providers";
+import { createProviderRegistry, MockMailProvider, mockCapabilities } from "@passport/providers";
 import type { Account, ActionRecord, AgentRun, Email } from "@passport/types";
-import { createRealBackend, type RealBackend } from "./compose.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type Arrival, ArrivalQueue, persistArrival } from "./arrivals.js";
 import { createApp } from "./auth.test-client.js";
+import { createRealBackend, type RealBackend } from "./compose.js";
 import { defaultConfig } from "./config.js";
 import { getSchedulerService } from "./schedulers/service.js";
-import { ArrivalQueue, persistArrival, type Arrival } from "./arrivals.js";
 
 const at = "2026-10-20T12:00:00.000Z";
 const account: Account = {
@@ -46,8 +42,7 @@ describe("durable email arrivals", () => {
       await getSchedulerService(backend).stop();
       await backend.close();
     }
-    for (const path of directories.splice(0))
-      await rm(path, { recursive: true, force: true });
+    for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true });
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -69,9 +64,7 @@ describe("durable email arrivals", () => {
       ...(enabled
         ? {
             llm: {
-              complete: vi
-                .fn()
-                .mockRejectedValue(new Error("Use the fake agent")),
+              complete: vi.fn().mockRejectedValue(new Error("Use the fake agent")),
             },
           }
         : {}),
@@ -83,19 +76,10 @@ describe("durable email arrivals", () => {
     await scheduler.ready;
     return { backend, mail, run, scheduler };
   }
-  async function arrival(
-    backend: RealBackend,
-    providerId = "new",
-  ): Promise<Email> {
-    return (await backend.store.emails.getByProviderId(
-      account.id,
-      providerId,
-    ))!;
+  async function arrival(backend: RealBackend, providerId = "new"): Promise<Email> {
+    return (await backend.store.emails.getByProviderId(account.id, providerId))!;
   }
-  async function entry(
-    backend: RealBackend,
-    email: Email,
-  ): Promise<Arrival | null> {
+  async function entry(backend: RealBackend, email: Email): Promise<Arrival | null> {
     const saved = await backend.store.kv.get(`arrival:${email.id}`);
     return saved ? JSON.parse(saved) : null;
   }
@@ -105,14 +89,10 @@ describe("durable email arrivals", () => {
     run.mockImplementationOnce(async (trigger) => {
       expect(trigger.kind).toBe("email.received");
       if (trigger.kind === "email.received") {
-        expect(
-          await backend.store.kv.get(`arrival:${trigger.emailId}`),
-        ).not.toBeNull();
-        expect(
-          JSON.parse((await backend.store.kv.get("arrival:pending"))!)[
-            trigger.emailId
-          ],
-        ).toBe(account.id);
+        expect(await backend.store.kv.get(`arrival:${trigger.emailId}`)).not.toBeNull();
+        expect(JSON.parse((await backend.store.kv.get("arrival:pending"))!)[trigger.emailId]).toBe(
+          account.id,
+        );
       }
       throw Object.assign(new Error("private provider detail"), {
         code: "MODEL_UNAVAILABLE",
@@ -127,9 +107,7 @@ describe("durable email arrivals", () => {
       nextAttemptAt: "2026-10-20T12:01:00.000Z",
       lastError: "MODEL_UNAVAILABLE",
     });
-    expect(
-      scheduler.list().find((job) => job.id === "agent.arrivals")!.definition,
-    ).toMatchObject({
+    expect(scheduler.list().find((job) => job.id === "agent.arrivals")!.definition).toMatchObject({
       schedule: { type: "interval", everyMs: 30000 },
       concurrency: "single",
     });
@@ -139,9 +117,7 @@ describe("durable email arrivals", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(run).toHaveBeenCalledTimes(2);
     expect(await entry(backend, email)).toBeNull();
-    expect(
-      JSON.parse((await backend.store.kv.get("arrival:pending"))!),
-    ).toEqual({});
+    expect(JSON.parse((await backend.store.kv.get("arrival:pending"))!)).toEqual({});
   });
 
   it("treats an AgentRun.error result as a failed attempt", async () => {
@@ -165,15 +141,32 @@ describe("durable email arrivals", () => {
     const { backend, mail, run, scheduler } = await fixture();
     await backend.policy.setConfig({ globalMode: "full_access" });
     await backend.policy.pinLevel("scheduling", "full_access");
-    await backend.store.accounts.upsert({ ...account, id: "calendar", capabilities: { ...account.capabilities, mail: false, calendar: true }, lastSyncAt: at });
+    await backend.store.accounts.upsert({
+      ...account,
+      id: "calendar",
+      capabilities: { ...account.capabilities, mail: false, calendar: true },
+      lastSyncAt: at,
+    });
     await backend.store.syncState.set({ accountId: "calendar", cursor: "complete", updatedAt: at });
-    run.mockImplementationOnce(async trigger => {
+    run.mockImplementationOnce(async (trigger) => {
       const runId = (trigger as { runId?: string }).runId;
       expect(runId).toBe(`arrival:${trigger.kind === "email.received" ? trigger.emailId : ""}`);
       await backend.executor.submit({
-        type: "calendar_propose", accountId: account.id, category: "scheduling", runId,
-        actor: { kind: "agent", id: "fixture" }, reason: "Schedule a meeting",
-        params: { slots: [], draft: { accountId: account.id, to: [{ email: "sam@example.com" }], subject: "Meeting", textBody: "Can we meet?" } },
+        type: "calendar_propose",
+        accountId: account.id,
+        category: "scheduling",
+        runId,
+        actor: { kind: "agent", id: "fixture" },
+        reason: "Schedule a meeting",
+        params: {
+          slots: [],
+          draft: {
+            accountId: account.id,
+            to: [{ email: "sam@example.com" }],
+            subject: "Meeting",
+            textBody: "Can we meet?",
+          },
+        },
       });
       throw new Error("Journal write failed after proposal creation");
     });
@@ -183,7 +176,10 @@ describe("durable email arrivals", () => {
     await vi.advanceTimersByTimeAsync(60000);
     await scheduler.scheduler.runNow("agent.arrivals");
     expect(run).toHaveBeenCalledTimes(2);
-    expect((await backend.store.actions.query({ runId: `arrival:${(await arrival(backend)).id}` })).items).toHaveLength(1);
+    expect(
+      (await backend.store.actions.query({ runId: `arrival:${(await arrival(backend)).id}` }))
+        .items,
+    ).toHaveLength(1);
     await backend.executor.releaseDue("2099-01-01T00:00:00Z");
     expect(mail.sentMail).toHaveLength(1);
   });
@@ -193,7 +189,9 @@ describe("durable email arrivals", () => {
     mail.injectEmail({ providerId: "new" });
     await backend.syncAccount(account.id);
     const email = await arrival(backend);
-    const remove = vi.spyOn(backend.store.kv, "delete").mockRejectedValueOnce(new Error("Disk failure"));
+    const remove = vi
+      .spyOn(backend.store.kv, "delete")
+      .mockRejectedValueOnce(new Error("Disk failure"));
     const queue = new ArrivalQueue(backend.store, backend.bus, backend.agent, () => true);
     await queue.enqueue(email.id, account.id);
     expect(await entry(backend, email)).toMatchObject({ completedAt: at });
@@ -212,9 +210,24 @@ describe("durable email arrivals", () => {
     await first.backend.syncAccount(account.id);
     const second = await fixture(directory, false);
     let finish!: (run: AgentRun) => void;
-    first.run.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-    const one = new ArrivalQueue(first.backend.store, first.backend.bus, first.backend.agent, () => true);
-    const two = new ArrivalQueue(second.backend.store, second.backend.bus, second.backend.agent, () => true);
+    first.run.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const one = new ArrivalQueue(
+      first.backend.store,
+      first.backend.bus,
+      first.backend.agent,
+      () => true,
+    );
+    const two = new ArrivalQueue(
+      second.backend.store,
+      second.backend.bus,
+      second.backend.agent,
+      () => true,
+    );
     const work = one.drainDue();
     await vi.advanceTimersByTimeAsync(0);
     await two.drainDue();
@@ -228,7 +241,12 @@ describe("durable email arrivals", () => {
 
   it("R5: defers unsynced companion calendars without consuming retries, then marks availability unverified after ten minutes", async () => {
     const { backend, mail, run } = await fixture();
-    await backend.store.accounts.upsert({ ...account, id: "calendar", capabilities: { ...account.capabilities, mail: false, calendar: true }, settings: { mailAccountId: account.id } });
+    await backend.store.accounts.upsert({
+      ...account,
+      id: "calendar",
+      capabilities: { ...account.capabilities, mail: false, calendar: true },
+      settings: { mailAccountId: account.id },
+    });
     mail.injectEmail({ providerId: "new" });
     await backend.syncAccount(account.id);
     await backend.drainAgentQueue();
@@ -240,18 +258,30 @@ describe("durable email arrivals", () => {
     expect(run).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await backend.processArrivals!();
-    expect(run).toHaveBeenCalledExactlyOnceWith({ kind: "email.received", emailId: email.id, runId: `arrival:${email.id}`, availabilityUnverified: true });
+    expect(run).toHaveBeenCalledExactlyOnceWith({
+      kind: "email.received",
+      emailId: email.id,
+      runId: `arrival:${email.id}`,
+      availabilityUnverified: true,
+    });
   });
 
   it("R5: resumes deferred arrivals once the companion calendar has a completed sync", async () => {
     const { backend, mail, run } = await fixture();
-    await backend.store.accounts.upsert({ ...account, id: "calendar", capabilities: { ...account.capabilities, mail: false, calendar: true } });
+    await backend.store.accounts.upsert({
+      ...account,
+      id: "calendar",
+      capabilities: { ...account.capabilities, mail: false, calendar: true },
+    });
     mail.injectEmail({ providerId: "new" });
     await backend.syncAccount(account.id);
     await backend.drainAgentQueue();
     expect(run).not.toHaveBeenCalled();
     await backend.store.syncState.set({ accountId: "calendar", cursor: "complete", updatedAt: at });
-    await backend.store.accounts.upsert({ ...(await backend.store.accounts.get("calendar"))!, lastSyncAt: at });
+    await backend.store.accounts.upsert({
+      ...(await backend.store.accounts.get("calendar"))!,
+      lastSyncAt: at,
+    });
     await vi.advanceTimersByTimeAsync(30000);
     await backend.processArrivals!();
     expect(run).toHaveBeenCalledTimes(1);
@@ -318,9 +348,7 @@ describe("durable email arrivals", () => {
       const updated = (await backend.store.emails.get(email.id))!;
       expect(updated.matterId).toBeTruthy();
       if (existingMatter) expect(updated.matterId).toBe("matter");
-      expect(
-        (await backend.store.matters.get(updated.matterId!))!.nextStep,
-      ).toContain("Review");
+      expect((await backend.store.matters.get(updated.matterId!))!.nextStep).toContain("Review");
     },
   );
 
@@ -369,9 +397,7 @@ describe("durable email arrivals", () => {
     await draining;
     await backend.drainAgentQueue();
     expect(run).toHaveBeenCalledTimes(2);
-    expect(
-      JSON.parse((await backend.store.kv.get("arrival:pending"))!),
-    ).toEqual({});
+    expect(JSON.parse((await backend.store.kv.get("arrival:pending"))!)).toEqual({});
   });
 
   it("retains arrivals without a configured model and recovers a claim interrupted on the fifth attempt", async () => {
@@ -391,18 +417,11 @@ describe("durable email arrivals", () => {
         lastError: null,
       }),
     );
-    const queue = new ArrivalQueue(
-      backend.store,
-      backend.bus,
-      backend.agent,
-      () => true,
-    );
+    const queue = new ArrivalQueue(backend.store, backend.bus, backend.agent, () => true);
     await queue.drainDue();
     await queue.drainDue();
     expect(run).not.toHaveBeenCalled();
-    expect(
-      (await backend.store.actions.query({ status: ["proposed"] })).items,
-    ).toHaveLength(1);
+    expect((await backend.store.actions.query({ status: ["proposed"] })).items).toHaveLength(1);
   });
 
   it("preserves discovery when concurrent account arrivals register and skips deleted mail", async () => {
@@ -416,18 +435,13 @@ describe("durable email arrivals", () => {
       persistArrival(backend.store, first),
       persistArrival(backend.store, second),
     ]);
-    expect(
-      Object.keys(JSON.parse((await backend.store.kv.get("arrival:pending"))!)),
-    ).toHaveLength(2);
+    expect(Object.keys(JSON.parse((await backend.store.kv.get("arrival:pending"))!))).toHaveLength(
+      2,
+    );
     await backend.store.emails.patchMany([first.id, second.id], {
       keywords: { $deleted: true },
     });
-    const queue = new ArrivalQueue(
-      backend.store,
-      backend.bus,
-      backend.agent,
-      () => true,
-    );
+    const queue = new ArrivalQueue(backend.store, backend.bus, backend.agent, () => true);
     await queue.drainDue();
     expect(run).not.toHaveBeenCalled();
     expect(await entry(backend, first)).toBeNull();

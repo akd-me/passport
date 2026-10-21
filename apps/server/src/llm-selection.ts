@@ -1,10 +1,16 @@
+import { detectHostAgents, HOST_AGENT_DEFAULT_MODELS, preferredHostAgent } from "@passport/agent";
 import type { HostAgentStatus, LlmConfig, LlmSelection } from "@passport/types";
-import { detectHostAgents, preferredHostAgent, HOST_AGENT_DEFAULT_MODELS } from "@passport/agent";
-import { AUTO_FALLBACK, isHostAgentProvider, llmConfigured, type ConfigWithFallback, type PassportConfig } from "./config.js";
+import {
+  AUTO_FALLBACK,
+  type ConfigWithFallback,
+  isHostAgentProvider,
+  llmConfigured,
+  type PassportConfig,
+} from "./config.js";
 import { logger } from "./logger.js";
 
 export type HostAgentDetector = (options?: { refresh?: boolean }) => Promise<HostAgentStatus[]>;
-let detector: HostAgentDetector = options => detectHostAgents(options);
+let detector: HostAgentDetector = (options) => detectHostAgents(options);
 
 /** Tests replace host-agent detection; returns the previous detector. */
 export function setHostAgentDetector(next: HostAgentDetector): HostAgentDetector {
@@ -18,9 +24,17 @@ export function hostAgents(options?: { refresh?: boolean }): Promise<HostAgentSt
 
 const NAMES = { "claude-code": "Claude Code", codex: "Codex" } as const;
 
-export function hostAgentLlm(kind: "claude-code" | "codex", model?: string, fastModel?: string): LlmConfig {
+export function hostAgentLlm(
+  kind: "claude-code" | "codex",
+  model?: string,
+  fastModel?: string,
+): LlmConfig {
   const defaults = HOST_AGENT_DEFAULT_MODELS[kind];
-  return { provider: kind, model: model?.trim() || defaults.main, fastModel: fastModel?.trim() || defaults.fast };
+  return {
+    provider: kind,
+    model: model?.trim() || defaults.main,
+    fastModel: fastModel?.trim() || defaults.fast,
+  };
 }
 
 export interface LlmResolution {
@@ -46,8 +60,10 @@ export async function resolveLlmSelection(
     if (options.log) logger.info(describeLlm(resolution));
     return resolution;
   };
-  if (env.PASSPORT_LLM_PROVIDER) return report({ selection: "explicit", source: "env", llm: config.llm });
-  if ((config.llmSelection ?? "auto") === "explicit") return report({ selection: "explicit", source: "explicit", llm: config.llm });
+  if (env.PASSPORT_LLM_PROVIDER)
+    return report({ selection: "explicit", source: "env", llm: config.llm });
+  if ((config.llmSelection ?? "auto") === "explicit")
+    return report({ selection: "explicit", source: "explicit", llm: config.llm });
   const target = config as ConfigWithFallback;
   const fallback = (target[AUTO_FALLBACK] ??= config.llm);
   const statuses = await hostAgents({ refresh: options.refresh });
@@ -59,23 +75,44 @@ export async function resolveLlmSelection(
   }
   // A host agent saved as the fallback but now unavailable leaves only environment keys.
   config.llm = isHostAgentProvider(fallback.provider)
-    ? { provider: "anthropic", model: "claude-sonnet-5-5", ...(env.PASSPORT_LLM_API_KEY || env.ANTHROPIC_API_KEY ? { apiKey: env.PASSPORT_LLM_API_KEY || env.ANTHROPIC_API_KEY } : {}) }
+    ? {
+        provider: "anthropic",
+        model: "claude-sonnet-5-5",
+        ...(env.PASSPORT_LLM_API_KEY || env.ANTHROPIC_API_KEY
+          ? { apiKey: env.PASSPORT_LLM_API_KEY || env.ANTHROPIC_API_KEY }
+          : {}),
+      }
     : fallback;
-  return report({ selection: "auto", source: llmConfigured(config.llm) ? "fallback" : "none", llm: config.llm, statuses });
+  return report({
+    selection: "auto",
+    source: llmConfigured(config.llm) ? "fallback" : "none",
+    llm: config.llm,
+    statuses,
+  });
 }
 
 export function describeLlm(resolution: LlmResolution): string {
   const { llm } = resolution;
   if (isHostAgentProvider(llm.provider)) {
-    const status = resolution.statuses?.find(item => item.kind === llm.provider);
+    const status = resolution.statuses?.find((item) => item.kind === llm.provider);
     return `Agent model: ${NAMES[llm.provider]} (${llm.model})${status?.account ? ` via ${status.account} login` : ""}${resolution.source === "host-agent" ? ", detected automatically" : ""}.`;
   }
-  if (resolution.source === "none") return "No agent model available: log in to Codex (`codex login`) or Claude Code (`claude auth login`). Mail sync still works.";
+  if (resolution.source === "none")
+    return "No agent model available: log in to Codex (`codex login`) or Claude Code (`claude auth login`). Mail sync still works.";
   return `Agent model: ${llm.provider} (${llm.model}).`;
 }
 
 /** The browser-safe view of the LLM settings. Keys never leave the server. */
-export function publicLlm(config: PassportConfig): Omit<LlmConfig, "apiKey"> & { apiKeyConfigured: boolean; configured: boolean; selection: LlmSelection } {
+export function publicLlm(config: PassportConfig): Omit<LlmConfig, "apiKey"> & {
+  apiKeyConfigured: boolean;
+  configured: boolean;
+  selection: LlmSelection;
+} {
   const { apiKey, ...llm } = config.llm;
-  return { ...llm, apiKeyConfigured: !!apiKey, configured: llmConfigured(config.llm), selection: config.llmSelection ?? "auto" };
+  return {
+    ...llm,
+    apiKeyConfigured: !!apiKey,
+    configured: llmConfigured(config.llm),
+    selection: config.llmSelection ?? "auto",
+  };
 }

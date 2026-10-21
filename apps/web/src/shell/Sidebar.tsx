@@ -1,17 +1,26 @@
+import type { ActionRecord, Matter, Page, Person } from "@passport/types";
 import type { ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router";
-import type { ActionRecord, Matter, Page, Person } from "@passport/types";
-import { useResource, useWorkspace } from "../state";
-import { useUi } from "../ui-state";
 import { AccountDot, useAccounts } from "../accounts/AccountFilter";
 import { needsReauthorization, syncSummary } from "../accounts/AccountRow";
-import { ModeMenu } from "../views/Trust";
 import { Icon, Kbd, mod } from "../components/ui";
+import { useResource, useWorkspace } from "../state";
+import { useUi } from "../ui-state";
+import { ModeMenu } from "../views/Trust";
 
 export function BrandMark({ size = 18 }: { size?: number }) {
   return (
     <svg viewBox="0 0 20 20" width={size} height={size} aria-hidden="true" className="brand-mark">
-      <rect x="3.5" y="2" width="13" height="16" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <rect
+        x="3.5"
+        y="2"
+        width="13"
+        height="16"
+        rx="2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
       <circle cx="10" cy="9" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
       <path d="M7 14.5h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
@@ -95,11 +104,7 @@ function AccountsGroup() {
         );
       })}
       <li>
-        <button
-          type="button"
-          className="side-row quiet"
-          onClick={() => setConnecting(true)}
-        >
+        <button type="button" className="side-row quiet" onClick={() => setConnecting(true)}>
           <Icon name="plus" size={14} />
           <span className="side-label">
             {mail.length ? "Connect another" : "Connect an account"}
@@ -146,9 +151,7 @@ function MattersGroup({ pending }: { pending: Map<string, number> }) {
 function PeopleGroup() {
   const people = useResource<Person[]>("/people?relationship=known&limit=40");
   const list = [...(people.data ?? [])]
-    .sort((a, b) =>
-      (b.stats.lastContactAt ?? "").localeCompare(a.stats.lastContactAt ?? ""),
-    )
+    .sort((a, b) => (b.stats.lastContactAt ?? "").localeCompare(a.stats.lastContactAt ?? ""))
     .slice(0, 6);
   return (
     <Group
@@ -160,7 +163,8 @@ function PeopleGroup() {
       }
     >
       {list.map((p) => {
-        const downgraded = !!p.lastSeenBlueAt && p.verification === "green" && !p.downgradeAcknowledgedAt;
+        const downgraded =
+          !!p.lastSeenBlueAt && p.verification === "green" && !p.downgradeAcknowledgedAt;
         return (
           <li key={p.id}>
             <NavLink
@@ -236,12 +240,19 @@ export function Sidebar() {
         <ModeMenu />
       </div>
       <nav className="side-nav" aria-label="Workspace">
-        <NavLink to={withScope("/")} end className={({ isActive }) => `side-row ${isActive ? "active" : ""}`}>
+        <NavLink
+          to={withScope("/")}
+          end
+          className={({ isActive }) => `side-row ${isActive ? "active" : ""}`}
+        >
           <Icon name="queue" size={15} />
           <span className="side-label">Queue</span>
           {proposed.length > 0 && <span className="side-count strong">{proposed.length}</span>}
         </NavLink>
-        <NavLink to={withScope("/activity")} className={({ isActive }) => `side-row ${isActive ? "active" : ""}`}>
+        <NavLink
+          to={withScope("/activity")}
+          className={({ isActive }) => `side-row ${isActive ? "active" : ""}`}
+        >
           <Icon name="activity" size={15} />
           <span className="side-label">Activity</span>
         </NavLink>

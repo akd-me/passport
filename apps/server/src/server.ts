@@ -1,18 +1,15 @@
 import { serve } from "@hono/node-server";
-import { WebSocket, WebSocketServer } from "ws";
-import type { Backend } from "./backend.js";
-import { createApp } from "./app.js";
-import { startSchedulers } from "./schedulers/index.js";
 import { serveHttp } from "@passport/mcp";
-import { logger } from "./logger.js";
+import { WebSocket, WebSocketServer } from "ws";
+import { createApp } from "./app.js";
 import { checkBind, getAuth } from "./auth.js";
+import type { Backend } from "./backend.js";
+import { logger } from "./logger.js";
 import { loadMcpToken } from "./mcp-token.js";
+import { startSchedulers } from "./schedulers/index.js";
 
 /** Bind locally by default; the WebSocket emits raw DomainEvent JSON at /ws. */
-export function startServer(
-  backend: Backend,
-  options: { allowRemote?: boolean } = {},
-) {
+export function startServer(backend: Backend, options: { allowRemote?: boolean } = {}) {
   checkBind(backend.config.host, options.allowRemote);
   const auth = getAuth(backend);
   const app = createApp(backend),
@@ -25,9 +22,7 @@ export function startServer(
   server.on("upgrade", (request, socket, head) => {
     const status = auth.upgradeStatus(request);
     if (status) {
-      socket.end(
-        `HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
-      );
+      socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
       return;
     }
     wss.handleUpgrade(request, socket, head, (ws) => {
@@ -45,10 +40,12 @@ export function startServer(
   });
   const schedulers = startSchedulers(backend);
   const mcp = backend.createMcpServer
-    ? loadMcpToken(backend.config.dataDir).then(token => serveHttp(backend.createMcpServer!(), {
-        port: backend.config.mcpPort ?? 4318,
-        token,
-      }))
+    ? loadMcpToken(backend.config.dataDir).then((token) =>
+        serveHttp(backend.createMcpServer!(), {
+          port: backend.config.mcpPort ?? 4318,
+          token,
+        }),
+      )
     : undefined;
   const ready = mcp?.then((handle) => {
     logger.info(`Mailbox MCP → ${handle.url}`);

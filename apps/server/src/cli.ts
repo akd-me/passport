@@ -1,35 +1,39 @@
 #!/usr/bin/env node
-import { createInterface } from "node:readline/promises";
 import { realpathSync } from "node:fs";
 import { stdin, stdout } from "node:process";
-import { pathToFileURL } from "node:url";
-import { loadConfig } from "./config.js";
-import { createRealBackend } from "./compose.js";
-import { createDemoBackend } from "./demo/index.js";
-import { addAccount } from "./accounts.js";
-import { startServer } from "./server.js";
-import { logger } from "./logger.js";
-import { ApiError } from "./errors.js";
-import { serveStdio } from "@passport/mcp";
-import { authorizeOAuth } from "./oauth.js";
+import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
-import { runJobsCommand } from "./schedulers/cli.js";
+import { pathToFileURL } from "node:url";
+import { serveStdio } from "@passport/mcp";
+import { addAccount } from "./accounts.js";
 import { apiToken, checkBind, getAuth } from "./auth.js";
-import { initializePassport } from "./onboarding/init.js";
-import { doctorCommand } from "./doctor.js";
-import { acquireOwner, activeOwner } from "./owner-lock.js";
 import { serverClient } from "./cli/server-client.js";
+import { createRealBackend } from "./compose.js";
+import { loadConfig } from "./config.js";
+import { createDemoBackend } from "./demo/index.js";
+import { doctorCommand } from "./doctor.js";
+import { ApiError } from "./errors.js";
 import { resolveLlmSelection } from "./llm-selection.js";
+import { logger } from "./logger.js";
+import { authorizeOAuth } from "./oauth.js";
+import { initializePassport } from "./onboarding/init.js";
+import { acquireOwner, activeOwner } from "./owner-lock.js";
+import { runJobsCommand } from "./schedulers/cli.js";
+import { startServer } from "./server.js";
 
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const [command = "serve", subcommand, kind] = args;
-  if (command === "mcp" && (subcommand === "install" || subcommand === "proxy")) return (await import("./cli/mcp-install.js")).handleMcpCommand(args);
+  if (command === "mcp" && (subcommand === "install" || subcommand === "proxy"))
+    return (await import("./cli/mcp-install.js")).handleMcpCommand(args);
   if (command === "jobs") return runJobsCommand(args.slice(1));
-  if (command === "accounts" && subcommand === "connect") return (await import("./setup/cli.js")).connectCommand(args.slice(2));
+  if (command === "accounts" && subcommand === "connect")
+    return (await import("./setup/cli.js")).connectCommand(args.slice(2));
   if (command === "init") return initializePassport(undefined, args.slice(1));
   if (command === "mcp" && ["--help", "-h", "help"].includes(subcommand ?? "")) {
-    console.log("passport mcp — mailbox tools over stdio (no background jobs)\npassport mcp install --client claude-code|codex|cursor|claude-desktop [--http] [--dry-run] [--user]");
+    console.log(
+      "passport mcp — mailbox tools over stdio (no background jobs)\npassport mcp install --client claude-code|codex|cursor|claude-desktop [--http] [--dry-run] [--user]",
+    );
     return;
   }
   if (command === "doctor") return doctorCommand(args.includes("--demo"));
@@ -40,22 +44,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (
-    ![
-      "serve",
-      "demo",
-      "sync",
-      "triage",
-      "mcp",
-      "accounts",
-      "trust",
-      "decisions",
-      "token",
-    ].includes(command)
+    !["serve", "demo", "sync", "triage", "mcp", "accounts", "trust", "decisions", "token"].includes(
+      command,
+    )
   )
-    throw new ApiError(
-      "INVALID_COMMAND",
-      "Unknown command. Run passport --help.",
-    );
+    throw new ApiError("INVALID_COMMAND", "Unknown command. Run passport --help.");
   const config = await loadConfig();
   if (command === "token") {
     console.log(apiToken(config.dataDir, { rotate: args.includes("--rotate") }));
@@ -66,33 +59,62 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (["trust", "decisions", "sync", "triage"].includes(command) && !args.includes("--demo")) {
     const request = await serverClient(config);
     if (request) {
-      if (command === "triage" && !subcommand) throw new ApiError("INVALID_COMMAND", "Use triage <emailId>");
+      if (command === "triage" && !subcommand)
+        throw new ApiError("INVALID_COMMAND", "Use triage <emailId>");
       if (command === "sync") {
-        const { accounts } = await request("/api/accounts") as { accounts: { id: string }[] };
-        for (const account of accounts) await request(`/api/accounts/${encodeURIComponent(account.id)}/sync`, "POST");
+        const { accounts } = (await request("/api/accounts")) as { accounts: { id: string }[] };
+        for (const account of accounts)
+          await request(`/api/accounts/${encodeURIComponent(account.id)}/sync`, "POST");
         console.log("Sync complete.");
-      } else console.log(JSON.stringify(await request(command === "triage" ? `/api/agent/triage/${encodeURIComponent(subcommand!)}` : `/api/${command}`, command === "triage" ? "POST" : "GET"), null, 2));
+      } else
+        console.log(
+          JSON.stringify(
+            await request(
+              command === "triage"
+                ? `/api/agent/triage/${encodeURIComponent(subcommand!)}`
+                : `/api/${command}`,
+              command === "triage" ? "POST" : "GET",
+            ),
+            null,
+            2,
+          ),
+        );
       return;
     }
   }
-  if (["serve", "sync", "triage"].includes(command) && !args.includes("--demo")) await resolveLlmSelection(config, { log: command === "serve" });
+  if (["serve", "sync", "triage"].includes(command) && !args.includes("--demo"))
+    await resolveLlmSelection(config, { log: command === "serve" });
   let shutdownOwner: (() => void) | undefined;
-  const owner = ["serve", "demo"].includes(command) ? acquireOwner(config.dataDir, () => {
-    logger.error("Workspace owner lease lost; stopping background work.");
-    process.exitCode = 1;
-    shutdownOwner?.();
-  }) : undefined;
+  const owner = ["serve", "demo"].includes(command)
+    ? acquireOwner(config.dataDir, () => {
+        logger.error("Workspace owner lease lost; stopping background work.");
+        process.exitCode = 1;
+        shutdownOwner?.();
+      })
+    : undefined;
   let backend: Awaited<ReturnType<typeof createDemoBackend>>;
   try {
     backend =
       command === "demo" || (command !== "mcp" && args.includes("--demo"))
         ? await createDemoBackend(config)
         : await createRealBackend(config, { clientMode: command !== "serve" });
-  } catch (error) { owner?.release(); throw error; }
+  } catch (error) {
+    owner?.release();
+    throw error;
+  }
   const closeBackend = backend.close.bind(backend);
-  backend.close = async () => { try { await closeBackend(); } finally { owner?.release(); } };
+  backend.close = async () => {
+    try {
+      await closeBackend();
+    } finally {
+      owner?.release();
+    }
+  };
   if (command === "mcp") {
-    if (!activeOwner(config.dataDir)) console.error("Passport serve is not running; stdio has no background jobs. Held/proposed actions wait for serve.");
+    if (!activeOwner(config.dataDir))
+      console.error(
+        "Passport serve is not running; stdio has no background jobs. Held/proposed actions wait for serve.",
+      );
     const server = backend.createMcpServer!();
     let closing: Promise<void> | undefined;
     const shutdown = () =>
@@ -151,8 +173,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   try {
     if (command === "triage") {
-      if (!subcommand)
-        throw new ApiError("INVALID_COMMAND", "Use triage <emailId>");
+      if (!subcommand) throw new ApiError("INVALID_COMMAND", "Use triage <emailId>");
       console.log(
         JSON.stringify(
           await backend.agent.run({
@@ -190,9 +211,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       );
     if (command === "accounts") {
       if (subcommand === "list")
-        console.log(
-          JSON.stringify(await backend.store.accounts.list(), null, 2),
-        );
+        console.log(JSON.stringify(await backend.store.accounts.list(), null, 2));
       else if (subcommand === "add") {
         if (!backend.providerKinds.includes(kind as never))
           throw new ApiError(
@@ -223,9 +242,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
               const env = `PASSPORT_SETUP_${field.id.replace(/[^a-zA-Z0-9]/g, "_").toUpperCase()}`;
               if (process.env[env]) fields[field.id] = process.env[env]!;
               else if (field.id !== "codeVerifier") {
-                stdout.write(
-                  `${field.label}${field.required ? "" : " (optional)"} (hidden): `,
-                );
+                stdout.write(`${field.label}${field.required ? "" : " (optional)"} (hidden): `);
                 muted = true;
                 try {
                   fields[field.id] = await rl.question("");
@@ -274,10 +291,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     await backend.close();
   }
 }
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
-)
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
   void main().catch((error: unknown) => {
     logger.error(
       error instanceof ApiError

@@ -1,17 +1,11 @@
 import { describe, expect, it } from "vitest";
-import sample from "./fixtures/graph.json" with { type: "json" };
 import gmail from "./fixtures/gmail.json" with { type: "json" };
+import sample from "./fixtures/graph.json" with { type: "json" };
 import window from "./fixtures/graph-window.json" with { type: "json" };
-import { GraphMailProvider } from "./graph.js";
 import { GoogleCalendarProvider } from "./google-calendar.js";
+import { GraphMailProvider } from "./graph.js";
 import { createProviderRegistry } from "./registry.js";
-import {
-  account,
-  collect,
-  fixtureFetch,
-  lastCursor,
-  response,
-} from "./test/helpers.js";
+import { account, collect, fixtureFetch, lastCursor, response } from "./test/helpers.js";
 
 describe("real-account adapter regressions", () => {
   it("keeps Gmail's date query on every full-sync page and captures the history watermark before listing", async () => {
@@ -20,8 +14,7 @@ describe("real-account adapter regressions", () => {
       fetch: fixtureFetch((url) => {
         calls.push(url.pathname);
         if (url.pathname.endsWith("/labels")) return response({ labels: [] });
-        if (url.pathname.endsWith("/profile"))
-          return response({ historyId: "watermark" });
+        if (url.pathname.endsWith("/profile")) return response({ historyId: "watermark" });
         if (url.pathname.endsWith("/messages")) {
           expect(url.searchParams.get("q")).toBe("after:1767225600");
           return response(
@@ -34,9 +27,7 @@ describe("real-account adapter regressions", () => {
       }),
     }).mail("gmail");
     await p.connect(account, { access_token: "token" });
-    const changes = await collect(
-      p.sync(null, { since: "2026-01-01T00:00:00Z" }),
-    );
+    const changes = await collect(p.sync(null, { since: "2026-01-01T00:00:00Z" }));
     expect(lastCursor(changes)).toBe("watermark");
     expect(changes.filter((d) => d.kind === "email")).toHaveLength(2);
     expect(calls.findIndex((c) => c.endsWith("/profile"))).toBeLessThan(
@@ -49,13 +40,9 @@ describe("real-account adapter regressions", () => {
     const p = new GraphMailProvider({
       fetch: fixtureFetch((url, init) => {
         calls.push(url);
-        expect(new Headers(init.headers).get("Prefer")).toContain(
-          'IdType="ImmutableId"',
-        );
-        if (url.pathname.endsWith("/mailFolders/delta"))
-          return response(window.folderPages[0]);
-        if (url.pathname.endsWith("/folder-page-2"))
-          return response(window.folderPages[1]);
+        expect(new Headers(init.headers).get("Prefer")).toContain('IdType="ImmutableId"');
+        if (url.pathname.endsWith("/mailFolders/delta")) return response(window.folderPages[0]);
+        if (url.pathname.endsWith("/folder-page-2")) return response(window.folderPages[1]);
         if (url.pathname.endsWith("/folder-state"))
           return response({
             value: [],
@@ -73,20 +60,12 @@ describe("real-account adapter regressions", () => {
             "@odata.deltaLink": "https://graph.microsoft.com/v1.0/child-state",
           });
         if (url.pathname.endsWith("/messages/delta")) {
-          expect(new Headers(init.headers).get("Prefer")).toContain(
-            "odata.maxpagesize=100",
-          );
-          expect(url.searchParams.get("$orderby")).toBe(
-            "receivedDateTime desc",
-          );
+          expect(new Headers(init.headers).get("Prefer")).toContain("odata.maxpagesize=100");
+          expect(url.searchParams.get("$orderby")).toBe("receivedDateTime desc");
           return response(window.messagePages[0]);
         }
-        if (url.pathname.endsWith("/message-page-2"))
-          return response(window.messagePages[1]);
-        if (
-          url.pathname.endsWith("/message-state") ||
-          url.pathname.endsWith("/child-state")
-        )
+        if (url.pathname.endsWith("/message-page-2")) return response(window.messagePages[1]);
+        if (url.pathname.endsWith("/message-state") || url.pathname.endsWith("/child-state"))
           return response({ value: [], "@odata.deltaLink": url.href });
         bodies.push(url.pathname);
         return response({
@@ -101,9 +80,7 @@ describe("real-account adapter regressions", () => {
       }),
     });
     await p.connect(account, { access_token: "token" });
-    const first = await collect(
-      p.sync(null, { since: "2026-02-01T00:00:00Z" }),
-    );
+    const first = await collect(p.sync(null, { since: "2026-02-01T00:00:00Z" }));
     expect(bodies).toEqual(["/v1.0/me/messages/recent"]);
     expect(first.filter((d) => d.kind === "mailbox")).toHaveLength(2);
     const cursor = lastCursor(first);
@@ -121,8 +98,7 @@ describe("real-account adapter regressions", () => {
           if (url.pathname.endsWith("/mailFolders/delta") && kind !== "folder")
             return response({
               value: [{ id: "f", displayName: "Inbox" }],
-              "@odata.deltaLink":
-                "https://graph.microsoft.com/v1.0/folders-state",
+              "@odata.deltaLink": "https://graph.microsoft.com/v1.0/folders-state",
             });
           if (url.pathname.endsWith("/messages/delta") || kind === "folder")
             return response({}, 410);
@@ -176,33 +152,22 @@ describe("real-account adapter regressions", () => {
         const body = new URLSearchParams(String(init.body));
         expect(body.get("client_secret")).toBeNull();
         expect(body.get("code_verifier")).toBe("verifier");
-        if (kind === "graph")
-          expect(body.get("scope")).toBe("openid email User.Read");
+        if (kind === "graph") expect(body.get("scope")).toBe("openid email User.Read");
         return response({ access_token: "new", refresh_token: "refresh" });
       });
-      const oauth = createProviderRegistry({ fetch: fetcher }).describe(
-        kind,
-      ).oauth!;
+      const oauth = createProviderRegistry({ fetch: fetcher }).describe(kind).oauth!;
       const settings = {
         clientId: "public",
         codeVerifier: "verifier",
         scopes: "openid email User.Read",
       };
       const url = new URL(
-        oauth.buildAuthUrl(
-          settings,
-          "http://127.0.0.1:3000/oauth/callback",
-          "state",
-        ),
+        oauth.buildAuthUrl(settings, "http://127.0.0.1:3000/oauth/callback", "state"),
       );
       expect(url.searchParams.get("scope")).toBe(settings.scopes);
       expect(url.searchParams.has("include_granted_scopes")).toBe(false);
       await expect(
-        oauth.exchangeCode(
-          settings,
-          "http://127.0.0.1:3000/oauth/callback",
-          "code",
-        ),
+        oauth.exchangeCode(settings, "http://127.0.0.1:3000/oauth/callback", "code"),
       ).resolves.toMatchObject({ refresh_token: "refresh" });
     },
   );

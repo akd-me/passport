@@ -1,14 +1,14 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { Route, Routes, useLocation } from "react-router";
-import { AccountWizard } from "./AccountWizard";
-import { AccountScope } from "./AccountFilter";
 import type { Account } from "@passport/types";
-import { accountApi } from "./api";
-import { api, type ProviderDescriptor } from "../api";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Route, Routes, useLocation } from "react-router";
+import { describe, expect, it, vi } from "vitest";
 import { App } from "../App";
+import { api, type ProviderDescriptor } from "../api";
 import { Sidebar } from "../shell/Sidebar";
 import { Harness, stubApi } from "../test-utils";
+import { AccountScope } from "./AccountFilter";
+import { AccountWizard } from "./AccountWizard";
+import { accountApi } from "./api";
 
 const providers: ProviderDescriptor[] = [
   { kind: "gmail", label: "Gmail", fields: [], oauth: { scopes: [] } },
@@ -66,12 +66,8 @@ describe("account wizard", () => {
     fireEvent.change(screen.getByLabelText("OAuth client ID"), {
       target: { value: "my-client" },
     });
-    expect(
-      screen.getByRole("checkbox", { name: "Connect calendar too" }),
-    ).toBeChecked();
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: "Connect calendar too" }),
-    );
+    expect(screen.getByRole("checkbox", { name: "Connect calendar too" })).toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Connect calendar too" }));
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     await waitFor(() =>
       expect(start).toHaveBeenCalledWith({
@@ -81,12 +77,11 @@ describe("account wizard", () => {
         accountId: undefined,
       }),
     );
-    expect(
-      await screen.findByText(/Waiting for authorization/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Open authorization tab" }),
-    ).toHaveAttribute("target", "_blank");
+    expect(await screen.findByText(/Waiting for authorization/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open authorization tab" })).toHaveAttribute(
+      "target",
+      "_blank",
+    );
     expect(add).not.toHaveBeenCalled();
   });
   it("shows Microsoft public-client instructions and the redirect path", () => {
@@ -95,9 +90,7 @@ describe("account wizard", () => {
       target: { value: "graph" },
     });
     expect(screen.getByText(/Allow public client flows/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/Mobile and desktop applications/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Mobile and desktop applications/)).toBeInTheDocument();
     expect(screen.getByText(/\/oauth\/callback/)).toBeInTheDocument();
   });
   it("tests IMAP without saving and displays failures in the wizard", async () => {
@@ -119,18 +112,14 @@ describe("account wizard", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
     await waitFor(() => expect(test).toHaveBeenCalled());
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Check your app password.",
-    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Check your app password.");
     expect(test.mock.calls[0]![0]).toMatchObject({
       kind: "imap",
       fields: { host: "imap.example.com", password: "app-secret" },
     });
   });
   it("preselects the provider chosen before falling back to manual setup", () => {
-    render(
-      <AccountWizard providers={providers} initialKind="graph" onClose={() => {}} />,
-    );
+    render(<AccountWizard providers={providers} initialKind="graph" onClose={() => {}} />);
     expect(screen.getByLabelText("Provider")).toHaveValue("graph");
     expect(screen.getByText(/Allow public client flows/)).toBeInTheDocument();
   });
@@ -153,11 +142,19 @@ function LocationProbe() {
 describe("account onboarding in the shell", () => {
   it("shows the connect flow in place of the queue for an empty workspace", async () => {
     stubApi({
-      "/accounts": { accounts: [], mode: "real", llm: { provider: "anthropic", model: "m", apiKeyConfigured: false } },
+      "/accounts": {
+        accounts: [],
+        mode: "real",
+        llm: { provider: "anthropic", model: "m", apiKeyConfigured: false },
+      },
       "/decisions": { items: [] },
       "/matters": [],
       "/people": [],
-      "/trust": { config: { globalMode: "supervised", alwaysAsk: [] }, categories: [], promotionOffers: [] },
+      "/trust": {
+        config: { globalMode: "supervised", alwaysAsk: [] },
+        categories: [],
+        promotionOffers: [],
+      },
     });
     render(
       <Harness>
@@ -172,13 +169,21 @@ describe("account onboarding in the shell", () => {
   });
   it("opens Settings → Accounts for the legacy /accounts URL the OAuth callback returns to", async () => {
     stubApi({
-      "/accounts": { accounts: [workAccount], mode: "real", llm: { provider: "anthropic", model: "m", apiKeyConfigured: true } },
+      "/accounts": {
+        accounts: [workAccount],
+        mode: "real",
+        llm: { provider: "anthropic", model: "m", apiKeyConfigured: true },
+      },
       "/providers": providers,
       "/decisions": { items: [] },
       "/actions": { items: [] },
       "/matters": [],
       "/people": [],
-      "/trust": { config: { globalMode: "supervised", alwaysAsk: [] }, categories: [], promotionOffers: [] },
+      "/trust": {
+        config: { globalMode: "supervised", alwaysAsk: [] },
+        categories: [],
+        promotionOffers: [],
+      },
     });
     render(
       <Harness path="/accounts?connected=work">
@@ -195,7 +200,11 @@ describe("account onboarding in the shell", () => {
       "/decisions": { items: [] },
       "/matters": [],
       "/people": [],
-      "/trust": { config: { globalMode: "supervised", alwaysAsk: [] }, categories: [], promotionOffers: [] },
+      "/trust": {
+        config: { globalMode: "supervised", alwaysAsk: [] },
+        categories: [],
+        promotionOffers: [],
+      },
     });
     render(
       <Harness path="/matters?status=active">

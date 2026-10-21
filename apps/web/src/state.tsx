@@ -1,18 +1,16 @@
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
-import { request, type DomainEvent } from "./api";
+import { type DomainEvent, request } from "./api";
 import { checkSession, websocketUrl } from "./auth";
 /** Frames on /ws: domain events plus setup-task updates from the onboarding service. */
-export type WorkspaceEvent =
-  | DomainEvent
-  | { type: "setup.task.updated"; task: unknown };
+export type WorkspaceEvent = DomainEvent | { type: "setup.task.updated"; task: unknown };
 type Listener = (event: WorkspaceEvent) => void;
 interface WorkspaceState {
   version: number;
@@ -69,10 +67,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         if (!stopped) {
           void checkSession();
           setConnection("Reconnecting");
-          reconnect = setTimeout(
-            connect,
-            Math.min(30000, 1000 * 2 ** attempts++),
-          );
+          reconnect = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempts++));
         }
       };
       socket.onerror = () => socket?.close();
@@ -94,9 +89,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [notice]);
   return (
-    <Workspace.Provider
-      value={{ version, subscribe, refresh, connection, notice, notify }}
-    >
+    <Workspace.Provider value={{ version, subscribe, refresh, connection, notice, notify }}>
       {children}
     </Workspace.Provider>
   );
@@ -126,8 +119,7 @@ export function useResource<T>(path: string | null) {
     request<T>(path, { signal: controller.signal })
       .then((data) => setState({ data, loading: false }))
       .catch((error) => {
-        if (!controller.signal.aborted)
-          setState({ error: error.message, loading: false });
+        if (!controller.signal.aborted) setState({ error: error.message, loading: false });
       });
     return () => controller.abort();
   }, [path, version]);

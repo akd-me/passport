@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
 import type { ActionRequest } from "@passport/types";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Backend } from "../backend.js";
 import { createDemoBackend } from "./index.js";
 
@@ -37,18 +37,14 @@ describe("demo permission boundaries", () => {
     expect((await backend.policy.evaluate(send)).outcome).toBe("ask");
     await backend.policy.setConfig({ globalMode: "auto" });
     expect((await backend.policy.evaluate(send)).outcome).toBe("hold");
-    expect(
-      (await backend.policy.evaluate({ ...send, category: "replies_stranger" }))
-        .outcome,
-    ).toBe("ask");
+    expect((await backend.policy.evaluate({ ...send, category: "replies_stranger" })).outcome).toBe(
+      "ask",
+    );
     await backend.policy.setConfig({ globalMode: "full_access" });
-    expect(
-      (await backend.policy.evaluate({ ...send, category: "replies_stranger" }))
-        .outcome,
-    ).toBe("hold");
-    expect(
-      (await backend.policy.evaluate({ ...send, category: "money" })).outcome,
-    ).toBe("ask");
+    expect((await backend.policy.evaluate({ ...send, category: "replies_stranger" })).outcome).toBe(
+      "hold",
+    );
+    expect((await backend.policy.evaluate({ ...send, category: "money" })).outcome).toBe("ask");
     await backend.policy.pinLevel("newsletters", "supervised");
     expect((await backend.policy.evaluate(request)).outcome).toBe("ask");
     await backend.policy.pinLevel("newsletters", null);
@@ -64,9 +60,9 @@ describe("demo permission boundaries", () => {
   });
   it("rejects simultaneous double approval without creating duplicate sends", async () => {
     backend = await createDemoBackend();
-    const action = (
-      await backend.store.actions.query({ status: ["proposed"] })
-    ).items.find((a) => a.request.type === "send")!;
+    const action = (await backend.store.actions.query({ status: ["proposed"] })).items.find(
+      (a) => a.request.type === "send",
+    )!;
     const outcomes = await Promise.allSettled([
       backend.executor.approve(action.id),
       backend.executor.approve(action.id),

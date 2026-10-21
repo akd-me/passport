@@ -1,18 +1,18 @@
-import { createInterface } from "node:readline/promises";
-import { Writable } from "node:stream";
-import { stdin, stdout } from "node:process";
 import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { HostAgentStatus, LlmConfig, ProviderSetupDescriptor } from "@passport/types";
+import { stdin, stdout } from "node:process";
+import { createInterface } from "node:readline/promises";
+import { Writable } from "node:stream";
 import { HOST_AGENT_DEFAULT_MODELS } from "@passport/agent";
-import { describeLlm, hostAgentLlm, hostAgents, resolveLlmSelection } from "../llm-selection.js";
+import type { HostAgentStatus, LlmConfig, ProviderSetupDescriptor } from "@passport/types";
+import { addAccount } from "../accounts.js";
 import { createRealBackend } from "../compose.js";
 import { loadConfig, saveConfig } from "../config.js";
-import { addAccount } from "../accounts.js";
-import { authorizeOAuth } from "../oauth.js";
-import { connectOAuthAccount, scopesFor } from "./oauth.js";
 import { probeAccount } from "../doctor.js";
 import { ApiError } from "../errors.js";
+import { describeLlm, hostAgentLlm, hostAgents, resolveLlmSelection } from "../llm-selection.js";
+import { authorizeOAuth } from "../oauth.js";
+import { connectOAuthAccount, scopesFor } from "./oauth.js";
 
 export interface InitPrompts {
   ask: (label: string, secret?: boolean) => Promise<string>;
@@ -77,25 +77,39 @@ export async function initializePassport(
 ): Promise<void> {
   let backend: Awaited<ReturnType<typeof createRealBackend>> | undefined;
   try {
-    let llm: string | undefined, skipAccount = false;
+    let llm: string | undefined,
+      skipAccount = false;
     for (let i = 0; i < args.length; i++) {
       if (args[i] === "--skip-account") skipAccount = true;
-      else if (args[i] === "--llm" && args[i + 1] && !args[i + 1]!.startsWith("--")) llm = args[++i];
-      else throw new ApiError("INVALID_COMMAND", "Use passport init [--llm auto|codex|claude-code|none|anthropic|openai|openai-compatible|ollama] [--skip-account]");
+      else if (args[i] === "--llm" && args[i + 1] && !args[i + 1]!.startsWith("--"))
+        llm = args[++i];
+      else
+        throw new ApiError(
+          "INVALID_COMMAND",
+          "Use passport init [--llm auto|codex|claude-code|none|anthropic|openai|openai-compatible|ollama] [--skip-account]",
+        );
     }
     const config = await loadConfig();
     prompts.log(`Passport setup → ${config.dataDir}`);
     // The default agent is the Claude Code or Codex subscription already on this machine.
-    const agents = llm && !["auto", "codex", "claude-code"].includes(llm) ? [] : await hostAgents({ refresh: true });
-    if (agents.length) prompts.log(`Agents on this machine: ${agents.map(describeAgent).join(", ")}`);
+    const agents =
+      llm && !["auto", "codex", "claude-code"].includes(llm)
+        ? []
+        : await hostAgents({ refresh: true });
+    if (agents.length)
+      prompts.log(`Agents on this machine: ${agents.map(describeAgent).join(", ")}`);
     const anyReady = agents.some((agent) => agent.ready);
     let provider =
-      (llm ?? (await prompts.ask(
-        `Agent model (auto / codex / claude-code / advanced / none) [${anyReady ? "auto" : "none"}]`,
-      ))) || (anyReady ? "auto" : "none");
+      (llm ??
+        (await prompts.ask(
+          `Agent model (auto / codex / claude-code / advanced / none) [${anyReady ? "auto" : "none"}]`,
+        ))) ||
+      (anyReady ? "auto" : "none");
     if (provider === "advanced")
       provider =
-        (await prompts.ask("API provider (anthropic / openai / openai-compatible / ollama) [anthropic]")) || "anthropic";
+        (await prompts.ask(
+          "API provider (anthropic / openai / openai-compatible / ollama) [anthropic]",
+        )) || "anthropic";
     let enteredKey: string | undefined;
     if (provider === "auto") {
       config.llmSelection = "auto";
@@ -103,20 +117,14 @@ export async function initializePassport(
       prompts.log(describeLlm(resolution));
     } else if (provider === "codex" || provider === "claude-code") {
       const status = agents.find((agent) => agent.kind === provider);
-      if (status && !status.ready) prompts.log(`${status.label} is not ready yet. ${status.fix ?? ""}`.trim());
+      if (status && !status.ready)
+        prompts.log(`${status.label} is not ready yet. ${status.fix ?? ""}`.trim());
       const model = await prompts.ask(`Model [${HOST_AGENT_DEFAULT_MODELS[provider].main}]`);
       config.llm = hostAgentLlm(provider, model);
       config.llmSelection = "explicit";
     } else if (provider !== "none") {
-      if (
-        !["anthropic", "openai", "openai-compatible", "ollama"].includes(
-          provider,
-        )
-      )
-        throw new ApiError(
-          "INVALID_PROVIDER",
-          "Choose one of the listed LLM providers",
-        );
+      if (!["anthropic", "openai", "openai-compatible", "ollama"].includes(provider))
+        throw new ApiError("INVALID_PROVIDER", "Choose one of the listed LLM providers");
       const defaults = {
         anthropic: "claude-sonnet-5-5",
         openai: "gpt-4.1",
@@ -124,9 +132,8 @@ export async function initializePassport(
         ollama: "llama3.2",
       };
       const model =
-        (await prompts.ask(
-          `Model [${defaults[provider as keyof typeof defaults]}]`,
-        )) || defaults[provider as keyof typeof defaults];
+        (await prompts.ask(`Model [${defaults[provider as keyof typeof defaults]}]`)) ||
+        defaults[provider as keyof typeof defaults];
       const baseUrl = ["ollama", "openai-compatible"].includes(provider)
         ? await prompts.ask(
             `Base URL [${provider === "ollama" ? "http://localhost:11434/v1" : "required"}]`,
@@ -136,10 +143,7 @@ export async function initializePassport(
         process.env.PASSPORT_LLM_API_KEY ||
         (provider === "ollama"
           ? ""
-          : await prompts.ask(
-              "API key (optional for a local compatible server)",
-              true,
-            ));
+          : await prompts.ask("API key (optional for a local compatible server)", true));
       config.llm = {
         provider: provider as LlmConfig["provider"],
         model,
@@ -153,10 +157,7 @@ export async function initializePassport(
     }
     await saveConfig(config);
     // This key was explicitly entered for persistence; environment-only keys remain in the environment.
-    if (
-      (enteredKey && !process.env.PASSPORT_LLM_API_KEY) ||
-      provider === "none"
-    ) {
+    if ((enteredKey && !process.env.PASSPORT_LLM_API_KEY) || provider === "none") {
       const target = join(config.dataDir, "passport.config.json"),
         temp = `${target}.${crypto.randomUUID()}.tmp`;
       await writeFile(temp, JSON.stringify(config, null, 2) + "\n", {
@@ -167,9 +168,9 @@ export async function initializePassport(
     }
     backend = await createRealBackend(config, { clientMode: true });
     const kind =
-      (skipAccount ? "skip" : await prompts.ask(
-        "First account (gmail / graph / imap / skip) [skip]",
-      )) || "skip";
+      (skipAccount
+        ? "skip"
+        : await prompts.ask("First account (gmail / graph / imap / skip) [skip]")) || "skip";
     if (kind === "gmail" || kind === "graph") {
       prompts.log(
         kind === "gmail"
@@ -180,13 +181,9 @@ export async function initializePassport(
         clientSecret =
           process.env.PASSPORT_SETUP_CLIENTSECRET ||
           (await prompts.ask("OAuth client secret (optional)", true));
-      if (!clientId)
-        throw new ApiError("MISSING_FIELD", "OAuth client ID is required");
-      const calendar =
-        (await prompts.ask("Connect calendar too? [Y/n]")).toLowerCase() !==
-        "n";
-      const descriptor: ProviderSetupDescriptor =
-        backend.providers.describe(kind);
+      if (!clientId) throw new ApiError("MISSING_FIELD", "OAuth client ID is required");
+      const calendar = (await prompts.ask("Connect calendar too? [Y/n]")).toLowerCase() !== "n";
+      const descriptor: ProviderSetupDescriptor = backend.providers.describe(kind);
       const credentials = await authorizeOAuth(
         descriptor,
         {
@@ -204,25 +201,16 @@ export async function initializePassport(
             ),
         },
       );
-      const account = await connectOAuthAccount(
-        backend,
-        { kind, clientId, calendar },
-        credentials,
-      );
-      prompts.log(
-        `Connected ${account.emailAddress}. Initial sync is running.`,
-      );
+      const account = await connectOAuthAccount(backend, { kind, clientId, calendar }, credentials);
+      prompts.log(`Connected ${account.emailAddress}. Initial sync is running.`);
     } else if (kind === "imap") {
       const emailAddress = await prompts.ask("Email address"),
         host = await prompts.ask("IMAP host"),
         port = (await prompts.ask("IMAP port [993]")) || "993";
-      const tls =
-        (await prompts.ask("Use implicit TLS? [Y/n]")).toLowerCase() !== "n";
-      const username =
-        (await prompts.ask(`Username [${emailAddress}]`)) || emailAddress;
+      const tls = (await prompts.ask("Use implicit TLS? [Y/n]")).toLowerCase() !== "n";
+      const username = (await prompts.ask(`Username [${emailAddress}]`)) || emailAddress;
       const password =
-        process.env.PASSPORT_SETUP_PASSWORD ||
-        (await prompts.ask("App password", true));
+        process.env.PASSPORT_SETUP_PASSWORD || (await prompts.ask("App password", true));
       const smtpHost = await prompts.ask("SMTP host"),
         smtpPort = (await prompts.ask("SMTP port [465]")) || "465";
       const smtpTls = smtpPort !== "587";
@@ -244,10 +232,7 @@ export async function initializePassport(
       await backend.syncAccount(account.id);
       prompts.log(`Connected ${emailAddress}.`);
     } else if (kind !== "skip")
-      throw new ApiError(
-        "INVALID_PROVIDER",
-        "Choose gmail, graph, imap or skip",
-      );
+      throw new ApiError("INVALID_PROVIDER", "Choose gmail, graph, imap or skip");
     prompts.log(
       `Configuration saved. Run passport serve, then open http://${config.host}:${config.port}/accounts`,
     );

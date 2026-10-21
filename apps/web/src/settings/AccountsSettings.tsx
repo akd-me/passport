@@ -1,13 +1,13 @@
-import { useState } from "react";
 import type { Account } from "@passport/types";
-import type { ProviderDescriptor } from "../api";
-import { useResource } from "../state";
-import { useUi } from "../ui-state";
+import { useState } from "react";
 import { useAccounts } from "../accounts/AccountFilter";
 import { AccountRow } from "../accounts/AccountRow";
 import { AccountWizard } from "../accounts/AccountWizard";
 import { DoctorCard } from "../accounts/DoctorCard";
+import type { ProviderDescriptor } from "../api";
 import { Empty, Icon } from "../components/ui";
+import { useResource } from "../state";
+import { useUi } from "../ui-state";
 
 /** Settings → Accounts: sync, history, re-authorization, removal and health. */
 export function AccountsSettings() {
@@ -33,8 +33,7 @@ export function AccountsSettings() {
         </div>
         {mode === "demo" && (
           <p className="hint">
-            Demo workspace: everything stays in memory and resets when the
-            server stops.
+            Demo workspace: everything stays in memory and resets when the server stops.
           </p>
         )}
         {accounts.length ? (
@@ -45,9 +44,7 @@ export function AccountsSettings() {
                 account={a}
                 reauthorize={() =>
                   setReauthorizing(
-                    accounts.find(
-                      (item) => item.id === a.settings.mailAccountId,
-                    ) ?? a,
+                    accounts.find((item) => item.id === a.settings.mailAccountId) ?? a,
                   )
                 }
               />

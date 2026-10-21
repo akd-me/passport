@@ -6,16 +6,12 @@ import type {
   ProviderRegistry,
 } from "@passport/types";
 import type { Backend } from "../backend.js";
-import {
-  defaultConfig,
-  validateConfig,
-  type PassportConfig,
-} from "../config.js";
+import { defaultConfig, type PassportConfig, validateConfig } from "../config.js";
 import { NotImplementedError, required } from "../errors.js";
-import { createDemoStore } from "./store.js";
+import { createDemoExecutor } from "./executor.js";
 import { demoCapabilities, seedDemo } from "./fixtures.js";
 import { createDemoPolicy } from "./policy.js";
-import { createDemoExecutor } from "./executor.js";
+import { createDemoStore } from "./store.js";
 
 export function createDemoBus(): EventBus {
   const listeners = new Set<(event: DomainEvent) => void>();
@@ -31,8 +27,7 @@ export function createDemoBus(): EventBus {
     },
     on: (type, handler) => {
       const listener = (event: DomainEvent) => {
-        if (event.type === type)
-          (handler as (event: DomainEvent) => void)(event);
+        if (event.type === type) (handler as (event: DomainEvent) => void)(event);
       };
       listeners.add(listener);
       return () => {
@@ -91,9 +86,7 @@ export async function createDemoBackend(
       );
     },
     calendar: () => {
-      throw new NotImplementedError(
-        "Real calendar adapters are wired during integration",
-      );
+      throw new NotImplementedError("Real calendar adapters are wired during integration");
     },
   };
   const draftRequest = async (
@@ -156,8 +149,7 @@ export async function createDemoBackend(
           status: ["proposed", "held"],
           limit: 200,
         });
-        const matterId =
-          trigger.kind === "manual" ? trigger.matterId : undefined;
+        const matterId = trigger.kind === "manual" ? trigger.matterId : undefined;
         const match = [0, 1, 3, 4].find(
           (i) =>
             (!matterId || matterId === `matter-${i}`) &&

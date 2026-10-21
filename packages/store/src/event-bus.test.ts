@@ -7,10 +7,10 @@ describe("InMemoryEventBus", () => {
   it("fans out synchronously to typed and catch-all handlers", () => {
     const bus = new InMemoryEventBus();
     const seen: string[] = [];
-    bus.on("email.updated", event => seen.push(event.emailId));
+    bus.on("email.updated", (event) => seen.push(event.emailId));
     bus.on("email.updated", () => seen.push("second"));
     bus.on("agent.run.started", () => seen.push("unrelated"));
-    bus.onAny(event => seen.push(event.type));
+    bus.onAny((event) => seen.push(event.type));
     bus.emit({ type: "email.updated", emailId: "email" });
     expect(seen).toEqual(["email", "second", "email.updated"]);
   });
@@ -21,7 +21,10 @@ describe("InMemoryEventBus", () => {
     const first = bus.on("email.updated", handler);
     const second = bus.on("email.updated", handler);
     const any = bus.onAny(handler);
-    first(); first(); any(); any();
+    first();
+    first();
+    any();
+    any();
     bus.emit({ type: "email.updated", emailId: "email" });
     expect(handler).toHaveBeenCalledTimes(1);
     second();
@@ -35,9 +38,13 @@ describe("InMemoryEventBus", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const bus = new InMemoryEventBus();
     const handler = vi.fn();
-    bus.on("email.updated", () => { throw new Error("secret body or credential"); });
+    bus.on("email.updated", () => {
+      throw new Error("secret body or credential");
+    });
     bus.on("email.updated", handler);
-    bus.onAny(() => { throw new Error("another secret"); });
+    bus.onAny(() => {
+      throw new Error("another secret");
+    });
     bus.onAny(handler);
     expect(() => bus.emit({ type: "email.updated", emailId: "email" })).not.toThrow();
     expect(handler).toHaveBeenCalledTimes(2);
@@ -49,7 +56,9 @@ describe("InMemoryEventBus", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const bus = new InMemoryEventBus();
     const handler = vi.fn();
-    bus.on("email.updated", async () => { throw new Error("private"); });
+    bus.on("email.updated", async () => {
+      throw new Error("private");
+    });
     bus.onAny(handler);
     bus.emit({ type: "email.updated", emailId: "email" });
     expect(handler).toHaveBeenCalledTimes(1);

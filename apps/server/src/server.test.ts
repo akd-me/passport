@@ -1,16 +1,16 @@
+import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { once } from "node:events";
-import { WebSocket } from "ws";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDemoBackend } from "./demo/index.js";
-import { defaultConfig } from "./config.js";
-import { startServer } from "./server.js";
-import { createRealBackend } from "./compose.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WebSocket } from "ws";
+import { createRealBackend } from "./compose.js";
+import { defaultConfig } from "./config.js";
+import { createDemoBackend } from "./demo/index.js";
 import { loadMcpToken } from "./mcp-token.js";
+import { startServer } from "./server.js";
 
 describe("HTTP + WebSocket listener", () => {
   const token = "server-integration-test-token";
@@ -30,14 +30,13 @@ describe("HTTP + WebSocket listener", () => {
       const mcpUrl = await handle.ready;
       if (!mcpUrl) throw new Error("Expected MCP URL");
       const address = handle.server.address();
-      if (!address || typeof address === "string")
-        throw new Error("Expected HTTP listener");
+      if (!address || typeof address === "string") throw new Error("Expected HTTP listener");
       const root = `http://127.0.0.1:${address.port}`;
       expect(
         (
-          (await fetch(`${root}/api/health`, { headers }).then((response) =>
-            response.json(),
-          )) as { mode: string }
+          (await fetch(`${root}/api/health`, { headers }).then((response) => response.json())) as {
+            mode: string;
+          }
         ).mode,
       ).toBe("real");
       const accounts = (await fetch(`${root}/api/accounts`, { headers }).then((response) =>
@@ -47,10 +46,12 @@ describe("HTTP + WebSocket listener", () => {
       expect((await fetch(root)).status).toBe(200);
       expect((await fetch(mcpUrl)).status).toBe(401);
       const token = await loadMcpToken(backend.config.dataDir);
-      await client.connect(new StreamableHTTPClientTransport(new URL(mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
-      expect(
-        (await client.listTools()).tools.map((tool) => tool.name),
-      ).toContain("archive_emails");
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(mcpUrl), {
+          requestInit: { headers: { Authorization: `Bearer ${token}` } },
+        }),
+      );
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("archive_emails");
     } finally {
       await client.close();
       await handle.close();
@@ -63,8 +64,7 @@ describe("HTTP + WebSocket listener", () => {
     const handle = startServer(backend);
     await once(handle.server, "listening");
     const address = handle.server.address();
-    if (!address || typeof address === "string")
-      throw new Error("Expected TCP listener");
+    if (!address || typeof address === "string") throw new Error("Expected TCP listener");
     const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { headers });
     try {
       await once(socket, "open");
@@ -76,8 +76,8 @@ describe("HTTP + WebSocket listener", () => {
       });
       expect(
         (
-          (await fetch(`http://127.0.0.1:${address.port}/api/health`, { headers }).then(
-            (r) => r.json(),
+          (await fetch(`http://127.0.0.1:${address.port}/api/health`, { headers }).then((r) =>
+            r.json(),
           )) as { mode: string }
         ).mode,
       ).toBe("demo");

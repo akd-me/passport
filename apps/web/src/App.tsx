@@ -1,19 +1,19 @@
 import { useEffect } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useSearchParams } from "react-router";
-import { useWorkspace } from "./state";
-import { isTyping, useUi, type SettingsSection } from "./ui-state";
 import { AccountScope, useAccounts } from "./accounts/AccountFilter";
 import { Icon, Loading } from "./components/ui";
-import { Sidebar, BrandMark } from "./shell/Sidebar";
-import { Surface } from "./shell/Surface";
-import { CommandPalette } from "./shell/CommandPalette";
-import { SettingsDialog } from "./settings/SettingsDialog";
 import { ConnectDialog } from "./connect/ConnectDialog";
 import { SetupFlow } from "./connect/SetupFlow";
-import { WorkQueue } from "./views/Decisions";
-import { Matters, MatterPage } from "./views/Matters";
-import { People, PersonPage } from "./views/People";
+import { SettingsDialog } from "./settings/SettingsDialog";
+import { CommandPalette } from "./shell/CommandPalette";
+import { BrandMark, Sidebar } from "./shell/Sidebar";
+import { Surface } from "./shell/Surface";
+import { useWorkspace } from "./state";
+import { isTyping, type SettingsSection, useUi } from "./ui-state";
 import { Activity } from "./views/Activity";
+import { WorkQueue } from "./views/Decisions";
+import { MatterPage, Matters } from "./views/Matters";
+import { People, PersonPage } from "./views/People";
 
 export function App() {
   return (
@@ -44,9 +44,8 @@ function Welcome() {
         <BrandMark size={28} />
         <h1>Connect the mailbox Passport should work on</h1>
         <p className="muted">
-          Passport reads your mail on this machine, proposes replies and
-          clean-up, and asks before anything leaves. You decide how much it
-          does on its own.
+          Passport reads your mail on this machine, proposes replies and clean-up, and asks before
+          anything leaves. You decide how much it does on its own.
         </p>
         <div className="welcome-flow">
           <SetupFlow onDone={() => {}} />

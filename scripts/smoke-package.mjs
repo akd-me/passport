@@ -6,15 +6,21 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { setTimeout } from "node:timers/promises";
 import { test } from "node:test";
+import { setTimeout } from "node:timers/promises";
 
 if (process.argv.length !== 3) throw new Error("Usage: node scripts/smoke-package.mjs <tarball>");
 const tarball = resolve(process.argv[2]);
 const directory = await mkdtemp(join(tmpdir(), "passport-package-"));
 const env = { ...process.env, PASSPORT_DATA_DIR: join(directory, "data") };
 // The smoke check never uses developer credentials or a real mailbox.
-for (const key of ["PASSPORT_MASTER_KEY", "PASSPORT_LLM_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "NODE_PATH"])
+for (const key of [
+  "PASSPORT_MASTER_KEY",
+  "PASSPORT_LLM_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "NODE_PATH",
+])
   delete env[key];
 env.PASSPORT_HOST = "127.0.0.1";
 env.PASSPORT_LLM_PROVIDER = "anthropic";
@@ -23,15 +29,28 @@ env.PASSPORT_LLM_BASE_URL = "";
 env.PASSPORT_MCP_PORT = "0";
 
 function command(program, args, options = {}) {
-  const result = spawnSync(program, args, { cwd: directory, env, encoding: "utf8", timeout: 120_000, ...options });
+  const result = spawnSync(program, args, {
+    cwd: directory,
+    env,
+    encoding: "utf8",
+    timeout: 120_000,
+    ...options,
+  });
   if (result.error) throw result.error;
-  assert.equal(result.status, 0, `${program} ${args.join(" ")}\n${result.stderr}\n${result.stdout}`);
+  assert.equal(
+    result.status,
+    0,
+    `${program} ${args.join(" ")}\n${result.stderr}\n${result.stdout}`,
+  );
   return result.stdout;
 }
 
 async function freePort() {
   const server = createServer();
-  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
   const port = server.address().port;
   await new Promise((resolve) => server.close(resolve));
   return port;
@@ -39,13 +58,23 @@ async function freePort() {
 
 async function smokeServer(cli, mode) {
   const port = await freePort();
-  const child = spawn(process.execPath, [cli, mode], { cwd: directory, env: { ...env, PASSPORT_PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [cli, mode], {
+    cwd: directory,
+    env: { ...env, PASSPORT_PORT: String(port) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   const closed = new Promise((resolve) => child.once("close", resolve));
   let logs = "";
-  child.stdout.on("data", (chunk) => { logs += chunk; });
-  child.stderr.on("data", (chunk) => { logs += chunk; });
+  child.stdout.on("data", (chunk) => {
+    logs += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    logs += chunk;
+  });
   let spawnError;
-  child.on("error", (error) => { spawnError = error; });
+  child.on("error", (error) => {
+    spawnError = error;
+  });
   try {
     const base = `http://127.0.0.1:${port}`;
     let healthy = false;
@@ -59,16 +88,39 @@ async function smokeServer(cli, mode) {
           if (url.origin === base) token = url.searchParams.get("token") ?? undefined;
         }
       }
-      if (!token) { await setTimeout(100); continue; }
+      if (!token) {
+        await setTimeout(100);
+        continue;
+      }
       try {
-        const response = await fetch(`${base}/api/health`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(500) });
-        if (response.ok) { healthy = true; break; }
-      } catch { /* Wait for the listener. */ }
+        const response = await fetch(`${base}/api/health`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(500),
+        });
+        if (response.ok) {
+          healthy = true;
+          break;
+        }
+      } catch {
+        /* Wait for the listener. */
+      }
       await setTimeout(100);
     }
     assert(healthy, `${mode} did not become healthy:\n${logs}`);
-    assert.equal((await fetch(`${base}/api/health`)).status, 401, "Health must require authentication");
-    const curl = ["--fail", "--silent", "--show-error", "--max-time", "5", "--header", `Authorization: Bearer ${token}`];
+    assert.equal(
+      (await fetch(`${base}/api/health`)).status,
+      401,
+      "Health must require authentication",
+    );
+    const curl = [
+      "--fail",
+      "--silent",
+      "--show-error",
+      "--max-time",
+      "5",
+      "--header",
+      `Authorization: Bearer ${token}`,
+    ];
     const health = JSON.parse(command("curl", [...curl, `${base}/api/health`]));
     assert.equal(health.ok, true);
     assert.equal(health.mode, mode === "serve" ? "real" : "demo");
@@ -81,7 +133,10 @@ async function smokeServer(cli, mode) {
     const asset = html.match(/src="([^"]+\.js)"/)?.[1];
     assert(asset, "UI must reference built JavaScript");
     const javascript = await fetch(new URL(asset, base), { signal: AbortSignal.timeout(5000) });
-    assert(javascript.ok && javascript.headers.get("content-type")?.includes("javascript"), "Built UI asset must be served");
+    assert(
+      javascript.ok && javascript.headers.get("content-type")?.includes("javascript"),
+      "Built UI asset must be served",
+    );
     console.log(`Installed passport ${mode}: health, decisions and built UI OK`);
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
@@ -96,7 +151,9 @@ await test("B4: packed CLI help, MCP dry-run and authenticated demo/persistent A
   try {
     await writeFile(join(directory, "package.json"), '{"private":true}\n');
     command("npm", ["install", "--no-audit", "--no-fund", tarball]);
-    const manifest = JSON.parse(await readFile(join(directory, "node_modules/@akd-me/passport/package.json"), "utf8"));
+    const manifest = JSON.parse(
+      await readFile(join(directory, "node_modules/@akd-me/passport/package.json"), "utf8"),
+    );
     assert.equal(manifest.name, "@akd-me/passport");
     assert.equal(manifest.bin.passport, "bin/passport.js");
     assert(!Object.keys(manifest.dependencies).some((name) => name.startsWith("@passport/")));
@@ -105,10 +162,16 @@ await test("B4: packed CLI help, MCP dry-run and authenticated demo/persistent A
     assert.match(command(cli, ["mcp", "--help"], { timeout: 10_000 }), /stdio/);
     const before = JSON.stringify({ mcpServers: { example: { command: "example" } } });
     await writeFile(join(directory, ".mcp.json"), before);
-    const dry = JSON.parse(command(cli, ["mcp", "install", "--client", "claude-code", "--dry-run"]));
+    const dry = JSON.parse(
+      command(cli, ["mcp", "install", "--client", "claude-code", "--dry-run"]),
+    );
     assert.equal(dry.dryRun, true);
     assert.equal(JSON.parse(dry.content).mcpServers.passport.args[1], "mcp");
-    assert.equal(await readFile(join(directory, ".mcp.json"), "utf8"), before, "Dry run must preserve config");
+    assert.equal(
+      await readFile(join(directory, ".mcp.json"), "utf8"),
+      before,
+      "Dry run must preserve config",
+    );
     command(cli, ["mcp", "install", "--client", "claude-code"]);
     command(cli, ["mcp", "install", "--client", "claude-code"]);
     const config = JSON.parse(await readFile(join(directory, ".mcp.json"), "utf8"));

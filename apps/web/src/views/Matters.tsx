@@ -1,9 +1,8 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
 import type { ActionRecord, Matter, MatterStatus, Page } from "@passport/types";
-import { api, queryString, type MatterDetail } from "../api";
-import { useResource, useTask } from "../state";
+import { type ReactNode, useMemo, useState } from "react";
+import { Link, useParams } from "react-router";
 import { AccountDot, useAccountId, useAccountScopeLink } from "../accounts/AccountFilter";
+import { api, type MatterDetail, queryString } from "../api";
 import {
   Avatar,
   Empty,
@@ -15,10 +14,11 @@ import {
   relativeTime,
   Verification,
 } from "../components/ui";
-import { Surface } from "../shell/Surface";
-import { Composer } from "../shell/Composer";
-import { DecisionCard } from "./Decisions";
 import { actionLabel } from "../labels";
+import { Composer } from "../shell/Composer";
+import { Surface } from "../shell/Surface";
+import { useResource, useTask } from "../state";
+import { DecisionCard } from "./Decisions";
 
 const statuses: MatterStatus[] = ["active", "waiting", "snoozed", "done"];
 
@@ -91,7 +91,9 @@ export function Matters() {
                   )}
                   <span className={`status-text ${matter.status}`}>{humanize(matter.status)}</span>
                   <span className="dots">
-                    {matter.accountIds?.map((id) => <AccountDot key={id} id={id} />)}
+                    {matter.accountIds?.map((id) => (
+                      <AccountDot key={id} id={id} />
+                    ))}
                   </span>
                   <time className="muted" dateTime={matter.updatedAt}>
                     {relativeTime(matter.updatedAt)}
@@ -342,7 +344,11 @@ export function MatterPage() {
                     {item.deleted && <span className="badge warn">Deleted at the provider</span>}
                     {item.verification}
                   </div>
-                  {item.body && <p className={item.icon === "mail" || item.icon === "send" ? "mail-text" : ""}>{item.body}</p>}
+                  {item.body && (
+                    <p className={item.icon === "mail" || item.icon === "send" ? "mail-text" : ""}>
+                      {item.body}
+                    </p>
+                  )}
                 </div>
               </details>
             </li>

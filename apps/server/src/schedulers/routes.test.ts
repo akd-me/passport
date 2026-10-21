@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Backend } from "../backend.js";
 import { createApp } from "../auth.test-client.js";
+import type { Backend } from "../backend.js";
 import { createDemoBackend } from "../demo/index.js";
 import { getSchedulerService, type JobView } from "./service.js";
 
@@ -49,40 +49,30 @@ describe("scheduler HTTP API", () => {
         "store.maintenance",
       ]),
     );
-    expect(
-      jobs.find((j) => j.id === "trust.decay")?.definition.schedule,
-    ).toMatchObject({ type: "daily", at: "03:00" });
+    expect(jobs.find((j) => j.id === "trust.decay")?.definition.schedule).toMatchObject({
+      type: "daily",
+      at: "03:00",
+    });
     expect(JSON.stringify(jobs)).not.toContain('"run":');
   });
   it("creates, edits, pauses, resumes, runs, inspects history and deletes routines", async () => {
     const job = await create();
     expect(job.kind).toBe("user");
-    expect(
-      (await app.request(`/api/jobs/${job.id}/pause`, request("POST"))).status,
-    ).toBe(200);
-    expect(getSchedulerService(backend).scheduler.get(job.id)?.enabled).toBe(
-      false,
-    );
+    expect((await app.request(`/api/jobs/${job.id}/pause`, request("POST"))).status).toBe(200);
+    expect(getSchedulerService(backend).scheduler.get(job.id)?.enabled).toBe(false);
     const patch = {
       name: "Evening triage",
       schedule: { type: "daily", at: "19:00", timeZone: "UTC" },
       routine: { instruction: "Review my active matters" },
     };
-    expect(
-      (await app.request(`/api/jobs/${job.id}`, request("PATCH", patch)))
-        .status,
-    ).toBe(200);
+    expect((await app.request(`/api/jobs/${job.id}`, request("PATCH", patch))).status).toBe(200);
     const run = vi.spyOn(backend.agent, "run");
-    expect(
-      (await app.request(`/api/jobs/${job.id}/run`, request("POST"))).status,
-    ).toBe(200);
+    expect((await app.request(`/api/jobs/${job.id}/run`, request("POST"))).status).toBe(200);
     expect(run).toHaveBeenCalledWith({
       kind: "manual",
       instruction: patch.routine.instruction,
     });
-    const history = await (
-      await app.request(`/api/jobs/${job.id}/history`)
-    ).json();
+    const history = await (await app.request(`/api/jobs/${job.id}/history`)).json();
     expect(history).toEqual([
       expect.objectContaining({ status: "ok", durationMs: expect.any(Number) }),
     ]);
@@ -94,12 +84,8 @@ describe("scheduler HTTP API", () => {
       runCount: 1,
       routine: patch.routine,
     });
-    expect(
-      (await app.request(`/api/jobs/${job.id}/resume`, request("POST"))).status,
-    ).toBe(200);
-    expect(
-      (await app.request(`/api/jobs/${job.id}`, request("DELETE"))).status,
-    ).toBe(200);
+    expect((await app.request(`/api/jobs/${job.id}/resume`, request("POST"))).status).toBe(200);
+    expect((await app.request(`/api/jobs/${job.id}`, request("DELETE"))).status).toBe(200);
     expect((await app.request(`/api/jobs/${job.id}/history`)).status).toBe(404);
     expect(await backend.store.kv.get(`job:${job.id}`)).toBeNull();
     expect(await backend.store.kv.get("scheduler:routines")).toBe("[]");
@@ -124,35 +110,18 @@ describe("scheduler HTTP API", () => {
       { ...input, schedule: { type: "daily", at: "07:30", timeZone: "bad" } },
       { ...input, run: "evil" },
     ]) {
-      expect(
-        (await app.request("/api/jobs", request("POST", value))).status,
-      ).toBe(400);
+      expect((await app.request("/api/jobs", request("POST", value))).status).toBe(400);
     }
+    expect((await app.request("/api/jobs/outbox.release", request("DELETE"))).status).toBe(409);
+    expect((await app.request("/api/jobs/missing/run", request("POST"))).status).toBe(404);
     expect(
-      (await app.request("/api/jobs/outbox.release", request("DELETE"))).status,
-    ).toBe(409);
-    expect(
-      (await app.request("/api/jobs/missing/run", request("POST"))).status,
-    ).toBe(404);
-    expect(
-      (
-        await app.request(
-          "/api/jobs/outbox.release",
-          request("PATCH", { enabled: "yes" }),
-        )
-      ).status,
+      (await app.request("/api/jobs/outbox.release", request("PATCH", { enabled: "yes" }))).status,
     ).toBe(400);
     expect(
-      (
-        await app.request(
-          "/api/jobs/outbox.release",
-          request("PATCH", { routine: input.routine }),
-        )
-      ).status,
+      (await app.request("/api/jobs/outbox.release", request("PATCH", { routine: input.routine })))
+        .status,
     ).toBe(400);
-    expect(
-      (await app.request("/api/jobs", { method: "POST", body: "{" })).status,
-    ).toBe(400);
+    expect((await app.request("/api/jobs", { method: "POST", body: "{" })).status).toBe(400);
     expect(
       (
         await app.request("/api/jobs", {
@@ -166,13 +135,8 @@ describe("scheduler HTTP API", () => {
     const job = await create(),
       events: string[] = [];
     const unsubscribe = backend.bus.onAny((e) => events.push(e.type));
-    vi.spyOn(backend.agent, "run").mockRejectedValueOnce(
-      new Error("Model is unavailable"),
-    );
-    const response = await app.request(
-      `/api/jobs/${job.id}/run`,
-      request("POST"),
-    );
+    vi.spyOn(backend.agent, "run").mockRejectedValueOnce(new Error("Model is unavailable"));
+    const response = await app.request(`/api/jobs/${job.id}/run`, request("POST"));
     expect(await response.json()).toMatchObject({
       status: "error",
       summary: "Model is unavailable",
@@ -185,10 +149,7 @@ describe("scheduler HTTP API", () => {
     unsubscribe();
   });
   it("skips maintenance when the store does not expose it", async () => {
-    const response = await app.request(
-      "/api/jobs/store.maintenance/run",
-      request("POST"),
-    );
+    const response = await app.request("/api/jobs/store.maintenance/run", request("POST"));
     expect(await response.json()).toMatchObject({ status: "skipped" });
   });
   it("registers onboarding accounts through the API lifecycle hook", async () => {
@@ -202,13 +163,9 @@ describe("scheduler HTTP API", () => {
     );
     expect(response.status).toBe(201);
     const account = (await response.json()) as { id: string };
-    expect(
-      getSchedulerService(backend).scheduler.get(`sync:${account.id}`),
-    ).toBeDefined();
+    expect(getSchedulerService(backend).scheduler.get(`sync:${account.id}`)).toBeDefined();
     await backend.store.accounts.delete(account.id);
     await getSchedulerService(backend).reconcileAccounts();
-    expect(
-      getSchedulerService(backend).scheduler.get(`sync:${account.id}`),
-    ).toBeUndefined();
+    expect(getSchedulerService(backend).scheduler.get(`sync:${account.id}`)).toBeUndefined();
   });
 });

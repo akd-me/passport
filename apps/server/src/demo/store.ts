@@ -101,11 +101,7 @@ export function createDemoStore(): Store {
         return row;
       },
       getByProviderId: async (id, providerId) =>
-        emails
-          .all()
-          .find(
-            (row) => row.accountId === id && row.providerId === providerId,
-          ) ?? null,
+        emails.all().find((row) => row.accountId === id && row.providerId === providerId) ?? null,
       query: async (q) => {
         const rows = emails
           .all()
@@ -114,28 +110,21 @@ export function createDemoStore(): Store {
               (!q.accountId || e.accountId === q.accountId) &&
               (!q.mailboxId || e.mailboxIds.includes(q.mailboxId)) &&
               (!q.threadId || e.threadId === q.threadId) &&
-              (q.matterId === undefined ||
-                (e.matterId ?? null) === q.matterId) &&
+              (q.matterId === undefined || (e.matterId ?? null) === q.matterId) &&
               (!q.personId || e.personIds.includes(q.personId)) &&
               (!q.category || e.category === q.category) &&
               inRange(e.receivedAt, q.after, q.before) &&
               (!q.text ||
-                [
-                  e.subject,
-                  e.textBody,
-                  ...e.from.map((f) => `${f.name} ${f.email}`),
-                ]
+                [e.subject, e.textBody, ...e.from.map((f) => `${f.name} ${f.email}`)]
                   .join(" ")
                   .toLowerCase()
                   .includes(q.text.toLowerCase())) &&
-              (!q.keywords?.has ||
-                q.keywords.has.every((k) => e.keywords[k])) &&
+              (!q.keywords?.has || q.keywords.has.every((k) => e.keywords[k])) &&
               (!q.keywords?.not || q.keywords.not.every((k) => !e.keywords[k])),
           );
         rows.sort(
           (a, b) =>
-            (q.sort === "receivedAt_asc" ? 1 : -1) *
-            a.receivedAt.localeCompare(b.receivedAt),
+            (q.sort === "receivedAt_asc" ? 1 : -1) * a.receivedAt.localeCompare(b.receivedAt),
         );
         if (!q.includeBodies)
           rows.forEach((e) => {
@@ -174,8 +163,7 @@ export function createDemoStore(): Store {
     people: {
       ...people,
       getByEmail: async (email) =>
-        people.all().find((p) => p.emails.includes(email.toLowerCase())) ??
-        null,
+        people.all().find((p) => p.emails.includes(email.toLowerCase())) ?? null,
       list: async (q = {}) =>
         people
           .all()
@@ -208,10 +196,7 @@ export function createDemoStore(): Store {
             (m) =>
               (!q.status || q.status.includes(m.status)) &&
               (!q.personId || m.personIds.includes(q.personId)) &&
-              (!q.text ||
-                `${m.title} ${m.summary}`
-                  .toLowerCase()
-                  .includes(q.text.toLowerCase())),
+              (!q.text || `${m.title} ${m.summary}`.toLowerCase().includes(q.text.toLowerCase())),
           )
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
           .slice(0, q.limit ?? 100),
@@ -247,11 +232,7 @@ export function createDemoStore(): Store {
           q.cursor,
         ),
       dueHeld: async (now) =>
-        actions
-          .all()
-          .filter(
-            (a) => a.status === "held" && a.holdUntil && a.holdUntil <= now,
-          ),
+        actions.all().filter((a) => a.status === "held" && a.holdUntil && a.holdUntil <= now),
     },
     trust: {
       list: async () => copy([...trust.values()]),

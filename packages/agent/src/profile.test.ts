@@ -18,11 +18,19 @@ describe("USER.md and draft attribution", () => {
     [DEFAULT_USER_PROFILE, {}],
     [DEFAULT_USER_PROFILE, { attribution: true }],
     ["assistant_attribution: true", {}],
-  ])("leaves attribution off unless both configuration and profile allow it", (profile, settings) => {
-    expect(formatDraft("Hello.\n\n(drafted by my assistant)", profile, settings)).toBe("Hello.");
-  });
+  ])(
+    "leaves attribution off unless both configuration and profile allow it",
+    (profile, settings) => {
+      expect(formatDraft("Hello.\n\n(drafted by my assistant)", profile, settings)).toBe("Hello.");
+    },
+  );
 
   it("adds the configured attribution exactly once when permitted", () => {
-    expect(formatDraft("Hello.\n(custom assistant line)", "assistant_attribution: true", { attribution: true, attributionLine: "(custom assistant line)" })).toBe("Hello.\n\n(custom assistant line)");
+    expect(
+      formatDraft("Hello.\n(custom assistant line)", "assistant_attribution: true", {
+        attribution: true,
+        attributionLine: "(custom assistant line)",
+      }),
+    ).toBe("Hello.\n\n(custom assistant line)");
   });
 });

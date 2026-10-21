@@ -1,5 +1,5 @@
-import { delimiter, dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 
 /**
  * Variables a host CLI needs to find its login (keychain, config dir), the network, and
@@ -8,14 +8,47 @@ import { homedir } from "node:os";
  * subscription login with metered API billing.
  */
 const FORWARDED = [
-  "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM",
-  "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
-  "CLAUDE_CONFIG_DIR", "CODEX_HOME",
-  "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "no_proxy", "all_proxy",
-  "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TZ",
+  "TERM",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_STATE_HOME",
+  "XDG_RUNTIME_DIR",
+  "CLAUDE_CONFIG_DIR",
+  "CODEX_HOME",
+  "HTTPS_PROXY",
+  "HTTP_PROXY",
+  "NO_PROXY",
+  "ALL_PROXY",
+  "https_proxy",
+  "http_proxy",
+  "no_proxy",
+  "all_proxy",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
   "__CF_USER_TEXT_ENCODING",
   // Windows equivalents of HOME/TMPDIR and the executable search order.
-  "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "SYSTEMROOT", "ComSpec", "PATHEXT", "HOMEDRIVE", "HOMEPATH",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "SystemRoot",
+  "SYSTEMROOT",
+  "ComSpec",
+  "PATHEXT",
+  "HOMEDRIVE",
+  "HOMEPATH",
 ];
 
 /** True for variables the host CLI itself receives (see {@link hostAgentEnv}). */
@@ -30,14 +63,18 @@ export function extraBinDirs(env: NodeJS.ProcessEnv = process.env): string[] {
 }
 
 /** Minimal child environment. `binaryPath`'s directory is added so CLIs find their own helpers. */
-export function hostAgentEnv(source: NodeJS.ProcessEnv = process.env, binaryPath?: string): Record<string, string> {
+export function hostAgentEnv(
+  source: NodeJS.ProcessEnv = process.env,
+  binaryPath?: string,
+): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of FORWARDED) {
     const value = source[key];
     if (value !== undefined) env[key] = value;
   }
   const path = (source.PATH ?? source.Path ?? "").split(delimiter).filter(Boolean);
-  for (const dir of [...(binaryPath ? [dirname(binaryPath)] : []), ...extraBinDirs(source)]) if (!path.includes(dir)) path.push(dir);
+  for (const dir of [...(binaryPath ? [dirname(binaryPath)] : []), ...extraBinDirs(source)])
+    if (!path.includes(dir)) path.push(dir);
   env.PATH = path.join(delimiter);
   env.NO_COLOR = "1";
   return env;

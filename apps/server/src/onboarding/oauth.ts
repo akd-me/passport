@@ -12,9 +12,7 @@ export const scopesFor = (kind: OAuthKind, calendar: boolean): string[] =>
         "openid",
         "email",
         "https://www.googleapis.com/auth/gmail.modify",
-        ...(calendar
-          ? ["https://www.googleapis.com/auth/calendar.events"]
-          : []),
+        ...(calendar ? ["https://www.googleapis.com/auth/calendar.events"] : []),
       ]
     : [
         "openid",
@@ -26,11 +24,8 @@ export const scopesFor = (kind: OAuthKind, calendar: boolean): string[] =>
         ...(calendar ? ["Calendars.ReadWrite"] : []),
       ];
 const calendarScope = (kind: OAuthKind) =>
-  kind === "gmail"
-    ? "https://www.googleapis.com/auth/calendar.events"
-    : "Calendars.ReadWrite";
-export const oauthCookie = (state: string) =>
-  `passport_oauth_${state.slice(0, 24)}`;
+  kind === "gmail" ? "https://www.googleapis.com/auth/calendar.events" : "Calendars.ReadWrite";
+export const oauthCookie = (state: string) => `passport_oauth_${state.slice(0, 24)}`;
 
 /** Mail and calendar use one grant; persist rotations to both encrypted records. */
 export async function persistOAuthCredentials(
@@ -42,12 +37,9 @@ export async function persistOAuthCredentials(
   if (!account) return;
   const group = account.settings.oauthGroup;
   const accounts = group
-    ? (await store.accounts.list()).filter(
-        (a) => a.settings.oauthGroup === group,
-      )
+    ? (await store.accounts.list()).filter((a) => a.settings.oauthGroup === group)
     : [account];
-  for (const sibling of accounts)
-    await store.accounts.setCredentials(sibling.id, credentials);
+  for (const sibling of accounts) await store.accounts.setCredentials(sibling.id, credentials);
 }
 
 export async function accountIdentity(
@@ -65,29 +57,20 @@ export async function accountIdentity(
     signal: AbortSignal.timeout(30000),
   });
   if (!response.ok)
-    throw new ApiError(
-      "OAUTH_IDENTITY_FAILED",
-      "Could not read the authorized account identity",
-    );
+    throw new ApiError("OAUTH_IDENTITY_FAILED", "Could not read the authorized account identity");
   const identity = (await response.json()) as {
     email?: string;
     mail?: string;
     userPrincipalName?: string;
     email_verified?: boolean;
   };
-  const address =
-    kind === "gmail"
-      ? identity.email
-      : identity.mail || identity.userPrincipalName;
+  const address = kind === "gmail" ? identity.email : identity.mail || identity.userPrincipalName;
   if (
     !address ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address) ||
     (kind === "gmail" && identity.email_verified === false)
   )
-    throw new ApiError(
-      "OAUTH_IDENTITY_FAILED",
-      "Provider did not return a verified email address",
-    );
+    throw new ApiError("OAUTH_IDENTITY_FAILED", "Provider did not return a verified email address");
   return address.toLowerCase();
 }
 
@@ -107,42 +90,30 @@ export async function connectOAuthAccount(
   const accounts = await backend.store.accounts.list();
   const existing = input.accountId
     ? required(await backend.store.accounts.get(input.accountId), "Account")
-    : accounts.find(
-        (a) =>
-          a.kind === input.kind &&
-          a.emailAddress.toLowerCase() === emailAddress,
-      );
+    : accounts.find((a) => a.kind === input.kind && a.emailAddress.toLowerCase() === emailAddress);
   if (
     existing &&
-    (existing.kind !== input.kind ||
-      existing.emailAddress.toLowerCase() !== emailAddress)
+    (existing.kind !== input.kind || existing.emailAddress.toLowerCase() !== emailAddress)
   )
     throw new ApiError(
       "OAUTH_IDENTITY_MISMATCH",
       "Authorize the same address as the account being reconnected",
     );
-  const oldCredentials = existing
-    ? await backend.store.accounts.getCredentials(existing.id)
-    : null;
+  const oldCredentials = existing ? await backend.store.accounts.getCredentials(existing.id) : null;
   const sameClient = existing?.settings.clientId === input.clientId;
   const tokens: AccountCredentials = {
     ...(sameClient && oldCredentials?.clientSecret
       ? { clientSecret: oldCredentials.clientSecret }
       : {}),
     ...credentials,
-    ...(!credentials.refresh_token &&
-    sameClient &&
-    oldCredentials?.refresh_token
+    ...(!credentials.refresh_token && sameClient && oldCredentials?.refresh_token
       ? { refresh_token: oldCredentials.refresh_token }
       : {}),
     scope: credentials.scope ?? scopesFor(input.kind, input.calendar).join(" "),
   };
   const granted =
-    tokens.scope
-      ?.split(/\s+/)
-      .map((s) => s.replace("https://graph.microsoft.com/", "")) ?? [];
-  const calendar =
-    input.calendar && granted.includes(calendarScope(input.kind));
+    tokens.scope?.split(/\s+/).map((s) => s.replace("https://graph.microsoft.com/", "")) ?? [];
+  const calendar = input.calendar && granted.includes(calendarScope(input.kind));
   const mailScopes =
     input.kind === "gmail"
       ? ["https://www.googleapis.com/auth/gmail.modify"]
@@ -179,13 +150,11 @@ export async function connectOAuthAccount(
     if (!existing) created.push(mail.id);
     await backend.store.accounts.setCredentials(mail.id, tokens);
     if (calendar) {
-      const kind =
-        input.kind === "gmail" ? "google-calendar" : "graph-calendar";
+      const kind = input.kind === "gmail" ? "google-calendar" : "graph-calendar";
       const oldCalendar = accounts.find(
         (a) =>
           a.kind === kind &&
-          (a.settings.oauthGroup === group ||
-            a.settings.mailAccountId === group),
+          (a.settings.oauthGroup === group || a.settings.mailAccountId === group),
       );
       const companion: Account = {
         ...mail,
@@ -209,9 +178,7 @@ export async function connectOAuthAccount(
       await backend.store.accounts.setCredentials(companion.id, tokens);
     }
     if (!calendar)
-      for (const sibling of accounts.filter(
-        (a) => a.settings.mailAccountId === group,
-      )) {
+      for (const sibling of accounts.filter((a) => a.settings.mailAccountId === group)) {
         await backend.store.accounts.upsert({
           ...sibling,
           settings: { ...sibling.settings, reauthorizationRequired: true },
@@ -227,8 +194,7 @@ export async function connectOAuthAccount(
     throw error;
   }
   const linked = (await backend.store.accounts.list()).filter(
-    (a) =>
-      a.settings.oauthGroup === group && !a.settings.reauthorizationRequired,
+    (a) => a.settings.oauthGroup === group && !a.settings.reauthorizationRequired,
   );
   for (const account of linked) {
     await accountSync(backend)?.reconnect(account.id);
@@ -280,47 +246,29 @@ export class BrowserOAuth {
   async start(input: Record<string, unknown>, origin: string) {
     this.prune();
     if (this.pending.size >= 100)
-      throw new ApiError(
-        "OAUTH_BUSY",
-        "Too many pending connections; try again later",
-        409,
-      );
+      throw new ApiError("OAUTH_BUSY", "Too many pending connections; try again later", 409);
     if (input.kind !== "gmail" && input.kind !== "graph")
       throw new ApiError("INVALID_PROVIDER", "Choose Gmail or Outlook");
     if (this.backend.mode === "demo")
-      throw new ApiError(
-        "DEMO_ONLY",
-        "Start passport serve to connect real accounts",
-      );
+      throw new ApiError("DEMO_ONLY", "Start passport serve to connect real accounts");
     if (typeof input.clientId !== "string" || !input.clientId.trim())
       throw new ApiError("MISSING_FIELD", "Client ID is required");
-    if (
-      input.clientSecret !== undefined &&
-      typeof input.clientSecret !== "string"
-    )
+    if (input.clientSecret !== undefined && typeof input.clientSecret !== "string")
       throw new ApiError("INVALID_FIELD", "Client secret must be text");
     if (input.calendar !== undefined && typeof input.calendar !== "boolean")
       throw new ApiError("INVALID_FIELD", "Calendar must be a checkbox value");
     const url = new URL(origin);
-    if (
-      url.protocol !== "http:" ||
-      !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
-    )
+    if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))
       throw new ApiError(
         "INVALID_REDIRECT",
         "Open Passport on an HTTP loopback address to connect accounts",
       );
-    const accountId =
-      typeof input.accountId === "string" ? input.accountId : undefined;
+    const accountId = typeof input.accountId === "string" ? input.accountId : undefined;
     if (
       accountId &&
-      required(await this.backend.store.accounts.get(accountId), "Account")
-        .kind !== input.kind
+      required(await this.backend.store.accounts.get(accountId), "Account").kind !== input.kind
     )
-      throw new ApiError(
-        "INVALID_PROVIDER",
-        "Re-authorize using the account's provider",
-      );
+      throw new ApiError("INVALID_PROVIDER", "Re-authorize using the account's provider");
     const state = randomBytes(32).toString("base64url");
     const entry: Pending = {
       kind: input.kind,
@@ -361,10 +309,7 @@ export class BrowserOAuth {
     this.prune();
     const status = this.statuses.get(state);
     if (!status || !nonce || status.nonce !== nonce)
-      throw new ApiError(
-        "OAUTH_STATE",
-        "Authorization expired or belongs to another browser",
-      );
+      throw new ApiError("OAUTH_STATE", "Authorization expired or belongs to another browser");
     const { nonce: _nonce, expiresAt: _expires, ...safe } = status;
     return safe;
   }
@@ -397,19 +342,17 @@ export class BrowserOAuth {
     try {
       if (url.searchParams.has("error") || !url.searchParams.get("code"))
         throw new ApiError("OAUTH_DENIED", "Authorization was not completed");
-      const credentials = await this.backend.providers
-        .describe(entry.kind)
-        .oauth!.exchangeCode(
-          {
-            clientId: entry.clientId,
-            ...(entry.clientSecret ? { clientSecret: entry.clientSecret } : {}),
-            codeVerifier: entry.codeVerifier,
-            tenantId: "common",
-            scopes: scopesFor(entry.kind, entry.calendar).join(" "),
-          },
-          entry.redirectUri,
-          url.searchParams.get("code")!,
-        );
+      const credentials = await this.backend.providers.describe(entry.kind).oauth!.exchangeCode(
+        {
+          clientId: entry.clientId,
+          ...(entry.clientSecret ? { clientSecret: entry.clientSecret } : {}),
+          codeVerifier: entry.codeVerifier,
+          tenantId: "common",
+          scopes: scopesFor(entry.kind, entry.calendar).join(" "),
+        },
+        entry.redirectUri,
+        url.searchParams.get("code")!,
+      );
       const account = await connectOAuthAccount(
         this.backend,
         entry,

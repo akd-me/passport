@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
 import type { LlmConfig } from "@passport/types";
-import { api, type AccountData } from "../api";
-import { authHeaders } from "../auth";
-import { useTask } from "../state";
-import { useUi, type ThemePreference } from "../ui-state";
+import { useEffect, useState } from "react";
 import { useAccounts } from "../accounts/AccountFilter";
+import { type AccountData, api } from "../api";
+import { authHeaders } from "../auth";
 import { Feedback, Icon } from "../components/ui";
+import { useTask } from "../state";
+import { type ThemePreference, useUi } from "../ui-state";
 
 const apiProviders: LlmConfig["provider"][] = [
   "anthropic",
@@ -36,9 +36,7 @@ function ApiKeyProvider({ llm, demo }: { llm: AccountData["llm"]; demo: boolean 
         e.preventDefault();
         void task.run(
           () => api.saveLlm({ provider, model, baseUrl, fastModel }),
-          demo
-            ? "Model preferences saved for this demo session."
-            : "Model settings saved.",
+          demo ? "Model preferences saved for this demo session." : "Model settings saved.",
         );
       }}
     >
@@ -55,9 +53,7 @@ function ApiKeyProvider({ llm, demo }: { llm: AccountData["llm"]; demo: boolean 
           Provider
           <select
             value={provider}
-            onChange={(e) =>
-              setProvider(e.target.value as LlmConfig["provider"])
-            }
+            onChange={(e) => setProvider(e.target.value as LlmConfig["provider"])}
           >
             {apiProviders.map((p) => (
               <option key={p} value={p}>
@@ -161,8 +157,7 @@ function DataAndAccess() {
         <dd>
           {tokenPath ? <code>{tokenPath}</code> : "Stored in the data directory"}
           <small>
-            Run <code>passport token</code> to print it. MCP clients use a
-            separate token.
+            Run <code>passport token</code> to print it. MCP clients use a separate token.
           </small>
         </dd>
       </dl>
@@ -195,13 +190,7 @@ export function AdvancedSettings() {
   return (
     <>
       <Appearance />
-      {llm && (
-        <ApiKeyProvider
-          key={JSON.stringify(llm)}
-          llm={llm}
-          demo={mode === "demo"}
-        />
-      )}
+      {llm && <ApiKeyProvider key={JSON.stringify(llm)} llm={llm} demo={mode === "demo"} />}
       <DataAndAccess />
     </>
   );

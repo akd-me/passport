@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
 import type { AgentRun } from "@passport/types";
+import { useEffect, useState } from "react";
+import { useAccounts } from "../accounts/AccountFilter";
 import { api } from "../api";
+import { Icon, Kbd } from "../components/ui";
+import { providerLabel } from "../settings/ModelSettings";
 import { useWorkspace } from "../state";
 import { useUi } from "../ui-state";
-import { useAccounts } from "../accounts/AccountFilter";
-import { providerLabel } from "../settings/ModelSettings";
 import { ModeMenu } from "../views/Trust";
-import { Icon, Kbd } from "../components/ui";
 
 type RunState =
   | { state: "idle" }
@@ -106,7 +106,9 @@ export function Composer({
         {run.state !== "idle" && (
           <div className={`run-status ${run.state}`} role="status" aria-live="polite">
             <Icon
-              name={run.state === "running" ? "spinner" : run.state === "failed" ? "alert" : "check"}
+              name={
+                run.state === "running" ? "spinner" : run.state === "failed" ? "alert" : "check"
+              }
               size={14}
             />
             <span className="run-instruction">{run.instruction}</span>
@@ -169,7 +171,10 @@ export function Composer({
             {model && <span className="muted model-name">{model}</span>}
           </button>
           {attached && (
-            <span className="composer-chip static context" title="Passport will read this message with your instruction">
+            <span
+              className="composer-chip static context"
+              title="Passport will read this message with your instruction"
+            >
               <Icon name="mail" size={14} />
               <span>{attached.label}</span>
               <button

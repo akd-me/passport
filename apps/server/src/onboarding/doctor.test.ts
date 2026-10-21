@@ -1,19 +1,17 @@
-import { mkdtemp, rm, writeFile, chmod } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRealBackend } from "../compose.js";
-import { defaultConfig } from "../config.js";
 import { addAccount } from "../accounts.js";
 import { createApp } from "../auth.test-client.js";
+import { createRealBackend } from "../compose.js";
+import { defaultConfig } from "../config.js";
 import { doctorCommand, runDoctor } from "../doctor.js";
 
 describe("passport doctor", () => {
   const paths: string[] = [];
   afterEach(async () => {
-    await Promise.all(
-      paths.splice(0).map((p) => rm(p, { recursive: true, force: true })),
-    );
+    await Promise.all(paths.splice(0).map((p) => rm(p, { recursive: true, force: true })));
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
@@ -28,14 +26,10 @@ describe("passport doctor", () => {
       await doctorCommand();
       expect(process.exitCode).toBe(1);
       expect(table).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({ Check: "Master key", Status: "error" }),
-        ]),
+        expect.arrayContaining([expect.objectContaining({ Check: "Master key", Status: "error" })]),
       );
       await expect(
-        import("node:fs/promises").then((fs) =>
-          fs.stat(join(dataDir, "master.key")),
-        ),
+        import("node:fs/promises").then((fs) => fs.stat(join(dataDir, "master.key"))),
       ).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       process.exitCode = previous;
@@ -92,9 +86,7 @@ describe("passport doctor", () => {
       expect(insecure.checks).toContainEqual(
         expect.objectContaining({ name: "Master key", status: "error" }),
       );
-      expect((await createApp(backend).request("/api/doctor")).status).toBe(
-        200,
-      );
+      expect((await createApp(backend).request("/api/doctor")).status).toBe(200);
     } finally {
       await backend.close();
     }

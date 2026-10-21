@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
+import { useAccounts } from "../accounts/AccountFilter";
+import { AccountWizard } from "../accounts/AccountWizard";
 import { ApiError, type ProviderDescriptor } from "../api";
+import { Feedback, Icon, Loading } from "../components/ui";
 import {
   isFinished,
-  setupApi,
   type SetupProvider,
   type SetupStep,
   type SetupTask,
+  setupApi,
 } from "../setup-api";
 import { useResource, useWorkspace, useWorkspaceEvents } from "../state";
-import { useAccounts } from "../accounts/AccountFilter";
-import { AccountWizard } from "../accounts/AccountWizard";
-import { Feedback, Icon, Loading } from "../components/ui";
 
 const providerNames: Record<SetupProvider, string> = {
   gmail: "Gmail",
@@ -54,9 +54,7 @@ function StepIcon({ status }: { status: SetupStep["status"] }) {
 
 /** Respond and cancel may echo the updated task; apply it without waiting for a poll. */
 const asTask = (value: unknown) =>
-  value && typeof value === "object" && "steps" in value
-    ? (value as SetupTask)
-    : undefined;
+  value && typeof value === "object" && "steps" in value ? (value as SetupTask) : undefined;
 
 function TaskView({
   task,
@@ -88,11 +86,8 @@ function TaskView({
       setBusy(false);
     }
   };
-  const respond = (value: string) =>
-    act(() => setupApi.respond(task.id, task.prompt!.id, value));
-  const connected = accounts.filter((a) =>
-    task.result?.accountIds.includes(a.id),
-  );
+  const respond = (value: string) => act(() => setupApi.respond(task.id, task.prompt!.id, value));
+  const connected = accounts.filter((a) => task.result?.accountIds.includes(a.id));
   const name = providerNames[task.provider];
   return (
     <div className="setup-task">
@@ -139,10 +134,7 @@ function TaskView({
       </ol>
       {task.status === "waiting_for_user" && task.prompt && (
         <div className="setup-prompt" role="alert">
-          <Icon
-            name={task.prompt.kind === "sign_in" ? "external" : "agent"}
-            size={18}
-          />
+          <Icon name={task.prompt.kind === "sign_in" ? "external" : "agent"} size={18} />
           <div>
             <strong>
               {task.prompt.kind === "sign_in"
@@ -172,11 +164,7 @@ function TaskView({
               </form>
             ) : task.prompt.kind === "confirm" ? (
               <div className="form-actions start">
-                <button
-                  className="btn btn-primary"
-                  disabled={busy}
-                  onClick={() => respond("yes")}
-                >
+                <button className="btn btn-primary" disabled={busy} onClick={() => respond("yes")}>
                   Yes, continue
                 </button>
                 <button className="btn" disabled={busy} onClick={() => respond("no")}>
@@ -185,11 +173,7 @@ function TaskView({
               </div>
             ) : (
               <div className="form-actions start">
-                <button
-                  className="btn btn-primary"
-                  disabled={busy}
-                  onClick={() => respond("done")}
-                >
+                <button className="btn btn-primary" disabled={busy} onClick={() => respond("done")}>
                   I’ve signed in, continue
                 </button>
               </div>
@@ -397,25 +381,17 @@ export function SetupFlow({ onDone }: { onDone: () => void }) {
         ))}
       </div>
       <label className="check">
-        <input
-          type="checkbox"
-          checked={calendar}
-          onChange={(e) => setCalendar(e.target.checked)}
-        />
+        <input type="checkbox" checked={calendar} onChange={(e) => setCalendar(e.target.checked)} />
         Connect calendar too
       </label>
       <p className="hint">
-        Claude Code or Codex on this computer opens a browser, registers a
-        private app in your {provider === "gmail" ? "Google" : "Microsoft"}{" "}
-        account and connects it. You only sign in. Mail stays on this machine.
+        Claude Code or Codex on this computer opens a browser, registers a private app in your{" "}
+        {provider === "gmail" ? "Google" : "Microsoft"} account and connects it. You only sign in.
+        Mail stays on this machine.
       </p>
       <Feedback error={error} />
       <div className="form-actions spread">
-        <button
-          type="button"
-          className="link-btn"
-          onClick={() => setManual({})}
-        >
+        <button type="button" className="link-btn" onClick={() => setManual({})}>
           Set up manually
         </button>
         <button

@@ -43,5 +43,11 @@
   "bin": {
     "passport": "bin/passport.js"
   },
-  "files": ["bin/", "dist/", "web/", "README.md", "LICENSE"]
+  "files": [
+    "bin/",
+    "dist/",
+    "web/",
+    "README.md",
+    "LICENSE"
+  ]
 }

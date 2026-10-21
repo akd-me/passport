@@ -1,6 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { redact } from "@passport/agent";
-import type { Id, SetupLogEntry, SetupPrompt, SetupPromptKind, SetupProvider, SetupStepStatus, SetupTask, SetupTaskStatus } from "@passport/types";
+import type {
+  Id,
+  SetupLogEntry,
+  SetupPrompt,
+  SetupPromptKind,
+  SetupProvider,
+  SetupStepStatus,
+  SetupTask,
+  SetupTaskStatus,
+} from "@passport/types";
 import { ApiError } from "../errors.js";
 import type { SetupStepDefinition } from "./prompt.js";
 
@@ -12,7 +21,10 @@ const MAX_LOG = 300;
 const CLIENT_SECRETS: Array<[RegExp, string]> = [
   [/\bGOCSPX-[A-Za-z0-9_-]{4,}/g, "[redacted]"],
   [/[A-Za-z0-9_.-]{2,}~[A-Za-z0-9_.~-]{20,}/g, "[redacted]"],
-  [/\b(secret)(\s*(?:is|was|value)?\s*[:=]?\s*["'`]?)(?!\[redacted\])[^\s"'`,;]{6,}/gi, "$1$2[redacted]"],
+  [
+    /\b(secret)(\s*(?:is|was|value)?\s*[:=]?\s*["'`]?)(?!\[redacted\])[^\s"'`,;]{6,}/gi,
+    "$1$2[redacted]",
+  ],
 ];
 const TERMINAL: readonly SetupTaskStatus[] = ["completed", "failed", "cancelled"];
 
@@ -32,16 +44,36 @@ export class SetupTaskState {
     private readonly publish: (task: SetupTask) => void,
     private readonly now: () => Date = () => new Date(),
   ) {
-    this.task = { id, provider, status: "running", steps: steps.map(step => ({ ...step, status: "pending" })), log: [] };
+    this.task = {
+      id,
+      provider,
+      status: "running",
+      steps: steps.map((step) => ({ ...step, status: "pending" })),
+      log: [],
+    };
   }
 
-  get id(): Id { return this.task.id; }
-  get provider(): SetupProvider { return this.task.provider; }
-  get status(): SetupTaskStatus { return this.task.status; }
-  get prompt(): SetupPrompt | undefined { return this.task.prompt; }
-  get terminal(): boolean { return TERMINAL.includes(this.task.status); }
-  get connected(): boolean { return !!this.task.result?.accountIds.length; }
-  stepIds(): string[] { return this.task.steps.map(step => step.id); }
+  get id(): Id {
+    return this.task.id;
+  }
+  get provider(): SetupProvider {
+    return this.task.provider;
+  }
+  get status(): SetupTaskStatus {
+    return this.task.status;
+  }
+  get prompt(): SetupPrompt | undefined {
+    return this.task.prompt;
+  }
+  get terminal(): boolean {
+    return TERMINAL.includes(this.task.status);
+  }
+  get connected(): boolean {
+    return !!this.task.result?.accountIds.length;
+  }
+  stepIds(): string[] {
+    return this.task.steps.map((step) => step.id);
+  }
 
   snapshot(): SetupTask {
     return structuredClone(this.task);
@@ -76,8 +108,12 @@ export class SetupTaskState {
 
   /** Unknown ids are rejected so the checklist stays the one the user was shown. */
   step(id: string, status: SetupStepStatus | "skipped", detail?: string): void {
-    const step = this.task.steps.find(candidate => candidate.id === id);
-    if (!step) throw new ApiError("UNKNOWN_STEP", `Unknown step ${id}; use one of ${this.stepIds().join(", ")}`);
+    const step = this.task.steps.find((candidate) => candidate.id === id);
+    if (!step)
+      throw new ApiError(
+        "UNKNOWN_STEP",
+        `Unknown step ${id}; use one of ${this.stepIds().join(", ")}`,
+      );
     this.change(() => {
       step.status = status === "skipped" ? "done" : status;
       const text = status === "skipped" ? `Already set up${detail ? `: ${detail}` : ""}` : detail;
@@ -109,9 +145,11 @@ export class SetupTaskState {
 
   /** Accept the user's answer to the current prompt. */
   answer(promptId: string): SetupPrompt {
-    if (this.terminal) throw new ApiError("TASK_FINISHED", "This setup task has already finished", 409);
+    if (this.terminal)
+      throw new ApiError("TASK_FINISHED", "This setup task has already finished", 409);
     const prompt = this.task.prompt;
-    if (!prompt || prompt.id !== promptId) throw new ApiError("PROMPT_STALE", "That question is no longer being asked", 409);
+    if (!prompt || prompt.id !== promptId)
+      throw new ApiError("PROMPT_STALE", "That question is no longer being asked", 409);
     this.change(() => {
       delete this.task.prompt;
       this.task.status = "running";
@@ -120,7 +158,9 @@ export class SetupTaskState {
   }
 
   connect(accountIds: Id[]): void {
-    this.change(() => { this.task.result = { accountIds }; });
+    this.change(() => {
+      this.task.result = { accountIds };
+    });
   }
 
   complete(): void {

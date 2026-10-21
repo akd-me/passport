@@ -1,16 +1,16 @@
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { request as httpRequest } from "node:http";
 import type { IncomingMessage } from "node:http";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { createApp } from "./app.js";
 import { apiToken, checkBind, getAuth, PassportAuth } from "./auth.js";
+import { main } from "./cli.js";
 import { defaultConfig } from "./config.js";
 import { createDemoBackend } from "./demo/index.js";
-import { main } from "./cli.js";
 import { startServer } from "./server.js";
 
 describe("local token security", () => {
@@ -45,9 +45,7 @@ describe("local token security", () => {
   it("creates a durable 32-byte hex token with private permissions and reuses it", async () => {
     const token = apiToken(dataDir, { env: {} });
     expect(token).toMatch(/^[a-f0-9]{64}$/);
-    expect(await readFile(join(dataDir, "api-token"), "utf8")).toBe(
-      `${token}\n`,
-    );
+    expect(await readFile(join(dataDir, "api-token"), "utf8")).toBe(`${token}\n`);
     expect((await stat(join(dataDir, "api-token"))).mode & 0o777).toBe(0o600);
     expect(apiToken(dataDir, { env: {} })).toBe(token);
     expect(apiToken(dataDir, { rotate: true, env: {} })).not.toBe(token);
@@ -56,9 +54,7 @@ describe("local token security", () => {
   it("honors explicit tokens without persisting them and refuses ineffective rotation", async () => {
     const env = { PASSPORT_API_TOKEN: "explicit-test-token" };
     expect(apiToken(dataDir, { env })).toBe(env.PASSPORT_API_TOKEN);
-    expect(() => apiToken(dataDir, { env, rotate: true })).toThrow(
-      /PASSPORT_API_TOKEN/,
-    );
+    expect(() => apiToken(dataDir, { env, rotate: true })).toThrow(/PASSPORT_API_TOKEN/);
     await expect(stat(join(dataDir, "api-token"))).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -99,9 +95,7 @@ describe("local token security", () => {
     },
   );
   it("accepts bearer tokens but rejects incorrect and query-only API credentials", async () => {
-    expect(
-      (await app.request("/api/health", { headers: bearer() })).status,
-    ).toBe(200);
+    expect((await app.request("/api/health", { headers: bearer() })).status).toBe(200);
     expect(
       (
         await app.request("/api/health", {
@@ -109,9 +103,7 @@ describe("local token security", () => {
         })
       ).status,
     ).toBe(401);
-    expect((await app.request(`/api/health?token=${auth.token}`)).status).toBe(
-      401,
-    );
+    expect((await app.request(`/api/health?token=${auth.token}`)).status).toBe(401);
   });
   it("exchanges the startup URL for an opaque strict HttpOnly cookie and a clean redirect", async () => {
     const response = await app.request(`/?token=${auth.token}`);
@@ -148,17 +140,10 @@ describe("local token security", () => {
     });
     expect(response.status).toBe(200);
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
-    expect(
-      (await app.request("/api/health", { headers: { Cookie: cookie } }))
-        .status,
-    ).toBe(401);
+    expect((await app.request("/api/health", { headers: { Cookie: cookie } })).status).toBe(401);
   });
   it("rejects malformed or wrong-token login without setting a cookie", async () => {
-    for (const init of [
-      json("wrong"),
-      json(null),
-      { method: "POST", body: "{" },
-    ]) {
+    for (const init of [json("wrong"), json(null), { method: "POST", body: "{" }]) {
       const response = await app.request("/api/auth/login", init);
       expect([400, 401]).toContain(response.status);
       expect(response.headers.get("set-cookie")).toBeNull();
@@ -198,10 +183,9 @@ describe("local token security", () => {
         })
       ).status,
     ).toBe(200);
-    expect(
-      (await app.request("/api/trust/config", { ...update, headers: bearer() }))
-        .status,
-    ).toBe(200);
+    expect((await app.request("/api/trust/config", { ...update, headers: bearer() })).status).toBe(
+      200,
+    );
   });
   it("does not fall back to a valid cookie when the bearer token is invalid", async () => {
     const cookie = await login();
@@ -228,53 +212,44 @@ describe("local token security", () => {
         })
       ).status,
     ).toBe(421);
-    expect((await app.request("/", { headers: { Host: host } })).status).toBe(
-      421,
-    );
+    expect((await app.request("/", { headers: { Host: host } })).status).toBe(421);
   });
-  it.each([
-    "127.0.0.1",
-    "127.0.0.1:3000",
-    "localhost:5173",
-    "LOCALHOST",
-    "[::1]",
-    "[::1]:3000",
-  ])("accepts allowed loopback Host: %s", async (host) => {
-    expect(
-      (
-        await app.request("/api/health", {
-          headers: { ...bearer(), Host: host },
-        })
-      ).status,
-    ).toBe(200);
-  });
+  it.each(["127.0.0.1", "127.0.0.1:3000", "localhost:5173", "LOCALHOST", "[::1]", "[::1]:3000"])(
+    "accepts allowed loopback Host: %s",
+    async (host) => {
+      expect(
+        (
+          await app.request("/api/health", {
+            headers: { ...bearer(), Host: host },
+          })
+        ).status,
+      ).toBe(200);
+    },
+  );
   it.each([
     "https://attacker.example",
     "null",
     "http://localhost.attacker.example",
     "http://localhost/",
     "file://localhost",
-  ])(
-    "rejects foreign/malformed Origin on POST even with bearer auth: %s",
-    async (origin) => {
-      expect(
-        (
-          await app.request("/api/agent/run", {
-            method: "POST",
-            headers: { ...bearer(), Origin: origin },
-          })
-        ).status,
-      ).toBe(403);
-      expect(
-        (
-          await app.request("/api/auth/login", {
-            ...json(auth.token),
-            headers: { Origin: origin },
-          })
-        ).status,
-      ).toBe(403);
-    },
-  );
+  ])("rejects foreign/malformed Origin on POST even with bearer auth: %s", async (origin) => {
+    expect(
+      (
+        await app.request("/api/agent/run", {
+          method: "POST",
+          headers: { ...bearer(), Origin: origin },
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await app.request("/api/auth/login", {
+          ...json(auth.token),
+          headers: { Origin: origin },
+        })
+      ).status,
+    ).toBe(403);
+  });
   it("allows exact configured LAN/proxy names and ports without suffix or wildcard matching", () => {
     const remote = new PassportAuth(backend, {
       PASSPORT_ALLOWED_HOSTS: "passport.tailnet.test, mail.lan:8443",
@@ -282,12 +257,10 @@ describe("local token security", () => {
     expect(remote.allowsHost("passport.tailnet.test:3000")).toBe(true);
     expect(remote.allowsOrigin("https://mail.lan:8443")).toBe(true);
     expect(remote.allowsHost("mail.lan:3000")).toBe(false);
-    expect(remote.allowsHost("passport.tailnet.test.attacker.example")).toBe(
-      false,
+    expect(remote.allowsHost("passport.tailnet.test.attacker.example")).toBe(false);
+    expect(() => new PassportAuth(backend, { PASSPORT_ALLOWED_HOSTS: "*" })).toThrow(
+      /PASSPORT_ALLOWED_HOSTS/,
     );
-    expect(
-      () => new PassportAuth(backend, { PASSPORT_ALLOWED_HOSTS: "*" }),
-    ).toThrow(/PASSPORT_ALLOWED_HOSTS/);
   });
   it("only trusts forwarded HTTPS when explicitly enabled", async () => {
     const request = json(auth.token);
@@ -295,9 +268,9 @@ describe("local token security", () => {
       ...request.headers,
       ...{ "X-Forwarded-Proto": "https" },
     };
-    expect(
-      (await app.request("/api/auth/login", request)).headers.get("set-cookie"),
-    ).not.toContain("Secure");
+    expect((await app.request("/api/auth/login", request)).headers.get("set-cookie")).not.toContain(
+      "Secure",
+    );
     const trusted = new PassportAuth(backend, { PASSPORT_TRUST_PROXY: "true" });
     const trustedApp = createApp(backend, { auth: trusted });
     const response = await trustedApp.request("/api/auth/login", {
@@ -305,10 +278,7 @@ describe("local token security", () => {
       headers: { "X-Forwarded-Proto": "https" },
     });
     expect(response.headers.get("set-cookie")).toContain("Secure");
-    const tls = await app.request(
-      "https://localhost/api/auth/login",
-      json(auth.token),
-    );
+    const tls = await app.request("https://localhost/api/auth/login", json(auth.token));
     expect(tls.headers.get("set-cookie")).toContain("Secure");
   });
   it("sets conservative security headers on API failures and UI assets", async () => {
@@ -326,20 +296,14 @@ describe("local token security", () => {
     const cookie = await login();
     const now = Date.now();
     vi.spyOn(Date, "now").mockReturnValue(now + 25 * 60 * 60 * 1000);
-    expect(
-      (await app.request("/api/health", { headers: { Cookie: cookie } }))
-        .status,
-    ).toBe(401);
+    expect((await app.request("/api/health", { headers: { Cookie: cookie } })).status).toBe(401);
     expect(
       auth.upgradeStatus({
         url: "//[",
         headers: { host: "localhost" },
       } as IncomingMessage),
     ).toBe(401);
-    const durable = new PassportAuth(
-      { mode: "real", config: backend.config },
-      {},
-    );
+    const durable = new PassportAuth({ mode: "real", config: backend.config }, {});
     await writeFile(join(dataDir, "api-token"), "invalid");
     expect(
       durable.upgradeStatus({
@@ -361,10 +325,7 @@ describe("local token security", () => {
         })
       ).status,
     ).toBe(401);
-    expect(
-      (await app.request("/api/health", { headers: { Cookie: cookie } }))
-        .status,
-    ).toBe(401);
+    expect((await app.request("/api/health", { headers: { Cookie: cookie } })).status).toBe(401);
     expect(
       (
         await app.request("/api/health", {
@@ -384,17 +345,14 @@ describe("local token security", () => {
     for (const host of ["localhost", "127.0.0.1", "127.0.0.2", "::1"])
       expect(() => checkBind(host, false, {})).not.toThrow();
     expect(auth.loginUrl("::1", 3000)).toContain("http://[::1]:3000/?token=");
-    expect(auth.loginUrl("0.0.0.0", 3000)).toContain(
-      "http://127.0.0.1:3000/?token=",
-    );
+    expect(auth.loginUrl("0.0.0.0", 3000)).toContain("http://127.0.0.1:3000/?token=");
   });
   it("blocks the review's exact DNS-rebinding trust escalation on a live listener", async () => {
     const handle = startServer(backend);
     try {
       await once(handle.server, "listening");
       const address = handle.server.address();
-      if (!address || typeof address === "string")
-        throw new Error("Expected listener");
+      if (!address || typeof address === "string") throw new Error("Expected listener");
       const original = (await backend.policy.getConfig()).globalMode;
       const status = await new Promise<number>((resolve, reject) => {
         const request = httpRequest(
@@ -428,8 +386,7 @@ describe("local token security", () => {
     try {
       await once(handle.server, "listening");
       const address = handle.server.address();
-      if (!address || typeof address === "string")
-        throw new Error("Expected listener");
+      if (!address || typeof address === "string") throw new Error("Expected listener");
       const root = `http://127.0.0.1:${address.port}`;
       const token = getAuth(backend).token;
       const response = await fetch(`${root}/?token=${token}`, {

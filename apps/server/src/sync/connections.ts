@@ -1,9 +1,4 @@
-import type {
-  CalendarProvider,
-  MailProvider,
-  ProviderRegistry,
-  Store,
-} from "@passport/types";
+import type { CalendarProvider, MailProvider, ProviderRegistry, Store } from "@passport/types";
 import { ApiError, required } from "../errors.js";
 
 type Provider = MailProvider | CalendarProvider;
@@ -20,15 +15,10 @@ export class ProviderConnections {
   constructor(
     private store: Store,
     private registry: ProviderRegistry,
-    private normalize: (
-      accountId: string,
-      method: string,
-      result: unknown,
-    ) => Promise<unknown>,
+    private normalize: (accountId: string, method: string, result: unknown) => Promise<unknown>,
   ) {}
 
-  mail = async (id: string): Promise<MailProvider> =>
-    this.get(id, "mail") as Promise<MailProvider>;
+  mail = async (id: string): Promise<MailProvider> => this.get(id, "mail") as Promise<MailProvider>;
   calendar = async (id: string): Promise<CalendarProvider> =>
     this.get(id, "calendar") as Promise<CalendarProvider>;
 
@@ -36,10 +26,7 @@ export class ProviderConnections {
     if (this.stopped) throw new ApiError("BACKEND_CLOSED", "Backend is closed");
     const account = required(await this.store.accounts.get(id), "Account");
     if (!account.capabilities[kind])
-      throw new ApiError(
-        "ACCOUNT_CAPABILITY",
-        `Account does not support ${kind}`,
-      );
+      throw new ApiError("ACCOUNT_CAPABILITY", `Account does not support ${kind}`);
     const key = `${kind}:${id}`;
     let entry = this.entries.get(key);
     if (!entry) {
@@ -50,14 +37,10 @@ export class ProviderConnections {
       entry = { raw, proxy: raw };
       const current = entry;
       const connect = async () => {
-        if (this.stopped)
-          throw new ApiError("BACKEND_CLOSED", "Backend is closed");
+        if (this.stopped) throw new ApiError("BACKEND_CLOSED", "Backend is closed");
         current.connected ??= (async () => {
           const fresh = required(await this.store.accounts.get(id), "Account");
-          await raw.connect(
-            fresh,
-            (await this.store.accounts.getCredentials(id)) ?? {},
-          );
+          await raw.connect(fresh, (await this.store.accounts.getCredentials(id)) ?? {});
         })().catch(async (error) => {
           current.connected = undefined;
           await raw.disconnect().catch(() => undefined);
@@ -83,8 +66,7 @@ export class ProviderConnections {
                 throw error;
               }
             };
-          if (property === "connect" || property === "disconnect")
-            return value.bind(target);
+          if (property === "connect" || property === "disconnect") return value.bind(target);
           return async (...args: unknown[]) => {
             await connect();
             try {

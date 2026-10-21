@@ -35,7 +35,11 @@ function track(pid: number | undefined): void {
   exitHook = true;
   process.once("exit", () => {
     for (const group of live) {
-      try { process.kill(-group, "SIGTERM"); } catch { /* already gone */ }
+      try {
+        process.kill(-group, "SIGTERM");
+      } catch {
+        /* already gone */
+      }
     }
   });
 }
@@ -45,10 +49,15 @@ function track(pid: number | undefined): void {
  * abort also stops grandchildren (MCP servers the CLI launched).
  */
 export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; kill: () => void } {
-  let killed = false, timedOut = false, aborted = false;
+  let killed = false,
+    timedOut = false,
+    aborted = false;
   const child = spawn(options.binary, options.args, {
-    cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"],
-    detached: process.platform !== "win32", windowsHide: true,
+    cwd: options.cwd,
+    env: options.env,
+    stdio: ["pipe", "pipe", "pipe"],
+    detached: process.platform !== "win32",
+    windowsHide: true,
   });
   track(child.pid);
   const kill = () => {
@@ -58,18 +67,30 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
       try {
         if (process.platform !== "win32" && child.pid) process.kill(-child.pid, sig);
         else child.kill(sig);
-      } catch { /* already gone */ }
+      } catch {
+        /* already gone */
+      }
     };
     signal("SIGTERM");
-    setTimeout(() => { if (child.exitCode === null && child.signalCode === null) signal("SIGKILL"); }, 2000).unref();
+    setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) signal("SIGKILL");
+    }, 2000).unref();
   };
-  const timer = setTimeout(() => { timedOut = true; kill(); }, options.timeoutMs);
+  const timer = setTimeout(() => {
+    timedOut = true;
+    kill();
+  }, options.timeoutMs);
   timer.unref();
-  const onAbort = () => { aborted = true; kill(); };
+  const onAbort = () => {
+    aborted = true;
+    kill();
+  };
   if (options.signal?.aborted) onAbort();
   else options.signal?.addEventListener("abort", onAbort, { once: true });
 
-  let stdout = "", stderr = "", pending = "";
+  let stdout = "",
+    stderr = "",
+    pending = "";
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
@@ -85,11 +106,13 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
   child.stderr.on("data", (chunk: string) => {
     stderr = (stderr + chunk).slice(-MAX_CAPTURE);
   });
-  child.stdin.on("error", () => { /* child exited before reading stdin */ });
+  child.stdin.on("error", () => {
+    /* child exited before reading stdin */
+  });
   child.stdin.end(options.input ?? "");
 
   const done = new Promise<CliRunResult>((resolve, reject) => {
-    child.once("error", error => {
+    child.once("error", (error) => {
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", onAbort);
       reject(error);
@@ -104,5 +127,11 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
       resolve({ code, signal, stdout, stderr, timedOut, aborted });
     });
   });
-  return { done, kill: () => { aborted = true; kill(); } };
+  return {
+    done,
+    kill: () => {
+      aborted = true;
+      kill();
+    },
+  };
 }

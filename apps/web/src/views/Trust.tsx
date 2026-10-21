@@ -1,4 +1,3 @@
-import { useRef, useState } from "react";
 import type {
   ActionCategory,
   GlobalPolicyConfig,
@@ -6,13 +5,14 @@ import type {
   TrustLevel,
 } from "@passport/types";
 import { TRUST_LEVELS } from "@passport/types";
+import { useRef, useState } from "react";
 import { api, type TrustData } from "../api";
-import { useResource, useTask } from "../state";
-import { useUi } from "../ui-state";
-import { Feedback, Icon, Loading } from "../components/ui";
 import { Popover } from "../components/Popover";
+import { Feedback, Icon, Loading } from "../components/ui";
 import { CATEGORIES, categoryLabel } from "../labels";
 import { ProfileEditor } from "../settings/ProfileEditor";
+import { useResource, useTask } from "../state";
+import { useUi } from "../ui-state";
 
 export const modes: {
   id: TrustLevel;
@@ -36,8 +36,7 @@ export const modes: {
   {
     id: "auto",
     label: "Auto",
-    description:
-      "Passport acts where trust is earned. New territory still asks.",
+    description: "Passport acts where trust is earned. New territory still asks.",
     icon: "sparkle",
   },
   {
@@ -47,8 +46,7 @@ export const modes: {
     icon: "unlock",
   },
 ];
-export const modeLabel = (level: TrustLevel) =>
-  modes.find((m) => m.id === level)?.label ?? level;
+export const modeLabel = (level: TrustLevel) => modes.find((m) => m.id === level)?.label ?? level;
 
 /** Four rungs filled up to the current level: the ladder at a glance. */
 export function TrustLadder({ level }: { level: TrustLevel }) {
@@ -83,15 +81,9 @@ export function TrustPicker({
       onKeyDown={(e) => {
         if (!["ArrowDown", "ArrowUp"].includes(e.key)) return;
         e.preventDefault();
-        const radios = [
-          ...(group.current?.querySelectorAll<HTMLElement>('[role="radio"]') ??
-            []),
-        ];
+        const radios = [...(group.current?.querySelectorAll<HTMLElement>('[role="radio"]') ?? [])];
         const index = radios.indexOf(document.activeElement as HTMLElement);
-        radios[
-          (index + (e.key === "ArrowDown" ? 1 : -1) + radios.length) %
-            radios.length
-        ]?.focus();
+        radios[(index + (e.key === "ArrowDown" ? 1 : -1) + radios.length) % radios.length]?.focus();
       }}
     >
       {modes.map((mode) => (
@@ -152,9 +144,7 @@ export function ModeMenu({
     >
       {(close) => (
         <>
-          <div className="popover-title">
-            How much Passport does without asking
-          </div>
+          <div className="popover-title">How much Passport does without asking</div>
           <TrustPicker
             compact
             value={level}
@@ -174,9 +164,7 @@ export function ModeMenu({
             <span>
               Always asks about{" "}
               {trust.data!.config.alwaysAsk.length
-                ? trust.data!.config.alwaysAsk
-                    .map((c) => categoryLabel(c).toLowerCase())
-                    .join(", ")
+                ? trust.data!.config.alwaysAsk.map((c) => categoryLabel(c).toLowerCase()).join(", ")
                 : "nothing in particular"}
               .
             </span>
@@ -216,8 +204,7 @@ export function PromotionPrompts() {
     trust.data?.promotionOffers.filter(
       (offer) =>
         !dismissed.includes(offerKey(offer)) &&
-        !trust.data!.categories.find((c) => c.category === offer.category)
-          ?.pinnedLevel,
+        !trust.data!.categories.find((c) => c.category === offer.category)?.pinnedLevel,
     ) ?? [];
   if (!offers.length) return null;
   const dismiss = (offer: PromotionOffer) => {
@@ -235,10 +222,9 @@ export function PromotionPrompts() {
         <div className="offer" key={offerKey(offer)} role="status">
           <TrustLadder level={offer.to} />
           <p>
-            <strong>{categoryLabel(offer.category)}</strong>:{" "}
-            {offer.evidence.approvalsUnchanged} of {offer.evidence.approvals}{" "}
-            approved without changes in {offer.evidence.window}. Let Passport
-            handle these on {modeLabel(offer.to)}?
+            <strong>{categoryLabel(offer.category)}</strong>: {offer.evidence.approvalsUnchanged} of{" "}
+            {offer.evidence.approvals} approved without changes in {offer.evidence.window}. Let
+            Passport handle these on {modeLabel(offer.to)}?
           </p>
           <button
             type="button"
@@ -325,10 +311,7 @@ function SafetyForm({ config }: { config: GlobalPolicyConfig }) {
         </label>
         <label className="field">
           <span>External agent ceiling</span>
-          <select
-            value={ceiling}
-            onChange={(e) => setCeiling(e.target.value as TrustLevel)}
-          >
+          <select value={ceiling} onChange={(e) => setCeiling(e.target.value as TrustLevel)}>
             {modes.map((mode) => (
               <option key={mode.id} value={mode.id}>
                 {mode.label}
@@ -375,8 +358,8 @@ function CategoryTable({ data }: { data: TrustData }) {
     <section className="settings-block">
       <h3>Trust by category</h3>
       <p className="hint">
-        Each category earns trust from your decisions. The global mode is
-        always the ceiling; pin a level to override what was earned.
+        Each category earns trust from your decisions. The global mode is always the ceiling; pin a
+        level to override what was earned.
       </p>
       <Feedback error={task.error} />
       <table className="data-table trust-table">
@@ -417,9 +400,7 @@ function CategoryTable({ data }: { data: TrustData }) {
                   >
                     <span style={{ width: `${state.score * 100}%` }} />
                   </span>
-                  <span className="num muted">
-                    {Math.round(state.score * 100)}%
-                  </span>
+                  <span className="num muted">{Math.round(state.score * 100)}%</span>
                 </span>
               </td>
               <td className="num">{state.approvals}</td>
@@ -436,9 +417,7 @@ function CategoryTable({ data }: { data: TrustData }) {
                       () =>
                         api.pin(
                           state.category,
-                          e.target.value
-                            ? (e.target.value as TrustLevel)
-                            : null,
+                          e.target.value ? (e.target.value as TrustLevel) : null,
                         ),
                       "Category level updated.",
                     )
@@ -471,8 +450,8 @@ export function TrustSettings() {
       <section className="settings-block">
         <h3>Permission mode</h3>
         <p className="hint">
-          The same ladder as a coding agent’s permission picker. It is also in
-          the sidebar and under the composer.
+          The same ladder as a coding agent’s permission picker. It is also in the sidebar and under
+          the composer.
         </p>
         <TrustPicker
           value={data.config.globalMode}

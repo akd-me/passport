@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDemoBackend } from "../demo/index.js";
 import type { Backend } from "../backend.js";
-import { startSchedulers, type SchedulerHandle } from "./index.js";
+import { createDemoBackend } from "../demo/index.js";
+import { type SchedulerHandle, startSchedulers } from "./index.js";
 
 describe("backend schedulers", () => {
   let backend: Backend, handle: SchedulerHandle | undefined;
@@ -32,9 +32,7 @@ describe("backend schedulers", () => {
     expect(sync).toHaveBeenCalledWith("second");
   });
   it("releases the outbox every 30 seconds and clears all timers on shutdown", async () => {
-    const release = vi
-      .spyOn(backend.executor, "releaseDue")
-      .mockResolvedValue([]);
+    const release = vi.spyOn(backend.executor, "releaseDue").mockResolvedValue([]);
     handle = startSchedulers(backend);
     await handle.ready;
     await vi.advanceTimersByTimeAsync(29999);
@@ -53,8 +51,7 @@ describe("backend schedulers", () => {
     backend.config.syncIntervalSeconds = 604800;
     handle = startSchedulers(backend);
     await handle.ready;
-    const untilThree =
-      Date.parse(handle.scheduler.get("trust.decay")!.nextRunAt!) - Date.now();
+    const untilThree = Date.parse(handle.scheduler.get("trust.decay")!.nextRunAt!) - Date.now();
     await vi.advanceTimersByTimeAsync(untilThree - 1);
     await vi.advanceTimersByTimeAsync(0);
     expect(decay).not.toHaveBeenCalled();
@@ -81,8 +78,7 @@ describe("backend schedulers", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(
       run.mock.calls.filter(
-        ([trigger]) =>
-          trigger.kind === "schedule" && trigger.name === "daily_digest",
+        ([trigger]) => trigger.kind === "schedule" && trigger.name === "daily_digest",
       ),
     ).toHaveLength(2);
     expect(run).toHaveBeenCalledWith({

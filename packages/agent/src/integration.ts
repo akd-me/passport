@@ -3,8 +3,12 @@ import { isObject } from "./llm/json.js";
 
 export type AgentEmailPatch = Partial<Pick<Email, "category" | "personIds">>;
 /** Executor extension: apply this patch to the action's emails in the same logged transaction. */
-export type AgentMatterAttachParams = ActionParams["matter_attach"] & { emailPatch: AgentEmailPatch };
-export type AgentMatterCreateParams = ActionParams["matter_create"] & { emailPatch: AgentEmailPatch };
+export type AgentMatterAttachParams = ActionParams["matter_attach"] & {
+  emailPatch: AgentEmailPatch;
+};
+export type AgentMatterCreateParams = ActionParams["matter_create"] & {
+  emailPatch: AgentEmailPatch;
+};
 
 /** Read the package-local metadata extension without changing the frozen shared ActionParams. */
 export function getAgentEmailPatch(request: ActionRequest): AgentEmailPatch | null {
@@ -13,8 +17,27 @@ export function getAgentEmailPatch(request: ActionRequest): AgentEmailPatch | nu
   if (!isObject(params) || !isObject(params.emailPatch)) return null;
   const patch = params.emailPatch;
   const result: AgentEmailPatch = {};
-  if (patch.category === null || (typeof patch.category === "string" && ["triage", "newsletters", "receipts", "notifications", "scheduling", "replies_known", "replies_stranger", "money", "legal", "unsubscribe", "matters", "other"].includes(patch.category))) result.category = patch.category as Email["category"];
-  if (Array.isArray(patch.personIds) && patch.personIds.every(id => typeof id === "string")) result.personIds = patch.personIds;
+  if (
+    patch.category === null ||
+    (typeof patch.category === "string" &&
+      [
+        "triage",
+        "newsletters",
+        "receipts",
+        "notifications",
+        "scheduling",
+        "replies_known",
+        "replies_stranger",
+        "money",
+        "legal",
+        "unsubscribe",
+        "matters",
+        "other",
+      ].includes(patch.category))
+  )
+    result.category = patch.category as Email["category"];
+  if (Array.isArray(patch.personIds) && patch.personIds.every((id) => typeof id === "string"))
+    result.personIds = patch.personIds;
   return result;
 }
 

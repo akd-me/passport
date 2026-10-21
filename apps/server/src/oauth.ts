@@ -1,9 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import type {
-  AccountCredentials,
-  ProviderSetupDescriptor,
-} from "@passport/types";
+import type { AccountCredentials, ProviderSetupDescriptor } from "@passport/types";
 import { ApiError } from "./errors.js";
 
 /** One-shot loopback OAuth flow. Temporary state/PKCE data never enters account settings. */
@@ -16,11 +13,8 @@ export async function authorizeOAuth(
     onAuthUrl: (url: string, redirectUri: string) => void;
   },
 ): Promise<AccountCredentials> {
-  if (!descriptor.oauth)
-    throw new ApiError("OAUTH_UNSUPPORTED", "Provider does not use OAuth");
-  const redirect = new URL(
-    options.redirectUri ?? "http://127.0.0.1:53682/oauth/callback",
-  );
+  if (!descriptor.oauth) throw new ApiError("OAUTH_UNSUPPORTED", "Provider does not use OAuth");
+  const redirect = new URL(options.redirectUri ?? "http://127.0.0.1:53682/oauth/callback");
   if (
     redirect.protocol !== "http:" ||
     !["127.0.0.1", "localhost"].includes(redirect.hostname) ||
@@ -56,18 +50,11 @@ export async function authorizeOAuth(
     }
     if (url.searchParams.has("error") || !url.searchParams.get("code")) {
       response.writeHead(400).end("Authorization was not completed.");
-      fail(
-        new ApiError(
-          "OAUTH_DENIED",
-          "Provider authorization was not completed",
-        ),
-      );
+      fail(new ApiError("OAUTH_DENIED", "Provider authorization was not completed"));
       return;
     }
     response.setHeader("Content-Type", "text/plain; charset=utf-8");
-    response.end(
-      "Passport authorization received. You can return to the terminal.",
-    );
+    response.end("Passport authorization received. You can return to the terminal.");
     settle(url.searchParams.get("code")!);
   });
   await new Promise<void>((resolve, reject) => {
@@ -81,19 +68,11 @@ export async function authorizeOAuth(
     () => fail(new ApiError("OAUTH_TIMEOUT", "OAuth authorization timed out")),
     options.timeoutMs ?? 300000,
   );
-  const interrupt = () =>
-    fail(new ApiError("OAUTH_CANCELLED", "OAuth authorization cancelled"));
+  const interrupt = () => fail(new ApiError("OAUTH_CANCELLED", "OAuth authorization cancelled"));
   process.once("SIGINT", interrupt);
   try {
-    options.onAuthUrl(
-      descriptor.oauth.buildAuthUrl(settings, redirect.href, state),
-      redirect.href,
-    );
-    return await descriptor.oauth.exchangeCode(
-      settings,
-      redirect.href,
-      await code,
-    );
+    options.onAuthUrl(descriptor.oauth.buildAuthUrl(settings, redirect.href, state), redirect.href);
+    return await descriptor.oauth.exchangeCode(settings, redirect.href, await code);
   } finally {
     clearTimeout(timeout);
     process.off("SIGINT", interrupt);

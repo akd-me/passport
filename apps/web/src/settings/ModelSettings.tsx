@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, type HostAgent } from "../api";
+import { useAccounts } from "../accounts/AccountFilter";
+import { ApiError, api, type HostAgent } from "../api";
+import { Feedback, Icon, Loading } from "../components/ui";
 import { useTask } from "../state";
 import { useUi } from "../ui-state";
-import { useAccounts } from "../accounts/AccountFilter";
-import { Feedback, Icon, Loading } from "../components/ui";
 
 const hostAgents: Record<
   HostAgent["kind"],
@@ -70,7 +70,10 @@ function useHostAgents(): Detection {
 function agentStatus(agent: HostAgent | undefined) {
   if (!agent?.installed) return { tone: "off", text: "Not installed" };
   if (!agent.loggedIn)
-    return { tone: "warn", text: `Installed${agent.version ? ` (${agent.version})` : ""}, not signed in` };
+    return {
+      tone: "warn",
+      text: `Installed${agent.version ? ` (${agent.version})` : ""}, not signed in`,
+    };
   return {
     tone: "good",
     text: `Signed in${agent.account ? ` as ${agent.account}` : ""}${agent.version ? `, ${agent.version}` : ""}`,
@@ -99,9 +102,7 @@ export function ModelSettings() {
         <div className="current-model">
           <Icon name="agent" size={18} />
           <div>
-            <strong>
-              {current ? (providerLabel[current] ?? current) : "Not set"}
-            </strong>
+            <strong>{current ? (providerLabel[current] ?? current) : "Not set"}</strong>
             <span className="muted">{llm?.model}</span>
           </div>
           {mode === "demo" ? (
@@ -114,14 +115,14 @@ export function ModelSettings() {
         </div>
         {mode === "demo" && (
           <p className="hint">
-            The demo workspace uses a built-in toy agent. Choices here are saved
-            for the session only.
+            The demo workspace uses a built-in toy agent. Choices here are saved for the session
+            only.
           </p>
         )}
         {llm?.selection === "auto" ? (
           <p className="hint">
-            Chosen automatically: Codex first, then Claude Code, then any API
-            provider you configured.
+            Chosen automatically: Codex first, then Claude Code, then any API provider you
+            configured.
           </p>
         ) : (
           <div className="form-actions">
@@ -144,20 +145,16 @@ export function ModelSettings() {
       <section className="settings-block">
         <h3>Use an agent on this computer</h3>
         <p className="hint">
-          Passport can work through Claude Code or Codex with the account you
-          are already signed in to. No API key needed.
+          Passport can work through Claude Code or Codex with the account you are already signed in
+          to. No API key needed.
         </p>
         {detection.state === "loading" && <Loading label="Looking for agents…" />}
         {detection.state === "unsupported" && (
           <p className="note">
             <Icon name="alert" size={15} />
-            This Passport server cannot detect host agents yet. Update Passport,
-            or use an API key under{" "}
-            <button
-              type="button"
-              className="link-btn"
-              onClick={() => openSettings("advanced")}
-            >
+            This Passport server cannot detect host agents yet. Update Passport, or use an API key
+            under{" "}
+            <button type="button" className="link-btn" onClick={() => openSettings("advanced")}>
               Advanced
             </button>
           </p>
@@ -202,9 +199,7 @@ export function ModelSettings() {
                       <span className="status-dot" aria-hidden="true" />
                       {status.text}
                     </small>
-                    {agent?.binaryPath && (
-                      <small className="muted path">{agent.binaryPath}</small>
-                    )}
+                    {agent?.binaryPath && <small className="muted path">{agent.binaryPath}</small>}
                   </button>
                 );
               })}
@@ -212,8 +207,8 @@ export function ModelSettings() {
             {selected?.installed && !selected.loggedIn && (
               <p className="note">
                 <Icon name="key" size={15} />
-                Run <code>{hostAgents[choice].signIn}</code> in a terminal to
-                sign in, then reopen this panel.
+                Run <code>{hostAgents[choice].signIn}</code> in a terminal to sign in, then reopen
+                this panel.
               </p>
             )}
             <label className="field">

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
 import type { Account } from "@passport/types";
+import { useEffect, useState } from "react";
 import { api, type ProviderDescriptor } from "../api";
-import { useTask, useWorkspace } from "../state";
 import { Feedback, Icon } from "../components/ui";
+import { useTask, useWorkspace } from "../state";
 import {
   accountApi,
   type ConnectedAccount,
@@ -27,9 +27,7 @@ export function AccountWizard({
   /** Provider to preselect, e.g. the one chosen before falling back to manual setup. */
   initialKind?: string;
 }) {
-  const choices = providers.filter((p) =>
-    ["gmail", "graph", "imap", "mock"].includes(p.kind),
-  );
+  const choices = providers.filter((p) => ["gmail", "graph", "imap", "mock"].includes(p.kind));
   const [kind, setKind] = useState(
     account?.kind ??
       (choices.some((c) => c.kind === initialKind) ? initialKind : undefined) ??
@@ -45,9 +43,7 @@ export function AccountWizard({
   });
   const [emailAddress, setEmail] = useState(account?.emailAddress ?? ""),
     [displayName, setName] = useState(account?.displayName ?? "");
-  const [calendar, setCalendar] = useState(
-      account?.settings.calendarGranted !== false,
-    ),
+  const [calendar, setCalendar] = useState(account?.settings.calendarGranted !== false),
     [attempt, setAttempt] = useState<ConnectionAttempt>();
   const [status, setStatus] = useState<ConnectionStatus>(),
     [tested, setTested] = useState(false);
@@ -95,12 +91,8 @@ export function AccountWizard({
           descriptor?.fields.some((field) => field.id === key),
         ),
       ),
-      ...(descriptor?.fields.some((f) => f.id === "emailAddress")
-        ? { emailAddress }
-        : {}),
-      ...(descriptor?.fields.some((f) => f.id === "displayName")
-        ? { displayName }
-        : {}),
+      ...(descriptor?.fields.some((f) => f.id === "emailAddress") ? { emailAddress } : {}),
+      ...(descriptor?.fields.some((f) => f.id === "displayName") ? { displayName } : {}),
     },
   });
   const setField = (id: string, value: string) => {
@@ -121,9 +113,7 @@ export function AccountWizard({
             const result = await accountApi.start({
               kind,
               clientId: fields.clientId ?? "",
-              ...(fields.clientSecret
-                ? { clientSecret: fields.clientSecret }
-                : {}),
+              ...(fields.clientSecret ? { clientSecret: fields.clientSecret } : {}),
               calendar,
               accountId: account?.id,
             });
@@ -144,11 +134,7 @@ export function AccountWizard({
       }}
     >
       <div className="block-heading">
-        <h3>
-          {account
-            ? `Re-authorize ${account.emailAddress}`
-            : (title ?? "Connect a mailbox")}
-        </h3>
+        <h3>{account ? `Re-authorize ${account.emailAddress}` : (title ?? "Connect a mailbox")}</h3>
         <button type="button" className="btn btn-sm btn-ghost" onClick={onClose}>
           Close
         </button>
@@ -186,17 +172,13 @@ export function AccountWizard({
                 <strong>Create your own Google OAuth client</strong>
                 <ol>
                   <li>
-                    Google Cloud console → APIs &amp; Services → Library: enable
-                    Gmail API and Google Calendar API.
+                    Google Cloud console → APIs &amp; Services → Library: enable Gmail API and
+                    Google Calendar API.
                   </li>
+                  <li>Google Auth Platform → Audience: add your address as a test user.</li>
                   <li>
-                    Google Auth Platform → Audience: add your address as a test
-                    user.
-                  </li>
-                  <li>
-                    Clients → Create client → Desktop app. Paste its client ID
-                    below; the downloaded JSON also contains an optional client
-                    secret.
+                    Clients → Create client → Desktop app. Paste its client ID below; the downloaded
+                    JSON also contains an optional client secret.
                   </li>
                 </ol>
               </>
@@ -205,28 +187,25 @@ export function AccountWizard({
                 <strong>Register your own Microsoft app</strong>
                 <ol>
                   <li>
-                    Azure portal → Microsoft Entra ID → App registrations → New
-                    registration. Choose organizational and personal Microsoft
-                    accounts.
+                    Azure portal → Microsoft Entra ID → App registrations → New registration. Choose
+                    organizational and personal Microsoft accounts.
                   </li>
                   <li>
-                    Authentication → Add a platform → Mobile and desktop
-                    applications → add the redirect below. Advanced settings →
-                    Allow public client flows → Yes.
+                    Authentication → Add a platform → Mobile and desktop applications → add the
+                    redirect below. Advanced settings → Allow public client flows → Yes.
                   </li>
                   <li>
-                    API permissions → Microsoft Graph → Delegated: User.Read,
-                    Mail.ReadWrite, Mail.Send, Calendars.ReadWrite,
-                    offline_access. If the portal rejects 127.0.0.1, add the URI
-                    in Manifest → publicClient.redirectUris.
+                    API permissions → Microsoft Graph → Delegated: User.Read, Mail.ReadWrite,
+                    Mail.Send, Calendars.ReadWrite, offline_access. If the portal rejects 127.0.0.1,
+                    add the URI in Manifest → publicClient.redirectUris.
                   </li>
                 </ol>
               </>
             )}
             <p>
               Redirect URI <code>{callback}</code>. Open Passport at{" "}
-              <code>http://127.0.0.1:{location.port || "3000"}</code> so the
-              browser can return here.
+              <code>http://127.0.0.1:{location.port || "3000"}</code> so the browser can return
+              here.
             </p>
           </div>
           <label className="field">
@@ -324,9 +303,7 @@ export function AccountWizard({
       <Feedback error={task.error || status?.error} />
       {attempt && (
         <div className="progress-note" role="status">
-          {status?.status === "authorizing" && (
-            <Icon name="spinner" size={14} />
-          )}
+          {status?.status === "authorizing" && <Icon name="spinner" size={14} />}
           <span>
             {status?.status === "connected"
               ? linked?.lastSyncError

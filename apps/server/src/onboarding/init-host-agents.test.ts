@@ -1,15 +1,22 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
 import type { HostAgentStatus } from "@passport/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type HostAgentDetector, setHostAgentDetector } from "../llm-selection.js";
 import { initializePassport } from "./init.js";
-import { setHostAgentDetector, type HostAgentDetector } from "../llm-selection.js";
 
 const agent = (kind: "codex" | "claude-code", ready: boolean): HostAgentStatus => ({
-  kind, label: kind === "codex" ? "Codex" : "Claude Code", installed: true, binaryPath: `/bin/${kind}`, version: "1.0.0",
-  loggedIn: ready, account: ready ? (kind === "codex" ? "ChatGPT" : "claude.ai (max)") : null, ready,
-  ...(ready ? {} : { fix: "Run `claude auth login`." }), checkedAt: new Date().toISOString(),
+  kind,
+  label: kind === "codex" ? "Codex" : "Claude Code",
+  installed: true,
+  binaryPath: `/bin/${kind}`,
+  version: "1.0.0",
+  loggedIn: ready,
+  account: ready ? (kind === "codex" ? "ChatGPT" : "claude.ai (max)") : null,
+  ready,
+  ...(ready ? {} : { fix: "Run `claude auth login`." }),
+  checkedAt: new Date().toISOString(),
 });
 
 describe("passport init with host agents", () => {
@@ -30,21 +37,31 @@ describe("passport init with host agents", () => {
     paths.push(dataDir);
     vi.stubEnv("PASSPORT_DATA_DIR", dataDir);
     vi.stubEnv("PASSPORT_LLM_PROVIDER", "");
-    const asked: string[] = [], logged: string[] = [];
-    await initializePassport({
-      ask: async (label, secret) => {
-        asked.push(label);
-        if (secret) throw new Error("No secret should be requested");
-        return replies.shift() ?? "";
+    const asked: string[] = [],
+      logged: string[] = [];
+    await initializePassport(
+      {
+        ask: async (label, secret) => {
+          asked.push(label);
+          if (secret) throw new Error("No secret should be requested");
+          return replies.shift() ?? "";
+        },
+        log: (text) => logged.push(text),
+        close() {},
       },
-      log: (text) => logged.push(text),
-      close() {},
-    }, args);
-    return { asked, logged, config: JSON.parse(await readFile(join(dataDir, "passport.config.json"), "utf8")) };
+      args,
+    );
+    return {
+      asked,
+      logged,
+      config: JSON.parse(await readFile(join(dataDir, "passport.config.json"), "utf8")),
+    };
   }
   it("shows detected agents and defaults to auto without asking for a key", async () => {
     const { asked, logged, config } = await run(["", "skip"]);
-    expect(logged).toContain("Agents on this machine: Codex (ChatGPT login) ✓, Claude Code (claude.ai (max) login) ✓");
+    expect(logged).toContain(
+      "Agents on this machine: Codex (ChatGPT login) ✓, Claude Code (claude.ai (max) login) ✓",
+    );
     expect(asked[0]).toBe("Agent model (auto / codex / claude-code / advanced / none) [auto]");
     expect(asked.some((label) => /api key/i.test(label))).toBe(false);
     expect(logged.some((line) => line.includes("Codex (gpt-6.1-sol)"))).toBe(true);
@@ -53,7 +70,10 @@ describe("passport init with host agents", () => {
   });
   it("persists an explicit host-agent choice and model", async () => {
     const { config } = await run(["claude-code", "claude-opus-5-5", "skip"]);
-    expect(config).toMatchObject({ llmSelection: "explicit", llm: { provider: "claude-code", model: "claude-opus-5-5", fastModel: "claude-haiku-5-5" } });
+    expect(config).toMatchObject({
+      llmSelection: "explicit",
+      llm: { provider: "claude-code", model: "claude-opus-5-5", fastModel: "claude-haiku-5-5" },
+    });
   });
   it("explains how to log in when the chosen agent is not ready", async () => {
     detected = [agent("codex", false), agent("claude-code", false)];
@@ -69,7 +89,12 @@ describe("passport init with host agents", () => {
     expect(none.asked[0]).toMatch(/\[none\]$/);
     expect(none.config.llmSelection).toBe("explicit");
     const advanced = await run(["advanced", "ollama", "", "http://localhost:11434/v1", "skip"]);
-    expect(advanced.asked[1]).toBe("API provider (anthropic / openai / openai-compatible / ollama) [anthropic]");
-    expect(advanced.config).toMatchObject({ llmSelection: "explicit", llm: { provider: "ollama", model: "llama3.2", baseUrl: "http://localhost:11434/v1" } });
+    expect(advanced.asked[1]).toBe(
+      "API provider (anthropic / openai / openai-compatible / ollama) [anthropic]",
+    );
+    expect(advanced.config).toMatchObject({
+      llmSelection: "explicit",
+      llm: { provider: "ollama", model: "llama3.2", baseUrl: "http://localhost:11434/v1" },
+    });
   });
 });

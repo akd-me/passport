@@ -28,7 +28,12 @@ export interface EmailAddress {
 // ---------------------------------------------------------------------------
 
 export type MailProviderKind = "gmail" | "graph" | "imap" | "jmap" | "mock";
-export type CalendarProviderKind = "google-calendar" | "graph-calendar" | "caldav" | "jmap-calendar" | "mock";
+export type CalendarProviderKind =
+  | "google-calendar"
+  | "graph-calendar"
+  | "caldav"
+  | "jmap-calendar"
+  | "mock";
 export type ProviderKind = MailProviderKind | CalendarProviderKind;
 
 export interface AccountCapabilities {
@@ -92,7 +97,15 @@ export interface Mailbox {
 }
 
 /** JMAP keywords. Standard ones are listed; providers may add their own (e.g. gmail labels as `label:Foo`). */
-export type Keyword = "$seen" | "$flagged" | "$draft" | "$answered" | "$forwarded" | "$junk" | "$notjunk" | (string & {});
+export type Keyword =
+  | "$seen"
+  | "$flagged"
+  | "$draft"
+  | "$answered"
+  | "$forwarded"
+  | "$junk"
+  | "$notjunk"
+  | (string & {});
 
 export interface Attachment {
   id: Id;
@@ -454,7 +467,12 @@ export interface ActionRecord {
  */
 export type TrustLevel = "supervised" | "auto_accept_edits" | "auto" | "full_access";
 
-export const TRUST_LEVELS: readonly TrustLevel[] = ["supervised", "auto_accept_edits", "auto", "full_access"];
+export const TRUST_LEVELS: readonly TrustLevel[] = [
+  "supervised",
+  "auto_accept_edits",
+  "auto",
+  "full_access",
+];
 
 /** User-visible learning state derived from TrustState. */
 export type TrustStage = "learning" | "trusted" | "autonomous";
@@ -529,7 +547,11 @@ export type OutcomeFeedback = "approved_unchanged" | "approved_edited" | "reject
 export interface PolicyEngine {
   evaluate(request: ActionRequest): Promise<PolicyDecision>;
   /** Called when a human decides a proposed action. Updates trust for the category. */
-  recordOutcome(actionId: Id, feedback: OutcomeFeedback, editDistance?: number): Promise<TrustState>;
+  recordOutcome(
+    actionId: Id,
+    feedback: OutcomeFeedback,
+    editDistance?: number,
+  ): Promise<TrustState>;
   getTrust(): Promise<TrustState[]>;
   getTrustFor(category: ActionCategory): Promise<TrustState>;
   pinLevel(category: ActionCategory, level: TrustLevel | null): Promise<TrustState>;
@@ -619,7 +641,12 @@ export interface Store {
     getByProviderId(accountId: Id, providerId: string): Promise<Email | null>;
     query(q: EmailQuery): Promise<Page<Email>>;
     upsertMany(emails: Email[]): Promise<void>;
-    patchMany(ids: Id[], patch: Partial<Pick<Email, "keywords" | "mailboxIds" | "matterId" | "category" | "personIds">>): Promise<void>;
+    patchMany(
+      ids: Id[],
+      patch: Partial<
+        Pick<Email, "keywords" | "mailboxIds" | "matterId" | "category" | "personIds">
+      >,
+    ): Promise<void>;
     deleteMany(ids: Id[]): Promise<void>;
   };
 
@@ -635,7 +662,13 @@ export interface Store {
 
   events: {
     get(id: Id): Promise<CalendarEvent | null>;
-    query(q: { accountId?: Id; range?: TimeRange; matterId?: Id; limit?: number; includeRecurring?: boolean }): Promise<CalendarEvent[]>;
+    query(q: {
+      accountId?: Id;
+      range?: TimeRange;
+      matterId?: Id;
+      limit?: number;
+      includeRecurring?: boolean;
+    }): Promise<CalendarEvent[]>;
     upsertMany(events: CalendarEvent[]): Promise<void>;
     deleteMany(ids: Id[]): Promise<void>;
   };
@@ -652,7 +685,12 @@ export interface Store {
 
   matters: {
     get(id: Id): Promise<Matter | null>;
-    list(q?: { status?: MatterStatus[]; personId?: Id; text?: string; limit?: number }): Promise<Matter[]>;
+    list(q?: {
+      status?: MatterStatus[];
+      personId?: Id;
+      text?: string;
+      limit?: number;
+    }): Promise<Matter[]>;
     upsert(matter: Matter): Promise<Matter>;
     delete(id: Id): Promise<void>;
   };
@@ -665,7 +703,12 @@ export interface Store {
     /** Held actions whose holdUntil <= now, for the outbox scheduler. */
     dueHeld(now: Timestamp): Promise<ActionRecord[]>;
     /** Atomically transition a matching status, recording the claim time in decidedAt. */
-    claim?(id: Id, from: ActionStatus, to: ActionStatus, now: Timestamp): Promise<ActionRecord | null>;
+    claim?(
+      id: Id,
+      from: ActionStatus,
+      to: ActionStatus,
+      now: Timestamp,
+    ): Promise<ActionRecord | null>;
   };
 
   trust: {
@@ -723,7 +766,10 @@ export interface MailProvider {
   connect(account: Account, credentials: AccountCredentials): Promise<void>;
   disconnect(): Promise<void>;
   /** Incremental sync from a cursor (null = full). Must yield a final `cursor` delta. */
-  sync(cursor: string | null, opts?: { maxEmails?: number; since?: Timestamp }): AsyncIterable<SyncDelta>;
+  sync(
+    cursor: string | null,
+    opts?: { maxEmails?: number; since?: Timestamp },
+  ): AsyncIterable<SyncDelta>;
   /** Fetch a full email including bodies. */
   getEmail(providerId: string): Promise<Email | null>;
   getBlob(blobId: string): Promise<{ type: string; data: Uint8Array }>;
@@ -744,12 +790,17 @@ export interface CalendarProvider {
   connect(account: Account, credentials: AccountCredentials): Promise<void>;
   disconnect(): Promise<void>;
   listCalendars(): Promise<Calendar[]>;
-  sync(cursor: string | null, range?: TimeRange): AsyncIterable<
+  sync(
+    cursor: string | null,
+    range?: TimeRange,
+  ): AsyncIterable<
     | { kind: "event"; op: "upsert"; event: CalendarEvent }
     | { kind: "event"; op: "delete"; providerId: string }
     | { kind: "cursor"; cursor: string }
   >;
-  createEvent(event: Omit<CalendarEvent, "id" | "providerId" | "updatedAt">): Promise<CalendarEvent>;
+  createEvent(
+    event: Omit<CalendarEvent, "id" | "providerId" | "updatedAt">,
+  ): Promise<CalendarEvent>;
   updateEvent(providerId: string, patch: Partial<CalendarEvent>): Promise<CalendarEvent>;
   deleteEvent(providerId: string): Promise<void>;
   respond(providerId: string, status: ParticipationStatus, comment?: string): Promise<void>;
@@ -767,11 +818,22 @@ export interface ProviderSetupDescriptor {
   kind: ProviderKind;
   label: string;
   /** Fields the user must supply. `secret` fields go to credentials, others to settings. */
-  fields: Array<{ id: string; label: string; secret: boolean; required: boolean; placeholder?: string; help?: string }>;
+  fields: Array<{
+    id: string;
+    label: string;
+    secret: boolean;
+    required: boolean;
+    placeholder?: string;
+    help?: string;
+  }>;
   /** For OAuth providers: how to build the consent URL and exchange the code. */
   oauth?: {
     buildAuthUrl(settings: Record<string, string>, redirectUri: string, state: string): string;
-    exchangeCode(settings: Record<string, string>, redirectUri: string, code: string): Promise<AccountCredentials>;
+    exchangeCode(
+      settings: Record<string, string>,
+      redirectUri: string,
+      code: string,
+    ): Promise<AccountCredentials>;
     scopes: string[];
   };
   docsUrl?: string;
@@ -800,15 +862,31 @@ export type DomainEvent =
   | { type: "matter.updated"; matter: Matter }
   | { type: "person.downgraded"; person: Person; emailId: Id }
   | { type: "agent.run.started"; runId: Id; trigger: string }
-  | { type: "agent.run.finished"; runId: Id; proposed: number; executed: number; error?: string | null }
+  | {
+      type: "agent.run.finished";
+      runId: Id;
+      proposed: number;
+      executed: number;
+      error?: string | null;
+    }
   | { type: "job.started"; jobId: Id; runId: Id }
-  | { type: "job.finished"; jobId: Id; runId: Id; status: "ok" | "error" | "skipped"; durationMs: number; summary?: string }
+  | {
+      type: "job.finished";
+      jobId: Id;
+      runId: Id;
+      status: "ok" | "error" | "skipped";
+      durationMs: number;
+      summary?: string;
+    }
   | { type: "job.updated"; jobId: Id }
   | { type: "setup.task.updated"; task: SetupTask };
 
 export interface EventBus {
   emit(event: DomainEvent): void;
-  on<T extends DomainEvent["type"]>(type: T, handler: (e: Extract<DomainEvent, { type: T }>) => void): () => void;
+  on<T extends DomainEvent["type"]>(
+    type: T,
+    handler: (e: Extract<DomainEvent, { type: T }>) => void,
+  ): () => void;
   onAny(handler: (e: DomainEvent) => void): () => void;
 }
 
@@ -840,7 +918,13 @@ export interface ActionExecutor {
 // ---------------------------------------------------------------------------
 
 /** `claude-code` and `codex` run the host machine's logged-in CLI (subscription); no API key. */
-export type LlmProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama" | "claude-code" | "codex";
+export type LlmProviderKind =
+  | "anthropic"
+  | "openai"
+  | "openai-compatible"
+  | "ollama"
+  | "claude-code"
+  | "codex";
 
 export interface LlmConfig {
   provider: LlmProviderKind;
@@ -990,7 +1074,7 @@ assistant_attribution: false
 
 /** Read the complete effective USER.md without mutating an unset profile. */
 export async function getEffectiveProfile(store: Pick<Store, "kv">): Promise<string> {
-  return await store.kv.get("user_profile") ?? DEFAULT_USER_PROFILE;
+  return (await store.kv.get("user_profile")) ?? DEFAULT_USER_PROFILE;
 }
 
 // ---------------------------------------------------------------------------
@@ -1033,7 +1117,12 @@ export type HostAgentReasoning = "low" | "medium" | "high" | "xhigh";
  * that download on first start or block on a person.
  */
 export type HostAgentMcpServer =
-  | { command: string; args?: string[]; env?: Record<string, string>; timeouts?: HostAgentMcpTimeouts }
+  | {
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      timeouts?: HostAgentMcpTimeouts;
+    }
   | { url: string; headers?: Record<string, string>; timeouts?: HostAgentMcpTimeouts };
 
 export interface HostAgentMcpTimeouts {

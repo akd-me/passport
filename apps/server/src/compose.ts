@@ -1,13 +1,7 @@
-import { randomBytes } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { chmod, mkdir, link, readFile, writeFile, rm } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { chmod, link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { InMemoryEventBus, openStore } from "@passport/store";
-import {
-  createProviderRegistry,
-  type PassportVerifier,
-} from "@passport/providers";
-import { createActionExecutor, createPolicyEngine } from "@passport/policy";
 import {
   createAgentRuntime,
   createLlmClient,
@@ -15,28 +9,26 @@ import {
   type LlmClient,
 } from "@passport/agent";
 import { createMailboxMcpServer } from "@passport/mcp";
+import { createActionExecutor, createPolicyEngine } from "@passport/policy";
+import { createProviderRegistry, type PassportVerifier } from "@passport/providers";
+import { InMemoryEventBus, openStore } from "@passport/store";
 import type {
-  AgentRuntime,
   ActionExecutor,
+  AgentRuntime,
   CalendarEvent,
   Email,
   ProviderRegistry,
 } from "@passport/types";
+import { type Arrival, ArrivalQueue, type ArrivalTrigger } from "./arrivals.js";
 import type { Backend } from "./backend.js";
-import {
-  saveConfig,
-  validateConfig,
-  llmConfigured,
-  type PassportConfig,
-} from "./config.js";
+import { calendarSafeStore } from "./calendar-safety.js";
+import { llmConfigured, type PassportConfig, saveConfig, validateConfig } from "./config.js";
 import { ApiError } from "./errors.js";
 import { logger } from "./logger.js";
 import { persistOAuthCredentials } from "./onboarding/oauth.js";
 import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
-import { ProviderConnections } from "./sync/connections.js";
-import { ArrivalQueue, type Arrival, type ArrivalTrigger } from "./arrivals.js";
-import { calendarSafeStore } from "./calendar-safety.js";
 import { attachSetupTasks } from "./setup/routes.js";
+import { ProviderConnections } from "./sync/connections.js";
 
 export interface RealBackendOptions {
   /** Client processes may submit Actions, but never run automatic arrivals/jobs. */
@@ -77,8 +69,7 @@ async function masterKey(dataDir: string): Promise<string> {
   }
   await chmod(path, 0o600);
   const key = (await readFile(path, "utf8")).trim();
-  if (!key)
-    throw new ApiError("INVALID_MASTER_KEY", "Master key file is empty");
+  if (!key) throw new ApiError("INVALID_MASTER_KEY", "Master key file is empty");
   return key;
 }
 
@@ -96,58 +87,63 @@ export async function createRealBackend(
   });
   try {
     await store.migrate();
-    if (await store.kv.get("user_profile") === null) await store.kv.set("user_profile", DEFAULT_USER_PROFILE);
+    if ((await store.kv.get("user_profile")) === null)
+      await store.kv.set("user_profile", DEFAULT_USER_PROFILE);
     for (const account of config.accounts)
-      if (!(await store.accounts.get(account.id)))
-        await store.accounts.upsert(account);
+      if (!(await store.accounts.get(account.id))) await store.accounts.upsert(account);
     config.accounts = await store.accounts.list();
     const bus = new InMemoryEventBus();
     const providers =
       options.providers ??
       createProviderRegistry({
-        onCredentials: (id, credentials) =>
-          persistOAuthCredentials(store, id, credentials),
+        onCredentials: (id, credentials) => persistOAuthCredentials(store, id, credentials),
         resolveEmail: (id) => store.emails.get(id, { includeBodies: true }),
         verifier: options.verifier,
       });
     let sync: AccountSyncService;
-    const connections = new ProviderConnections(
-      store,
-      providers,
-      async (id, method, result) => {
-        if (
-          ["getEmail", "createDraft", "updateDraft"].includes(method) &&
-          result
-        )
-          return sync.email(id, result as Email);
-        if (["createEvent", "updateEvent"].includes(method) && result)
-          return sync.event(id, result as CalendarEvent);
-        return result;
-      },
-    );
+    const connections = new ProviderConnections(store, providers, async (id, method, result) => {
+      if (["getEmail", "createDraft", "updateDraft"].includes(method) && result)
+        return sync.email(id, result as Email);
+      if (["createEvent", "updateEvent"].includes(method) && result)
+        return sync.event(id, result as CalendarEvent);
+      return result;
+    });
     sync = new AccountSyncService(store, bus, connections.mail, connections.calendar, config);
     const policy = createPolicyEngine({ store, bus });
     const evaluate = policy.evaluate.bind(policy);
-    policy.evaluate = async request => {
+    policy.evaluate = async (request) => {
       const decision = await evaluate(request);
-      if (options.clientMode && ["send", "calendar_propose"].includes(request.type) &&
-          (decision.outcome === "allow" || decision.outcome === "hold") &&
-          (await policy.getConfig()).outboxHoldMinutes <= 0)
-        return { ...decision, outcome: "ask", reason: "Start passport serve and approve this outward action; client mode has no delayed outbox owner." };
+      if (
+        options.clientMode &&
+        ["send", "calendar_propose"].includes(request.type) &&
+        (decision.outcome === "allow" || decision.outcome === "hold") &&
+        (await policy.getConfig()).outboxHoldMinutes <= 0
+      )
+        return {
+          ...decision,
+          outcome: "ask",
+          reason:
+            "Start passport serve and approve this outward action; client mode has no delayed outbox owner.",
+        };
       return request.type === "profile_update" && request.actor.kind === "human"
         ? { ...decision, outcome: "allow", reason: "Human profile edit; reversible and logged." }
         : decision;
     };
     const releasing = new AsyncLocalStorage<boolean>();
     const executor = createActionExecutor({
-      store: calendarSafeStore(store, bus, () => releasing.getStore() === true, () => config.calendarMaxSyncAgeMinutes ?? 10),
+      store: calendarSafeStore(
+        store,
+        bus,
+        () => releasing.getStore() === true,
+        () => config.calendarMaxSyncAgeMinutes ?? 10,
+      ),
       bus,
       policy,
       mailProviderFor: connections.mail,
       calendarProviderFor: connections.calendar,
     });
     const releaseDue = executor.releaseDue;
-    executor.releaseDue = at => releasing.run(true, () => releaseDue(at));
+    executor.releaseDue = (at) => releasing.run(true, () => releaseDue(at));
     const agentJobs = new Set<Promise<unknown>>();
     let closing: Promise<void> | undefined;
     let stopped = false;
@@ -158,17 +154,31 @@ export async function createRealBackend(
     let currentStep: string | undefined;
     const agentExecutor: ActionExecutor = {
       ...executor,
-      submit: async request => {
+      submit: async (request) => {
         const runId = currentTrigger?.runId;
         // People may require several actions in one step. Address identity survives
         // retries even when a partial step already created a person's local ID.
         const params = request.params as { patch?: { emails?: string[] }; personId?: string };
-        const identity = request.type === "person_update" ? (params.patch?.emails?.map(email => email.toLowerCase()).sort().join(",") ?? params.personId ?? "") : "";
-        const marker = runId && currentStep ? `[arrival-step=${currentStep};action=${request.type};identity=${encodeURIComponent(identity)}]` : "";
+        const identity =
+          request.type === "person_update"
+            ? (params.patch?.emails
+                ?.map((email) => email.toLowerCase())
+                .sort()
+                .join(",") ??
+              params.personId ??
+              "")
+            : "";
+        const marker =
+          runId && currentStep
+            ? `[arrival-step=${currentStep};action=${request.type};identity=${encodeURIComponent(identity)}]`
+            : "";
         if (marker) {
-          const previous = (await store.actions.query({ runId, limit: 2147483647 })).items.find(action => action.request.reason.endsWith(marker));
+          const previous = (await store.actions.query({ runId, limit: 2147483647 })).items.find(
+            (action) => action.request.reason.endsWith(marker),
+          );
           if (previous) {
-            if (["failed", "executing"].includes(previous.status)) throw new ApiError("TRIAGE_ACTION_INCOMPLETE", "Prior triage action requires review");
+            if (["failed", "executing"].includes(previous.status))
+              throw new ApiError("TRIAGE_ACTION_INCOMPLETE", "Prior triage action requires review");
             return previous;
           }
         }
@@ -192,10 +202,7 @@ export async function createRealBackend(
             ? createLlmClient(config.llm, { hostAgentCwd: join(config.dataDir, "host-agent") })
             : {
                 complete: async () => {
-                  throw new ApiError(
-                    "LLM_NOT_CONFIGURED",
-                    "LLM not configured",
-                  );
+                  throw new ApiError("LLM_NOT_CONFIGURED", "LLM not configured");
                 },
               }),
         selfAddresses: config.accounts.map((account) => account.emailAddress),
@@ -212,49 +219,64 @@ export async function createRealBackend(
           currentStep = step;
           try {
             // Recover a step whose action committed before its checkpoint did.
-            const actions = (await store.actions.query({ runId: currentTrigger.runId, limit: 2147483647 })).items;
-            const stepActions = actions.filter(action => action.request.reason.split("\n").at(-1)?.startsWith(`[arrival-step=${step};`));
-            const previous = step === "playbook" ? stepActions.find(action => ["archive", "draft_create"].includes(action.request.type)) : stepActions[0];
+            const actions = (
+              await store.actions.query({ runId: currentTrigger.runId, limit: 2147483647 })
+            ).items;
+            const stepActions = actions.filter((action) =>
+              action.request.reason.split("\n").at(-1)?.startsWith(`[arrival-step=${step};`),
+            );
+            const previous =
+              step === "playbook"
+                ? stepActions.find((action) =>
+                    ["archive", "draft_create"].includes(action.request.type),
+                  )
+                : stepActions[0];
             let value: T;
             if (previous && ["matter", "scheduling", "playbook"].includes(step)) {
-              if (["failed", "executing"].includes(previous.status)) throw new ApiError("TRIAGE_ACTION_INCOMPLETE", "Prior triage action requires review");
+              if (["failed", "executing"].includes(previous.status))
+                throw new ApiError(
+                  "TRIAGE_ACTION_INCOMPLETE",
+                  "Prior triage action requires review",
+                );
               const email = await store.emails.get(currentTrigger.emailId);
               const matter = email?.matterId ? await store.matters.get(email.matterId) : null;
-              value = (step === "matter" ? { ...(matter ? { id: matter.id } : {}), summary: matter?.summary ?? "Review this email" } : undefined) as T;
+              value = (
+                step === "matter"
+                  ? {
+                      ...(matter ? { id: matter.id } : {}),
+                      summary: matter?.summary ?? "Review this email",
+                    }
+                  : undefined
+              ) as T;
             } else value = await task();
             entry.checkpoints = { ...entry.checkpoints, [step]: { value } };
             await store.kv.set(key, JSON.stringify(entry));
             return value;
-          } finally { currentStep = undefined; }
+          } finally {
+            currentStep = undefined;
+          }
         },
       });
       if (!enabled)
-        logger.warn(
-          "LLM not configured; agent disabled. Configure an API key or a local model.",
-        );
+        logger.warn("LLM not configured; agent disabled. Configure an API key or a local model.");
     };
     configureAgent();
     const agent: AgentRuntime = {
       getUserProfile: () => runtime.getUserProfile(),
       setUserProfile: (markdown) => runtime.setUserProfile(markdown),
       run: (trigger) => {
-        if (stopped)
-          return Promise.reject(
-            new ApiError("BACKEND_CLOSED", "Backend is closed"),
-          );
+        if (stopped) return Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"));
         // Digests and outbox processing remain useful without inference.
-        if (
-          !enabled &&
-          (trigger.kind !== "schedule" || trigger.name === "matter_review")
-        )
-          return Promise.reject(
-            new ApiError("LLM_NOT_CONFIGURED", "LLM not configured"),
-          );
+        if (!enabled && (trigger.kind !== "schedule" || trigger.name === "matter_review"))
+          return Promise.reject(new ApiError("LLM_NOT_CONFIGURED", "LLM not configured"));
         // Keep one serialization boundary even when account/model settings replace the runtime.
         const job = runQueue.then(async () => {
           currentTrigger = trigger as ArrivalTrigger;
-          try { return await runtime.run(trigger); }
-          finally { currentTrigger = undefined; }
+          try {
+            return await runtime.run(trigger);
+          } finally {
+            currentTrigger = undefined;
+          }
         });
         runQueue = job.catch(() => undefined);
         agentJobs.add(job);
@@ -265,11 +287,15 @@ export async function createRealBackend(
         return job;
       },
     };
-    const arrivals = options.clientMode ? undefined : new ArrivalQueue(store, bus, agent, () => enabled && !stopped);
-    const unsubscribe = options.clientMode ? () => {} : bus.on("email.received", ({ email }) => {
-      if (!enabled || stopped) return;
-      void arrivals!.enqueue(email.id, email.accountId);
-    });
+    const arrivals = options.clientMode
+      ? undefined
+      : new ArrivalQueue(store, bus, agent, () => enabled && !stopped);
+    const unsubscribe = options.clientMode
+      ? () => {}
+      : bus.on("email.received", ({ email }) => {
+          if (!enabled || stopped) return;
+          void arrivals!.enqueue(email.id, email.accountId);
+        });
     const drainAgentQueue = async () => {
       await arrivals?.drain();
       while (agentJobs.size) await Promise.allSettled([...agentJobs]);
@@ -277,65 +303,67 @@ export async function createRealBackend(
     const dependencies = { store, executor, policy, bus };
     const mcp = createMailboxMcpServer(dependencies);
     const servers = new Set([mcp]);
-    return attachSetupTasks(attachAccountSync<RealBackend>({
-      mode: "real",
-      ...dependencies,
-      providers,
-      config,
-      agent,
-      mcp,
-      providerKinds: [
-        "gmail",
-        "graph",
-        "imap",
-        "jmap",
-        "google-calendar",
-        "graph-calendar",
-        "caldav",
-        "mock",
-      ],
-      createMcpServer() {
-        const server = createMailboxMcpServer(dependencies);
-        servers.add(server);
-        return server;
-      },
-      async updateConfig(patch) {
-        await drainAgentQueue();
-        const next = validateConfig({ ...config, ...patch });
-        if (!memory) await saveConfig(next);
-        Object.assign(config, next);
-        configureAgent();
-      },
-      syncAccount: (id) =>
-        stopped
-          ? Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"))
-          : sync.syncAccount(id),
-      async waitForChanges(id, signal) {
-        if (signal.aborted) return;
-        const provider = await connections.mail(id);
-        if (provider.waitForChanges) await provider.waitForChanges(signal);
-        else
-          await new Promise<void>((resolve) => {
-            if (signal.aborted) resolve();
+    return attachSetupTasks(
+      attachAccountSync<RealBackend>(
+        {
+          mode: "real",
+          ...dependencies,
+          providers,
+          config,
+          agent,
+          mcp,
+          providerKinds: [
+            "gmail",
+            "graph",
+            "imap",
+            "jmap",
+            "google-calendar",
+            "graph-calendar",
+            "caldav",
+            "mock",
+          ],
+          createMcpServer() {
+            const server = createMailboxMcpServer(dependencies);
+            servers.add(server);
+            return server;
+          },
+          async updateConfig(patch) {
+            await drainAgentQueue();
+            const next = validateConfig({ ...config, ...patch });
+            if (!memory) await saveConfig(next);
+            Object.assign(config, next);
+            configureAgent();
+          },
+          syncAccount: (id) =>
+            stopped
+              ? Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"))
+              : sync.syncAccount(id),
+          async waitForChanges(id, signal) {
+            if (signal.aborted) return;
+            const provider = await connections.mail(id);
+            if (provider.waitForChanges) await provider.waitForChanges(signal);
             else
-              signal.addEventListener("abort", () => resolve(), { once: true });
-          });
-      },
-      drainAgentQueue,
-      processArrivals: (signal) => arrivals?.drainDue(signal) ?? Promise.resolve(),
-      close: () =>
-        (closing ??= (async () => {
-          await sync.drain();
-          unsubscribe();
-          await drainAgentQueue();
-          stopped = true;
-          await Promise.allSettled(
-            [...servers].map((server) => server.close()),
-          );
-          await connections.close();
-          await store.close();
-        })()),
-    }, sync));
+              await new Promise<void>((resolve) => {
+                if (signal.aborted) resolve();
+                else signal.addEventListener("abort", () => resolve(), { once: true });
+              });
+          },
+          drainAgentQueue,
+          processArrivals: (signal) => arrivals?.drainDue(signal) ?? Promise.resolve(),
+          close: () =>
+            (closing ??= (async () => {
+              await sync.drain();
+              unsubscribe();
+              await drainAgentQueue();
+              stopped = true;
+              await Promise.allSettled([...servers].map((server) => server.close()));
+              await connections.close();
+              await store.close();
+            })()),
+        },
+        sync,
+      ),
+    );
   } catch (error) {
     await store.close();
     throw error;

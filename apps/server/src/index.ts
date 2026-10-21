@@ -1,10 +1,10 @@
 export { createApp } from "./app.js";
-export { startServer } from "./server.js";
-export { createDemoBackend } from "./demo/index.js";
-export { createRealBackend } from "./compose.js";
-export { loadConfig, saveConfig, defaultConfig } from "./config.js";
-export { startSchedulers } from "./schedulers/index.js";
 export type { Backend } from "./backend.js";
-export type { PassportConfig } from "./config.js";
 export type { RealBackend, RealBackendOptions } from "./compose.js";
+export { createRealBackend } from "./compose.js";
+export type { PassportConfig } from "./config.js";
+export { defaultConfig, loadConfig, saveConfig } from "./config.js";
+export { createDemoBackend } from "./demo/index.js";
+export { startSchedulers } from "./schedulers/index.js";
+export { startServer } from "./server.js";
 export { SyncService } from "./sync/index.js";

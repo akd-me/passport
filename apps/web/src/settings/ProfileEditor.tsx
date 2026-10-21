@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
-import { useTask } from "../state";
 import { Feedback } from "../components/ui";
+import { useTask } from "../state";
 
 /** USER.md: tone, preferences and standing instructions the agent follows. */
 export function ProfileEditor({ markdown }: { markdown: string }) {
@@ -12,16 +12,13 @@ export function ProfileEditor({ markdown }: { markdown: string }) {
       className="settings-block"
       onSubmit={(e) => {
         e.preventDefault();
-        void task.run(
-          () => api.saveProfile(body),
-          "Standing instructions saved.",
-        );
+        void task.run(() => api.saveProfile(body), "Standing instructions saved.");
       }}
     >
       <h3>Standing instructions</h3>
       <p className="hint">
-        How you write, who matters, what never to do. Plain Markdown, saved as
-        USER.md and read by every agent run.
+        How you write, who matters, what never to do. Plain Markdown, saved as USER.md and read by
+        every agent run.
       </p>
       <label className="sr-only" htmlFor="user-profile">
         USER.md standing instructions
@@ -36,10 +33,7 @@ export function ProfileEditor({ markdown }: { markdown: string }) {
       />
       <Feedback error={task.error} />
       <div className="form-actions">
-        <button
-          className="btn btn-primary"
-          disabled={task.busy || body === markdown}
-        >
+        <button className="btn btn-primary" disabled={task.busy || body === markdown}>
           {task.busy ? "Saving…" : "Save instructions"}
         </button>
       </div>

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api";
-import { setupApi, type SetupTask } from "../setup-api";
+import { type SetupTask, setupApi } from "../setup-api";
 import { Harness, stubApi } from "../test-utils";
 import { SetupFlow } from "./SetupFlow";
 
@@ -53,7 +53,11 @@ describe("agent-driven account setup", () => {
     vi.spyOn(setupApi, "get").mockResolvedValue(
       task({
         status: "waiting_for_user",
-        prompt: { id: "prompt-1", kind: "sign_in", message: "Sign in to Microsoft in the window that opened." },
+        prompt: {
+          id: "prompt-1",
+          kind: "sign_in",
+          message: "Sign in to Microsoft in the window that opened.",
+        },
       }),
     );
     const respond = vi.spyOn(setupApi, "respond").mockResolvedValue(
@@ -70,7 +74,9 @@ describe("agent-driven account setup", () => {
     expect(prompt).toHaveTextContent("Sign in in the browser window, then continue");
     fireEvent.click(within(prompt).getByRole("button", { name: "I’ve signed in, continue" }));
     await waitFor(() => expect(respond).toHaveBeenCalledWith("task-1", "prompt-1", "done"));
-    expect(await screen.findByRole("heading", { name: "Outlook is connected" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Outlook is connected" }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(done).toHaveBeenCalled();
   });
@@ -79,13 +85,18 @@ describe("agent-driven account setup", () => {
     stubApi({ "/accounts": { accounts: [] } });
     vi.spyOn(setupApi, "start").mockResolvedValue({ id: "task-1" });
     vi.spyOn(setupApi, "get").mockResolvedValue(
-      task({ status: "waiting_for_user", prompt: { id: "q", kind: "question", message: "Which tenant?" } }),
+      task({
+        status: "waiting_for_user",
+        prompt: { id: "q", kind: "question", message: "Which tenant?" },
+      }),
     );
     const respond = vi.spyOn(setupApi, "respond").mockResolvedValue(task());
     const cancel = vi.spyOn(setupApi, "cancel").mockResolvedValue(task({ status: "cancelled" }));
     renderFlow();
     fireEvent.click(screen.getByRole("button", { name: "Connect Gmail" }));
-    fireEvent.change(await screen.findByLabelText("Your answer"), { target: { value: "personal" } });
+    fireEvent.change(await screen.findByLabelText("Your answer"), {
+      target: { value: "personal" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(respond).toHaveBeenCalledWith("task-1", "q", "personal"));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel setup" }));
@@ -102,9 +113,13 @@ describe("agent-driven account setup", () => {
     );
     renderFlow();
     fireEvent.click(screen.getByRole("button", { name: "Connect Gmail" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Google rejected the consent screen.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Google rejected the consent screen.",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Set up manually" }));
-    expect(await screen.findByRole("button", { name: "Back to automatic setup" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Back to automatic setup" }),
+    ).toBeInTheDocument();
   });
 
   it("falls back to manual setup when the server has no setup tasks yet", async () => {
@@ -115,7 +130,9 @@ describe("agent-driven account setup", () => {
         { kind: "graph", label: "Outlook", fields: [], oauth: { scopes: [] } },
       ],
     });
-    vi.spyOn(setupApi, "start").mockRejectedValue(new ApiError("Unknown API route", "NOT_FOUND", 404));
+    vi.spyOn(setupApi, "start").mockRejectedValue(
+      new ApiError("Unknown API route", "NOT_FOUND", 404),
+    );
     renderFlow();
     fireEvent.click(screen.getByRole("radio", { name: /Microsoft/ }));
     fireEvent.click(screen.getByRole("button", { name: "Connect Outlook" }));

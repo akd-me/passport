@@ -1,8 +1,9 @@
+import type { ActionRecord, DraftInput } from "@passport/types";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ActionRecord, DraftInput } from "@passport/types";
 import { api } from "../api";
 import { DecisionCard } from "./Decisions";
+
 function action(status: "proposed" | "held" = "proposed"): ActionRecord {
   return {
     id: "action-test",
@@ -38,13 +39,9 @@ describe("DecisionCard", () => {
   it("approves the original request", async () => {
     const approve = vi.spyOn(api, "approve").mockResolvedValue(action("held"));
     render(<DecisionCard action={action()} />);
-    expect(
-      screen.getByText("Confirm the launch with Maya."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Confirm the launch with Maya.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-    await waitFor(() =>
-      expect(approve).toHaveBeenCalledWith("action-test", undefined),
-    );
+    await waitFor(() => expect(approve).toHaveBeenCalledWith("action-test", undefined));
   });
   it("edits the draft, focuses the editor, and approves the edited body", async () => {
     const approve = vi.spyOn(api, "approve").mockResolvedValue(action("held"));
@@ -75,39 +72,27 @@ describe("DecisionCard", () => {
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
     expect(reject).toHaveBeenCalledWith("action-test");
     finish({ ...action(), status: "rejected" });
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
   });
   it("shows the hold countdown and cancels an outgoing message", async () => {
-    const cancel = vi
-      .spyOn(api, "cancel")
-      .mockResolvedValue({ ...action(), status: "rejected" });
+    const cancel = vi.spyOn(api, "cancel").mockResolvedValue({ ...action(), status: "rejected" });
     render(<DecisionCard action={action("held")} />);
     expect(screen.getByText("2:00")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Approve" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel send" }));
     await waitFor(() => expect(cancel).toHaveBeenCalledWith("action-test"));
   });
   it("keeps the draft and displays an actionable error when approval fails", async () => {
-    vi.spyOn(api, "approve").mockRejectedValue(
-      new Error("This action has already been decided."),
-    );
+    vi.spyOn(api, "approve").mockRejectedValue(new Error("This action has already been decided."));
     render(<DecisionCard action={action()} />);
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "already been decided",
-    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("already been decided");
     expect(screen.getByText(/Hi Maya, Thursday works/)).toBeInTheDocument();
   });
   it("does not allow approving an empty edited draft", () => {
     render(<DecisionCard action={action()} />);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "  " } });
-    expect(
-      screen.getByRole("button", { name: "Edit & approve" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit & approve" })).toBeDisabled();
   });
 });

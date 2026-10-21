@@ -4,11 +4,12 @@ import { BrowserRouter } from "react-router";
 import "@fontsource-variable/public-sans/wght.css";
 import "@fontsource-variable/public-sans/wght-italic.css";
 import "@fontsource-variable/source-serif-4/opsz.css";
+import { App } from "./App";
 import { WorkspaceProvider } from "./state";
 import { UiProvider } from "./ui-state";
-import { App } from "./App";
 import "./styles.css";
 import { initializeAuth } from "./auth";
+
 void initializeAuth(() =>
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

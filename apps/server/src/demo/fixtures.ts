@@ -1,4 +1,3 @@
-import { DEFAULT_POLICY_CONFIG } from "@passport/types";
 import type {
   Account,
   ActionCategory,
@@ -8,6 +7,7 @@ import type {
   Person,
   Store,
 } from "@passport/types";
+import { DEFAULT_POLICY_CONFIG } from "@passport/types";
 
 export const CATEGORIES: ActionCategory[] = [
   "triage",
@@ -23,8 +23,7 @@ export const CATEGORIES: ActionCategory[] = [
   "matters",
   "other",
 ];
-const ago = (hours: number) =>
-  new Date(Date.now() - hours * 3_600_000).toISOString();
+const ago = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
 export const demoCapabilities = {
   mail: true,
   calendar: true,
@@ -103,9 +102,7 @@ export async function seedDemo(store: Store): Promise<void> {
     title,
     summary: summaries[i]!,
     status: i === 1 || i === 4 ? "waiting" : "active",
-    kind: ["project", "trip", "personal", "project", "hiring", "subscription"][
-      i
-    ],
+    kind: ["project", "trip", "personal", "project", "hiring", "subscription"][i],
     personIds: matterPeople[i]!.map((p) => `person-${p}`),
     emailIds: [],
     eventIds: [],
@@ -171,12 +168,7 @@ export async function seedDemo(store: Store): Promise<void> {
         dkim: "pass",
         spf: "pass",
         dmarc: "pass",
-        passport:
-          person.verification === "blue"
-            ? "blue"
-            : m === 2
-              ? "downgraded"
-              : "green",
+        passport: person.verification === "blue" ? "blue" : m === 2 ? "downgraded" : "green",
         signer: person.primaryEmail.split("@")[1],
       },
       matterId: `matter-${m}`,
@@ -238,8 +230,7 @@ export async function seedDemo(store: Store): Promise<void> {
     location: i === 1 ? "Harbor House, Portland" : "Video call",
   }));
   await store.events.upsertMany(events);
-  for (const event of events)
-    matters.find((m) => m.id === event.matterId)!.eventIds.push(event.id);
+  for (const event of events) matters.find((m) => m.id === event.matterId)!.eventIds.push(event.id);
   for (const matter of matters) await store.matters.upsert(matter);
   await store.trust.setConfig(structuredClone(DEFAULT_POLICY_CONFIG));
   for (const [i, category] of CATEGORIES.entries())

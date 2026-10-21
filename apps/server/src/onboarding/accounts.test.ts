@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRealBackend } from "../compose.js";
-import { createDemoBackend } from "../demo/index.js";
-import { createApp } from "../auth.test-client.js";
-import { defaultConfig, validateConfig } from "../config.js";
 import type { ActionRecord, Matter, Page } from "@passport/types";
-import type { Backend } from "../backend.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { addAccount } from "../accounts.js";
+import { createApp } from "../auth.test-client.js";
+import type { Backend } from "../backend.js";
+import { createRealBackend } from "../compose.js";
+import { defaultConfig, validateConfig } from "../config.js";
+import { createDemoBackend } from "../demo/index.js";
 
 describe("account onboarding API", () => {
   let backend: Backend | undefined;
@@ -87,15 +87,12 @@ describe("account onboarding API", () => {
         })
       ).status,
     ).toBe(400);
-    expect(
-      (await app.request(`/api/accounts/${account.id}`, { method: "DELETE" }))
-        .status,
-    ).toBe(200);
+    expect((await app.request(`/api/accounts/${account.id}`, { method: "DELETE" })).status).toBe(
+      200,
+    );
     expect(await backend.store.accounts.list()).toHaveLength(0);
     expect(await backend.store.accounts.getCredentials(account.id)).toBeNull();
-    expect(
-      (await backend.store.emails.query({ accountId: account.id })).items,
-    ).toHaveLength(0);
+    expect((await backend.store.emails.query({ accountId: account.id })).items).toHaveLength(0);
     expect(backend.config.accounts).toHaveLength(0);
   });
   it("filters actions before pagination and adds account IDs to matters", async () => {
@@ -104,37 +101,26 @@ describe("account onboarding API", () => {
       all = await backend.store.actions.query({ limit: 500 });
     const id = all.items[0]!.request.accountId;
     const filtered = (await (
-      await app.request(
-        `/api/actions?accountId=${encodeURIComponent(id)}&limit=1`,
-      )
+      await app.request(`/api/actions?accountId=${encodeURIComponent(id)}&limit=1`)
     ).json()) as Page<ActionRecord>;
     expect(filtered.items).toHaveLength(1);
     expect(
-      filtered.items.every(
-        (a: { request: { accountId: string } }) => a.request.accountId === id,
-      ),
+      filtered.items.every((a: { request: { accountId: string } }) => a.request.accountId === id),
     ).toBe(true);
-    expect(filtered.total).toBe(
-      all.items.filter((a) => a.request.accountId === id).length,
-    );
+    expect(filtered.total).toBe(all.items.filter((a) => a.request.accountId === id).length);
     expect(
-      (
-        (await (
-          await app.request("/api/decisions?accountId=missing")
-        ).json()) as Page<ActionRecord>
-      ).items,
+      ((await (await app.request("/api/decisions?accountId=missing")).json()) as Page<ActionRecord>)
+        .items,
     ).toHaveLength(0);
     const matters = (await (
       await app.request(`/api/matters?accountId=${encodeURIComponent(id)}`)
     ).json()) as Array<Matter & { accountIds: string[] }>;
-    expect(
-      matters.every((m: { accountIds: string[] }) => m.accountIds.includes(id)),
-    ).toBe(true);
+    expect(matters.every((m: { accountIds: string[] }) => m.accountIds.includes(id))).toBe(true);
   });
   it("validates the initial sync window", () => {
     expect(defaultConfig().sync?.initialDays).toBe(30);
-    expect(() =>
-      validateConfig({ ...defaultConfig(), sync: { initialDays: 0 } }),
-    ).toThrow("initialDays");
+    expect(() => validateConfig({ ...defaultConfig(), sync: { initialDays: 0 } })).toThrow(
+      "initialDays",
+    );
   });
 });

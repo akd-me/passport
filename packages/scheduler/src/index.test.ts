@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DomainEvent, EventBus } from "@passport/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createScheduler,
-  nextOccurrence,
-  validateSchedule,
-  type Scheduler,
   type JobDefinition,
+  nextOccurrence,
+  type Scheduler,
+  validateSchedule,
 } from "./index.js";
 
 const deferred = () => {
@@ -125,11 +125,9 @@ describe("persistent scheduler", () => {
       at: "01:30",
       timeZone: "America/New_York",
     });
-    expect(
-      new Date(
-        nextOccurrence(s, Date.parse("2026-11-01T05:30:00Z"))!,
-      ).toISOString(),
-    ).toBe("2026-11-02T06:30:00.000Z");
+    expect(new Date(nextOccurrence(s, Date.parse("2026-11-01T05:30:00Z"))!).toISOString()).toBe(
+      "2026-11-02T06:30:00.000Z",
+    );
   });
   it("supports weekly weekdays and validates schedule inputs", () => {
     const s = validateSchedule({
@@ -138,11 +136,9 @@ describe("persistent scheduler", () => {
       at: "07:30",
       timeZone: "UTC",
     });
-    expect(
-      new Date(
-        nextOccurrence(s, Date.parse("2026-03-06T08:00:00Z"))!,
-      ).toISOString(),
-    ).toBe("2026-03-09T07:30:00.000Z");
+    expect(new Date(nextOccurrence(s, Date.parse("2026-03-06T08:00:00Z"))!).toISOString()).toBe(
+      "2026-03-09T07:30:00.000Z",
+    );
     for (const bad of [
       { type: "interval", everyMs: 0 },
       { type: "daily", at: "25:00" },
@@ -181,10 +177,7 @@ describe("persistent scheduler", () => {
     await scheduler.start();
     await vi.advanceTimersByTimeAsync(3000);
     expect(def.run).toHaveBeenCalledTimes(1);
-    expect(scheduler.get("test")!.history.map((r) => r.status)).toEqual([
-      "skipped",
-      "skipped",
-    ]);
+    expect(scheduler.get("test")!.history.map((r) => r.status)).toEqual(["skipped", "skipped"]);
     expect((await scheduler.runNow("test")).status).toBe("skipped");
     d.resolve({});
     await vi.advanceTimersByTimeAsync(0);
@@ -197,22 +190,14 @@ describe("persistent scheduler", () => {
       .mockRejectedValueOnce(new Error("second"))
       .mockRejectedValueOnce(new Error("third"))
       .mockResolvedValue({});
-    await scheduler.register(
-      job({ run, retry: { maxAttempts: 5, baseMs: 100, maxMs: 250 } }),
-    );
+    await scheduler.register(job({ run, retry: { maxAttempts: 5, baseMs: 100, maxMs: 250 } }));
     await scheduler.start();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(
-      100,
-    );
+    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(100);
     await vi.advanceTimersByTimeAsync(100);
-    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(
-      200,
-    );
+    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(200);
     await vi.advanceTimersByTimeAsync(200);
-    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(
-      250,
-    );
+    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(250);
     await vi.advanceTimersByTimeAsync(250);
     expect(scheduler.get("test")!.consecutiveFailures).toBe(0);
     expect(scheduler.get("test")!.lastError).toBeNull();
@@ -231,9 +216,7 @@ describe("persistent scheduler", () => {
     await scheduler.start();
     await vi.advanceTimersByTimeAsync(1100);
     expect(scheduler.get("test")!.consecutiveFailures).toBe(2);
-    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(
-      1000,
-    );
+    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(1000);
   });
   it("aborts on timeout and keeps noncooperating work single-flight", async () => {
     let signal!: AbortSignal;
@@ -280,14 +263,8 @@ describe("persistent scheduler", () => {
     expect(scheduler.list()).toEqual([]);
     expect(data.has("job:test")).toBe(false);
     await scheduler.register(job({ kind: "system" }));
-    await expect(scheduler.remove("test")).rejects.toHaveProperty(
-      "code",
-      "SYSTEM_JOB",
-    );
-    await expect(scheduler.runNow("missing")).rejects.toHaveProperty(
-      "code",
-      "JOB_NOT_FOUND",
-    );
+    await expect(scheduler.remove("test")).rejects.toHaveProperty("code", "SYSTEM_JOB");
+    await expect(scheduler.runNow("missing")).rejects.toHaveProperty("code", "JOB_NOT_FOUND");
   });
   it("limits history to 20 and returns independent state snapshots", async () => {
     await scheduler.register(job({ schedule: { type: "manual" } }));
@@ -321,26 +298,17 @@ describe("persistent scheduler", () => {
       }),
     );
     await scheduler.runNow("test");
-    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(
-      3600000,
-    );
+    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(3600000);
     await scheduler.runNow("test");
-    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(
-      3600000,
-    );
+    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(3600000);
   });
   it("manual recovery resets a pending backoff to the regular schedule", async () => {
-    const run = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValue({});
+    const run = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue({});
     await scheduler.register(
       job({ run, schedule: { type: "daily", at: "13:00", timeZone: "UTC" } }),
     );
     await scheduler.runNow("test");
-    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(
-      1000,
-    );
+    expect(Date.parse(scheduler.get("test")!.nextRunAt!) - Date.now()).toBe(1000);
     await scheduler.runNow("test");
     expect(scheduler.get("test")!.nextRunAt).toBe("2026-03-07T13:00:00.000Z");
   });
@@ -350,10 +318,7 @@ describe("persistent scheduler", () => {
     const run = scheduler.runNow("test");
     await vi.advanceTimersByTimeAsync(0);
     await scheduler.remove("test");
-    await expect(scheduler.register(job())).rejects.toHaveProperty(
-      "code",
-      "JOB_STILL_RUNNING",
-    );
+    await expect(scheduler.register(job())).rejects.toHaveProperty("code", "JOB_STILL_RUNNING");
     let stopped = false;
     const stop = scheduler.stop().then(() => {
       stopped = true;
@@ -376,10 +341,7 @@ describe("persistent scheduler", () => {
     await vi.advanceTimersByTimeAsync(50);
     await stop;
     expect(vi.getTimerCount()).toBe(0);
-    await expect(scheduler.start()).rejects.toHaveProperty(
-      "code",
-      "JOB_STILL_RUNNING",
-    );
+    await expect(scheduler.start()).rejects.toHaveProperty("code", "JOB_STILL_RUNNING");
     d.resolve({});
     await run;
     await scheduler.start();
@@ -388,53 +350,76 @@ describe("persistent scheduler", () => {
 });
 
 describe("R10 interrupted occurrence recovery", () => {
-  it.each([undefined, 2000])("R10 recovers an unfinished occurrence exactly once on restart (timeout %s)", async timeoutMs => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-10-20T12:00:00Z"));
-    const data = new Map<string, string>();
-    const options = { store: { kv: {
-      get: async (key: string) => data.get(key) ?? null,
-      set: async (key: string, value: string) => { data.set(key, value); },
-      delete: async (key: string) => { data.delete(key); },
-    } }, bus: { emit: () => {}, on: () => () => {}, onAny: () => () => {} } as EventBus, stopTimeoutMs: 1 };
-    const original = createScheduler(options);
-    let restarted: Scheduler | undefined;
-    const def = { id: "interrupted", name: "Interrupted", kind: "user" as const, schedule: { type: "interval" as const, everyMs: 60_000 }, timeoutMs };
-    try {
-      await original.register({ ...def, run: () => new Promise(() => {}) });
-      await original.start();
-      await vi.advanceTimersByTimeAsync(60_000);
-      const saved = JSON.parse(data.get("job:interrupted")!);
-      expect(saved.activeRun).toMatchObject({ occurrenceAt: "2026-10-20T12:01:00.000Z", startedAt: "2026-10-20T12:01:00.000Z", runId: expect.any(String) });
-      const stop = original.stop();
-      await vi.advanceTimersByTimeAsync(1);
-      await stop;
-      const occurrences: string[] = [];
-      restarted = createScheduler(options);
-      const run = vi.fn(async () => {
-        occurrences.push(restarted!.get("interrupted")!.activeRun!.occurrenceAt);
-        return {};
-      });
-      await restarted.register({ ...def, run });
-      await restarted.start();
-      await vi.advanceTimersByTimeAsync(0);
-      if (timeoutMs) {
-        expect(run).not.toHaveBeenCalled();
-        await vi.advanceTimersByTimeAsync(timeoutMs);
+  it.each([undefined, 2000])(
+    "R10 recovers an unfinished occurrence exactly once on restart (timeout %s)",
+    async (timeoutMs) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-20T12:00:00Z"));
+      const data = new Map<string, string>();
+      const options = {
+        store: {
+          kv: {
+            get: async (key: string) => data.get(key) ?? null,
+            set: async (key: string, value: string) => {
+              data.set(key, value);
+            },
+            delete: async (key: string) => {
+              data.delete(key);
+            },
+          },
+        },
+        bus: { emit: () => {}, on: () => () => {}, onAny: () => () => {} } as EventBus,
+        stopTimeoutMs: 1,
+      };
+      const original = createScheduler(options);
+      let restarted: Scheduler | undefined;
+      const def = {
+        id: "interrupted",
+        name: "Interrupted",
+        kind: "user" as const,
+        schedule: { type: "interval" as const, everyMs: 60_000 },
+        timeoutMs,
+      };
+      try {
+        await original.register({ ...def, run: () => new Promise(() => {}) });
+        await original.start();
+        await vi.advanceTimersByTimeAsync(60_000);
+        const saved = JSON.parse(data.get("job:interrupted")!);
+        expect(saved.activeRun).toMatchObject({
+          occurrenceAt: "2026-10-20T12:01:00.000Z",
+          startedAt: "2026-10-20T12:01:00.000Z",
+          runId: expect.any(String),
+        });
+        const stop = original.stop();
+        await vi.advanceTimersByTimeAsync(1);
+        await stop;
+        const occurrences: string[] = [];
+        restarted = createScheduler(options);
+        const run = vi.fn(async () => {
+          occurrences.push(restarted!.get("interrupted")!.activeRun!.occurrenceAt);
+          return {};
+        });
+        await restarted.register({ ...def, run });
+        await restarted.start();
+        await vi.advanceTimersByTimeAsync(0);
+        if (timeoutMs) {
+          expect(run).not.toHaveBeenCalled();
+          await vi.advanceTimersByTimeAsync(timeoutMs);
+        }
+        expect(run).toHaveBeenCalledTimes(1);
+        expect(occurrences).toEqual([saved.activeRun.occurrenceAt]);
+        expect(JSON.parse(data.get("job:interrupted")!).activeRun).toBeNull();
+        await restarted.stop();
+        const again = createScheduler(options);
+        await again.register({ ...def, run });
+        await again.start();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(run).toHaveBeenCalledTimes(1);
+        await again.stop();
+      } finally {
+        if (restarted) await restarted.stop();
+        vi.useRealTimers();
       }
-      expect(run).toHaveBeenCalledTimes(1);
-      expect(occurrences).toEqual([saved.activeRun.occurrenceAt]);
-      expect(JSON.parse(data.get("job:interrupted")!).activeRun).toBeNull();
-      await restarted.stop();
-      const again = createScheduler(options);
-      await again.register({ ...def, run });
-      await again.start();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(run).toHaveBeenCalledTimes(1);
-      await again.stop();
-    } finally {
-      if (restarted) await restarted.stop();
-      vi.useRealTimers();
-    }
-  });
+    },
+  );
 });

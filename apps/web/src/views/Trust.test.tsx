@@ -6,22 +6,19 @@ describe("trust permission picker", () => {
   it("exposes all four modes and highlights only the current one", () => {
     render(<TrustPicker value="auto_accept_edits" onChange={vi.fn()} />);
     expect(screen.getAllByRole("radio")).toHaveLength(4);
-    expect(
-      screen.getByRole("radio", { name: /Auto-accept edits/ }),
-    ).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: /Auto-accept edits/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
     expect(screen.getByRole("radio", { name: /^Supervised/ })).toHaveAttribute(
       "aria-checked",
       "false",
     );
-    expect(
-      screen.getByRole("radio", { name: /Full access/ }),
-    ).toHaveTextContent("always-ask");
+    expect(screen.getByRole("radio", { name: /Full access/ })).toHaveTextContent("always-ask");
   });
   it("reports the selected contract value and supports disabled saving state", () => {
     const change = vi.fn(),
-      { rerender } = render(
-        <TrustPicker value="supervised" onChange={change} />,
-      );
+      { rerender } = render(<TrustPicker value="supervised" onChange={change} />);
     fireEvent.click(screen.getByRole("radio", { name: /^Auto Passport/ }));
     expect(change).toHaveBeenCalledWith("auto");
     rerender(<TrustPicker value="auto" onChange={change} disabled />);
@@ -43,7 +40,17 @@ const trustData = {
     externalAgentCeiling: "auto_accept_edits",
   },
   categories: [
-    { category: "newsletters", level: "auto_accept_edits", score: 0.8, stage: "trusted", approvals: 27, approvalsUnchanged: 25, edits: 2, rejections: 0, lastActivityAt: null },
+    {
+      category: "newsletters",
+      level: "auto_accept_edits",
+      score: 0.8,
+      stage: "trusted",
+      approvals: 27,
+      approvalsUnchanged: 25,
+      edits: 2,
+      rejections: 0,
+      lastActivityAt: null,
+    },
   ],
   promotionOffers: [
     {
@@ -73,7 +80,9 @@ describe("permission mode menu", () => {
     const popover = screen.getByRole("dialog", { name: "Permission mode: Auto-accept edits" });
     expect(popover).toHaveTextContent("Always asks about money, legal.");
     expect(screen.getByRole("radio", { name: /Auto-accept edits/ })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole("radio", { name: /Auto-accept edits/ }), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("radio", { name: /Auto-accept edits/ }), {
+      key: "ArrowDown",
+    });
     expect(screen.getByRole("radio", { name: /^Auto Passport/ })).toHaveFocus();
     fireEvent.click(screen.getByRole("radio", { name: /^Auto Passport/ }));
     await waitFor(() => expect(set).toHaveBeenCalledWith({ globalMode: "auto" }));
@@ -99,7 +108,9 @@ describe("promotion prompts", () => {
     stubApi({ "/trust": trustData });
     const pin = vi.spyOn(api, "pin").mockResolvedValue(trustData.categories[0] as never);
     render(<PromotionPrompts />);
-    expect(await screen.findByText(/25 of 27 approved without changes in 30 days/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/25 of 27 approved without changes in 30 days/),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Allow Auto" }));
     await waitFor(() => expect(pin).toHaveBeenCalledWith("newsletters", "auto"));
   });

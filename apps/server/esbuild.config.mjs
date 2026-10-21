@@ -15,15 +15,17 @@ export default function config({ serverDir, outdir, workspaceEntries }) {
     sourcemap: true,
     sourcesContent: false,
     metafile: true,
-    plugins: [{
-      name: "bundle-passport-workspaces",
-      setup(build) {
-        build.onResolve({ filter: noExternal[0] }, ({ path }) => {
-          const entry = workspaceEntries.get(path);
-          if (!entry) throw new Error(`Unknown workspace root: ${path}`);
-          return { path: entry };
-        });
+    plugins: [
+      {
+        name: "bundle-passport-workspaces",
+        setup(build) {
+          build.onResolve({ filter: noExternal[0] }, ({ path }) => {
+            const entry = workspaceEntries.get(path);
+            if (!entry) throw new Error(`Unknown workspace root: ${path}`);
+            return { path: entry };
+          });
+        },
       },
-    }],
+    ],
   };
 }

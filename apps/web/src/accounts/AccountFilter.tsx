@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 import { useSearchParams } from "react-router";
 import type { AccountData } from "../api";
 import { useResource } from "../state";
@@ -16,9 +16,9 @@ const Accounts = createContext<AccountScopeState>({
 });
 /** Loads `/accounts` once for the shell: sidebar, colour dots, model chip and empty state. */
 export function AccountScope({ children }: { children: ReactNode }) {
-  const resource = useResource<
-    Omit<AccountData, "accounts"> & { accounts: ConnectedAccount[] }
-  >("/accounts");
+  const resource = useResource<Omit<AccountData, "accounts"> & { accounts: ConnectedAccount[] }>(
+    "/accounts",
+  );
   return (
     <Accounts.Provider
       value={{
@@ -36,9 +36,7 @@ export const useAccounts = () => useContext(Accounts);
 export function accountColour(id: string): string {
   let hash = 0;
   for (const c of id) hash = (Math.imul(hash, 31) + c.charCodeAt(0)) | 0;
-  return ["#3b8a64", "#4a6fd4", "#c07a2c", "#2a8f99", "#c2507c", "#7d8a2e"][
-    Math.abs(hash) % 6
-  ]!;
+  return ["#3b8a64", "#4a6fd4", "#c07a2c", "#2a8f99", "#c2507c", "#7d8a2e"][Math.abs(hash) % 6]!;
 }
 export function AccountDot({ id }: { id: string }) {
   const { accounts } = useContext(Accounts),

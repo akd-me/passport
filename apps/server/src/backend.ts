@@ -1,3 +1,4 @@
+import type { createMailboxMcpServer } from "@passport/mcp";
 import type {
   ActionExecutor,
   AgentRuntime,
@@ -8,7 +9,6 @@ import type {
   Store,
 } from "@passport/types";
 import type { PassportConfig } from "./config.js";
-import type { createMailboxMcpServer } from "@passport/mcp";
 
 /** The only server dependency: implementations are composed outside the HTTP layer. */
 export interface Backend {

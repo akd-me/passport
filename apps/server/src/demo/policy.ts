@@ -1,15 +1,10 @@
+import type { EventBus, PolicyEngine, Store, TrustLevel } from "@passport/types";
 import {
   BASE_REVERSIBILITY,
   BASE_RISK,
   DEFAULT_POLICY_CONFIG,
-  TRUST_LEVELS,
   minTrust,
-} from "@passport/types";
-import type {
-  EventBus,
-  PolicyEngine,
-  Store,
-  TrustLevel,
+  TRUST_LEVELS,
 } from "@passport/types";
 import { required } from "../errors.js";
 
@@ -24,8 +19,7 @@ export function createDemoPolicy(store: Store, bus: EventBus): PolicyEngine {
       return config;
     },
     getTrust: () => store.trust.list(),
-    getTrustFor: async (category) =>
-      required(await store.trust.get(category), "Trust category"),
+    getTrustFor: async (category) => required(await store.trust.get(category), "Trust category"),
     pinLevel: async (category, level) => {
       const state = await store.trust.upsert({
         ...(await policy.getTrustFor(category)),
@@ -53,16 +47,9 @@ export function createDemoPolicy(store: Store, bus: EventBus): PolicyEngine {
         )
           outcome = "allow";
       }
-      if (
-        request.actor.kind === "external-agent" &&
-        reversibility === "irreversible"
-      )
+      if (request.actor.kind === "external-agent" && reversibility === "irreversible")
         outcome = "deny";
-      if (
-        outcome === "allow" &&
-        reversibility === "delayed" &&
-        config.outboxHoldMinutes > 0
-      )
+      if (outcome === "allow" && reversibility === "delayed" && config.outboxHoldMinutes > 0)
         outcome = "hold";
       return {
         outcome,
@@ -78,9 +65,7 @@ export function createDemoPolicy(store: Store, bus: EventBus): PolicyEngine {
               : "Allowed by your demo trust policy.",
         holdUntil:
           outcome === "hold"
-            ? new Date(
-                Date.now() + config.outboxHoldMinutes * 60000,
-              ).toISOString()
+            ? new Date(Date.now() + config.outboxHoldMinutes * 60000).toISOString()
             : null,
         promotionOffer:
           request.category === "newsletters"
@@ -108,14 +93,9 @@ export function createDemoPolicy(store: Store, bus: EventBus): PolicyEngine {
         0,
         Math.min(1, old.score + (unchanged ? 0.025 : approved ? -0.03 : -0.08)),
       );
-      const stage =
-        score >= 0.9 ? "autonomous" : score >= 0.7 ? "trusted" : "learning";
+      const stage = score >= 0.9 ? "autonomous" : score >= 0.7 ? "trusted" : "learning";
       const level: TrustLevel =
-        stage === "autonomous"
-          ? "auto"
-          : stage === "trusted"
-            ? "auto_accept_edits"
-            : "supervised";
+        stage === "autonomous" ? "auto" : stage === "trusted" ? "auto_accept_edits" : "supervised";
       const state = await store.trust.upsert({
         ...old,
         score,
@@ -133,30 +113,19 @@ export function createDemoPolicy(store: Store, bus: EventBus): PolicyEngine {
     applyDecay: async (now = new Date().toISOString()) => {
       const config = await policy.getConfig(),
         day = now.slice(0, 10);
-      if ((await store.kv.get("demo.decay-day")) === day)
-        return policy.getTrust();
+      if ((await store.kv.get("demo.decay-day")) === day) return policy.getTrust();
       for (const state of await policy.getTrust())
         if (
           state.lastActivityAt &&
-          Date.parse(now) - Date.parse(state.lastActivityAt) >
-            config.decayAfterDays * 86400000
+          Date.parse(now) - Date.parse(state.lastActivityAt) > config.decayAfterDays * 86400000
         ) {
           const score = Math.max(0, state.score - 0.01);
           const updated = await store.trust.upsert({
             ...state,
             score,
-            stage:
-              score >= 0.9
-                ? "autonomous"
-                : score >= 0.7
-                  ? "trusted"
-                  : "learning",
+            stage: score >= 0.9 ? "autonomous" : score >= 0.7 ? "trusted" : "learning",
             level:
-              score >= 0.9
-                ? TRUST_LEVELS[2]!
-                : score >= 0.7
-                  ? TRUST_LEVELS[1]!
-                  : TRUST_LEVELS[0]!,
+              score >= 0.9 ? TRUST_LEVELS[2]! : score >= 0.7 ? TRUST_LEVELS[1]! : TRUST_LEVELS[0]!,
           });
           bus.emit({ type: "trust.changed", state: updated });
         }

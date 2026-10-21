@@ -1,9 +1,9 @@
-import { useEffect } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { Harness, stubApi } from "../test-utils";
 import { useUi } from "../ui-state";
-import { CommandPalette, filterCommands, type Command } from "./CommandPalette";
+import { type Command, CommandPalette, filterCommands } from "./CommandPalette";
 
 function OpenPalette() {
   const ui = useUi();
@@ -12,8 +12,17 @@ function OpenPalette() {
 }
 function renderPalette() {
   stubApi({
-    "/matters": [{ id: "m1", title: "Northstar launch", status: "active", nextStep: "Confirm Thursday" }],
-    "/people": [{ id: "p1", displayName: "Maya Chen", primaryEmail: "maya@example.com", emails: ["maya@example.com"] }],
+    "/matters": [
+      { id: "m1", title: "Northstar launch", status: "active", nextStep: "Confirm Thursday" },
+    ],
+    "/people": [
+      {
+        id: "p1",
+        displayName: "Maya Chen",
+        primaryEmail: "maya@example.com",
+        emails: ["maya@example.com"],
+      },
+    ],
   });
   return render(
     <Harness>
@@ -33,12 +42,18 @@ describe("command palette", () => {
       run: vi.fn(),
       ...extra,
     });
-    const list = [cmd("Settings: Trust & rules"), cmd("Permission mode: Auto", { keywords: "trust ladder" }), cmd("Queue")];
+    const list = [
+      cmd("Settings: Trust & rules"),
+      cmd("Permission mode: Auto", { keywords: "trust ladder" }),
+      cmd("Queue"),
+    ];
     expect(filterCommands(list, "trust").map((c) => c.label)).toEqual([
       "Settings: Trust & rules",
       "Permission mode: Auto",
     ]);
-    expect(filterCommands(list, "ladder auto").map((c) => c.label)).toEqual(["Permission mode: Auto"]);
+    expect(filterCommands(list, "ladder auto").map((c) => c.label)).toEqual([
+      "Permission mode: Auto",
+    ]);
     expect(filterCommands(list, "")).toHaveLength(3);
   });
 

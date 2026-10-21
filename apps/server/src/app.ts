@@ -1,19 +1,20 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { serveStatic } from "@hono/node-server/serve-static";
+import type { ActionQuery, EmailQuery, Matter, Person, PromotionOffer } from "@passport/types";
+import { TRUST_LEVELS } from "@passport/types";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { serveStatic } from "@hono/node-server/serve-static";
-import { TRUST_LEVELS } from "@passport/types";
-import type {
-  ActionQuery,
-  EmailQuery,
-  Matter,
-  Person,
-  PromotionOffer,
-} from "@passport/types";
-import type { Backend } from "./backend.js";
 import { addAccount } from "./accounts.js";
+import { getAuth, installAuth, type PassportAuth } from "./auth.js";
+import type { Backend } from "./backend.js";
 import { ApiError, required } from "./errors.js";
+import { installLlmRoutes } from "./llm-routes.js";
+import { publicLlm } from "./llm-selection.js";
+import { logger } from "./logger.js";
+import { registerOnboarding } from "./onboarding/routes.js";
+import { installJobRoutes } from "./schedulers/routes.js";
+import { registerSetup } from "./setup/routes.js";
 import {
   categories,
   editedRequest,
@@ -24,13 +25,6 @@ import {
   statuses,
   string,
 } from "./validation.js";
-import { logger } from "./logger.js";
-import { installJobRoutes } from "./schedulers/routes.js";
-import { getAuth, installAuth, type PassportAuth } from "./auth.js";
-import { registerOnboarding } from "./onboarding/routes.js";
-import { registerSetup } from "./setup/routes.js";
-import { installLlmRoutes } from "./llm-routes.js";
-import { publicLlm } from "./llm-selection.js";
 
 const csv = (value?: string) => value?.split(",").filter(Boolean);
 const limit = (value?: string) =>
@@ -46,9 +40,7 @@ function timestamp(value: string | undefined): string | undefined {
 function actionQuery(q: Record<string, string>): ActionQuery {
   return {
     status: csv(q.status)?.map((s) => member(s, statuses, "status")),
-    category: q.category
-      ? member(q.category, categories, "category")
-      : undefined,
+    category: q.category ? member(q.category, categories, "category") : undefined,
     actorKind: q.actorKind
       ? member(q.actorKind, ["human", "agent", "external-agent"], "actorKind")
       : undefined,
@@ -72,25 +64,18 @@ function emailQuery(q: Record<string, string>): EmailQuery {
     matterId: q.matterId === "null" ? null : q.matterId,
     personId: q.personId,
     text: q.text,
-    category: q.category
-      ? member(q.category, categories, "category")
-      : undefined,
+    category: q.category ? member(q.category, categories, "category") : undefined,
     after: timestamp(q.after),
     before: timestamp(q.before),
     limit: limit(q.limit),
     cursor: q.cursor,
-    sort: q.sort
-      ? member(q.sort, ["receivedAt_desc", "receivedAt_asc"], "sort")
-      : undefined,
+    sort: q.sort ? member(q.sort, ["receivedAt_desc", "receivedAt_asc"], "sort") : undefined,
     includeBodies: q.includeBodies === "true",
     includeDeleted: q.includeDeleted === "true",
     keywords: q.has || q.not ? { has: csv(q.has), not: csv(q.not) } : undefined,
   };
 }
-async function jsonBody(
-  request: Request,
-  optional = false,
-): Promise<Record<string, unknown>> {
+async function jsonBody(request: Request, optional = false): Promise<Record<string, unknown>> {
   const text = await request.text();
   if (!text.trim() && optional) return {};
   try {
@@ -107,15 +92,9 @@ export function createApp(
   const app = new Hono();
   app.onError((error, c) => {
     if (error instanceof ApiError)
-      return c.json(
-        { error: { code: error.code, message: error.message } },
-        error.status,
-      );
+      return c.json({ error: { code: error.code, message: error.message } }, error.status);
     if (error instanceof HTTPException)
-      return c.json(
-        { error: { code: "HTTP_ERROR", message: error.message } },
-        error.status,
-      );
+      return c.json({ error: { code: "HTTP_ERROR", message: error.message } }, error.status);
     const code =
       typeof (error as { code?: unknown }).code === "string"
         ? (error as unknown as { code: string }).code
@@ -126,8 +105,7 @@ export function createApp(
       {
         error: {
           code,
-          message:
-            "The operation failed. Check your provider connection and retry.",
+          message: "The operation failed. Check your provider connection and retry.",
         },
       },
       500,
@@ -152,17 +130,12 @@ export function createApp(
   );
   app.post("/api/actions/:id/approve", async (c) => {
     const body = await jsonBody(c.req.raw, true),
-      original = required(
-        await backend.store.actions.get(c.req.param("id")),
-        "Action",
-      );
+      original = required(await backend.store.actions.get(c.req.param("id")), "Action");
     const edited = body.request ?? body.editedRequest;
     return c.json(
       await backend.executor.approve(
         original.id,
-        edited === undefined
-          ? undefined
-          : editedRequest(edited, original.request),
+        edited === undefined ? undefined : editedRequest(edited, original.request),
       ),
     );
   });
@@ -195,10 +168,7 @@ export function createApp(
     ),
   );
   app.get("/api/threads/:id", async (c) => {
-    const thread = required(
-      await backend.store.threads.get(c.req.param("id")),
-      "Thread",
-    );
+    const thread = required(await backend.store.threads.get(c.req.param("id")), "Thread");
     return c.json({
       thread,
       emails: await backend.store.emails.query({
@@ -223,10 +193,7 @@ export function createApp(
     ),
   );
   app.get("/api/matters/:id", async (c) => {
-    const matter = required(
-      await backend.store.matters.get(c.req.param("id")),
-      "Matter",
-    );
+    const matter = required(await backend.store.matters.get(c.req.param("id")), "Matter");
     const [emails, events, actions, people] = await Promise.all([
       backend.store.emails.query({
         matterId: matter.id,
@@ -247,46 +214,23 @@ export function createApp(
     });
   });
   app.patch("/api/matters/:id", async (c) => {
-    const matter = required(
-        await backend.store.matters.get(c.req.param("id")),
-        "Matter",
-      ),
+    const matter = required(await backend.store.matters.get(c.req.param("id")), "Matter"),
       body = await jsonBody(c.req.raw),
       patch: Partial<Matter> = {};
     for (const key of Object.keys(body))
-      if (
-        ![
-          "title",
-          "summary",
-          "nextStep",
-          "status",
-          "dueAt",
-          "snoozedUntil",
-        ].includes(key)
-      )
-        throw new ApiError(
-          "INVALID_FIELD",
-          `Matter field ${key} is not editable here`,
-        );
+      if (!["title", "summary", "nextStep", "status", "dueAt", "snoozedUntil"].includes(key))
+        throw new ApiError("INVALID_FIELD", `Matter field ${key} is not editable here`);
     for (const key of ["title", "summary", "nextStep"] as const)
       if (body[key] !== undefined) patch[key] = string(body[key], key);
     if (body.status !== undefined)
-      patch.status = member(
-        body.status,
-        ["active", "waiting", "snoozed", "done"],
-        "matter status",
-      );
+      patch.status = member(body.status, ["active", "waiting", "snoozed", "done"], "matter status");
     for (const key of ["dueAt", "snoozedUntil"] as const)
       if (body[key] !== undefined)
-        patch[key] =
-          body[key] === null ? null : timestamp(string(body[key], key));
+        patch[key] = body[key] === null ? null : timestamp(string(body[key], key));
     const accountId =
-      (matter.emailIds[0]
-        ? await backend.store.emails.get(matter.emailIds[0])
-        : null
-      )?.accountId ?? (await backend.store.accounts.list())[0]?.id;
-    if (!accountId)
-      throw new ApiError("ACCOUNT_REQUIRED", "Add an account first");
+      (matter.emailIds[0] ? await backend.store.emails.get(matter.emailIds[0]) : null)?.accountId ??
+      (await backend.store.accounts.list())[0]?.id;
+    if (!accountId) throw new ApiError("ACCOUNT_REQUIRED", "Add an account first");
     return c.json(
       await backend.executor.submit({
         type: "matter_update",
@@ -315,10 +259,7 @@ export function createApp(
     ),
   );
   app.get("/api/people/:id", async (c) => {
-    const person = required(
-      await backend.store.people.get(c.req.param("id")),
-      "Person",
-    );
+    const person = required(await backend.store.people.get(c.req.param("id")), "Person");
     return c.json({
       person,
       emails: await backend.store.emails.query({
@@ -331,8 +272,7 @@ export function createApp(
   app.get("/api/events", async (c) => {
     const start = timestamp(c.req.query("start")),
       end = timestamp(c.req.query("end"));
-    if (!!start !== !!end)
-      throw new ApiError("INVALID_QUERY", "Supply both start and end");
+    if (!!start !== !!end) throw new ApiError("INVALID_QUERY", "Supply both start and end");
     return c.json(
       await backend.store.events.query({
         accountId: c.req.query("accountId"),
@@ -347,10 +287,7 @@ export function createApp(
       offers = new Map<string, PromotionOffer>();
     for (const a of actions.items)
       if (a.decision.promotionOffer)
-        offers.set(
-          a.decision.promotionOffer.category,
-          a.decision.promotionOffer,
-        );
+        offers.set(a.decision.promotionOffer.category, a.decision.promotionOffer);
     return c.json({
       config: await backend.policy.getConfig(),
       categories: await backend.policy.getTrust(),
@@ -358,9 +295,7 @@ export function createApp(
     });
   });
   app.put("/api/trust/config", async (c) =>
-    c.json(
-      await backend.policy.setConfig(policyPatch(await jsonBody(c.req.raw))),
-    ),
+    c.json(await backend.policy.setConfig(policyPatch(await jsonBody(c.req.raw)))),
   );
   app.put("/api/trust/:category/pin", async (c) => {
     const body = await jsonBody(c.req.raw);
@@ -377,16 +312,17 @@ export function createApp(
   app.put("/api/user-profile", async (c) => {
     const body = await jsonBody(c.req.raw),
       markdown = string(body.markdown, "markdown");
-    if (markdown.length > 100000)
-      throw new ApiError("INVALID_FIELD", "Profile is too large");
-    return c.json(await backend.executor.submit({
-      type: "profile_update",
-      accountId: (await backend.store.accounts.list())[0]?.id ?? "profile",
-      params: { markdown },
-      actor: { kind: "human", id: "user" },
-      category: "matters",
-      reason: "You updated your profile.",
-    }));
+    if (markdown.length > 100000) throw new ApiError("INVALID_FIELD", "Profile is too large");
+    return c.json(
+      await backend.executor.submit({
+        type: "profile_update",
+        accountId: (await backend.store.accounts.list())[0]?.id ?? "profile",
+        params: { markdown },
+        actor: { kind: "human", id: "user" },
+        category: "matters",
+        reason: "You updated your profile.",
+      }),
+    );
   });
   app.get("/api/accounts", async (c) => {
     return c.json({
@@ -422,8 +358,7 @@ export function createApp(
     const body = await jsonBody(c.req.raw, true);
     if (
       body.emailIds !== undefined &&
-      (!Array.isArray(body.emailIds) ||
-        body.emailIds.some((id) => typeof id !== "string"))
+      (!Array.isArray(body.emailIds) || body.emailIds.some((id) => typeof id !== "string"))
     )
       throw new ApiError("INVALID_FIELD", "emailIds must be strings");
     return c.json(
@@ -433,10 +368,7 @@ export function createApp(
           body.instruction === undefined
             ? "Review active matters and prepare next steps."
             : string(body.instruction, "instruction"),
-        matterId:
-          body.matterId === undefined
-            ? undefined
-            : string(body.matterId, "matterId"),
+        matterId: body.matterId === undefined ? undefined : string(body.matterId, "matterId"),
         emailIds: body.emailIds as string[] | undefined,
       }),
     );
@@ -451,26 +383,19 @@ export function createApp(
       throw new ApiError("INVALID_DATE", "Use YYYY-MM-DD");
     return c.json({
       date,
-      markdown: required(
-        await backend.store.kv.get(`digest:${date}`),
-        "Digest",
-      ),
+      markdown: required(await backend.store.kv.get(`digest:${date}`), "Digest"),
     });
   });
   app.all("/api/*", (c) =>
     c.json({ error: { code: "NOT_FOUND", message: "Unknown API route" } }, 404),
   );
-  const staticDir =
-    options.staticDir ??
-    fileURLToPath(new URL("../../web/dist/", import.meta.url));
+  const staticDir = options.staticDir ?? fileURLToPath(new URL("../../web/dist/", import.meta.url));
   if (existsSync(`${staticDir}/index.html`)) {
     app.use("*", serveStatic({ root: staticDir }));
     app.get("*", serveStatic({ path: `${staticDir}/index.html` }));
   } else
     app.get("/", (c) =>
-      c.text(
-        "Passport API is running. Build @passport/web or start its Vite dev server.",
-      ),
+      c.text("Passport API is running. Build @passport/web or start its Vite dev server."),
     );
   return app;
 }

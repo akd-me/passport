@@ -1,11 +1,11 @@
 import { Dialog } from "../components/Dialog";
 import { Icon } from "../components/ui";
-import { useUi, type SettingsSection } from "../ui-state";
-import { ModelSettings } from "./ModelSettings";
+import { type SettingsSection, useUi } from "../ui-state";
+import { RoutinesSettings } from "../views/Scheduler";
+import { TrustSettings } from "../views/Trust";
 import { AccountsSettings } from "./AccountsSettings";
 import { AdvancedSettings } from "./AdvancedSettings";
-import { TrustSettings } from "../views/Trust";
-import { RoutinesSettings } from "../views/Scheduler";
+import { ModelSettings } from "./ModelSettings";
 
 export const settingsSections: {
   id: SettingsSection;

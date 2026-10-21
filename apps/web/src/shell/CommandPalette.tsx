@@ -1,13 +1,13 @@
+import type { Matter, Person, TrustLevel } from "@passport/types";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import type { Matter, Person, TrustLevel } from "@passport/types";
 import { api } from "../api";
-import { useResource, useWorkspace } from "../state";
-import { useUi } from "../ui-state";
 import { Dialog } from "../components/Dialog";
 import { Icon, Kbd, mod } from "../components/ui";
-import { modes } from "../views/Trust";
 import { settingsSections } from "../settings/SettingsDialog";
+import { useResource, useWorkspace } from "../state";
+import { useUi } from "../ui-state";
+import { modes } from "../views/Trust";
 
 export interface Command {
   id: string;
@@ -26,7 +26,8 @@ export function filterCommands(commands: Command[], query: string): Command[] {
   if (!tokens.length) return commands;
   return commands
     .map((command) => {
-      const haystack = `${command.label} ${command.hint ?? ""} ${command.keywords ?? ""}`.toLowerCase();
+      const haystack =
+        `${command.label} ${command.hint ?? ""} ${command.keywords ?? ""}`.toLowerCase();
       if (!tokens.every((t) => haystack.includes(t))) return null;
       const at = command.label.toLowerCase().indexOf(tokens[0]!);
       return { command, score: at < 0 ? 1000 : at };
@@ -106,10 +107,31 @@ function useCommands(close: () => void): Command[] {
             .catch((e: Error) => notify(e.message));
         }),
       })),
-      { id: "queue", group: "Go to", label: "Queue", icon: "queue", keywords: "decisions home inbox", run: go("/") },
-      { id: "activity", group: "Go to", label: "Activity", icon: "activity", keywords: "log history undo outbox", run: go("/activity") },
+      {
+        id: "queue",
+        group: "Go to",
+        label: "Queue",
+        icon: "queue",
+        keywords: "decisions home inbox",
+        run: go("/"),
+      },
+      {
+        id: "activity",
+        group: "Go to",
+        label: "Activity",
+        icon: "activity",
+        keywords: "log history undo outbox",
+        run: go("/activity"),
+      },
       { id: "matters", group: "Go to", label: "All matters", icon: "matters", run: go("/matters") },
-      { id: "people", group: "Go to", label: "All people", icon: "people", keywords: "contacts", run: go("/people") },
+      {
+        id: "people",
+        group: "Go to",
+        label: "All people",
+        icon: "people",
+        keywords: "contacts",
+        run: go("/people"),
+      },
       ...settingsSections.map((s) => ({
         id: `settings-${s.id}`,
         group: "Settings" as const,
@@ -127,10 +149,38 @@ function useCommands(close: () => void): Command[] {
         keywords: "appearance dark light",
         run: act(() => ui.setTheme("system")),
       },
-      { id: "theme-light", group: "Settings", label: "Theme: light", icon: "light", keywords: "appearance", run: act(() => ui.setTheme("light")) },
-      { id: "theme-dark", group: "Settings", label: "Theme: dark", icon: "dark", keywords: "appearance", run: act(() => ui.setTheme("dark")) },
-      { id: "sidebar", group: "Settings", label: "Toggle sidebar", icon: "sidebar", shortcut: `${mod}B`, run: act(ui.toggleSidebar) },
-      { id: "details", group: "Settings", label: "Toggle details panel", icon: "panel", shortcut: `${mod}.`, run: act(ui.toggleDetails) },
+      {
+        id: "theme-light",
+        group: "Settings",
+        label: "Theme: light",
+        icon: "light",
+        keywords: "appearance",
+        run: act(() => ui.setTheme("light")),
+      },
+      {
+        id: "theme-dark",
+        group: "Settings",
+        label: "Theme: dark",
+        icon: "dark",
+        keywords: "appearance",
+        run: act(() => ui.setTheme("dark")),
+      },
+      {
+        id: "sidebar",
+        group: "Settings",
+        label: "Toggle sidebar",
+        icon: "sidebar",
+        shortcut: `${mod}B`,
+        run: act(ui.toggleSidebar),
+      },
+      {
+        id: "details",
+        group: "Settings",
+        label: "Toggle details panel",
+        icon: "panel",
+        shortcut: `${mod}.`,
+        run: act(ui.toggleDetails),
+      },
       ...(matters.data ?? []).map((m) => ({
         id: `matter-${m.id}`,
         group: "Matters" as const,
@@ -171,7 +221,9 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     return query
       ? filtered
       : groupOrder.flatMap((g) =>
-          filtered.filter((c) => c.group === g).slice(0, g === "People" || g === "Matters" ? 5 : 20),
+          filtered
+            .filter((c) => c.group === g)
+            .slice(0, g === "People" || g === "Matters" ? 5 : 20),
         );
   }, [commands, query]);
   const current = Math.min(active, Math.max(0, results.length - 1));
@@ -243,9 +295,16 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         {!results.length && <li className="palette-empty">No matches for “{query}”.</li>}
       </ul>
       <div className="palette-foot" aria-hidden="true">
-        <span><Kbd>↑</Kbd><Kbd>↓</Kbd> move</span>
-        <span><Kbd>↵</Kbd> open</span>
-        <span><Kbd>esc</Kbd> close</span>
+        <span>
+          <Kbd>↑</Kbd>
+          <Kbd>↓</Kbd> move
+        </span>
+        <span>
+          <Kbd>↵</Kbd> open
+        </span>
+        <span>
+          <Kbd>esc</Kbd> close
+        </span>
       </div>
     </Dialog>
   );

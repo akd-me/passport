@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
   Account,
   ActionRecord,
@@ -8,9 +7,10 @@ import type {
   Page,
   Person,
 } from "@passport/types";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./auth.test-client.js";
-import { createDemoBackend } from "./demo/index.js";
 import type { Backend } from "./backend.js";
+import { createDemoBackend } from "./demo/index.js";
 
 describe("HTTP API with DemoBackend", () => {
   let backend: Backend;
@@ -27,14 +27,10 @@ describe("HTTP API with DemoBackend", () => {
     body: JSON.stringify(value),
   });
   async function decisions() {
-    return (await (
-      await app.request("/api/decisions")
-    ).json()) as Page<ActionRecord>;
+    return (await (await app.request("/api/decisions")).json()) as Page<ActionRecord>;
   }
   it("seeds realistic linked records and exposes every read surface", async () => {
-    const emails = (await (
-      await app.request("/api/emails?limit=5")
-    ).json()) as Page<Email>;
+    const emails = (await (await app.request("/api/emails?limit=5")).json()) as Page<Email>;
     expect(emails.total).toBe(40);
     expect(emails.items).toHaveLength(5);
     expect(emails.nextCursor).toBe("5");
@@ -58,9 +54,7 @@ describe("HTTP API with DemoBackend", () => {
       const response = await app.request(route);
       expect(response.status, route).toBe(200);
     }
-    const matter = (await (
-      await app.request("/api/matters/matter-0")
-    ).json()) as {
+    const matter = (await (await app.request("/api/matters/matter-0")).json()) as {
       people: Person[];
       emails: Page<Email>;
       events: CalendarEvent[];
@@ -91,9 +85,9 @@ describe("HTTP API with DemoBackend", () => {
     expect(held.executedAt).toBeUndefined();
     expect(held.request.actor.kind).toBe("agent");
     expect(held.request.category).toBe(action.request.category);
-    expect(
-      (held.request.params as { draft: { textBody: string } }).draft.textBody,
-    ).toBe("Thanks Maya, Thursday works.");
+    expect((held.request.params as { draft: { textBody: string } }).draft.textBody).toBe(
+      "Thanks Maya, Thursday works.",
+    );
     const trust = await backend.policy.getTrustFor(action.request.category);
     expect(trust.edits).toBeGreaterThan(2);
     expect(
@@ -103,28 +97,22 @@ describe("HTTP API with DemoBackend", () => {
         })
       ).status,
     ).toBe(200);
-    expect((await backend.store.actions.get(action.id))?.status).toBe(
-      "rejected",
-    );
+    expect((await backend.store.actions.get(action.id))?.status).toBe("rejected");
     expect(
-      (await backend.executor.releaseDue("2099-01-01T00:00:00Z")).some(
-        (a) => a.id === action.id,
-      ),
+      (await backend.executor.releaseDue("2099-01-01T00:00:00Z")).some((a) => a.id === action.id),
     ).toBe(false);
   });
   it("rejects once, records feedback, and returns conflicts for stale decisions", async () => {
-    const action = (await decisions()).items.find(
-      (a) => a.status === "proposed",
-    )!;
+    const action = (await decisions()).items.find((a) => a.status === "proposed")!;
     const before = await backend.policy.getTrustFor(action.request.category);
     const response = await app.request(`/api/actions/${action.id}/reject`, {
       method: "POST",
       ...body({ reason: "Needs a different tone" }),
     });
     expect(((await response.json()) as ActionRecord).status).toBe("rejected");
-    expect(
-      (await backend.policy.getTrustFor(action.request.category)).rejections,
-    ).toBe(before.rejections + 1);
+    expect((await backend.policy.getTrustFor(action.request.category)).rejections).toBe(
+      before.rejections + 1,
+    );
     expect(
       (
         await app.request(`/api/actions/${action.id}/approve`, {
@@ -132,30 +120,23 @@ describe("HTTP API with DemoBackend", () => {
         })
       ).status,
     ).toBe(409);
-    expect(
-      (await app.request("/api/actions/missing/approve", { method: "POST" }))
-        .status,
-    ).toBe(404);
+    expect((await app.request("/api/actions/missing/approve", { method: "POST" })).status).toBe(
+      404,
+    );
   });
   it("undo restores exact mail state and logs the inverse", async () => {
-    const archived = (
-      await backend.store.actions.query({ status: ["executed"] })
-    ).items.find((a) => a.request.type === "archive")!;
-    expect((await backend.store.emails.get("email-5"))?.mailboxIds).toEqual([
-      "mailbox-archive",
-    ]);
+    const archived = (await backend.store.actions.query({ status: ["executed"] })).items.find(
+      (a) => a.request.type === "archive",
+    )!;
+    expect((await backend.store.emails.get("email-5"))?.mailboxIds).toEqual(["mailbox-archive"]);
     const response = await app.request(`/api/actions/${archived.id}/undo`, {
       method: "POST",
     });
     expect(response.status).toBe(200);
     expect(((await response.json()) as ActionRecord).status).toBe("undone");
-    expect((await backend.store.emails.get("email-5"))?.mailboxIds).toEqual([
-      "mailbox-inbox",
-    ]);
+    expect((await backend.store.emails.get("email-5"))?.mailboxIds).toEqual(["mailbox-inbox"]);
     const history = await backend.store.actions.query({ status: ["executed"] });
-    expect(history.items.some((a) => a.result?.undoes === archived.id)).toBe(
-      true,
-    );
+    expect(history.items.some((a) => a.result?.undoes === archived.id)).toBe(true);
     expect(
       (
         await app.request(`/api/actions/${archived.id}/undo`, {
@@ -166,29 +147,22 @@ describe("HTTP API with DemoBackend", () => {
   });
   it("only releases due sends once and marks released sends irreversible", async () => {
     const held = (await decisions()).items.find((a) => a.status === "held")!;
-    expect(await backend.executor.releaseDue("2000-01-01T00:00:00Z")).toEqual(
-      [],
-    );
+    expect(await backend.executor.releaseDue("2000-01-01T00:00:00Z")).toEqual([]);
     const released = await backend.executor.releaseDue("2099-01-01T00:00:00Z");
     expect(released).toHaveLength(1);
     expect(released[0]?.id).toBe(held.id);
     expect(released[0]?.inverse).toBeNull();
     expect(released[0]?.decision.reversibility).toBe("irreversible");
-    expect(await backend.executor.releaseDue("2099-01-01T00:00:00Z")).toEqual(
-      [],
+    expect(await backend.executor.releaseDue("2099-01-01T00:00:00Z")).toEqual([]);
+    expect((await app.request(`/api/actions/${held.id}/undo`, { method: "POST" })).status).toBe(
+      409,
     );
-    expect(
-      (await app.request(`/api/actions/${held.id}/undo`, { method: "POST" }))
-        .status,
-    ).toBe(409);
-    const detail = (await (
-      await app.request("/api/matters/matter-1")
-    ).json()) as { emails: Page<Email> };
-    expect(
-      detail.emails.items.some((e: Email) =>
-        e.mailboxIds.includes("mailbox-sent"),
-      ),
-    ).toBe(true);
+    const detail = (await (await app.request("/api/matters/matter-1")).json()) as {
+      emails: Page<Email>;
+    };
+    expect(detail.emails.items.some((e: Email) => e.mailboxIds.includes("mailbox-sent"))).toBe(
+      true,
+    );
   });
   it("persists trust mode, safety settings and category pins; rejects invalid input", async () => {
     const response = await app.request("/api/trust/config", {
@@ -214,9 +188,7 @@ describe("HTTP API with DemoBackend", () => {
         })
       ).status,
     ).toBe(200);
-    expect((await backend.policy.getTrustFor("newsletters")).pinnedLevel).toBe(
-      "full_access",
-    );
+    expect((await backend.policy.getTrustFor("newsletters")).pinnedLevel).toBe("full_access");
     expect(
       (
         await app.request("/api/trust/newsletters/pin", {
@@ -290,9 +262,7 @@ describe("HTTP API with DemoBackend", () => {
         })
       ).status,
     ).toBe(200);
-    expect(
-      (await backend.store.accounts.get(account.id))?.lastSyncAt,
-    ).toBeTruthy();
+    expect((await backend.store.accounts.get(account.id))?.lastSyncAt).toBeTruthy();
     expect(
       (
         await app.request("/api/accounts", {
@@ -330,9 +300,7 @@ describe("HTTP API with DemoBackend", () => {
         })
       ).status,
     ).toBe(400);
-    const pending = (await decisions()).items.find(
-      (a) => a.request.matterId === "matter-0",
-    )!;
+    const pending = (await decisions()).items.find((a) => a.request.matterId === "matter-0")!;
     await backend.executor.reject(pending.id);
     const run = (await (
       await app.request("/api/agent/run", { method: "POST", ...body({}) })
@@ -347,9 +315,7 @@ describe("HTTP API with DemoBackend", () => {
     ).json()) as Page<Email>;
     expect(emails.items.length).toBeGreaterThan(0);
     expect(
-      emails.items.every(
-        (e) => e.matterId === "matter-0" && e.textBody && e.keywords.$seen,
-      ),
+      emails.items.every((e) => e.matterId === "matter-0" && e.textBody && e.keywords.$seen),
     ).toBe(true);
     for (const path of [
       "/api/emails?limit=-1",
@@ -359,10 +325,7 @@ describe("HTTP API with DemoBackend", () => {
       "/api/digest/2026-99-99",
     ])
       expect((await app.request(path)).status, path).toBe(400);
-    expect(
-      (await app.request("/api/trust/config", { method: "PUT", body: "{" }))
-        .status,
-    ).toBe(400);
+    expect((await app.request("/api/trust/config", { method: "PUT", body: "{" })).status).toBe(400);
     expect(
       (
         await app.request("/api/user-profile", {

@@ -10,17 +10,26 @@ const shimPath = realpathSync(fileURLToPath(import.meta.url));
 async function run() {
   const [major, minor] = process.versions.node.split(".").map(Number);
   if (major < 22 || (major === 22 && minor < 5)) {
-    const error = new Error("Passport requires Node >=22.16 with SQLite FTS5 (Node 24 recommended).");
+    const error = new Error(
+      "Passport requires Node >=22.16 with SQLite FTS5 (Node 24 recommended).",
+    );
     error.code = "PASSPORT_RUNTIME_REQUIRED";
     throw error;
   }
   // Early Node 22 releases gate node:sqlite behind this flag. Re-exec before
   // importing the bundle, whose static imports include SQLite.
   if (major === 22 && minor < 13 && !process.execArgv.includes("--experimental-sqlite")) {
-    const child = spawn(process.execPath, ["--experimental-sqlite", shimPath, ...args], { stdio: "inherit" });
+    const child = spawn(process.execPath, ["--experimental-sqlite", shimPath, ...args], {
+      stdio: "inherit",
+    });
     for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
-    child.on("error", () => { console.error("Could not start Passport with built-in SQLite."); process.exitCode = 1; });
-    child.on("exit", (code, signal) => { process.exitCode = code ?? (signal === "SIGINT" ? 130 : 1); });
+    child.on("error", () => {
+      console.error("Could not start Passport with built-in SQLite.");
+      process.exitCode = 1;
+    });
+    child.on("exit", (code, signal) => {
+      process.exitCode = code ?? (signal === "SIGINT" ? 130 : 1);
+    });
     return;
   }
   const command = args[0] ?? "serve";
@@ -31,7 +40,9 @@ async function run() {
     try {
       probe.exec("CREATE VIRTUAL TABLE passport_runtime_probe USING fts5(content)");
     } catch {
-      const error = new Error("This Node build lacks SQLite FTS5, required for persistent workspaces. Upgrade to Node 24 (or Node >=22.16 with FTS5). Demo mode still works on Node >=22.5.");
+      const error = new Error(
+        "This Node build lacks SQLite FTS5, required for persistent workspaces. Upgrade to Node 24 (or Node >=22.16 with FTS5). Demo mode still works on Node >=22.5.",
+      );
       error.code = "PASSPORT_RUNTIME_REQUIRED";
       throw error;
     } finally {
@@ -53,6 +64,18 @@ async function run() {
 }
 
 run().catch((error) => {
-  console.error(["INVALID_COMMAND", "PASSPORT_RUNTIME_REQUIRED", "API_UNAUTHORIZED", "SERVER_UNAVAILABLE", "WRONG_SERVER", "OWNER_RUNNING", "OWNER_BUSY"].includes(error?.code) || args[1] === "install" ? error.message : "Passport failed. Check your Node version, configuration and provider credentials.");
+  console.error(
+    [
+      "INVALID_COMMAND",
+      "PASSPORT_RUNTIME_REQUIRED",
+      "API_UNAUTHORIZED",
+      "SERVER_UNAVAILABLE",
+      "WRONG_SERVER",
+      "OWNER_RUNNING",
+      "OWNER_BUSY",
+    ].includes(error?.code) || args[1] === "install"
+      ? error.message
+      : "Passport failed. Check your Node version, configuration and provider credentials.",
+  );
   process.exitCode = 1;
 });

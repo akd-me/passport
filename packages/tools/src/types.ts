@@ -1,4 +1,13 @@
-import type { ActionCategory, ActionExecutor, Actor, Email, EventBus, Person, PolicyEngine, Store } from "@passport/types";
+import type {
+  ActionCategory,
+  ActionExecutor,
+  Actor,
+  Email,
+  EventBus,
+  Person,
+  PolicyEngine,
+  Store,
+} from "@passport/types";
 import type { JsonSchema } from "./schema.js";
 
 export interface ToolResult {

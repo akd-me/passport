@@ -18,7 +18,10 @@ export function setupSteps(provider: SetupProvider, calendar: boolean): SetupSte
         { id: "prepare", title: "Start the browser and agent" },
         { id: "sign_in", title: "Sign in to Google Cloud" },
         { id: "project", title: "Create or choose a project" },
-        { id: "apis", title: calendar ? "Enable the Gmail and Google Calendar APIs" : "Enable the Gmail API" },
+        {
+          id: "apis",
+          title: calendar ? "Enable the Gmail and Google Calendar APIs" : "Enable the Gmail API",
+        },
         { id: "consent", title: "Set up the consent screen and test user" },
         { id: "client", title: "Create a desktop OAuth client" },
         { id: "authorize", title: "Approve Passport's access and connect" },
@@ -28,7 +31,12 @@ export function setupSteps(provider: SetupProvider, calendar: boolean): SetupSte
         { id: "sign_in", title: "Sign in to Microsoft Entra" },
         { id: "register", title: "Register the Passport app" },
         { id: "redirect", title: "Add the desktop redirect URI" },
-        { id: "permissions", title: calendar ? "Add Microsoft Graph mail and calendar permissions" : "Add Microsoft Graph mail permissions" },
+        {
+          id: "permissions",
+          title: calendar
+            ? "Add Microsoft Graph mail and calendar permissions"
+            : "Add Microsoft Graph mail permissions",
+        },
         { id: "authorize", title: "Approve Passport's access and connect" },
       ];
 }
@@ -82,8 +90,12 @@ Provider: Gmail (Google). Steps for report_progress: sign_in, project, apis, con
    https://console.cloud.google.com/projectcreate ), or select an existing project clearly named Passport.
    Wait until it exists and is selected. Remember its project id for URLs (?project=<id>).
 3. apis: enable the Gmail API${calendar ? " and the Google Calendar API" : ""}. Landmarks:
-   https://console.cloud.google.com/apis/library/gmail.googleapis.com${calendar ? `
-   and https://console.cloud.google.com/apis/library/calendar-json.googleapis.com` : ""} → "Enable"
+   https://console.cloud.google.com/apis/library/gmail.googleapis.com${
+     calendar
+       ? `
+   and https://console.cloud.google.com/apis/library/calendar-json.googleapis.com`
+       : ""
+   } → "Enable"
    ("Manage" or "API enabled" means it already is).
 4. consent: Google Auth Platform (https://console.cloud.google.com/auth/overview ; older consoles call it
    "OAuth consent screen"). If it says not configured, "Get started": app name "Passport", user support
@@ -109,7 +121,9 @@ Passport's redirect URI for this computer is ${redirectUri} (a Desktop app clien
 }
 
 function microsoft(redirectUri: string, calendar: boolean): string {
-  const permissions = scopesFor("graph", calendar).filter(scope => !["openid", "email"].includes(scope));
+  const permissions = scopesFor("graph", calendar).filter(
+    (scope) => !["openid", "email"].includes(scope),
+  );
   return `${SHARED}
 
 Provider: Microsoft (Outlook, Microsoft 365). Steps for report_progress: sign_in, register, redirect,
@@ -139,9 +153,16 @@ permissions, authorize.
 6. When connected, call finish({ summary, success: true }) naming the app and connected address.`;
 }
 
-export function setupPrompt(input: { provider: SetupProvider; calendar: boolean; redirectUri: string }): { systemPrompt: string; prompt: string } {
+export function setupPrompt(input: {
+  provider: SetupProvider;
+  calendar: boolean;
+  redirectUri: string;
+}): { systemPrompt: string; prompt: string } {
   return {
-    systemPrompt: input.provider === "gmail" ? gmail(input.redirectUri, input.calendar) : microsoft(input.redirectUri, input.calendar),
+    systemPrompt:
+      input.provider === "gmail"
+        ? gmail(input.redirectUri, input.calendar)
+        : microsoft(input.redirectUri, input.calendar),
     prompt: `Set up Passport for ${input.provider === "gmail" ? "Gmail" : "Microsoft Outlook"}${input.calendar ? " with calendar access" : " (mail only)"} now. Start by opening the console in the browser.`,
   };
 }

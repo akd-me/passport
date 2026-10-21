@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { InMemoryEventBus, openStore } from "@passport/store";
 import { MockMailProvider, mockCapabilities } from "@passport/providers";
+import { InMemoryEventBus, openStore } from "@passport/store";
 import type { Account, DomainEvent, Store, SyncDelta } from "@passport/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountSyncService } from "./sync.js";
 
 describe("account sync lifecycle", () => {
@@ -54,14 +54,12 @@ describe("account sync lifecycle", () => {
   it.each([429, 503])(
     "retries HTTP %s with exponential backoff and stops after five retries",
     async (status) => {
-      const sync = vi
-        .spyOn(mail, "sync")
-        .mockImplementation(async function* () {
-          throw Object.assign(new Error("remote secret"), {
-            code: status === 429 ? "RATE_LIMITED" : "HTTP_503",
-            status,
-          });
+      const sync = vi.spyOn(mail, "sync").mockImplementation(async function* () {
+        throw Object.assign(new Error("remote secret"), {
+          code: status === 429 ? "RATE_LIMITED" : "HTTP_503",
+          status,
         });
+      });
       const job = service.syncAccount(account.id),
         failed = expect(job).rejects.toMatchObject({ status });
       await vi.advanceTimersByTimeAsync(0);
@@ -74,35 +72,26 @@ describe("account sync lifecycle", () => {
         expect(sync).toHaveBeenCalledTimes(before + 1);
       }
       await failed;
-      expect(
-        events.filter((e) => e.type === "account.sync.retry"),
-      ).toHaveLength(5);
+      expect(events.filter((e) => e.type === "account.sync.retry")).toHaveLength(5);
       expect(events).toContainEqual({
         type: "account.sync.failed",
         accountId: account.id,
         error: status === 429 ? "RATE_LIMITED" : "HTTP_503",
       });
-      expect(
-        (await store.accounts.get(account.id))?.lastSyncError,
-      ).not.toContain("secret");
+      expect((await store.accounts.get(account.id))?.lastSyncError).not.toContain("secret");
     },
   );
   it("recovers from a transient failure and commits the successful cursor", async () => {
     let calls = 0;
-    vi.spyOn(mail, "sync").mockImplementation(
-      async function* (): AsyncIterable<SyncDelta> {
-        if (calls++ === 0)
-          throw Object.assign(new Error(), { status: 503, code: "HTTP_503" });
-        yield { kind: "cursor", cursor: "finished" };
-      },
-    );
+    vi.spyOn(mail, "sync").mockImplementation(async function* (): AsyncIterable<SyncDelta> {
+      if (calls++ === 0) throw Object.assign(new Error(), { status: 503, code: "HTTP_503" });
+      yield { kind: "cursor", cursor: "finished" };
+    });
     const job = service.syncAccount(account.id);
     expect(service.syncAccount(account.id)).toBe(job);
     await vi.advanceTimersByTimeAsync(1000);
     await job;
-    expect((await store.syncState.get(account.id))?.cursor).toContain(
-      "finished",
-    );
+    expect((await store.syncState.get(account.id))?.cursor).toContain("finished");
     expect((await store.accounts.get(account.id))?.lastSyncError).toBeNull();
   });
   it("pauses revoked grants without a scheduled crash loop", async () => {
@@ -166,9 +155,7 @@ describe("account sync lifecycle", () => {
     // A null-cursor backfill is additive even if a previous message is omitted.
     await service.backfill(account.id, 90);
     const old = (await store.emails.getByProviderId(account.id, "old"))!;
-    expect(
-      (await store.emails.get(recent.id))!.keywords.$deleted,
-    ).toBeUndefined();
+    expect((await store.emails.get(recent.id))!.keywords.$deleted).toBeUndefined();
     expect(await store.emails.get(recent.id)).toMatchObject({
       category: "receipts",
       personIds: ["person"],
@@ -210,9 +197,7 @@ describe("account sync lifecycle", () => {
       throw Object.assign(new Error(), { status: 429, code: "RATE_LIMITED" });
     });
     await expect(jittered.syncAccount(account.id)).rejects.toThrow();
-    expect(sleep.mock.calls.map((c) => c[0])).toEqual([
-      1400, 2800, 5600, 11200, 22400,
-    ]);
+    expect(sleep.mock.calls.map((c) => c[0])).toEqual([1400, 2800, 5600, 11200, 22400]);
   });
   it("restores the previous incremental cursor when a backfill fails", async () => {
     vi.spyOn(mail, "sync").mockImplementation(async function* () {

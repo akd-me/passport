@@ -1,6 +1,14 @@
 /** Deliberately small JSON Schema subset, validated locally on every structured response. */
 export interface JsonSchema {
-  type?: "object" | "array" | "string" | "number" | "integer" | "boolean" | "null" | Array<"object" | "array" | "string" | "number" | "integer" | "boolean" | "null">;
+  type?:
+    | "object"
+    | "array"
+    | "string"
+    | "number"
+    | "integer"
+    | "boolean"
+    | "null"
+    | Array<"object" | "array" | "string" | "number" | "integer" | "boolean" | "null">;
   description?: string;
   properties?: Record<string, JsonSchema>;
   required?: string[];

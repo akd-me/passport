@@ -1,4 +1,3 @@
-import { BASE_REVERSIBILITY } from "@passport/types";
 import type {
   ActionExecutor,
   ActionParams,
@@ -11,10 +10,11 @@ import type {
   PolicyEngine,
   Store,
 } from "@passport/types";
+import { BASE_REVERSIBILITY } from "@passport/types";
 import { ApiError, NotImplementedError, required } from "../errors.js";
+
 const now = () => new Date().toISOString();
-const params = <T extends ActionType>(r: ActionRequest, _type: T) =>
-  r.params as ActionParams[T];
+const params = <T extends ActionType>(r: ActionRequest, _type: T) => r.params as ActionParams[T];
 
 /** In-memory action gate. Unsupported mutations fail visibly; nothing is sent to a network. */
 export function createDemoExecutor(
@@ -26,11 +26,7 @@ export function createDemoExecutor(
     busy = new Set<string>();
   async function lock<T>(id: string, task: () => Promise<T>): Promise<T> {
     if (busy.has(id))
-      throw new ApiError(
-        "ACTION_BUSY",
-        "This action is already being processed",
-        409,
-      );
+      throw new ApiError("ACTION_BUSY", "This action is already being processed", 409);
     busy.add(id);
     try {
       return await task();
@@ -38,25 +34,15 @@ export function createDemoExecutor(
       busy.delete(id);
     }
   }
-  async function get(
-    id: string,
-    status: ActionRecord["status"],
-  ): Promise<ActionRecord> {
+  async function get(id: string, status: ActionRecord["status"]): Promise<ActionRecord> {
     const record = required(await store.actions.get(id), "Action");
     if (record.status !== status)
-      throw new ApiError(
-        "INVALID_ACTION_STATE",
-        `Expected ${status}, found ${record.status}`,
-        409,
-      );
+      throw new ApiError("INVALID_ACTION_STATE", `Expected ${status}, found ${record.status}`, 409);
     return record;
   }
   async function apply(record: ActionRecord): Promise<ActionRequest | null> {
     const r = record.request;
-    const inverse = (
-      type: ActionType,
-      value: ActionRequest["params"],
-    ): ActionRequest => ({
+    const inverse = (type: ActionType, value: ActionRequest["params"]): ActionRequest => ({
       ...r,
       type,
       params: value,
@@ -120,10 +106,7 @@ export function createDemoExecutor(
       };
       const previous = await Promise.all(
         p.emailIds.map(async (id) =>
-          required(
-            await store.emails.get(id, { includeBodies: true }),
-            "Email",
-          ),
+          required(await store.emails.get(id, { includeBodies: true }), "Email"),
         ),
       );
       for (const email of previous) {
@@ -142,35 +125,20 @@ export function createDemoExecutor(
             p.toMailboxId ?? "mailbox-inbox",
           ];
         if (r.type === "move" || r.type === "delete")
-          patch.mailboxIds = [
-            r.type === "delete" ? "mailbox-trash" : p.toMailboxId!,
-          ];
+          patch.mailboxIds = [r.type === "delete" ? "mailbox-trash" : p.toMailboxId!];
         const keyword = r.type.includes("read")
           ? "$seen"
           : r.type.includes("flag")
             ? "$flagged"
             : `label:${p.label}`;
-        if (
-          [
-            "mark_read",
-            "mark_unread",
-            "flag",
-            "unflag",
-            "label",
-            "unlabel",
-          ].includes(r.type)
-        )
-          patch.keywords[keyword] = ["mark_read", "flag", "label"].includes(
-            r.type,
-          );
+        if (["mark_read", "mark_unread", "flag", "unflag", "label", "unlabel"].includes(r.type))
+          patch.keywords[keyword] = ["mark_read", "flag", "label"].includes(r.type);
         await store.emails.patchMany([email.id], patch);
         bus.emit({ type: "email.updated", emailId: email.id });
       }
       restorers.set(record.id, async () => {
         await store.emails.upsertMany(previous);
-        previous.forEach((e) =>
-          bus.emit({ type: "email.updated", emailId: e.id }),
-        );
+        previous.forEach((e) => bus.emit({ type: "email.updated", emailId: e.id }));
       });
       const pairs: Partial<Record<ActionType, ActionType>> = {
         archive: "unarchive",
@@ -194,25 +162,20 @@ export function createDemoExecutor(
       const draft: DraftInput | undefined =
         p.draft ??
         (p.draftEmailId
-          ? await store.emails
-              .get(p.draftEmailId, { includeBodies: true })
-              .then((e) =>
-                e
-                  ? {
-                      accountId: e.accountId,
-                      to: e.to,
-                      cc: e.cc,
-                      subject: e.subject,
-                      textBody: e.textBody ?? "",
-                    }
-                  : undefined,
-              )
+          ? await store.emails.get(p.draftEmailId, { includeBodies: true }).then((e) =>
+              e
+                ? {
+                    accountId: e.accountId,
+                    to: e.to,
+                    cc: e.cc,
+                    subject: e.subject,
+                    textBody: e.textBody ?? "",
+                  }
+                : undefined,
+            )
           : undefined);
       if (!draft) throw new ApiError("INVALID_DRAFT", "A draft is required");
-      const account = required(
-          await store.accounts.get(r.accountId),
-          "Account",
-        ),
+      const account = required(await store.accounts.get(r.accountId), "Account"),
         id = crypto.randomUUID();
       const email: Email = {
         id,
@@ -292,9 +255,7 @@ export function createDemoExecutor(
       await store.actions.update(record.id, {
         result: { emailId: id, demo: true },
       });
-      return r.type === "send"
-        ? null
-        : inverse("draft_delete", { draftEmailId: id });
+      return r.type === "send" ? null : inverse("draft_delete", { draftEmailId: id });
     }
     throw new NotImplementedError(
       `Demo execution does not implement ${r.type}. Use the real executor after integration.`,
@@ -319,8 +280,7 @@ export function createDemoExecutor(
     } catch (error) {
       const action = await store.actions.update(record.id, {
         status: "failed",
-        error:
-          error instanceof ApiError ? error.message : "Demo execution failed",
+        error: error instanceof ApiError ? error.message : "Demo execution failed",
       });
       bus.emit({ type: "action.failed", action });
       throw error;
@@ -328,13 +288,8 @@ export function createDemoExecutor(
   }
   async function approved(record: ActionRecord): Promise<ActionRecord> {
     const config = await policy.getConfig();
-    if (
-      BASE_REVERSIBILITY[record.request.type] === "delayed" &&
-      config.outboxHoldMinutes > 0
-    ) {
-      const holdUntil = new Date(
-        Date.now() + config.outboxHoldMinutes * 60000,
-      ).toISOString();
+    if (BASE_REVERSIBILITY[record.request.type] === "delayed" && config.outboxHoldMinutes > 0) {
+      const holdUntil = new Date(Date.now() + config.outboxHoldMinutes * 60000).toISOString();
       const action = await store.actions.update(record.id, {
         status: "held",
         holdUntil,
@@ -371,29 +326,21 @@ export function createDemoExecutor(
         const record = await get(id, "proposed");
         if (
           edited &&
-          (edited.type !== record.request.type ||
-            edited.accountId !== record.request.accountId)
+          (edited.type !== record.request.type || edited.accountId !== record.request.accountId)
         )
           throw new ApiError(
             "INVALID_EDIT",
             "Edited approvals must preserve action type and account",
           );
         const changed =
-          edited &&
-          JSON.stringify(edited.params) !==
-            JSON.stringify(record.request.params);
+          edited && JSON.stringify(edited.params) !== JSON.stringify(record.request.params);
         const action = await store.actions.update(id, {
-          request: edited
-            ? { ...record.request, params: edited.params }
-            : record.request,
+          request: edited ? { ...record.request, params: edited.params } : record.request,
           status: "approved",
           decidedAt: now(),
           editDistance: changed ? 0.25 : 0,
         });
-        await policy.recordOutcome(
-          id,
-          changed ? "approved_edited" : "approved_unchanged",
-        );
+        await policy.recordOutcome(id, changed ? "approved_edited" : "approved_unchanged");
         bus.emit({ type: "action.decided", action });
         return approved(action);
       }),
@@ -425,11 +372,7 @@ export function createDemoExecutor(
       lock(id, async () => {
         const record = await get(id, "executed");
         if (!record.inverse || !restorers.has(id))
-          throw new ApiError(
-            "NOT_UNDOABLE",
-            "This action cannot be undone",
-            409,
-          );
+          throw new ApiError("NOT_UNDOABLE", "This action cannot be undone", 409);
         const inverseRecord = await store.actions.insert({
           id: crypto.randomUUID(),
           request: record.inverse,

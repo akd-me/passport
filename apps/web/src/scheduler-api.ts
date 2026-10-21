@@ -40,8 +40,6 @@ export const jobsApi = {
     request<Job>("/jobs", { method: "POST", body: JSON.stringify(routine) }),
   run: (id: string) => request<JobRun>(`${path(id)}/run`, { method: "POST" }),
   pause: (id: string) => request<Job>(`${path(id)}/pause`, { method: "POST" }),
-  resume: (id: string) =>
-    request<Job>(`${path(id)}/resume`, { method: "POST" }),
-  remove: (id: string) =>
-    request<{ ok: boolean }>(path(id), { method: "DELETE" }),
+  resume: (id: string) => request<Job>(`${path(id)}/resume`, { method: "POST" }),
+  remove: (id: string) => request<{ ok: boolean }>(path(id), { method: "DELETE" }),
 };

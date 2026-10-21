@@ -1,11 +1,6 @@
-import type {
-  CalendarProvider,
-  EventBus,
-  MailProvider,
-  Store,
-} from "@passport/types";
-import { SyncService } from "../sync/index.js";
+import type { CalendarProvider, EventBus, MailProvider, Store } from "@passport/types";
 import { ApiError, required } from "../errors.js";
+import { SyncService } from "../sync/index.js";
 import { initialDays } from "./config.js";
 
 /** Retries ingestion only. Provider mutations and submissions are never replayed. */
@@ -22,8 +17,7 @@ export class AccountSyncService extends SyncService {
     private calendarProvider: (id: string) => Promise<CalendarProvider>,
     config: { sync?: { initialDays?: number } },
     private timing = {
-      sleep: (ms: number) =>
-        new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
       random: () => Math.random(),
     },
   ) {
@@ -39,15 +33,9 @@ export class AccountSyncService extends SyncService {
           get(target, property) {
             if (property === "sync")
               return async function* (cursor: string | null) {
-                const account = required(
-                  await accountStore.accounts.get(id),
-                  "Account",
-                );
-                const window =
-                  windows.get(id) ?? Number(account.settings.syncDays ?? days);
-                const since = new Date(
-                  Date.now() - window * 86400000,
-                ).toISOString();
+                const account = required(await accountStore.accounts.get(id), "Account");
+                const window = windows.get(id) ?? Number(account.settings.syncDays ?? days);
+                const since = new Date(Date.now() - window * 86400000).toISOString();
                 snapshots.set(id, since);
                 yield* target.sync(cursor, { since });
               };
@@ -77,10 +65,7 @@ export class AccountSyncService extends SyncService {
     return job;
   }
   private async runAccount(id: string): Promise<void> {
-    const account = required(
-      await this.accountStore.accounts.get(id),
-      "Account",
-    );
+    const account = required(await this.accountStore.accounts.get(id), "Account");
     // Revoked tokens need human consent, not another scheduled attempt.
     if (account.settings.reauthorizationRequired === true) return;
     this.events.emit({ type: "account.sync.started", accountId: id });
@@ -94,9 +79,7 @@ export class AccountSyncService extends SyncService {
           [429, 503].includes(failure.status ?? 0) ||
           ["RATE_LIMITED", "HTTP_429", "HTTP_503"].includes(failure.code ?? "");
         if (transient && retry < 5) {
-          const delayMs = Math.round(
-            1000 * 2 ** retry * (0.5 + this.timing.random()),
-          );
+          const delayMs = Math.round(1000 * 2 ** retry * (0.5 + this.timing.random()));
           this.events.emit({
             type: "account.sync.retry",
             accountId: id,
@@ -106,15 +89,10 @@ export class AccountSyncService extends SyncService {
           await this.timing.sleep(delayMs);
           continue;
         }
-        const fresh = required(
-          await this.accountStore.accounts.get(id),
-          "Account",
+        const fresh = required(await this.accountStore.accounts.get(id), "Account");
+        const reauthorize = ["AUTH_FAILED", "OAUTH_REFRESH_FAILED", "TOKEN_EXPIRED"].includes(
+          failure.code ?? "",
         );
-        const reauthorize = [
-          "AUTH_FAILED",
-          "OAUTH_REFRESH_FAILED",
-          "TOKEN_EXPIRED",
-        ].includes(failure.code ?? "");
         await this.accountStore.accounts.upsert({
           ...fresh,
           settings: {
@@ -128,9 +106,7 @@ export class AccountSyncService extends SyncService {
         this.events.emit({
           type: "account.sync.failed",
           accountId: id,
-          error: reauthorize
-            ? "REAUTHORIZE_REQUIRED"
-            : (fresh.lastSyncError ?? "SYNC_FAILED"),
+          error: reauthorize ? "REAUTHORIZE_REQUIRED" : (fresh.lastSyncError ?? "SYNC_FAILED"),
         });
         throw error;
       }
@@ -141,27 +117,13 @@ export class AccountSyncService extends SyncService {
     if (!Number.isInteger(days) || days < 1 || days > 36500)
       throw new ApiError("INVALID_QUERY", "days must be 1–36500");
     if (this.jobs.has(id))
-      throw new ApiError(
-        "SYNC_BUSY",
-        "Wait for the current sync to finish",
-        409,
-      );
+      throw new ApiError("SYNC_BUSY", "Wait for the current sync to finish", 409);
     const job = (async () => {
-      const account = required(
-        await this.accountStore.accounts.get(id),
-        "Account",
-      );
+      const account = required(await this.accountStore.accounts.get(id), "Account");
       if (!account.capabilities.mail)
-        throw new ApiError(
-          "ACCOUNT_CAPABILITY",
-          "Backfill requires a mail account",
-        );
+        throw new ApiError("ACCOUNT_CAPABILITY", "Backfill requires a mail account");
       if (account.settings.reauthorizationRequired)
-        throw new ApiError(
-          "REAUTHORIZE_REQUIRED",
-          "Re-authorize this account first",
-          409,
-        );
+        throw new ApiError("REAUTHORIZE_REQUIRED", "Re-authorize this account first", 409);
       const saved = await this.accountStore.syncState.get(id);
       const prefix = "passport-sync-v1:";
       const cursors = saved?.cursor?.startsWith(prefix)
@@ -172,16 +134,10 @@ export class AccountSyncService extends SyncService {
         cursor: prefix + JSON.stringify({ ...cursors, mail: null }),
         updatedAt: new Date().toISOString(),
       });
-      this.windows.set(
-        id,
-        Math.max(days, Number(account.settings.syncDays ?? this.defaultDays)),
-      );
+      this.windows.set(id, Math.max(days, Number(account.settings.syncDays ?? this.defaultDays)));
       try {
         await this.runAccount(id);
-        const fresh = required(
-          await this.accountStore.accounts.get(id),
-          "Account",
-        );
+        const fresh = required(await this.accountStore.accounts.get(id), "Account");
         await this.accountStore.accounts.upsert({
           ...fresh,
           settings: { ...fresh.settings, syncDays: this.windows.get(id)! },
@@ -205,12 +161,8 @@ export class AccountSyncService extends SyncService {
   /** Explicit reconnect updates the retained provider after browser re-authorization. */
   async reconnect(id: string): Promise<void> {
     await this.jobs.get(id)?.catch(() => undefined);
-    const account = required(
-      await this.accountStore.accounts.get(id),
-      "Account",
-    );
-    const credentials =
-      (await this.accountStore.accounts.getCredentials(id)) ?? {};
+    const account = required(await this.accountStore.accounts.get(id), "Account");
+    const credentials = (await this.accountStore.accounts.getCredentials(id)) ?? {};
     for (const kind of ["mail", "calendar"] as const)
       if (account.capabilities[kind]) {
         const provider = await (kind === "mail"
@@ -223,16 +175,11 @@ export class AccountSyncService extends SyncService {
   async remove(id: string): Promise<void> {
     this.retired.add(id);
     await this.jobs.get(id)?.catch(() => undefined);
-    const account = required(
-      await this.accountStore.accounts.get(id),
-      "Account",
-    );
+    const account = required(await this.accountStore.accounts.get(id), "Account");
     if (account.capabilities.mail)
       await (await this.mailProvider(id)).disconnect().catch(() => undefined);
     if (account.capabilities.calendar)
-      await (await this.calendarProvider(id))
-        .disconnect()
-        .catch(() => undefined);
+      await (await this.calendarProvider(id)).disconnect().catch(() => undefined);
   }
   override async drain(): Promise<void> {
     await Promise.allSettled([...this.jobs.values()]);
@@ -241,10 +188,7 @@ export class AccountSyncService extends SyncService {
 }
 
 const services = new WeakMap<object, AccountSyncService>();
-export function attachAccountSync<T extends object>(
-  backend: T,
-  service: AccountSyncService,
-): T {
+export function attachAccountSync<T extends object>(backend: T, service: AccountSyncService): T {
   services.set(backend, service);
   return backend;
 }

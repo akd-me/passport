@@ -14,10 +14,7 @@ export async function checkSession(): Promise<void> {
     const response = await fetch("/api/auth/status", {
       credentials: "same-origin",
     });
-    if (
-      response.ok &&
-      !((await response.json()) as { authenticated: boolean }).authenticated
-    )
+    if (response.ok && !((await response.json()) as { authenticated: boolean }).authenticated)
       window.location.replace("/");
   } catch {
     /* Reconnect normally while the server is unavailable. */
@@ -69,9 +66,7 @@ function loginPage(tokenPath: string): void {
     error.textContent = "";
     try {
       if (await login(input.value.trim())) window.location.replace("/");
-      else
-        error.textContent =
-          "That token was not accepted. Check the terminal and try again.";
+      else error.textContent = "That token was not accepted. Check the terminal and try again.";
     } catch {
       error.textContent = "Could not reach Passport. Please try again.";
     } finally {

@@ -116,26 +116,18 @@ export const api = {
       "POST",
       edited ? { request: edited } : undefined,
     ),
-  reject: (id: string) =>
-    write<ActionRecord>(`/actions/${encodeURIComponent(id)}/reject`, "POST"),
+  reject: (id: string) => write<ActionRecord>(`/actions/${encodeURIComponent(id)}/reject`, "POST"),
   cancel: (id: string) =>
-    write<ActionRecord>(
-      `/actions/${encodeURIComponent(id)}/cancel-hold`,
-      "POST",
-    ),
-  undo: (id: string) =>
-    write<ActionRecord>(`/actions/${encodeURIComponent(id)}/undo`, "POST"),
-  actions: (query?: ActionQuery) =>
-    request<Page<ActionRecord>>(`/actions${queryString(query)}`),
+    write<ActionRecord>(`/actions/${encodeURIComponent(id)}/cancel-hold`, "POST"),
+  undo: (id: string) => write<ActionRecord>(`/actions/${encodeURIComponent(id)}/undo`, "POST"),
+  actions: (query?: ActionQuery) => request<Page<ActionRecord>>(`/actions${queryString(query)}`),
   emails: (query?: EmailQuery) =>
     request<Page<Email>>(
       `/emails${queryString(query ? { ...query, keywords: undefined, has: query.keywords?.has, not: query.keywords?.not } : {})}`,
     ),
   email: (id: string) => request<Email>(`/emails/${encodeURIComponent(id)}`),
   thread: (id: string) =>
-    request<{ thread: Thread; emails: Page<Email> }>(
-      `/threads/${encodeURIComponent(id)}`,
-    ),
+    request<{ thread: Thread; emails: Page<Email> }>(`/threads/${encodeURIComponent(id)}`),
   updateMatter: (id: string, patch: Partial<Matter>) =>
     write<ActionRecord>(`/matters/${encodeURIComponent(id)}`, "PATCH", patch),
   trust: () => request<TrustData>("/trust"),
@@ -149,8 +141,7 @@ export const api = {
     displayName: string;
     fields: Record<string, string>;
   }) => write<Account>("/accounts", "POST", body),
-  sync: (id: string) =>
-    write<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}/sync`, "POST"),
+  sync: (id: string) => write<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}/sync`, "POST"),
   saveLlm: (
     config: Partial<Omit<LlmConfig, "apiKey" | "provider">> & {
       provider: ModelProvider | "auto";
@@ -159,7 +150,6 @@ export const api = {
   hostAgents: () => request<HostAgent[]>("/host-agents"),
   saveProfile: (markdown: string) =>
     write<{ markdown: string }>("/user-profile", "PUT", { markdown }),
-  runAgent: (body: AgentInstruction = {}) =>
-    write<AgentRun>("/agent/run", "POST", body),
+  runAgent: (body: AgentInstruction = {}) => write<AgentRun>("/agent/run", "POST", body),
 };
 export type { DomainEvent };

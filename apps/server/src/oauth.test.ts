@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
-import { describe, expect, it, vi } from "vitest";
 import type { ProviderSetupDescriptor } from "@passport/types";
+import { describe, expect, it, vi } from "vitest";
 import { authorizeOAuth } from "./oauth.js";
 
 async function redirectUri() {
@@ -42,14 +42,9 @@ describe("CLI OAuth callback", () => {
         onAuthUrl: (url) => {
           callbacks.push(
             (async () => {
-              expect(
-                (await fetch(`${redirect}?state=wrong&code=evil`)).status,
-              ).toBe(400);
+              expect((await fetch(`${redirect}?state=wrong&code=evil`)).status).toBe(400);
               const state = new URL(url).searchParams.get("state");
-              expect(
-                (await fetch(`${redirect}?state=${state}&code=valid-code`))
-                  .status,
-              ).toBe(200);
+              expect((await fetch(`${redirect}?state=${state}&code=valid-code`)).status).toBe(200);
             })(),
           );
         },
@@ -85,11 +80,7 @@ describe("CLI OAuth callback", () => {
       },
     };
     await expect(
-      authorizeOAuth(
-        descriptor,
-        {},
-        { redirectUri: redirect, timeoutMs: 10, onAuthUrl: () => {} },
-      ),
+      authorizeOAuth(descriptor, {}, { redirectUri: redirect, timeoutMs: 10, onAuthUrl: () => {} }),
     ).rejects.toMatchObject({ code: "OAUTH_TIMEOUT" });
     expect(exchangeCode).not.toHaveBeenCalled();
     await expect(fetch(redirect)).rejects.toThrow();

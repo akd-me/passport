@@ -1,5 +1,6 @@
 // Append migrations; never change an already released migration.
-export const migrations: readonly string[] = [String.raw`
+export const migrations: readonly string[] = [
+  String.raw`
   CREATE TABLE accounts (id TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)));
   CREATE TABLE credentials (account_id TEXT PRIMARY KEY, encrypted BLOB NOT NULL);
   CREATE TABLE sync_state (account_id TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)));
@@ -110,4 +111,5 @@ export const migrations: readonly string[] = [String.raw`
   CREATE TABLE trust (id TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)));
   CREATE TABLE policy_config (id TEXT PRIMARY KEY CHECK(id = 'global'), data TEXT NOT NULL CHECK(json_valid(data)));
   CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-`];
+`,
+];

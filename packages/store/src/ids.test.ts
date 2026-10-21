@@ -8,11 +8,12 @@ describe("identifiers and timestamps", () => {
     vi.spyOn(Date, "now").mockReturnValue(2_000_000_000_000);
     const ids = Array.from({ length: 10_000 }, () => newId());
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.every(id => /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(id))).toBe(true);
+    expect(ids.every((id) => /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(id))).toBe(true);
     expect(ids).toEqual([...ids].sort());
     const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     let time = 0n;
-    for (const character of ids[0]!.slice(0, 10)) time = (time << 5n) | BigInt(alphabet.indexOf(character));
+    for (const character of ids[0]!.slice(0, 10))
+      time = (time << 5n) | BigInt(alphabet.indexOf(character));
     expect(time).toBe(2_000_000_000_000n);
   });
 

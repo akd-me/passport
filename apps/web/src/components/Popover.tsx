@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 /**
  * A disclosure-style popover anchored to its trigger. Closes on outside click and Escape,
