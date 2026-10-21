@@ -803,7 +803,8 @@ export type DomainEvent =
   | { type: "agent.run.finished"; runId: Id; proposed: number; executed: number; error?: string | null }
   | { type: "job.started"; jobId: Id; runId: Id }
   | { type: "job.finished"; jobId: Id; runId: Id; status: "ok" | "error" | "skipped"; durationMs: number; summary?: string }
-  | { type: "job.updated"; jobId: Id };
+  | { type: "job.updated"; jobId: Id }
+  | { type: "setup.task.updated"; task: SetupTask };
 
 export interface EventBus {
   emit(event: DomainEvent): void;
@@ -1026,10 +1027,19 @@ export type LlmSelection = "auto" | "explicit";
 
 export type HostAgentReasoning = "low" | "medium" | "high" | "xhigh";
 
-/** An MCP server handed to a host agent session: stdio (command) or streamable HTTP (url). */
+/**
+ * An MCP server handed to a host agent session: stdio (command) or streamable HTTP (url).
+ * `timeouts` raise the CLI's defaults (Codex: 10 s startup, 60 s per tool call) for servers
+ * that download on first start or block on a person.
+ */
 export type HostAgentMcpServer =
-  | { command: string; args?: string[]; env?: Record<string, string> }
-  | { url: string; headers?: Record<string, string> };
+  | { command: string; args?: string[]; env?: Record<string, string>; timeouts?: HostAgentMcpTimeouts }
+  | { url: string; headers?: Record<string, string>; timeouts?: HostAgentMcpTimeouts };
+
+export interface HostAgentMcpTimeouts {
+  startupSec?: number;
+  toolSec?: number;
+}
 
 /** An agentic host-agent run: multiple turns, tool use through the supplied MCP servers. */
 export interface HostAgentSessionRequest {
@@ -1078,4 +1088,46 @@ export interface HostAgentSessionResult {
   text: string;
   usage?: HostAgentUsage;
   error?: { message: string; code: string };
+}
+
+// ---------------------------------------------------------------------------
+// Account setup tasks (additive, v0.2): a host agent drives a browser to create the
+// user's own OAuth client, asking the user to sign in and consent along the way.
+// ---------------------------------------------------------------------------
+
+export type SetupProvider = "gmail" | "microsoft";
+export type SetupTaskStatus = "running" | "waiting_for_user" | "completed" | "failed" | "cancelled";
+export type SetupStepStatus = "pending" | "running" | "done" | "failed";
+export type SetupPromptKind = "sign_in" | "confirm" | "question";
+
+export interface SetupStep {
+  id: string;
+  title: string;
+  status: SetupStepStatus;
+  detail?: string;
+}
+
+/** A question the agent is waiting on. Answer `"done"` for sign_in/confirm, free text for question. */
+export interface SetupPrompt {
+  id: string;
+  kind: SetupPromptKind;
+  message: string;
+}
+
+/** Redacted progress line; never contains secrets. */
+export interface SetupLogEntry {
+  at: Timestamp;
+  level: "info" | "warn" | "error";
+  text: string;
+}
+
+export interface SetupTask {
+  id: Id;
+  provider: SetupProvider;
+  status: SetupTaskStatus;
+  steps: SetupStep[];
+  prompt?: SetupPrompt;
+  result?: { accountIds: Id[] };
+  error?: string;
+  log: SetupLogEntry[];
 }

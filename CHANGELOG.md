@@ -19,6 +19,14 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   API-key providers under "advanced"; `passport doctor` reports each CLI with
   its fix and test-pings the selected one. Accounts shows detected agents.
 
+- Agent-driven account setup: **Set up with my agent** (Accounts) and `passport accounts connect
+  --provider gmail|microsoft` start a task in which Codex (`gpt-6.1-sol`, high reasoning; Claude Code
+  as fallback) drives a visible browser (Playwright MCP, pinned) to create your own Google or Microsoft
+  OAuth client, asks you to sign in and approve, and connects the mailbox. New `/api/setup/tasks`
+  routes and the `setup.task.updated` event; the setup tools run on `127.0.0.1` behind a per-task
+  bearer token. The setup browser profile lives in `<data dir>/setup-browser-profile`; keep it out of
+  backups. Host-agent MCP servers accept startup/tool-call timeouts.
+
 ### Changed
 
 - API keys are optional. Existing configurations that only held the old

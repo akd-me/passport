@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { HostAgentEvent } from "@passport/types";
+import type { HostAgentEvent, HostAgentMcpServer } from "@passport/types";
 import { LlmError } from "../errors.js";
 import { redact } from "./env.js";
 import { count, emptyUsage, record, SERVER_NAME, type HostInvocation, type HostRunOutcome, type HostRunSpec, type HostStreamParser } from "./types.js";
@@ -23,6 +23,7 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
   if (spec.systemPrompt !== undefined) args.push("--system-prompt", spec.systemPrompt);
   if (spec.jsonSchema) args.push("--json-schema", JSON.stringify(spec.jsonSchema));
   let dir: string | undefined;
+  const env: Record<string, string> = {};
   if (spec.completion) {
     args.push("--safe-mode", "--tools", "", "--max-turns", "1");
   } else {
@@ -34,6 +35,12 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
         ? { type: "http", url: server.url, ...(server.headers ? { headers: server.headers } : {}) }
         : { type: "stdio", command: server.command, args: server.args ?? [], ...(server.env ? { env: server.env } : {}) };
     }
+    // Claude Code reads MCP startup and tool-call timeouts (milliseconds) from its environment.
+    const longest = (pick: (server: HostAgentMcpServer) => number | undefined) =>
+      Math.max(0, ...Object.values(servers).map(server => pick(server) ?? 0).filter(value => Number.isFinite(value)));
+    const startup = longest(server => server.timeouts?.startupSec), tool = longest(server => server.timeouts?.toolSec);
+    if (startup > 0) env.MCP_TIMEOUT = String(Math.ceil(startup * 1000));
+    if (tool > 0) env.MCP_TOOL_TIMEOUT = String(Math.ceil(tool * 1000));
     if (Object.keys(mcpServers).length) {
       // A private file keeps MCP env and headers out of the process list.
       dir = await mkdtemp(join(tmpdir(), "passport-claude-"));
@@ -48,7 +55,7 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
     if (spec.maxTurns !== undefined) args.push("--max-turns", String(spec.maxTurns));
   }
   return {
-    args, input: spec.prompt, env: {}, schemaEnforced: !!spec.jsonSchema,
+    args, input: spec.prompt, env, schemaEnforced: !!spec.jsonSchema,
     cleanup: async () => { if (dir) await rm(dir, { recursive: true, force: true }); },
   };
 }

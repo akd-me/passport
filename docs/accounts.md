@@ -1,8 +1,60 @@
 # Connect your accounts
 
-Passport uses your own OAuth registrations and models. Account passwords, client secrets and tokens
-go through the encrypted credential store. OAuth verifiers and browser login states stay in memory;
-authorization attempts expire after ten minutes. Use the local server on the same computer as your browser.
+Passport connects Gmail and Outlook through **your own** OAuth client, so no third party sits between
+you and your mail. Creating that client used to mean a tour of the Google Cloud or Microsoft Entra
+console. Now your agent does it: you click one button, sign in when asked, and approve access.
+Account passwords, client secrets and tokens go through the encrypted credential store. OAuth
+verifiers and browser login states stay in memory; authorization attempts expire after ten minutes.
+Use the local server on the same computer as your browser.
+
+## Let your agent set it up
+
+Requirements: `passport serve` (not the demo), a signed-in host agent (Codex, or Claude Code as the
+fallback; see [Start a workspace](#start-a-workspace)), Google Chrome or Microsoft Edge, and Node's
+`npx` with network access the first time.
+
+1. Open **Accounts → Add account**, choose **Gmail** or **Microsoft Outlook**, leave **Connect calendar
+   too** as you want it, and click **Set up with my agent**. From a terminal:
+   `passport accounts connect --provider gmail|microsoft [--no-calendar] [--agent codex|claude-code]`.
+2. A browser window opens. The agent opens the Google Cloud console (or Microsoft Entra app
+   registrations). When it asks, **sign in in that window** and click **Continue** in Passport (press
+   Enter in the terminal). The agent never types passwords or codes for you.
+3. The agent creates or reuses a project named Passport, enables the Gmail (and Calendar) API, sets up
+   the consent screen with you as a test user, and creates a **Desktop app** client (Microsoft: a public
+   client app registration with the `http://127.0.0.1:<port>/oauth/callback` redirect and the delegated
+   Graph permissions listed below). If a console page is not what it expects, it asks you a question
+   instead of guessing. A checklist and a log in Passport show what it is doing.
+4. Passport stores the client encrypted and the agent opens Google's (or Microsoft's) consent page in
+   the same window. **You** choose the account and approve; Google will say the app is unverified,
+   which is expected for your own client (**Advanced → Go to Passport**). The mailbox connects and the
+   first sync starts.
+
+Cancel at any time; the agent and the browser stop. Things already created in the console stay and are
+reused next time. Run the task again for each account; the browser remembers your console sign-in.
+
+How it works: Passport starts a host-agent session (Codex with `gpt-6.1-sol` at high reasoning, else
+Claude Code with `claude-opus-5-5`) with two MCP servers. The browser is
+[Playwright MCP](https://github.com/microsoft/playwright-mcp) (`npx -y @playwright/mcp@0.0.83`, pinned),
+headed, on your installed Chrome, then Edge, then Playwright's Chromium (if neither browser is
+installed, run `npx -y @playwright/mcp@0.0.83 install-browser chrome-for-testing`). Code-running,
+file-upload and network-inspection browser tools are not offered to the agent. Passport's setup tools
+(`ask_user`, `report_progress`, `register_oauth_client`, `wait_for_connection`, `finish`) run on a
+`127.0.0.1` listener that accepts only a random per-task bearer token, passed to the CLI outside its
+argument list and revoked when the task ends. `register_oauth_client` goes through the same PKCE flow
+as the manual wizard; the agent's browser opens a single-use `/oauth/setup/<ticket>` link that binds the
+attempt to that browser. The client secret never enters the task log, the event stream or the agent's
+instructions; log text is scrubbed of it and of secret-shaped strings.
+
+**The setup browser profile** lives in `<data dir>/setup-browser-profile` and keeps you signed in to
+the Google/Microsoft console between tasks. It holds live console cookies: keep it out of git (the
+repository's `.gitignore` excludes it) and out of backups (see [deployment](deploy.md#backups-and-upgrades)).
+Delete the directory to sign the setup browser out. Screenshots the agent takes go to
+`<data dir>/setup-agent/browser-output` and are deleted when the task ends.
+
+Known limits: Google sometimes refuses sign-in in a browser controlled by automation ("This browser or
+app may not be secure"). If that happens, sign in to the console in that window again later or use the
+manual steps below. Consoles change; the agent works from goals and landmarks (see
+`apps/server/src/setup/prompt.ts`) and asks you when stuck.
 
 ## Start a workspace
 
@@ -26,7 +78,11 @@ wizard at `/` too. `PASSPORT_PORT` changes the HTTP port. All browser instructio
 open: it shows authorization progress and receives sync updates over WebSocket. The consent tab
 returns to Accounts after connecting. Repeat for every personal, work and secondary mailbox.
 
-## Gmail with your own desktop OAuth client
+## Set up manually
+
+The same OAuth clients the agent creates, step by step, plus IMAP.
+
+### Gmail with your own desktop OAuth client
 
 1. Open [Google Cloud console](https://console.cloud.google.com/). Use the project selector →
    **New project** → name it → **Create**, then select it.
@@ -69,7 +125,7 @@ and [unverified app limits](https://support.google.com/cloud/answer/7454865).
 Google desktop apps support S256 PKCE and an optional client secret; Passport never puts the secret
 in the authorization URL. See [Google's desktop flow](https://developers.google.com/identity/protocols/oauth2/native-app).
 
-### Gmail through IMAP and an app password
+#### Gmail through IMAP and an app password
 
 1. Open [Google Account](https://myaccount.google.com/) → **Security & sign-in → How you sign in to Google
    → 2-Step Verification** → enable it.
@@ -84,7 +140,7 @@ in the authorization URL. See [Google's desktop flow](https://developers.google.
 4. Click **Test connection**, then **Add account**. This path syncs mail; it does not connect a calendar.
    Do not enter your normal Google password. A Workspace administrator must allow IMAP access.
 
-## Outlook.com and Microsoft 365
+### Outlook.com and Microsoft 365
 
 1. Open [Azure portal](https://portal.azure.com/) → **Microsoft Entra ID → App registrations →
    New registration**. Enter a name. For both personal and work accounts, select **Accounts in any
@@ -115,7 +171,7 @@ folder. Primary calendar sync uses `/me/calendarView/delta`; secondary-calendar 
 unsupported. Shared/delegated mailboxes, sovereign clouds and tenant-specific consent restrictions
 need separate live verification; the wizard targets each signed-in user's own mailbox in the global cloud.
 
-## Other IMAP providers
+### Other IMAP providers
 
 Choose **Accounts → Add account → IMAP / SMTP**. Enter the account address, IMAP host, numeric port,
 TLS mode, username and app password supplied by your service. Enter an SMTP host for sending.

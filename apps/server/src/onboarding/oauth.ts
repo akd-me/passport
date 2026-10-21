@@ -368,6 +368,14 @@ export class BrowserOAuth {
     const { nonce: _nonce, expiresAt: _expires, ...safe } = status;
     return safe;
   }
+  /** Server-side progress of an attempt, without the browser binding. Undefined once expired. */
+  peek(state: string) {
+    this.prune();
+    const status = this.statuses.get(state);
+    if (!status) return;
+    const { nonce: _nonce, expiresAt: _expires, ...safe } = status;
+    return safe;
+  }
   async callback(url: URL, nonce?: string): Promise<Account> {
     const state = url.searchParams.get("state") ?? "";
     const entry = this.pending.get(state);
@@ -420,4 +428,12 @@ export class BrowserOAuth {
       throw error;
     }
   }
+}
+
+const instances = new WeakMap<Backend, BrowserOAuth>();
+/** One attempt table per backend, so routes and setup tasks see the same callbacks. */
+export function browserOAuth(backend: Backend): BrowserOAuth {
+  let oauth = instances.get(backend);
+  if (!oauth) instances.set(backend, (oauth = new BrowserOAuth(backend)));
+  return oauth;
 }

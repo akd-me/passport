@@ -72,13 +72,13 @@ pnpm demo
 
 `pnpm dev` keeps the source demo in watch mode. For frontend editing, also run `pnpm --filter @passport/web dev` and open the URL Vite prints. The [installation guide](docs/install.md) covers configuration, tarballs and the package build.
 
-## Connect Gmail
+## Connect Gmail or Outlook
 
-Create your own Google **Desktop app** OAuth client and enable the Gmail API (and Google Calendar API if needed). Run `passport serve`, open **Accounts → Add account → Gmail**, and follow the browser authorization flow. **Connect calendar too** adds your primary calendar when permission is granted. See [account setup and scopes](docs/accounts.md).
-
-## Connect Outlook
-
-Register your own Microsoft Entra application and native loopback redirect URI, then use **Accounts → Add account → Outlook** in the browser. Calendar access is optional in the same consent flow. Tenant settings, scopes and consent are covered in [account setup](docs/accounts.md).
+Open **Accounts → Add account**, pick **Gmail** or **Microsoft Outlook** and click **Set up with my agent**
+(or run `passport accounts connect --provider gmail|microsoft`). Your signed-in Codex (or Claude Code)
+opens a browser, creates your own OAuth client in the Google Cloud console or Microsoft Entra, and asks
+you only to sign in and approve access. **Connect calendar too** adds your primary calendar. The manual
+steps, scopes and tenant settings are in [account setup](docs/accounts.md).
 
 ## Connect IMAP
 

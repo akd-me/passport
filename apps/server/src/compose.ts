@@ -36,6 +36,7 @@ import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
 import { ProviderConnections } from "./sync/connections.js";
 import { ArrivalQueue, type Arrival, type ArrivalTrigger } from "./arrivals.js";
 import { calendarSafeStore } from "./calendar-safety.js";
+import { attachSetupTasks } from "./setup/routes.js";
 
 export interface RealBackendOptions {
   /** Client processes may submit Actions, but never run automatic arrivals/jobs. */
@@ -276,7 +277,7 @@ export async function createRealBackend(
     const dependencies = { store, executor, policy, bus };
     const mcp = createMailboxMcpServer(dependencies);
     const servers = new Set([mcp]);
-    return attachAccountSync<RealBackend>({
+    return attachSetupTasks(attachAccountSync<RealBackend>({
       mode: "real",
       ...dependencies,
       providers,
@@ -334,7 +335,7 @@ export async function createRealBackend(
           await connections.close();
           await store.close();
         })()),
-    }, sync);
+    }, sync));
   } catch (error) {
     await store.close();
     throw error;

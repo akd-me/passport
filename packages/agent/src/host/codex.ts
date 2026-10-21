@@ -12,6 +12,12 @@ const toml = (value: string | string[]): string => JSON.stringify(value);
 const tomlTable = (entries: Record<string, string>): string =>
   `{ ${Object.entries(entries).map(([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`).join(", ")} }`;
 
+/** A positive TOML float; MCP timeouts are seconds. */
+const seconds = (value: number): string => {
+  if (!Number.isFinite(value) || value <= 0) throw new LlmError("MCP timeouts must be positive numbers of seconds", "HOST_AGENT_CONFIG");
+  return Number.isInteger(value) ? `${value}.0` : String(value);
+};
+
 /** Codex features that reach outside the model call. `-c features.x=false` tolerates unknown names. */
 const COMPLETION_FEATURES_OFF = ["shell_tool", "unified_exec", "apps", "plugins", "multi_agent", "image_generation", "browser_use", "computer_use", "hooks", "goals", "skill_search", "tool_suggest", "view_image"];
 const SESSION_FEATURES_OFF = ["apps", "plugins", "multi_agent", "image_generation", "computer_use", "hooks"];
@@ -74,6 +80,8 @@ export async function codexInvocation(spec: HostRunSpec): Promise<HostInvocation
         if (Object.keys(inline).length) args.push("-c", `${key}.env=${tomlTable(inline)}`);
         if (forwarded.length) args.push("-c", `${key}.env_vars=${toml(forwarded)}`);
       }
+      if (server.timeouts?.startupSec) args.push("-c", `${key}.startup_timeout_sec=${seconds(server.timeouts.startupSec)}`);
+      if (server.timeouts?.toolSec) args.push("-c", `${key}.tool_timeout_sec=${seconds(server.timeouts.toolSec)}`);
       args.push("-c", `${key}.default_tools_approval_mode=${toml("approve")}`);
       if (allowed) {
         const prefix = `mcp__${name}__`;

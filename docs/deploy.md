@@ -103,7 +103,9 @@ token from `PASSPORT_MCP_TOKEN` or `<data-dir>/mcp-token`. Do not expose that to
 
 ## Backups and upgrades
 
-Back up the whole data directory and the matching encryption secret. If
+Back up the data directory and the matching encryption secret, except
+`setup-browser-profile/` and `setup-agent/`: they hold the agent-driven setup browser's live
+Google/Microsoft console sign-in and scratch files, are recreated on demand, and must not be archived. If
 `PASSPORT_MASTER_KEY` is supplied externally, save it securely with the backup;
 otherwise include `master.key`. Losing the key makes saved provider credentials
 unreadable. The database contains plaintext mail; encrypt backup storage.
@@ -115,7 +117,7 @@ docker compose stop passport
 mkdir -p backups
 chmod 700 backups
 # Run from this Compose project so /data mounts the correct named volume.
-docker compose run --rm --no-deps --entrypoint tar passport -C /data -czf - . > backups/passport-data.tar.gz
+docker compose run --rm --no-deps --entrypoint tar passport -C /data --exclude=./setup-browser-profile --exclude=./setup-agent -czf - . > backups/passport-data.tar.gz
 chmod 600 backups/passport-data.tar.gz
 docker compose up -d
 ```

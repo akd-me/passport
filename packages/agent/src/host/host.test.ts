@@ -218,6 +218,17 @@ describe("host CLI invocations", () => {
     expect(argv).not.toContain("mcp_servers.remote.enabled_tools");
     expect(invocation.env).toEqual({ PROBE_WORD: "s3cret-word", PASSPORT_HOST_MCP_0: "Bearer s3cret-token" });
   });
+  it("raises MCP startup and tool timeouts per CLI", async () => {
+    const mcpServers = { slow: { command: "npx", timeouts: { startupSec: 120 } }, human: { url: "http://127.0.0.1:9/mcp", timeouts: { toolSec: 900.5 } } };
+    const codex = await codexInvocation(spec({ kind: "codex", completion: false, mcpServers }));
+    expect(codex.args).toEqual(expect.arrayContaining(["mcp_servers.slow.startup_timeout_sec=120.0", "mcp_servers.human.tool_timeout_sec=900.5"]));
+    expect(codex.args.join("\n")).not.toContain("slow.tool_timeout_sec");
+    await expect(codexInvocation(spec({ kind: "codex", completion: false, mcpServers: { bad: { command: "x", timeouts: { toolSec: -1 } } } }))).rejects.toMatchObject({ code: "HOST_AGENT_CONFIG" });
+    const claude = await claudeInvocation(spec({ completion: false, mcpServers }));
+    expect(claude.env).toEqual({ MCP_TIMEOUT: "120000", MCP_TOOL_TIMEOUT: "900500" });
+    await claude.cleanup();
+    expect((await claudeInvocation(spec({ completion: false, mcpServers: { probe: { command: "node" } } }))).env).toEqual({});
+  });
   it("enables the Codex shell only when Bash is explicitly allowed", async () => {
     const { args } = await codexInvocation(spec({ kind: "codex", completion: false, allowedTools: ["Bash"] }));
     expect(args).not.toContain("features.shell_tool=false");
