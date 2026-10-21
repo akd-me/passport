@@ -22,6 +22,7 @@
   --text: light-dark(#1b1b20, #e9e9ee);
   --text-2: light-dark(#45464f, #babbc5);
   --muted: light-dark(#6a6b75, #8e8f9a);
+  /* Decorative strokes and disabled glyphs only; readable text uses --muted or stronger. */
   --faint: light-dark(#9c9da6, #61626c);
 
   --ink: light-dark(#5340c9, #a194ff);
@@ -653,6 +654,18 @@ input[type="radio"] {
   margin-top: 3px;
   color: var(--amber);
 }
+.side-row.setup-waiting {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  align-items: flex-start;
+  background: var(--ink-soft);
+  color: var(--ink);
+  font-weight: 580;
+}
+.side-row.setup-waiting .icon {
+  margin-top: 3px;
+  color: var(--ink);
+}
 .side-label {
   flex: 1;
   min-width: 0;
@@ -722,7 +735,7 @@ input[type="radio"] {
 .side-empty {
   padding: 4px 8px;
   font-size: var(--t-s);
-  color: var(--faint);
+  color: var(--muted);
 }
 .matter-glyph {
   width: 8px;
@@ -1440,7 +1453,7 @@ input[type="radio"] {
   align-items: center;
   gap: 5px;
   font-size: var(--t-xs);
-  color: var(--faint);
+  color: var(--muted);
 }
 .key-hints .kbd + .kbd {
   margin-left: 0;
@@ -1629,7 +1642,7 @@ input[type="radio"] {
   box-shadow: none;
 }
 .composer textarea::placeholder {
-  color: var(--faint);
+  color: var(--muted);
 }
 .composer-footer {
   display: flex;
@@ -1690,7 +1703,7 @@ button.composer-chip:hover {
   gap: 5px;
   margin-right: 8px;
   font-size: var(--t-xs);
-  color: var(--faint);
+  color: var(--muted);
 }
 .send-btn {
   display: grid;

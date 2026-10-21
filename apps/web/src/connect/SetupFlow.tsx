@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAccounts } from "../accounts/AccountFilter";
 import { AccountWizard } from "../accounts/AccountWizard";
 import { ApiError, type ProviderDescriptor } from "../api";
 import { Feedback, Icon, Loading } from "../components/ui";
 import { logger } from "../logger";
-import { isFinished, type SetupProvider, type SetupTask, setupApi } from "../setup-api";
-import { useResource, useWorkspace, useWorkspaceEvents } from "../state";
+import { type SetupProvider, setupApi } from "../setup-api";
+import { useResource } from "../state";
+import { useUi } from "../ui-state";
 import { ProviderMark, TaskView } from "./SetupTaskView";
+import { findActiveTask } from "./setup-session";
 import { providerNames } from "./setup-task-model";
 
 function ManualSetup({
@@ -56,57 +58,17 @@ function ManualSetup({
 export function SetupFlow({ onDone }: { onDone: () => void }) {
   const [provider, setProvider] = useState<SetupProvider>("gmail"),
     [calendar, setCalendar] = useState(true),
-    [task, setTask] = useState<SetupTask>(),
     [manual, setManual] = useState<{ note?: string } | null>(null),
     [starting, setStarting] = useState(false),
     [error, setError] = useState("");
-  const { refresh } = useWorkspace();
-  useWorkspaceEvents((event) => {
-    if (event.type !== "setup.task.updated") {
-      return;
-    }
-    const next = event.task as SetupTask;
-    if (next?.id && next.id === task?.id) {
-      setTask(next);
-    }
-  });
-  const id = task?.id,
-    finished = task ? isFinished(task) : true;
-  useEffect(() => {
-    // The WebSocket is the fast path; polling covers a missed frame or a reconnect.
-    if (!id || finished) {
-      return;
-    }
-    let stopped = false;
-    const timer = setInterval(async () => {
-      try {
-        const next = await setupApi.get(id);
-        if (!stopped) {
-          setTask(next);
-        }
-      } catch {
-        // Setup status refresh failed; retaining the last state.
-        logger.warn("Setup status refresh failed; retaining the last state");
-
-        /* Keep the last known state; the next tick retries. */
-      }
-    }, 1500);
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-    };
-  }, [id, finished]);
-  useEffect(() => {
-    if (task?.status === "completed") {
-      refresh();
-    }
-  }, [task?.status, refresh]);
+  const { setup } = useUi(),
+    task = setup.task;
   const start = async () => {
     setStarting(true);
     setError("");
     try {
       const { id } = await setupApi.start({ provider, calendar });
-      setTask(await setupApi.get(id));
+      setup.update(await setupApi.get(id));
     } catch (e) {
       // Automatic setup could not start.
       logger.warn("Automatic setup could not start");
@@ -115,11 +77,30 @@ export function SetupFlow({ onDone }: { onDone: () => void }) {
         setManual({
           note: "Automatic setup is not available on this Passport server yet. Set the account up with your own OAuth client instead.",
         });
+      } else if (e instanceof ApiError && e.code === "SETUP_BUSY") {
+        const resumed = await resumeBusy();
+        if (!resumed) {
+          setError(e.message);
+        }
       } else {
         setError(e instanceof Error ? e.message : "Setup could not start.");
       }
     } finally {
       setStarting(false);
+    }
+  };
+  /** Another task already holds the slot (another tab, say): show that one instead. */
+  const resumeBusy = async () => {
+    try {
+      const found = await findActiveTask();
+      if (found) {
+        setup.update(found);
+      }
+      return !!found;
+    } catch {
+      // The running task could not be listed; the busy error is shown instead.
+      logger.warn("Running setup task could not be listed");
+      return false;
     }
   };
   if (manual) {
@@ -136,11 +117,15 @@ export function SetupFlow({ onDone }: { onDone: () => void }) {
     return (
       <TaskView
         task={task}
-        onUpdate={setTask}
-        onDone={onDone}
+        onUpdate={setup.update}
+        onAnswered={setup.resolvePrompt}
+        onDone={() => {
+          setup.update(undefined);
+          onDone();
+        }}
         onManual={() => setManual({})}
         onRetry={() => {
-          setTask(undefined);
+          setup.update(undefined);
           void start();
         }}
       />

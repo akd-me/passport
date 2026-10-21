@@ -44,6 +44,17 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   `HOST_AGENT_MAX_TURNS` when the budget is exceeded (V2-9).
 - Malformed Claude authentication status and individual CLI probe failures no longer hide
   a healthy Codex installation during host-agent detection (V2-14).
+- Web: closing the connect dialog no longer orphans a running setup task. The task lives in
+  app state, reopening the dialog returns to it, a running or waiting task is recovered from
+  `GET /api/setup/tasks` after a reload (or when starting hits `SETUP_BUSY`), and a sidebar
+  entry under Accounts reopens a setup that is waiting for you.
+- Web: setup status polling no longer overlaps requests, and late or out-of-order snapshots
+  (polls or WebSocket frames) can no longer replace a newer one or hide an agent's prompt.
+- Web: a composer instruction that fails no longer overwrites a draft typed while it ran; the
+  failed instruction is offered as Retry instead.
+- Web: the composer placeholder, send hint, decision key hints and empty sidebar text use
+  `--muted` and reach WCAG AA contrast (4.5:1) in light and dark; `--faint` is kept for
+  decorative strokes.
 
 ## [0.1.0] — Unreleased
 
