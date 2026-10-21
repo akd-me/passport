@@ -6,6 +6,7 @@ import { createApp } from "../app.js";
 import { serverClient } from "../cli/server-client.js";
 import { createRealBackend } from "../compose.js";
 import { loadConfig } from "../config.js";
+import { resolveLlmSelection } from "../llm-selection.js";
 import { ApiError } from "../errors.js";
 import { parseSetupInput } from "./runner.js";
 import { setupTasks } from "./routes.js";
@@ -89,6 +90,7 @@ export async function connectCommand(args: string[]): Promise<void> {
     };
   } else {
     // No server: run the task here, with a temporary listener for the OAuth callback.
+    await resolveLlmSelection(config, { log: false });
     const backend = await createRealBackend(config, { clientMode: true });
     const app = createApp(backend);
     let listener: ReturnType<typeof serve>;
@@ -118,8 +120,10 @@ export async function connectCommand(args: string[]): Promise<void> {
   }
   const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: !!process.stdout.isTTY });
   let id: string | undefined;
+  const interrupted = new AbortController();
   const interrupt = () => {
     console.log("\nCancelling…");
+    interrupted.abort();
     if (id) void client.cancel(id).catch(() => undefined);
   };
   process.once("SIGINT", interrupt);
@@ -129,10 +133,13 @@ export async function connectCommand(args: string[]): Promise<void> {
     console.log("A browser window will open. Passport's agent does the console work; you sign in and approve.");
     const task = await followSetupTask(client, id, async prompt => {
       console.log(`\n>> ${prompt.message}`);
-      if (prompt.kind === "question") return rl.question("Your answer: ");
-      await rl.question("Press Enter when done… ");
+      // An interrupted question resolves; the next poll then sees the cancelled task.
+      try {
+        if (prompt.kind === "question") return await rl.question("Your answer: ", { signal: interrupted.signal });
+        await rl.question("Press Enter when done… ", { signal: interrupted.signal });
+      } catch { /* interrupted */ }
       return "done";
-    }, line => console.log(line));
+    }, line => console.log(line), { signal: interrupted.signal });
     if (task.status === "completed") console.log(`\nConnected. Accounts: ${task.result?.accountIds.join(", ") ?? "none"}.`);
     else {
       console.log(`\nSetup ${task.status}.${task.error ? ` ${task.error}` : ""} See docs/accounts.md to set up manually.`);
