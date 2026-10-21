@@ -8,3 +8,6 @@ export type { CompleteOptions, JsonSchema, LlmClient, LlmClientOptions, LlmCompl
 export { getAgentEmailPatch } from "./integration.js";
 export type { AgentDecision, AgentEmailPatch, AgentFinishedEvent, AgentMatterAttachParams, AgentMatterCreateParams, DailyDigest } from "./integration.js";
 export { AgentError, LlmError } from "./errors.js";
+export { detectHostAgents, preferredHostAgent, resolveHostAgentBinary, runHostAgentSession, HostAgentLlmClient, HOST_AGENT_DEFAULT_MODELS, HOST_AGENT_MODELS, HOST_AGENT_FIXES, HOST_AGENT_KINDS } from "./host/index.js";
+export type { DetectHostAgentsOptions, HostAgentLlmClientOptions } from "./host/index.js";
+export type { HostAgentEvent, HostAgentKind, HostAgentMcpServer, HostAgentReasoning, HostAgentSessionRequest, HostAgentSessionResult, HostAgentStatus, HostAgentUsage } from "@passport/types";

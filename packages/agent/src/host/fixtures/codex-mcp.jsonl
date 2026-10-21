@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"01a15ca7-f7dd-7ae3-92fe-f6b8897c2b27"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I\u2019ll query the probe MCP server for the code word and report it back."}}
+{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"probe","tool":"get_code_word","arguments":{},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"probe","tool":"get_code_word","arguments":{},"result":{"content":[{"type":"text","text":"The code word is ZEBRA"}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"The code word is **ZEBRA**."}}
+{"type":"turn.completed","usage":{"input_tokens":22381,"cached_input_tokens":17408,"cache_write_input_tokens":0,"output_tokens":164,"reasoning_output_tokens":18}}

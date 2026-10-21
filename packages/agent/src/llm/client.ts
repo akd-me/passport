@@ -1,6 +1,7 @@
 import type { LlmConfig } from "@passport/types";
 import { LlmError } from "../errors.js";
 import { extractJson, isObject, validateJson } from "./json.js";
+import { HostAgentLlmClient } from "../host/client.js";
 import type { CompleteOptions, LlmClient, LlmClientOptions, LlmCompletion, LlmMessage, LlmToolCall, LlmUsage } from "./types.js";
 
 function object(value: unknown): Record<string, unknown> {
@@ -211,6 +212,11 @@ export function createLlmClient(config: LlmConfig, options?: LlmClientOptions): 
   switch (config.provider) {
     case "anthropic": return new AnthropicClient(config, options);
     case "openai": case "openai-compatible": case "ollama": return new OpenAiCompatibleClient(config, options);
+    case "claude-code": case "codex":
+      return new HostAgentLlmClient({
+        kind: config.provider, model: config.model, ...(config.fastModel ? { fastModel: config.fastModel } : {}),
+        ...(options?.hostAgentCwd ? { cwd: options.hostAgentCwd } : {}),
+      });
     default: throw new LlmError("Unsupported LLM provider", "LLM_CONFIG");
   }
 }

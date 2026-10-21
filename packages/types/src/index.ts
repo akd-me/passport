@@ -838,7 +838,8 @@ export interface ActionExecutor {
 // Agent runtime
 // ---------------------------------------------------------------------------
 
-export type LlmProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama";
+/** `claude-code` and `codex` run the host machine's logged-in CLI (subscription); no API key. */
+export type LlmProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama" | "claude-code" | "codex";
 
 export interface LlmConfig {
   provider: LlmProviderKind;
@@ -989,4 +990,92 @@ assistant_attribution: false
 /** Read the complete effective USER.md without mutating an unset profile. */
 export async function getEffectiveProfile(store: Pick<Store, "kv">): Promise<string> {
   return await store.kv.get("user_profile") ?? DEFAULT_USER_PROFILE;
+}
+
+// ---------------------------------------------------------------------------
+// Host agents (additive, v0.2): the Claude Code and Codex CLIs already installed and
+// logged in on the host machine. Passport drives them with the user's own subscription.
+// ---------------------------------------------------------------------------
+
+export type HostAgentKind = "claude-code" | "codex";
+
+/** Detection result for one host agent. Never contains tokens. */
+export interface HostAgentStatus {
+  kind: HostAgentKind;
+  /** Display name, e.g. "Claude Code". */
+  label: string;
+  installed: boolean;
+  /** Absolute path of the resolved binary, or null when not installed. */
+  binaryPath: string | null;
+  version: string | null;
+  loggedIn: boolean;
+  /** Login method and account label when cheaply available, e.g. "ChatGPT" or "claude.ai (max)". */
+  account: string | null;
+  /** Installed and logged in. */
+  ready: boolean;
+  /** Actionable next step when not ready. */
+  fix?: string;
+  checkedAt: Timestamp;
+}
+
+/**
+ * How the agent's model is chosen. `auto` re-detects host agents at startup (Codex, then
+ * Claude Code, then a configured HTTP provider, else no agent); `explicit` keeps `llm` as set.
+ */
+export type LlmSelection = "auto" | "explicit";
+
+export type HostAgentReasoning = "low" | "medium" | "high" | "xhigh";
+
+/** An MCP server handed to a host agent session: stdio (command) or streamable HTTP (url). */
+export type HostAgentMcpServer =
+  | { command: string; args?: string[]; env?: Record<string, string> }
+  | { url: string; headers?: Record<string, string> };
+
+/** An agentic host-agent run: multiple turns, tool use through the supplied MCP servers. */
+export interface HostAgentSessionRequest {
+  kind: HostAgentKind;
+  model?: string;
+  reasoning?: HostAgentReasoning;
+  prompt: string;
+  systemPrompt?: string;
+  /** Working directory for the CLI. It must exist and should be a scratch directory. */
+  cwd: string;
+  mcpServers?: Record<string, HostAgentMcpServer>;
+  /**
+   * Tools the agent may use without prompting. MCP tools use `mcp__<server>__<tool>`;
+   * when omitted every tool of every supplied MCP server is allowed. Host built-in tools
+   * (shell, file edits) stay disabled unless named here (Claude Code built-in names).
+   */
+  allowedTools?: string[];
+  maxTurns?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/** Token usage of a host-agent run. Subscription usage has no per-call cost: `costUsd` is null. */
+export interface HostAgentUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number | null;
+}
+
+export type HostAgentEvent =
+  | { type: "started"; sessionId?: string }
+  | { type: "text"; text: string }
+  | { type: "tool_call"; name: string; input: unknown }
+  | { type: "tool_result"; name: string; ok: boolean; summary: string }
+  | { type: "completed"; text: string; usage?: HostAgentUsage }
+  | { type: "error"; message: string; code: string };
+
+export interface HostAgentSessionResult {
+  kind: HostAgentKind;
+  ok: boolean;
+  sessionId?: string;
+  /** Final assistant message. */
+  text: string;
+  usage?: HostAgentUsage;
+  error?: { message: string; code: string };
 }
