@@ -3,6 +3,7 @@ import type { Account } from "@passport/types";
 import { api, type ProviderDescriptor } from "../api";
 import { useTask, useWorkspace } from "../state";
 import { Feedback } from "../components/ui";
+import { SetupTaskPanel } from "./SetupTaskPanel";
 import {
   accountApi,
   type ConnectedAccount,
@@ -170,6 +171,7 @@ export function AccountWizard({
       </label>
       {oauth ? (
         <>
+          {!account && <SetupTaskPanel provider={kind === "gmail" ? "gmail" : "microsoft"} calendar={calendar} />}
           <div className="info-note oauth-guide">
             {kind === "gmail" ? (
               <>
