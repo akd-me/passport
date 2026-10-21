@@ -4,6 +4,23 @@ Branch: `t3/passport-code-quality-pass`
 Worktree: `/Users/akshaykumardileepmacmini/.t3/worktrees/passport/t3-18d9dd31`  
 Base: `3bcb669`
 
+## Commits
+
+| Step | Commit | Summary |
+| --- | --- | --- |
+| 1 | `8c92201` | `chore(tooling): add Biome checks and contributor defaults` — pinned Biome 2.5.15, formatter/lint scripts, documented warning baseline, CI and Node/editor defaults. |
+| 2 | `59dda1b` | `style: format the repository with Biome` — mechanical formatting and safe fixes; owner explicitly approved Biome's scoped removal of four erased type imports. |
+| 3 | `8f9f61e` | `refactor(readability): unpack dense one-liners` — expanded control flow, named conditional decisions, calendar timestamp helper, behavior-preserving memo cleanup, blame-ignore hash. |
+| 4 | `8e12fb1` | `refactor(errors): make every catch explicit` — full catch audit, typed parser checks and static operational diagnostics. |
+| 5 | `a0aad07` | `refactor(structure): split oversized modules at natural seams` — separated the modules listed below without changing package-root exports or route order. |
+| 6 | `9d159f9` | `chore(deps): remove dead code and unused dependencies` — Knip audit, dead internal exports/declarations, redundant development dependencies and lockfile cleanup. |
+| 7 | Current documentation commit | `docs: coding conventions` — shared style conventions, final catch locations, warning counts and validation report. |
+
+Commit 1 is the owner-approved lint exception because the repository was not yet formatted.
+Its install/build/typecheck/offline tests passed. Commits 2–7 require the full install, build,
+typecheck, lint, and offline-test checkpoint. Commit 2 contains only automated edits; the owner
+approved the narrowly scoped type-only import fix, which is recorded in its commit body.
+
 ## Catch audit
 
 Every production catch clause and inline promise rejection handler in `packages/` and `apps/`
@@ -62,7 +79,7 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `apps/server/src/mcp-token.ts:36` | a | A concurrent token creator won; read its existing token. |
 | `apps/server/src/onboarding/oauth-account.ts:206` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/onboarding/oauth-account.ts:220` | b | Initial account sync failed; retaining its recorded failure. |
-| `apps/server/src/onboarding/oauth.ts:192` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `apps/server/src/onboarding/oauth.ts:186` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/onboarding/routes.ts:16` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/onboarding/routes.ts:96` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/onboarding/sync.ts:84` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
@@ -98,11 +115,11 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `apps/server/src/setup/routes.ts:62` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/setup/runner-events.ts:17` | b | Browser URL could not be summarized safely. |
 | `apps/server/src/setup/runner-state.ts:138` | b | Setup owner process probe failed. |
-| `apps/server/src/setup/runner.ts:132` | b | Keep the existing operational log and fallback; never include the caught payload. |
-| `apps/server/src/setup/runner.ts:251` | b | Browser helper preparation failed. |
-| `apps/server/src/setup/runner.ts:342` | b | Browser helper release failed during cleanup. |
-| `apps/server/src/setup/runner.ts:348` | b | Setup browser close failed during cleanup. |
-| `apps/server/src/setup/runner.ts:354` | b | Setup browser output cleanup failed. |
+| `apps/server/src/setup/runner.ts:131` | b | Keep the existing operational log and fallback; never include the caught payload. |
+| `apps/server/src/setup/runner.ts:250` | b | Browser helper preparation failed. |
+| `apps/server/src/setup/runner.ts:341` | b | Browser helper release failed during cleanup. |
+| `apps/server/src/setup/runner.ts:347` | b | Setup browser close failed during cleanup. |
+| `apps/server/src/setup/runner.ts:353` | b | Setup browser output cleanup failed. |
 | `apps/server/src/sync/connections.ts:50` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/sync/connections.ts:54` | b | Provider disconnect failed after connection failure. |
 | `apps/server/src/sync/connections.ts:65` | b | Provider disconnect failed while invalidating a connection. |
@@ -125,9 +142,9 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `apps/web/src/shell/CommandPalette.tsx:100` | b | Agent review command failed. |
 | `apps/web/src/shell/CommandPalette.tsx:118` | b | Permission mode command failed. |
 | `apps/web/src/shell/Composer.tsx:82` | b | Agent composition failed; restoring the instruction. |
-| `apps/web/src/state.tsx:69` | b | Workspace event frame could not be processed. |
-| `apps/web/src/state.tsx:133` | b | Resource request failed or was cancelled. |
-| `apps/web/src/state.tsx:162` | b | Workspace action failed. |
+| `apps/web/src/state.tsx:70` | b | Workspace event frame could not be processed. |
+| `apps/web/src/state.tsx:134` | b | Resource request failed or was cancelled. |
+| `apps/web/src/state.tsx:163` | b | Workspace action failed. |
 | `apps/web/src/ui-state.tsx:41` | b | Stored preference could not be read; using the default. |
 | `apps/web/src/ui-state.tsx:51` | b | Preference storage unavailable; retaining session state. |
 | `apps/web/src/views/PromotionPrompts.tsx:18` | b | Promotion dismissal storage could not be read. |
@@ -217,7 +234,7 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `packages/tools/src/extra.ts:459` | a | Malformed URL targets provide no capability; keep trying valid input. |
 | `packages/tools/src/register.ts:27` | b | Tool request failed; returning the existing bounded error. |
 | `packages/tools/src/register.ts:33` | b | Tool error exceeds the response budget; returning the minimal error. |
-| `packages/tools/src/schema.ts:215` | a | Malformed URL targets provide no capability; keep trying valid input. |
+| `packages/tools/src/schema.ts:216` | a | Malformed URL targets provide no capability; keep trying valid input. |
 | `apps/server/src/cli/mcp-install.ts:594` | b | Both bridge directions share the logged failure and shutdown handler. |
 | `apps/server/src/cli/mcp-install.ts:600` | b | Both bridge directions share the logged failure and shutdown handler. |
 
@@ -284,3 +301,137 @@ Retained deliberately:
 
 `knip.jsonc` contains only the platform-binary allowance, compatibility tag, and the two narrow
 intentional-duplicate allowances. No Biome suppression comments were added.
+
+Removed internal export surface (definitions remain private unless listed as deleted above):
+
+| File | Removed exports/re-exports |
+| --- | --- |
+| `apps/server/src/demo/fixtures.ts` | `CATEGORIES` |
+| `apps/server/src/doctor.ts` | `printDoctor` |
+| `apps/server/src/onboarding/oauth-account.ts` | `accountIdentity`, `calendarScope` |
+| `apps/server/src/onboarding/oauth.ts` | `OAuthKind`, `accountIdentity` |
+| `apps/server/src/owner-lock.ts` | `OWNER_HEARTBEAT_MS`, `OWNER_STALE_MS` |
+| `apps/server/src/schedulers/index.ts` | `JobView`, `RoutineDefinition`, `getSchedulerService` |
+| `apps/server/src/setup/browser.ts` | `npxCommand` |
+| `apps/server/src/setup/mcp.ts` | `createSetupMcpServer` |
+| `apps/server/src/setup/runner-state.ts` | `SetupOAuth` |
+| `apps/server/src/setup/runner.ts` | `SETUP_BROWSER_TOOLS`, `SetupOAuth` |
+| `apps/server/src/validation.ts` | `TrustLevel` |
+| `apps/web/src/accounts/AccountFilter.tsx` | `accountColour` |
+| `apps/web/src/accounts/AccountRow.tsx` | `providerName` |
+| `apps/web/src/components/Dialog.tsx` | `trapTab` |
+| `apps/web/src/components/ui.tsx` | `PageHeader`, `isMac` |
+| `apps/web/src/connect/SetupTaskView.tsx` | `StepIcon` |
+| `apps/web/src/setup-api.ts` | `SetupLogEntry`, `SetupPrompt`, `SetupTaskStatus`, `setupTaskFromEvent` |
+| `apps/web/src/shell/Composer.tsx` | `suggestions` |
+| `apps/web/src/state.tsx` | `WorkspaceEvent` |
+| `apps/web/src/ui-state.tsx` | `applyTheme` |
+| `apps/web/src/views/DecisionCard.tsx` | `CancelButton`, `Countdown` |
+| `apps/web/src/views/Decisions.tsx` | `CancelButton`, `Countdown`, `ProposalDetails` |
+| `apps/web/src/views/JobTable.tsx` | `JobRow`, `countdown`, `duration` |
+| `apps/web/src/views/NewRoutineForm.tsx` | `examples` |
+| `apps/web/src/views/People.tsx` | `DowngradeWarning` |
+| `apps/web/src/views/PromotionPrompts.tsx` | `DISMISSED`, `offerKey`, `readDismissed` |
+| `apps/web/src/views/ProposalDetails.tsx` | `reversibilityText` |
+| `apps/web/src/views/Trust.tsx` | `ActionCategory` |
+| `packages/agent/src/host/detect.ts` | `ProbeExec` |
+| `packages/agent/src/host/index.ts` | `ProbeExec`, `createClaudeParser`, `createCodexParser`, `hostAgentEnv` |
+| `packages/agent/src/prompts/index.ts` | `emailContext` |
+| `packages/agent/src/schemas.ts` | `CATEGORIES`, `categorySchema`, `objectSchema`, `slotSchema`, `string`, `strings` |
+| `packages/agent/src/triage.ts` | `emailCounterparty`, `readThread`, `replyDraft`, `sensitiveCategory` |
+| `packages/mcp/src/presentation.ts` | `errorResult`, `json` |
+| `packages/mcp/src/testing/fixtures.ts` | `at` |
+| `packages/policy/src/executor-dispatch.ts` | `Dispatch` |
+| `packages/policy/src/testing/fixtures.ts` | `FakeCalendarProvider`, `FakeMailProvider`, `capabilities` |
+| `packages/providers/src/caldav-ical.ts` | `calendarTimestamp`, `participation`, `providerId` |
+| `packages/providers/src/gmail.ts` | `GmailPart` |
+| `packages/providers/src/graph.ts` | `GraphAttachment` |
+| `packages/providers/src/http.ts` | `readJson`, `request` |
+| `packages/tools/src/response-budget.ts` | `bodyPrefix` |
+| `packages/tools/src/schemas.ts` | `address`, `addresses`, `category`, `status` |
+
+## Behavior and retained warnings
+
+The proposal-grouping memo now computes its pure filter inside the existing memo callback,
+retaining the same data/grouping dependencies and recomputation timing. The remaining resource
+effect warning is intentional: the workspace version is a refresh trigger. The command-palette
+test effect intentionally seeds its initial state on mount. Neither dependency array was changed.
+No tests were removed or weakened, and no new test was necessary for a new domain branch.
+
+The four required error rules remain errors: `suspicious/noExplicitAny`,
+`correctness/noUnusedVariables`, `correctness/noUnusedImports`, and `style/useConst`.
+`complexity/noExcessiveCognitiveComplexity` remains a warning at threshold 25.
+The owner approved the documented baseline warnings below, including low-count rules whose
+unsafe fixes would change UI, hook, generator-fixture, or parser behavior. The comments live in
+`biome-baseline.jsonc`, extended by strict-JSON `biome.json`. No inline or file-level
+`biome-ignore` comments were added.
+
+| Rule | Remaining warnings | Severity origin |
+| --- | ---: | --- |
+| `a11y/noAutofocus` | 3 | Owner-approved baseline downgrade |
+| `a11y/noLabelWithoutControl` | 1 | Owner-approved baseline downgrade |
+| `a11y/noNoninteractiveElementToInteractiveRole` | 1 | Owner-approved baseline downgrade |
+| `a11y/noNoninteractiveTabindex` | 1 | Owner-approved baseline downgrade |
+| `a11y/noStaticElementInteractions` | 2 | Owner-approved baseline downgrade |
+| `a11y/noSvgWithoutTitle` | 1 | Owner-approved baseline downgrade |
+| `a11y/useAriaPropsSupportedByRole` | 3 | Owner-approved baseline downgrade |
+| `a11y/useButtonType` | 37 | Owner-approved baseline downgrade |
+| `a11y/useFocusableInteractive` | 1 | Owner-approved baseline downgrade |
+| `a11y/useKeyWithClickEvents` | 3 | Owner-approved baseline downgrade |
+| `a11y/useSemanticElements` | 8 | Owner-approved baseline downgrade |
+| `complexity/noCommaOperator` | 2 | Default/recommended warning |
+| `complexity/noExcessiveCognitiveComplexity` | 76 | Requested threshold 25 |
+| `complexity/noImportantStyles` | 4 | Default/recommended warning |
+| `complexity/useOptionalChain` | 5 | Default/recommended warning |
+| `correctness/noEmptyCharacterClassInRegex` | 1 | Owner-approved baseline downgrade |
+| `correctness/noUnsafeOptionalChaining` | 5 | Owner-approved baseline downgrade |
+| `correctness/noUnusedFunctionParameters` | 12 | Default/recommended warning |
+| `correctness/useExhaustiveDependencies` | 2 | Owner-approved baseline downgrade |
+| `correctness/useYield` | 10 | Owner-approved baseline downgrade |
+| `style/noDescendingSpecificity` | 40 | Default/recommended warning |
+| `style/noNonNullAssertion` | 621 | Default/recommended warning |
+| `suspicious/noArrayIndexKey` | 3 | Owner-approved baseline downgrade |
+| `suspicious/noAssignInExpressions` | 0 | Owner-approved baseline downgrade |
+| `suspicious/noConfusingVoidType` | 2 | Default/recommended warning |
+| `suspicious/noExportsInTest` | 1 | Owner-approved baseline downgrade |
+| `suspicious/noFocusedTests` | 2 | Default/recommended warning |
+| `suspicious/noImplicitAnyLet` | 3 | Owner-approved baseline downgrade |
+| `suspicious/noShadowRestrictedNames` | 1 | Owner-approved baseline downgrade |
+| `suspicious/useIterableCallbackReturn` | 4 | Owner-approved baseline downgrade |
+
+Total: **855 warnings**, zero errors. Biome also reports 9 informational
+notices (including the requested `recommended` configuration field's deprecation notice).
+The catch audit covers **203 sites**: 32 expected/narrowed fallbacks,
+100 logged fallbacks, and 71 existing typed errors or propagation paths.
+
+## Validation
+
+Environment: Node **25.9.0**, pnpm **10.33.0**. CI retains its Node 22/24 matrix.
+
+| Check | Result |
+| --- | --- |
+| `pnpm install` | Passed at every commit checkpoint; lockfile consistent |
+| `pnpm build` | Passed at every checkpoint, before MCP/server tests |
+| `pnpm typecheck` | Passed at every checkpoint |
+| `pnpm lint` | Passed from commit 2 onward; commit 1 exception explicitly approved |
+| `PASSPORT_SKIP_LIVE_HOST_AGENTS=1 pnpm test` | Passed at every checkpoint: 1,061 passed, seven intentionally skipped live tests |
+| `pnpm format:check` | Passed; no fixes needed |
+| `npx --yes knip --reporter json --no-progress` | Knip 6.42.1 reports `{"issues":[]}` with the documented narrow allowances |
+| Shared type-contract comparison against `3bcb669` | All 88 existing interface/type/enum declarations retain identical syntax structure, ignoring formatting punctuation |
+| `pnpm run pack` | Built a fresh `apps/server/dist/akd-me-passport-0.1.0.tgz` |
+| `node scripts/smoke-package.mjs apps/server/dist/*.tgz` | Passed: installed CLI help, MCP dry-run, authenticated demo and persistent APIs, decisions and built UI |
+| Live host-agent tests with `PASSPORT_SKIP_LIVE_HOST_AGENTS` removed | Six passed: Claude Code and Codex JSON completion, stdio MCP, and authenticated HTTP MCP; about 20 seconds |
+| Live setup test with the skip variable removed | One passed: real Codex session, scripted console, simulated user responses, client registration and connected result; about 24 seconds |
+| `git diff --check` | Passed |
+
+Live commands were run once after the final source changes:
+
+```sh
+env -u PASSPORT_SKIP_LIVE_HOST_AGENTS pnpm --filter @passport/agent exec vitest run src/host/host.live.test.ts
+env -u PASSPORT_SKIP_LIVE_HOST_AGENTS pnpm --filter @passport/server exec vitest run src/setup/setup.live.test.ts
+```
+
+The seven requested commits remain separate. Nothing was pushed or merged. The deliberate
+retentions, baseline rule downgrades with per-rule counts, full 203-site catch table, module
+splits, and dead-code decisions are recorded above. No API route, CLI flag, configuration key,
+event/MCP tool name, rendered UI styling, or UI copy was changed.

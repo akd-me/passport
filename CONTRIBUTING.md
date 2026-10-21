@@ -31,6 +31,27 @@ TypeScript checks.
 
 Open a pull request against `main`. CI runs build, typecheck, Biome checks and tests on Node 22 and 24.
 
+## Code style
+
+The Biome formatter is authoritative. Use `pnpm format` before submitting changes and `pnpm lint`
+to check formatting, imports, lint rules, and workspace types. `pnpm format:check` checks only
+formatting; CI's `pnpm lint` already covers it. Package-local lint scripts remain TypeScript checks.
+
+- Put one statement on each line and use braces around control-flow bodies. Prefer named
+  intermediate values and early returns over dense nested expressions.
+- Make every catch explicit: narrow and explain an expected ignored error, retain its fallback
+  with a safe diagnostic, or propagate a typed error with a stable code. Comment the fallback
+  and never log raw provider errors, credentials, message bodies, or token-bearing URLs.
+- Aim for files under about 400 lines and split at natural responsibility boundaries. Keep
+  related state and operation order together rather than adding layers to meet a line count.
+- Keep `packages/types` append-only in substance: add compatible contracts, never remove or
+  reshape existing ones as cleanup. Preserve package-root APIs unless their removal is agreed.
+
+The commented baseline in `biome-baseline.jsonc` keeps existing behavior-sensitive findings as
+warnings; each rule explains why. Review fixes individually and use no file-level suppressions.
+The formatting revision is listed in `.git-blame-ignore-revs`; use
+`git blame --ignore-revs-file .git-blame-ignore-revs` to see past it.
+
 ## Reporting a security issue
 
 Email the maintainer directly rather than opening a public issue.

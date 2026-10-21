@@ -48,6 +48,26 @@ and accept dependencies via constructor injection.
 - Every package exports from `src/index.ts` only. Keep public surface small and documented with JSDoc.
 - Tests live next to code as `*.test.ts`. Use the `mock` provider and an in-memory SQLite store; no network in tests.
 
+## Code style
+
+Biome is authoritative for formatting: 100-column lines, two-space indentation, double quotes,
+trailing commas, and semicolons. Run `pnpm format` to apply it and `pnpm lint` to check formatting,
+imports, lint rules, and all workspace types. `pnpm format:check` checks formatting alone.
+
+- Use one statement per line and braces around control-flow bodies. Expand long conditional
+  expressions into named intermediate values or helpers, with early returns where useful.
+- Every catch is explicit: narrow an expected error and comment why it can be ignored, preserve
+  the fallback with a diagnostic through the existing logging seam, or propagate a typed error
+  with a stable code. Comment retained fallbacks. Never log credentials, message bodies, raw
+  provider errors, or token-bearing URLs; package diagnostics are optional and default to no-op.
+- Aim for files under about 400 lines. Split at an action, route, repository, provider, or component
+  boundary when that makes the code easier to follow; keep related state and evaluation order clear.
+- `packages/types` is append-only in substance. Formatting is fine; existing types, names, and
+  invariants must remain compatible. Internal cleanup does not justify removing a public contract.
+
+The mechanical formatting commit is recorded in `.git-blame-ignore-revs`; use
+`git blame --ignore-revs-file .git-blame-ignore-revs` when investigating earlier changes.
+
 ## Definition of done for a package
 
 1. `pnpm --filter @passport/<name> typecheck` and `test` pass.
