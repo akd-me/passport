@@ -9,7 +9,8 @@ contacts under a trust policy. Think "t3code, but the workspace is a mailbox ins
 
 - **Bring your own providers**: Gmail API, Microsoft Graph, IMAP/SMTP, JMAP (mail); Google Calendar,
   Graph, CalDAV (calendar). Users supply their own OAuth client ids / app passwords / tokens.
-- **Bring your own model**: Anthropic, OpenAI, OpenAI-compatible, Ollama.
+- **Bring your own model**: by default the Codex or Claude Code CLI signed in on the host (subscription,
+  no API key); Anthropic, OpenAI, OpenAI-compatible, Ollama as API providers.
 - **Two new units**: the *person* (identity, verification state, relationship) and the *matter*
   (a living workspace for a topic). Threads are an implementation detail.
 - **Every locally originated state change is an Action** that passes through the policy engine,
@@ -80,3 +81,15 @@ worktrees. During this wave **every package depends only on `@passport/types`** 
 collaborators (Store, ActionExecutor, PolicyEngine, ProviderRegistry, AgentRuntime, EventBus) through
 constructor injection. Tests use small in-memory fakes of those interfaces. The composition root in
 `apps/server` is wired to the real implementations in the integration step that follows.
+
+## Additive contract: host agents (v0.2)
+
+- `LlmProviderKind` gains `"claude-code" | "codex"`: the host machine's logged-in CLI, never an API key.
+- New types: `HostAgentKind`, `HostAgentStatus` (detection, no tokens), `LlmSelection` (`auto` | `explicit`),
+  and the session API `HostAgentSessionRequest`, `HostAgentMcpServer`, `HostAgentReasoning`, `HostAgentEvent`,
+  `HostAgentUsage` (`costUsd` is `null` for subscription usage), `HostAgentSessionResult`.
+- `@passport/agent` exports `detectHostAgents`, `HostAgentLlmClient` (an `LlmClient`) and
+  `runHostAgentSession(request, onEvent) → { done, cancel }`. Host-agent code lives in `packages/agent/src/host/`
+  and, like the rest of `agent`, imports neither `providers` nor server code.
+- Spawned CLIs get an allowlisted environment (no `PASSPORT_*`, no provider API keys); stderr is classified,
+  never surfaced; token-shaped strings are redacted from any CLI-derived error text.

@@ -29,9 +29,10 @@ passport mcp --help
 ```
 
 Open the login URL printed at startup (it includes the API token). `demo` is an ephemeral, offline fixture workspace;
-`serve` creates a persistent workspace. No account or model key is required just
-to start it. Without a model key, automatic triage is disabled, while UI, sync,
-human decisions and MCP remain available.
+`serve` creates a persistent workspace. No account or API key is required: if
+Codex or Claude Code is installed and signed in on this machine, the agent uses
+that subscription (see [Models](#models)). With no agent available, automatic
+triage is disabled, while UI, sync, human decisions and MCP remain available.
 
 ## Build from source
 
@@ -115,16 +116,19 @@ it. Configuration is read from `<data-dir>/passport.config.json`:
   "syncIntervalSeconds": 120,
   "calendarMaxSyncAgeMinutes": 10,
   "dailyDigestHour": 8,
+  "llmSelection": "auto",
   "llm": {
     "provider": "anthropic",
-    "model": "your-chosen-model"
+    "model": "claude-sonnet-5-5"
   }
 }
 ```
 
-Choose an available model at your provider. `llm.provider` accepts `anthropic`,
-`openai`, `openai-compatible` or `ollama`; optional fields include `fastModel`,
-`baseUrl` and `apiKey`. Prefer environment variables for secrets. Passport does
+`llmSelection` is `auto` (default) or `explicit`; see [Models](#models). In `auto`
+mode `llm` is only the fallback used when no host agent is available.
+`llm.provider` accepts `codex`, `claude-code` (no key), `anthropic`, `openai`,
+`openai-compatible` or `ollama`; optional fields include `fastModel`, `baseUrl`
+and `apiKey` (API providers only). Prefer environment variables for secrets. Passport does
 not automatically load `.env` for a native CLI process; export variables in your
 shell or service manager. Docker Compose loads the supplied `.env` file.
 
@@ -133,11 +137,12 @@ shell or service manager. Docker Compose loads the supplied `.env` file.
 | `PASSPORT_DATA_DIR` | Database, config and generated key directory |
 | `PASSPORT_HOST`, `PASSPORT_PORT` | API bind address and port; defaults `127.0.0.1:3000` |
 | `PASSPORT_MCP_PORT` | Loopback HTTP MCP port, default `4318` |
-| `PASSPORT_LLM_PROVIDER`, `PASSPORT_LLM_MODEL` | Model adapter and model name |
+| `PASSPORT_LLM_PROVIDER`, `PASSPORT_LLM_MODEL` | Pin the provider (`codex`, `claude-code`, or an API provider) and model; skips auto-detection |
+| `PASSPORT_CODEX_PATH`, `PASSPORT_CLAUDE_PATH` | Host CLI binary outside `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` |
 | `PASSPORT_LLM_FAST_MODEL` | Optional model for classification |
 | `PASSPORT_LLM_BASE_URL` | Compatible/Ollama endpoint override |
-| `PASSPORT_LLM_API_KEY` | Selected provider's key |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | Provider-specific fallback keys |
+| `PASSPORT_LLM_API_KEY` | API provider key (optional; never passed to host agents) |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | Provider-specific fallback keys for API providers |
 | `PASSPORT_MASTER_KEY` | Credential encryption secret; omitted generates `master.key` |
 | `PASSPORT_SYNC_INTERVAL_SECONDS` | Poll interval, default `120` |
 | `PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES` | Maximum calendar sync age at proposal release, default `10` minutes |
@@ -149,6 +154,40 @@ key remains in that file. Provider credentials are encrypted in SQLite. Keep
 the generated `master.key` or your chosen master secret with your backups; mail
 bodies and the whole database are not encrypted by Passport.
 
+## Models
+
+Passport's default agent is the **Codex or Claude Code subscription on this
+machine**. Install and sign in to either CLI once:
+
+| Agent | Install | Sign in | Check |
+| --- | --- | --- | --- |
+| Codex | `npm install -g @openai/codex` ([docs](https://developers.openai.com/codex/cli)) | `codex login` (ChatGPT) | `codex login status` |
+| Claude Code | [setup guide](https://docs.claude.com/en/docs/claude-code/setup) | `claude auth login` (Claude plan) | `claude auth status` |
+
+With `llmSelection: "auto"`, each `serve` (and `doctor`, `sync`, `triage`) start
+detects the CLIs on `PATH` plus `~/.local/bin`, `/opt/homebrew/bin` and
+`/usr/local/bin`, and uses Codex if it is signed in, else Claude Code, else the
+configured API provider, else no agent. `passport init`, **Accounts → Your
+agent** and `PUT /api/settings/llm` record an explicit choice; `GET
+/api/host-agents` returns what was detected. `passport doctor` lists both CLIs
+with the fix for each and sends a one-word test request through the selected one.
+
+Model defaults are `gpt-6.1-sol` (main) and `gpt-5.6-luna` (fast) for Codex and
+`claude-sonnet-5-5` / `claude-haiku-5-5` for Claude Code; set `llm.model` and
+`llm.fastModel` to any model your plan offers. Every call is a fresh, ephemeral
+CLI run in `<data-dir>/host-agent` with tools, shell, user config and plugins
+disabled, so email content cannot drive local commands; Passport executes all
+actions itself. The CLI gets a minimal environment (home, path, locale, proxy and
+CLI config variables only). Usage counts against your plan's limits; Passport
+reports token usage without a cost. Docker images do not contain the CLIs; use an
+API provider there, or run Passport natively.
+
+### API providers (advanced)
+
+Anthropic, OpenAI, OpenAI-compatible endpoints and Ollama remain available:
+choose **advanced** in `passport init`, the advanced form in Accounts, or set
+`PASSPORT_LLM_PROVIDER`. Keys come from the environment variables above.
+
 For Ollama, set `PASSPORT_LLM_PROVIDER=ollama`, select an installed model and use
 `PASSPORT_LLM_BASE_URL=http://localhost:11434`. In Docker, use a hostname reachable
 from the container instead. See [deployment](deploy.md).
@@ -157,8 +196,9 @@ from the container instead. See [deployment](deploy.md).
 
 Run `passport serve` and use **Accounts → Add account** in the browser. Gmail uses a
 Google Desktop app OAuth client; see [accounts](accounts.md) for scopes and setup.
-`passport init --llm none --skip-account` initializes a workspace unattended;
-`printf 'none\nskip\n' | passport init` also works. `passport sync` requests one
+`passport init --llm auto --skip-account` initializes a workspace unattended
+(`--llm codex|claude-code|none` also work); `printf 'none\nskip\n' | passport init`
+also works. `passport sync` requests one
 sync pass from the running server, or uses the store directly when no owner is live.
 
 `passport mcp install --client claude-code|codex|cursor|claude-desktop` merges the

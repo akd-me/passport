@@ -7,12 +7,14 @@ authorization attempts expire after ten minutes. Use the local server on the sam
 ## Start a workspace
 
 From a built checkout, run `passport init` (during development:
-`pnpm --filter @passport/server exec tsx src/cli.ts init`). Choose a model provider and model, or `none`.
-Cloud API keys are entered without terminal echo; explicitly entered keys are saved in the private
-config file. You can instead set `PASSPORT_LLM_API_KEY` in the environment. `none` leaves mail usable
+`pnpm --filter @passport/server exec tsx src/cli.ts init`). It lists the Codex and Claude Code CLIs it
+found and offers `auto` (the default: use whichever is signed in), `codex`, `claude-code`, `advanced`
+(an API provider) or `none`. Host agents use your subscription and need no key. Under `advanced`,
+cloud API keys are entered without terminal echo; explicitly entered keys are saved in the private
+config file, or set `PASSPORT_LLM_API_KEY` in the environment instead. `none` leaves mail usable
 without an agent. The wizard creates the data directory, `master.key` and `passport.config.json`.
 Keep the master key with any encrypted database backup. For unattended setup use
-`passport init --llm none --skip-account`, or pipe `none\nskip\n` to `passport init`.
+`passport init --llm auto --skip-account` (or `--llm none`), or pipe `none\nskip\n` to `passport init`.
 
 The CLI can connect a first mailbox with a one-shot callback listener on
 `http://127.0.0.1:53682/oauth/callback`. It prints the URL and waits up to ten minutes. For a different

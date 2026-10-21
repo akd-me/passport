@@ -45,6 +45,32 @@ Errors contain no response bodies, credentials, or full email contents. Redirect
 Protocol references: [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
 and [Anthropic tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls).
 
+## Host agents (Claude Code and Codex)
+
+`provider: "codex"` and `provider: "claude-code"` run the host machine's logged-in CLI through its
+subscription; no API key. `HostAgentLlmClient` implements `LlmClient`: every call is a fresh,
+non-persisted run (`claude -p --safe-mode --tools "" --system-prompt …` or `codex exec --json -s
+read-only --ignore-user-config` with the shell and other tools disabled) in a scratch `cwd`
+(`createLlmClient(config, { hostAgentCwd })`). JSON mode uses `--json-schema` / `--output-schema`
+(strict-compatible schemas only; others are described in the prompt) and is validated locally.
+Interactive tools are emulated as structured output, so Passport executes them under policy. `model:
+"fast"` uses `fastModel`, defaulting to `claude-haiku-5-5` / `gpt-5.6-luna`. Usage maps to `LlmUsage`
+with `costUsd: null`.
+
+`detectHostAgents()` resolves `claude` / `codex` on `PATH` plus `~/.local/bin`, `/opt/homebrew/bin`
+and `/usr/local/bin` (or `PASSPORT_CLAUDE_PATH` / `PASSPORT_CODEX_PATH`) and reports version, login
+and plan without reading tokens; results are cached for 60 seconds.
+
+`runHostAgentSession(request, onEvent)` is an agentic run: MCP servers (`{ command, args, env }` or
+`{ url, headers }`) are wired through a private `--mcp-config` file with `--strict-mcp-config` (Claude
+Code) or `-c mcp_servers.*` with secrets in the child environment (Codex). `allowedTools` defaults to
+every tool of the supplied servers; built-in shell/file tools stay off unless named. Events are
+`started`, `text`, `tool_call`, `tool_result`, `completed` and `error`; `cancel()` or an aborted
+`signal` kills the CLI's process group. Children receive an allowlisted environment (no `PASSPORT_*`
+or provider API keys), stderr is classified but never surfaced, and CLI-derived error text is
+redacted. Live tests in `src/host/host.live.test.ts` skip when a CLI is absent or signed out (set
+`PASSPORT_SKIP_LIVE_HOST_AGENTS=1` to skip them anyway).
+
 ## How triage decides
 
 1. Read the stored email, including available bodies. Resolve from/to/cc case-insensitively.

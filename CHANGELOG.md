@@ -3,6 +3,27 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
+## Unreleased
+
+### Added
+
+- Host agents: the agent now runs on the Codex or Claude Code subscription
+  signed in on the host machine, with no API key. New `codex` and `claude-code`
+  providers drive the CLIs (`codex exec --json`, `claude -p --output-format
+  stream-json`) for completions and for agentic sessions with MCP servers
+  (`runHostAgentSession`, groundwork for browser-driven account setup).
+- `auto` model selection (the new default): Codex, then Claude Code, then a
+  configured API provider, else no agent. Explicit choices are persisted.
+- `GET /api/host-agents`; `PUT /api/settings/llm` accepts `codex`,
+  `claude-code` and `auto`. `passport init` detects host agents and keeps
+  API-key providers under "advanced"; `passport doctor` reports each CLI with
+  its fix and test-pings the selected one. Accounts shows detected agents.
+
+### Changed
+
+- API keys are optional. Existing configurations that only held the old
+  placeholder default switch to `auto`; any other saved model choice is kept.
+
 ## [0.1.0] — Unreleased
 
 ### Added
