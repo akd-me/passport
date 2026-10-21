@@ -34,12 +34,12 @@ jobs:
           node --input-type=module -e 'import fs from "node:fs"; const p = JSON.parse(fs.readFileSync("apps/server/dist/package/package.json")); if (`v${p.version}` !== process.env.RELEASE_TAG) throw new Error("Tag must match the first CHANGELOG.md version");'
           node scripts/release-notes.mjs "${RELEASE_TAG#v}" > "$RUNNER_TEMP/release-notes.md"
       - run: node scripts/smoke-package.mjs apps/server/dist/*.tgz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: cli
           path: apps/server/dist/*.tgz
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-notes
           path: ${{ runner.temp }}/release-notes.md
