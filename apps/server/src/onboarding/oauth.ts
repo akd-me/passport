@@ -2,9 +2,19 @@ import { randomBytes } from "node:crypto";
 import type { Account } from "@passport/types";
 import type { Backend } from "../backend.js";
 import { ApiError, required } from "../errors.js";
-import { connectOAuthAccount, type OAuthKind, scopesFor } from "./oauth-account.js";
+import {
+  connectOAuthAccount,
+  type OAuthKind,
+  SETUP_ENDED_MESSAGE,
+  scopesFor,
+} from "./oauth-account.js";
 
-export { connectOAuthAccount, persistOAuthCredentials, scopesFor } from "./oauth-account.js";
+export {
+  connectOAuthAccount,
+  persistOAuthCredentials,
+  SETUP_ENDED_MESSAGE,
+  scopesFor,
+} from "./oauth-account.js";
 
 export const oauthCookie = (state: string) => `passport_oauth_${state.slice(0, 24)}`;
 
@@ -18,6 +28,8 @@ interface Pending {
   expiresAt: number;
   redirectUri: string;
   codeVerifier: string;
+  /** Set for setup-task attempts: false once the task has ended. */
+  active?: () => boolean;
 }
 
 /** In-memory, single-use attempts expire after ten minutes, including any client secret. */
@@ -31,6 +43,7 @@ export class BrowserOAuth {
       accountId?: string;
       error?: string;
       status: string;
+      revoked?: boolean;
     }
   >();
   constructor(
@@ -52,7 +65,8 @@ export class BrowserOAuth {
       }
     }
   }
-  async start(input: Record<string, unknown>, origin: string) {
+  /** `owner` binds the attempt to a setup task; its callback re-checks `active()` before persisting. */
+  async start(input: Record<string, unknown>, origin: string, owner?: { active(): boolean }) {
     this.prune();
     if (this.pending.size >= 100) {
       throw new ApiError("OAUTH_BUSY", "Too many pending connections; try again later", 409);
@@ -97,6 +111,7 @@ export class BrowserOAuth {
       expiresAt: this.now() + 600000,
       redirectUri: `${url.origin}/oauth/callback`,
       codeVerifier: randomBytes(48).toString("base64url"),
+      ...(owner ? { active: () => owner.active() } : {}),
     };
     this.pending.set(state, entry);
     this.statuses.set(state, {
@@ -128,7 +143,7 @@ export class BrowserOAuth {
     if (!status || !nonce || status.nonce !== nonce) {
       throw new ApiError("OAUTH_STATE", "Authorization expired or belongs to another browser");
     }
-    const { nonce: _nonce, expiresAt: _expires, ...safe } = status;
+    const { nonce: _nonce, expiresAt: _expires, revoked: _revoked, ...safe } = status;
     return safe;
   }
   /** Server-side progress of an attempt, without the browser binding. Undefined once expired. */
@@ -138,8 +153,23 @@ export class BrowserOAuth {
     if (!status) {
       return;
     }
-    const { nonce: _nonce, expiresAt: _expires, ...safe } = status;
+    const { nonce: _nonce, expiresAt: _expires, revoked: _revoked, ...safe } = status;
     return safe;
+  }
+  /**
+   * End an attempt that has not reached its callback, dropping its client secret. A callback
+   * already in flight is stopped by its owner check instead.
+   */
+  revoke(state: string): void {
+    if (!this.pending.delete(state)) {
+      return;
+    }
+    const status = this.statuses.get(state);
+    if (status) {
+      status.status = "failed";
+      status.error = SETUP_ENDED_MESSAGE;
+      status.revoked = true;
+    }
   }
   async callback(url: URL, nonce?: string): Promise<Account> {
     const state = url.searchParams.get("state") ?? "";
@@ -151,6 +181,9 @@ export class BrowserOAuth {
       entry.nonce !== nonce ||
       url.origin !== new URL(entry.redirectUri).origin
     ) {
+      if (!entry && this.statuses.get(state)?.revoked) {
+        throw new ApiError("OAUTH_SETUP_ENDED", SETUP_ENDED_MESSAGE, 409);
+      }
       this.prune();
       throw new ApiError(
         "OAUTH_STATE",
