@@ -556,6 +556,15 @@ export function WorkQueue() {
         <>
           <PromotionPrompts />
           <Composer
+            showSuggestions={!!decisions.data && !proposed.length}
+            context={
+              current && draftOf(current)?.inReplyToEmailId
+                ? {
+                    emailId: draftOf(current)!.inReplyToEmailId!,
+                    label: draftOf(current)!.subject,
+                  }
+                : undefined
+            }
             onRun={(run) => {
               setFresh(run.actionIds);
               if (run.actionIds[0]) setSelected(run.actionIds[0]);

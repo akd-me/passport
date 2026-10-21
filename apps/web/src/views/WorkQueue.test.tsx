@@ -29,6 +29,7 @@ function proposal(
           to: [{ name: `Person ${id}`, email: `${id}@example.com` }],
           subject: `Subject ${id}`,
           textBody: `Body ${id}`,
+          inReplyToEmailId: id === "p1" ? "e1" : null,
         },
       },
     },
@@ -167,11 +168,17 @@ describe("work queue", () => {
       </Harness>,
     );
     const input = await screen.findByLabelText("Instruction for Passport");
+    // The selected proposal's source message rides along as context.
+    expect(await screen.findByRole("button", { name: "Don’t include Subject p1" })).toBeInTheDocument();
     fireEvent.change(input, { target: { value: "Draft replies" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
-      expect(run).toHaveBeenCalledWith({ instruction: "Draft replies" }),
+      expect(run).toHaveBeenCalledWith({ instruction: "Draft replies", emailIds: ["e1"] }),
     );
     expect(await screen.findByText(/2 actions ready/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Don’t include Subject p1" }));
+    fireEvent.change(input, { target: { value: "Summarise" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send instruction" }));
+    await waitFor(() => expect(run).toHaveBeenLastCalledWith({ instruction: "Summarise" }));
   });
 });

@@ -199,7 +199,19 @@ export function Sidebar() {
   const withScope = (path: string) =>
     scope ? `${path}?accountId=${encodeURIComponent(scope)}` : path;
   return (
-    <aside className="sidebar" aria-label="Sidebar">
+    <aside
+      className="sidebar"
+      aria-label="Sidebar"
+      onClick={(event) => {
+        // As an overlay on narrow screens, get out of the way once something is chosen.
+        const target = event.target as HTMLElement;
+        if (
+          window.matchMedia?.("(max-width: 860px)").matches &&
+          target.closest("a, .side-row.account, .sidebar-foot .icon-btn")
+        )
+          toggleSidebar();
+      }}
+    >
       <div className="sidebar-top">
         <Link to="/" className="brand" aria-label="Passport, go to queue">
           <BrandMark />

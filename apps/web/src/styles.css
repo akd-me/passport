@@ -1555,20 +1555,22 @@ input[type="radio"] {
   gap: 6px;
 }
 .offer {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   padding: 8px 8px 8px 12px;
   border-radius: var(--r-l);
   background: var(--ink-soft);
   border: 1px solid var(--ink-line);
   font-size: var(--t-s);
-  flex-wrap: wrap;
 }
 .offer p {
-  flex: 1;
-  min-width: 220px;
   color: var(--text-2);
+}
+.offer .error {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 .offer strong {
   color: var(--text);
@@ -1640,6 +1642,24 @@ input[type="radio"] {
 }
 .composer-chip .model-name {
   font-weight: 450;
+}
+.composer-chip.context {
+  background: var(--surface-2);
+  padding-right: 3px;
+  max-width: 280px;
+}
+.chip-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--muted);
+  flex: none;
+}
+.chip-x:hover {
+  background: var(--surface-3);
+  color: var(--text);
 }
 button.composer-chip:hover {
   background: var(--surface-2);
@@ -3009,6 +3029,18 @@ fieldset.field legend {
   }
   .handled-what span {
     display: none;
+  }
+  .offer {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .offer .btn {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .offer .icon-btn {
+    grid-column: 3;
+    grid-row: 1;
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -36,14 +36,19 @@ export function Composer({
   matterTitle,
   onRun,
   showSuggestions = false,
+  context,
 }: {
   matterId?: string;
   matterTitle?: string;
   onRun?: (run: AgentRun) => void;
   showSuggestions?: boolean;
+  /** The message the user is looking at; sent as `emailIds` unless they remove it. */
+  context?: { emailId: string; label: string };
 }) {
   const [text, setText] = useState(""),
-    [run, setRun] = useState<RunState>({ state: "idle" });
+    [run, setRun] = useState<RunState>({ state: "idle" }),
+    [dropped, setDropped] = useState<string>();
+  const attached = context && context.emailId !== dropped ? context : undefined;
   const { composer, openSettings } = useUi(),
     { refresh } = useWorkspace(),
     { llm, mode } = useAccounts();
@@ -60,6 +65,7 @@ export function Composer({
       const result = await api.runAgent({
         instruction,
         ...(matterId ? { matterId } : {}),
+        ...(attached ? { emailIds: [attached.emailId] } : {}),
       });
       setRun({ state: "done", instruction, run: result });
       refresh();
@@ -162,6 +168,20 @@ export function Composer({
             <span>{provider}</span>
             {model && <span className="muted model-name">{model}</span>}
           </button>
+          {attached && (
+            <span className="composer-chip static context" title="Passport will read this message with your instruction">
+              <Icon name="mail" size={14} />
+              <span>{attached.label}</span>
+              <button
+                type="button"
+                className="chip-x"
+                aria-label={`Don’t include ${attached.label}`}
+                onClick={() => setDropped(attached.emailId)}
+              >
+                <Icon name="close" size={11} />
+              </button>
+            </span>
+          )}
           {matterTitle && (
             <span className="composer-chip static" title="This instruction is scoped to the matter">
               <Icon name="matters" size={14} />
