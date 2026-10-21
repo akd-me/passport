@@ -69,7 +69,9 @@ export function Composer({
       return;
     }
     setRun({ state: "running", instruction });
-    setText("");
+    if (instruction === text.trim()) {
+      setText("");
+    }
     try {
       const result = await api.runAgent({
         instruction,
@@ -80,10 +82,10 @@ export function Composer({
       refresh();
       onRun?.(result);
     } catch (e) {
-      // Agent composition failed; restoring the instruction.
+      // Agent composition failed; restoring the instruction unless a new draft was started.
       logger.warn("Agent composition failed; restoring the instruction");
 
-      setText(instruction);
+      setText((draft) => draft || instruction);
       setRun({
         state: "failed",
         instruction,
@@ -131,6 +133,16 @@ export function Composer({
                   ? run.error
                   : outcome(run.run)}
             </span>
+            {run.state === "failed" && text && text !== run.instruction && (
+              <button
+                type="button"
+                className="link-btn"
+                aria-label={`Retry: ${run.instruction}`}
+                onClick={() => void submit(run.instruction)}
+              >
+                Retry
+              </button>
+            )}
             {run.state !== "running" && (
               <button
                 type="button"
