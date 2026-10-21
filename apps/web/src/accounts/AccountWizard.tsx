@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Account } from "@passport/types";
 import { api, type ProviderDescriptor } from "../api";
 import { useTask, useWorkspace } from "../state";
-import { Feedback } from "../components/ui";
+import { Feedback, Icon } from "../components/ui";
 import {
   accountApi,
   type ConnectedAccount,
@@ -15,17 +15,26 @@ export function AccountWizard({
   accounts = [],
   account,
   onClose,
+  title,
+  initialKind,
 }: {
   providers: ProviderDescriptor[];
   accounts?: ConnectedAccount[];
   account?: Account;
   onClose: () => void;
+  /** Heading; the connect dialog supplies its own context. */
+  title?: string;
+  /** Provider to preselect, e.g. the one chosen before falling back to manual setup. */
+  initialKind?: string;
 }) {
   const choices = providers.filter((p) =>
     ["gmail", "graph", "imap", "mock"].includes(p.kind),
   );
   const [kind, setKind] = useState(
-    account?.kind ?? choices[0]?.kind ?? "gmail",
+    account?.kind ??
+      (choices.some((c) => c.kind === initialKind) ? initialKind : undefined) ??
+      choices[0]?.kind ??
+      "gmail",
   );
   const [fields, setFields] = useState<Record<string, string>>({
     clientId: String(account?.settings.clientId ?? ""),
@@ -98,9 +107,10 @@ export function AccountWizard({
     setFields((f) => ({ ...f, [id]: value }));
     setTested(false);
   };
+  const callback = `${location.origin}/oauth/callback`;
   return (
     <form
-      className="panel add-account-form"
+      className="manual-setup"
       onSubmit={async (e) => {
         e.preventDefault();
         if (oauth) {
@@ -133,17 +143,17 @@ export function AccountWizard({
         }
       }}
     >
-      <div className="section-heading">
-        <h2>
+      <div className="block-heading">
+        <h3>
           {account
             ? `Re-authorize ${account.emailAddress}`
-            : "Connect a mailbox"}
-        </h2>
-        <button type="button" className="button text" onClick={onClose}>
+            : (title ?? "Connect a mailbox")}
+        </h3>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={onClose}>
           Close
         </button>
       </div>
-      <label>
+      <label className="field">
         Provider
         <select
           value={kind}
@@ -170,42 +180,56 @@ export function AccountWizard({
       </label>
       {oauth ? (
         <>
-          <div className="info-note oauth-guide">
+          <div className="guide">
             {kind === "gmail" ? (
               <>
-                <strong>Your own Google OAuth client</strong>
-                <p>
-                  Google Cloud console → APIs &amp; Services → Library: enable
-                  Gmail API and Google Calendar API. Google Auth Platform →
-                  Audience: add your address as a test user. Clients → Create
-                  client → Desktop app. Paste its client ID below; the
-                  downloaded JSON also contains an optional client secret.
-                </p>
+                <strong>Create your own Google OAuth client</strong>
+                <ol>
+                  <li>
+                    Google Cloud console → APIs &amp; Services → Library: enable
+                    Gmail API and Google Calendar API.
+                  </li>
+                  <li>
+                    Google Auth Platform → Audience: add your address as a test
+                    user.
+                  </li>
+                  <li>
+                    Clients → Create client → Desktop app. Paste its client ID
+                    below; the downloaded JSON also contains an optional client
+                    secret.
+                  </li>
+                </ol>
               </>
             ) : (
               <>
-                <strong>Your own Microsoft app registration</strong>
-                <p>
-                  Azure portal → Microsoft Entra ID → App registrations → New
-                  registration. Choose organizational and personal Microsoft
-                  accounts. Authentication → Add a platform → Mobile and desktop
-                  applications → add the redirect below. Advanced settings →
-                  Allow public client flows → Yes. API permissions → Microsoft
-                  Graph → Delegated: User.Read, Mail.ReadWrite, Mail.Send,
-                  Calendars.ReadWrite, offline_access. If the portal rejects
-                  127.0.0.1, add the URI in Manifest →
-                  publicClient.redirectUris.
-                </p>
+                <strong>Register your own Microsoft app</strong>
+                <ol>
+                  <li>
+                    Azure portal → Microsoft Entra ID → App registrations → New
+                    registration. Choose organizational and personal Microsoft
+                    accounts.
+                  </li>
+                  <li>
+                    Authentication → Add a platform → Mobile and desktop
+                    applications → add the redirect below. Advanced settings →
+                    Allow public client flows → Yes.
+                  </li>
+                  <li>
+                    API permissions → Microsoft Graph → Delegated: User.Read,
+                    Mail.ReadWrite, Mail.Send, Calendars.ReadWrite,
+                    offline_access. If the portal rejects 127.0.0.1, add the URI
+                    in Manifest → publicClient.redirectUris.
+                  </li>
+                </ol>
               </>
             )}
             <p>
-              Callback: <code>{location.origin}/oauth/callback</code>. Open
-              Passport at{" "}
-              <code>http://127.0.0.1:{location.port || "3000"}/accounts</code>{" "}
-              for local authorization.
+              Redirect URI <code>{callback}</code>. Open Passport at{" "}
+              <code>http://127.0.0.1:{location.port || "3000"}</code> so the
+              browser can return here.
             </p>
           </div>
-          <label>
+          <label className="field">
             OAuth client ID
             <input
               autoComplete="off"
@@ -214,7 +238,7 @@ export function AccountWizard({
               onChange={(e) => setField("clientId", e.target.value)}
             />
           </label>
-          <label>
+          <label className="field">
             OAuth client secret (optional)
             <input
               type="password"
@@ -223,7 +247,7 @@ export function AccountWizard({
               onChange={(e) => setField("clientSecret", e.target.value)}
             />
           </label>
-          <label className="checkbox-label">
+          <label className="check">
             <input
               type="checkbox"
               checked={calendar}
@@ -231,15 +255,11 @@ export function AccountWizard({
             />
             Connect calendar too
           </label>
-          <p className="subtle">
-            The provider supplies your address after consent. Repeat this wizard
-            for each account.
-          </p>
         </>
       ) : (
         <>
-          <div className="form-columns">
-            <label>
+          <div className="field-row">
+            <label className="field">
               Email address
               <input
                 type="email"
@@ -251,95 +271,103 @@ export function AccountWizard({
                 }}
               />
             </label>
-            <label>
+            <label className="field">
               Display name
               <input
                 value={displayName}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Personal mailbox"
+                placeholder="Work"
               />
             </label>
           </div>
-          {descriptor?.fields
-            .filter((f) => !["emailAddress", "displayName"].includes(f.id))
-            .map((field) => (
-              <label key={field.id}>
-                {field.label}
-                {["tls", "smtpTls"].includes(field.id) ? (
-                  <select
-                    value={fields[field.id] ?? "true"}
-                    onChange={(e) => setField(field.id, e.target.value)}
-                  >
-                    <option value="true">TLS</option>
-                    <option value="false">STARTTLS</option>
-                  </select>
-                ) : (
-                  <input
-                    type={
-                      field.secret
-                        ? "password"
-                        : ["port", "smtpPort"].includes(field.id)
-                          ? "number"
-                          : "text"
-                    }
-                    required={field.required}
-                    value={fields[field.id] ?? ""}
-                    onChange={(e) => setField(field.id, e.target.value)}
-                    autoComplete={field.secret ? "new-password" : "off"}
-                  />
-                )}
-                {field.help && <small>{field.help}</small>}
-              </label>
-            ))}
-          {kind === "imap" && (
-            <button
-              type="button"
-              className="button secondary"
-              disabled={task.busy}
-              onClick={() =>
-                task.run(async () => {
-                  await accountApi.test(input());
-                  setTested(true);
-                }, "Connection test passed.")
-              }
-            >
-              Test connection
-            </button>
+          <div className="field-grid">
+            {descriptor?.fields
+              .filter((f) => !["emailAddress", "displayName"].includes(f.id))
+              .map((field) => (
+                <label key={field.id} className="field">
+                  {field.label}
+                  {["tls", "smtpTls"].includes(field.id) ? (
+                    <select
+                      value={fields[field.id] ?? "true"}
+                      onChange={(e) => setField(field.id, e.target.value)}
+                    >
+                      <option value="true">TLS</option>
+                      <option value="false">STARTTLS</option>
+                    </select>
+                  ) : (
+                    <input
+                      type={
+                        field.secret
+                          ? "password"
+                          : ["port", "smtpPort"].includes(field.id)
+                            ? "number"
+                            : "text"
+                      }
+                      required={field.required}
+                      value={fields[field.id] ?? ""}
+                      onChange={(e) => setField(field.id, e.target.value)}
+                      autoComplete={field.secret ? "new-password" : "off"}
+                    />
+                  )}
+                  {field.help && <small>{field.help}</small>}
+                </label>
+              ))}
+          </div>
+          {tested && (
+            <p role="status" className="ok-note">
+              <Icon name="check" size={14} />
+              Connection test passed.
+            </p>
           )}
-          {tested && <p role="status">Connection test passed.</p>}
         </>
       )}
       <Feedback error={task.error || status?.error} />
       {attempt && (
-        <div className="connection-progress" role="status">
-          {status?.status === "connected"
-            ? linked?.lastSyncError
-              ? `Connected. Sync needs attention: ${linked.lastSyncError}`
-              : linked?.lastSyncAt && !linked.syncing
-                ? `Connected and synced ${linked.messageCount ?? 0} messages.`
-                : "Connected. Initial sync is running…"
-            : status?.status === "failed"
-              ? "Connection was not completed."
-              : "Waiting for authorization in the other tab…"}
+        <div className="progress-note" role="status">
           {status?.status === "authorizing" && (
-            <p>
-              <a
-                href={attempt.authUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Open authorization tab
-              </a>
-            </p>
+            <Icon name="spinner" size={14} />
+          )}
+          <span>
+            {status?.status === "connected"
+              ? linked?.lastSyncError
+                ? `Connected. Sync needs attention: ${linked.lastSyncError}`
+                : linked?.lastSyncAt && !linked.syncing
+                  ? `Connected and synced ${linked.messageCount ?? 0} messages.`
+                  : "Connected. Initial sync is running…"
+              : status?.status === "failed"
+                ? "Connection was not completed."
+                : "Waiting for authorization in the other tab…"}
+          </span>
+          {status?.status === "authorizing" && (
+            <a href={attempt.authUrl} target="_blank" rel="noopener noreferrer">
+              Open authorization tab
+            </a>
           )}
         </div>
       )}
-      <button
-        className="button primary"
-        disabled={task.busy || !descriptor || status?.status === "authorizing"}
-      >
-        {task.busy ? "Connecting…" : oauth ? "Connect" : "Add account"}
-      </button>
+      <div className="form-actions">
+        {kind === "imap" && (
+          <button
+            type="button"
+            className="btn"
+            disabled={task.busy}
+            onClick={() =>
+              task.run(async () => {
+                await accountApi.test(input());
+                setTested(true);
+              }, "Connection test passed.")
+            }
+          >
+            Test connection
+          </button>
+        )}
+        <button
+          className="btn btn-primary"
+          disabled={task.busy || !descriptor || status?.status === "authorizing"}
+        >
+          {task.busy ? "Connecting…" : oauth ? "Connect" : "Add account"}
+        </button>
+      </div>
     </form>
   );
 }

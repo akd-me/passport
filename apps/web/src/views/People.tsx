@@ -5,51 +5,73 @@ import { queryString, type PersonDetail } from "../api";
 import { useResource } from "../state";
 import {
   Avatar,
-  Badge,
   Empty,
   Feedback,
   humanize,
   Icon,
   Loading,
-  PageHeader,
   relativeTime,
   Verification,
 } from "../components/ui";
+import { Surface } from "../shell/Surface";
+
 export function DowngradeWarning({ person }: { person: Person }) {
   return person.lastSeenBlueAt && person.verification === "green" ? (
-    <div className="warning-banner" role="alert">
-      <Icon name="trust" size={20} />
+    <div className="warning" role="alert">
+      <Icon name="alert" size={16} />
       <div>
         <strong>Verification changed for {person.displayName}.</strong>
         <p>
-          Previously verified blue. Their latest message is green. Check with
-          them through a known channel before sharing sensitive information.
+          Earlier messages were verified blue; the latest is green. Check with
+          them through a channel you trust before sharing anything sensitive.
         </p>
       </div>
     </div>
   ) : null;
 }
+
+const relationships = ["", "known", "stranger", "service"];
+const relationshipLabel: Record<string, string> = {
+  "": "All",
+  known: "Known",
+  stranger: "New",
+  service: "Services",
+  self: "You",
+};
+
 export function People() {
   const [text, setText] = useState(""),
-    { data, error } = useResource<Person[]>(`/people${queryString({ text })}`);
+    [relationship, setRelationship] = useState(""),
+    { data, error } = useResource<Person[]>(`/people${queryString({ text, relationship })}`);
   return (
-    <>
-      <PageHeader
-        eyebrow="FAMILIAR FACES, CLEARER CONTEXT"
-        title="It starts with people."
-        description="The relationships behind the messages, with identity you can see."
-      />
-      <div className="filter-bar">
+    <Surface title="People" wide>
+      <div className="list-head">
+        <h1>People</h1>
+        <span className="muted num">{data?.length ?? ""}</span>
+      </div>
+      <div className="toolbar">
         <label className="search-field">
-          <Icon name="search" size={18} />
+          <Icon name="search" size={14} />
           <input
             aria-label="Search people"
-            placeholder="Find a person…"
+            placeholder="Search by name or address"
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
         </label>
-        <span className="subtle">{data?.length ?? "—"} people</span>
+        <div className="segmented small" role="radiogroup" aria-label="Relationship">
+          {relationships.map((r) => (
+            <button
+              key={r || "all"}
+              type="button"
+              role="radio"
+              aria-checked={relationship === r}
+              onClick={() => setRelationship(r)}
+            >
+              {relationshipLabel[r]}
+            </button>
+          ))}
+        </div>
       </div>
       <Feedback error={error} />
       {!data ? (
@@ -62,102 +84,132 @@ export function People() {
               <DowngradeWarning key={p.id} person={p} />
             ))}
           {!data.length ? (
-            <Empty title="No one found.">
-              Try another name or email address.
+            <Empty title="No one found." icon="people">
+              Try another name or address.
             </Empty>
           ) : (
-            <div className="people-grid">
+            <ul className="rows">
               {data.map((p) => (
-                <Link to={`/people/${p.id}`} className="person-tile" key={p.id}>
-                  <div className="person-tile-top">
-                    <Avatar name={p.displayName} />
-                    <Verification person={p} />
-                  </div>
-                  <h2>{p.displayName}</h2>
-                  <p className="person-email">{p.primaryEmail}</p>
-                  <Badge>{humanize(p.relationship)}</Badge>
-                  <p className="person-note">
-                    {p.notes ?? "A new connection in your workspace."}
-                  </p>
-                  <div className="tile-footer">
-                    <span>
-                      {p.stats.received} received · {p.stats.sent} sent
+                <li key={p.id}>
+                  <Link to={`/people/${p.id}`} className="row person-row">
+                    <Avatar name={p.displayName} small />
+                    <span className="row-main">
+                      <strong>{p.displayName}</strong>
+                      <span className="muted">{p.notes ?? p.primaryEmail}</span>
                     </span>
-                    <span>
-                      {p.stats.lastContactAt
-                        ? relativeTime(p.stats.lastContactAt)
-                        : "No contact yet"}
+                    <span className="row-meta">
+                      <span className="muted">{relationshipLabel[p.relationship] ?? humanize(p.relationship)}</span>
+                      <Verification person={p} />
+                      <span className="muted num" title="Received and sent">
+                        {p.stats.received} in, {p.stats.sent} out
+                      </span>
+                      <time className="muted">
+                        {p.stats.lastContactAt ? relativeTime(p.stats.lastContactAt) : "No contact"}
+                      </time>
                     </span>
-                  </div>
-                </Link>
+                  </Link>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
-          <p className="identity-note">
-            <Icon name="trust" size={16} />
+          <p className="footnote">
+            <Icon name="trust" size={14} />
             Verification comes from signatures and authentication headers.
-            Message content never determines a badge.
+            Message content never sets it.
           </p>
         </>
       )}
-    </>
+    </Surface>
   );
 }
+
 export function PersonPage() {
   const { id } = useParams(),
-    { data, error } = useResource<PersonDetail>(
-      `/people/${encodeURIComponent(id!)}`,
-    );
+    { data, error } = useResource<PersonDetail>(`/people/${encodeURIComponent(id!)}`);
   if (!data)
     return (
-      <>
+      <Surface title="Person" crumbs={[{ label: "People", to: "/people" }, { label: "…" }]}>
         <Feedback error={error} />
         {!error && <Loading />}
-      </>
+      </Surface>
     );
+  const { person } = data;
   return (
-    <>
-      <Link to="/people" className="back-link">
-        ← All people
-      </Link>
-      <PageHeader
-        eyebrow={humanize(data.person.relationship)}
-        title={data.person.displayName}
-        description={data.person.primaryEmail}
-      >
-        <Verification person={data.person} />
-      </PageHeader>
-      <DowngradeWarning person={data.person} />
-      <div className="detail-layout">
-        <section className="panel">
+    <Surface
+      title={person.displayName}
+      crumbs={[{ label: "People", to: "/people" }, { label: person.displayName }]}
+      detailsLabel="About"
+      details={
+        <div className="details-stack">
+          <section>
+            <h3>Notes</h3>
+            <p>{person.notes ?? "No notes yet."}</p>
+            <dl className="facts compact">
+              <dt>Relationship</dt>
+              <dd>{relationshipLabel[person.relationship] ?? humanize(person.relationship)}</dd>
+              <dt>Addresses</dt>
+              <dd>{person.emails.join(", ")}</dd>
+              <dt>Received</dt>
+              <dd className="num">{person.stats.received}</dd>
+              <dt>Sent</dt>
+              <dd className="num">{person.stats.sent}</dd>
+            </dl>
+          </section>
+          <section>
+            <h3>Shared matters</h3>
+            {data.matters.length ? (
+              <ul className="link-list">
+                {data.matters.map((m) => (
+                  <li key={m.id}>
+                    <Link to={`/matters/${m.id}`}>
+                      <span className={`matter-glyph ${m.status}`} aria-hidden="true" />
+                      {m.title}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">None yet.</p>
+            )}
+          </section>
+        </div>
+      }
+    >
+      <header className="person-head">
+        <Avatar name={person.displayName} />
+        <div>
+          <h1>{person.displayName}</h1>
+          <p className="muted">{person.primaryEmail}</p>
+        </div>
+        <Verification person={person} />
+      </header>
+      <DowngradeWarning person={person} />
+      <section className="group" aria-label="Recent correspondence">
+        <div className="group-head">
           <h2>Recent correspondence</h2>
+          <span className="count">{data.emails.items.length}</span>
+        </div>
+        <ol className="timeline">
           {data.emails.items.map((email) => (
-            <details className="correspondence" key={email.id}>
-              <summary>
-                <strong>{email.subject}</strong>
-                <span className="subtle">{relativeTime(email.receivedAt)}</span>
-              </summary>
-              <p>{email.preview}</p>
-            </details>
+            <li key={email.id}>
+              <span className="timeline-icon">
+                <Icon name={email.provenance === "sent" ? "send" : "mail"} size={13} />
+              </span>
+              <details>
+                <summary>
+                  <span className="timeline-title">{email.subject}</span>
+                  <time className="muted" dateTime={email.receivedAt}>
+                    {relativeTime(email.receivedAt)}
+                  </time>
+                </summary>
+                <div className="timeline-body">
+                  <p className="mail-text">{email.preview}</p>
+                </div>
+              </details>
+            </li>
           ))}
-        </section>
-        <aside>
-          <section className="rail-card">
-            <h2>Relationship notes</h2>
-            <p>{data.person.notes ?? "No notes yet."}</p>
-            <Badge>{humanize(data.person.relationship)}</Badge>
-          </section>
-          <section className="rail-card">
-            <h2>Shared matters</h2>
-            {data.matters.map((m) => (
-              <Link to={`/matters/${m.id}`} className="matter-link" key={m.id}>
-                {m.title}
-                <Icon name="arrow" size={16} />
-              </Link>
-            ))}
-          </section>
-        </aside>
-      </div>
-    </>
+        </ol>
+      </section>
+    </Surface>
   );
 }
