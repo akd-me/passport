@@ -31,8 +31,9 @@ it("R3: reads api-token without generating a new one and authenticates health an
   vi.stubGlobal("fetch", fetcher);
   const request = await serverClient(config);
   await request!("/api/decisions");
-  for (const [, init] of fetcher.mock.calls)
+  for (const [, init] of fetcher.mock.calls) {
     expect(init?.headers).toHaveProperty("Authorization", "Bearer file-token");
+  }
 });
 it("R3/R9: unreachable live owner refuses fallback; absent owner announces local access", async () => {
   const config = await fixture();
@@ -68,8 +69,9 @@ it.each(["trust", "decisions", "sync", "triage"])(
     vi.spyOn(console, "log").mockImplementation(() => {});
     await main([command, ...(command === "triage" ? ["email"] : [])]);
     expect(fetcher.mock.calls.length).toBeGreaterThan(1);
-    for (const [, init] of fetcher.mock.calls)
+    for (const [, init] of fetcher.mock.calls) {
       expect(init?.headers).toHaveProperty("Authorization", "Bearer shared-token");
+    }
     expect(fetcher.mock.calls.at(-1)?.[0]).toContain(
       command === "sync"
         ? "/api/accounts/account/sync"

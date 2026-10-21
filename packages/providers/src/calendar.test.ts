@@ -108,12 +108,13 @@ describe("Google Calendar adapter", () => {
     let incremental = false;
     const p = new GoogleCalendarProvider({
       fetch: fixtureFetch((url) => {
-        if (url.pathname.endsWith("/calendarList"))
+        if (url.pathname.endsWith("/calendarList")) {
           return response({
             items: [
               { id: account.emailAddress, summary: "Personal", primary: true, timeZone: "UTC" },
             ],
           });
+        }
         if (incremental) {
           expect(url.searchParams.get("syncToken")).toBe("sync-1");
           return response({ items: [], nextSyncToken: "sync-2" });
@@ -142,12 +143,14 @@ describe("Google Calendar adapter", () => {
     const mutations: Array<{ method: string; body: Record<string, unknown> }> = [];
     const p = new GoogleCalendarProvider({
       fetch: fixtureFetch((url, init) => {
-        if (url.pathname.endsWith("/freeBusy"))
+        if (url.pathname.endsWith("/freeBusy")) {
           return response({
             calendars: { primary: { busy: [{ start: eventInput.start, end: eventInput.end }] } },
           });
-        if (init.method)
+        }
+        if (init.method) {
           mutations.push({ method: init.method, body: init.body ? jsonBody(init) : {} });
+        }
         return init.method === "DELETE" ? response(null, 204) : response(google);
       }),
     });
@@ -171,14 +174,16 @@ describe("Google Calendar adapter", () => {
     const allDay = { ...google, start: { date: "2026-01-20" }, end: { date: "2026-01-21" } };
     const p = new GoogleCalendarProvider({
       fetch: fixtureFetch((url, init) => {
-        if (url.pathname.endsWith("/calendars/primary"))
+        if (url.pathname.endsWith("/calendars/primary")) {
           return response({ timeZone: "America/New_York" });
+        }
         if (init.method === "PATCH") {
           expect(jsonBody(init).start).toEqual({ date: "2026-01-22" });
           return response(allDay);
         }
-        if (url.pathname.endsWith("/events"))
+        if (url.pathname.endsWith("/events")) {
           return response({ items: [allDay], nextSyncToken: "token" });
+        }
         return response(allDay);
       }),
     });
@@ -211,25 +216,29 @@ describe("Graph Calendar adapter", () => {
   it("syncs partial delta records and tombstones within a cursor-bound time window", async () => {
     const p = new GraphCalendarProvider({
       fetch: fixtureFetch((url) => {
-        if (url.pathname.endsWith("/calendarView/delta"))
+        if (url.pathname.endsWith("/calendarView/delta")) {
           return response({
             value: [{ id: "ms-event" }],
             "@odata.nextLink": "https://graph.microsoft.com/v1.0/second-page",
           });
-        if (url.pathname.endsWith("/second-page"))
+        }
+        if (url.pathname.endsWith("/second-page")) {
           return response({
             value: [{ id: "gone", "@removed": {} }],
             "@odata.deltaLink": "https://graph.microsoft.com/v1.0/calendar-state",
           });
-        if (url.pathname.endsWith("/calendar-state"))
+        }
+        if (url.pathname.endsWith("/calendar-state")) {
           return response({
             value: [],
             "@odata.deltaLink": "https://graph.microsoft.com/v1.0/calendar-state-2",
           });
-        if (url.pathname.endsWith("/calendars"))
+        }
+        if (url.pathname.endsWith("/calendars")) {
           return response({
             value: [{ id: "remote-calendar", name: "Primary", isDefaultCalendar: true }],
           });
+        }
         return response(graph);
       }),
     });
@@ -252,7 +261,7 @@ describe("Graph Calendar adapter", () => {
     const p = new GraphCalendarProvider({
       fetch: fixtureFetch((url, init) => {
         calls.push(`${init.method ?? "GET"} ${url.pathname}`);
-        if (url.pathname.endsWith("/getSchedule"))
+        if (url.pathname.endsWith("/getSchedule")) {
           return response({
             value: [
               {
@@ -263,16 +272,22 @@ describe("Graph Calendar adapter", () => {
               },
             ],
           });
-        if (init.method === "DELETE" || /\/(accept|decline|tentativelyAccept)$/.test(url.pathname))
+        }
+        if (
+          init.method === "DELETE" ||
+          /\/(accept|decline|tentativelyAccept)$/.test(url.pathname)
+        ) {
           return response(null, 204);
+        }
         return response(graph);
       }),
     });
     await p.connect(account, { access_token: "token" });
     await p.createEvent(eventInput);
     await p.updateEvent("ms-event", { title: "Updated" });
-    for (const status of ["accepted", "declined", "tentative"] as const)
+    for (const status of ["accepted", "declined", "tentative"] as const) {
       await p.respond("ms-event", status);
+    }
     await p.deleteEvent("ms-event");
     expect(await p.freeBusy(range)).toEqual([{ start: eventInput.start, end: eventInput.end }]);
     expect(calls).toContain("POST /v1.0/me/events/ms-event/tentativelyAccept");
@@ -325,20 +340,26 @@ function davServer(
       body = String(init.body ?? ""),
       headers = new Headers(init.headers);
     requests.push({ method, body, headers });
-    if (method === "PROPFIND") return response(propfind(), 207);
+    if (method === "PROPFIND") {
+      return response(propfind(), 207);
+    }
     if (method === "REPORT") {
-      if (body.includes("free-busy-query"))
+      if (body.includes("free-busy-query")) {
         return options.freeBusy === false
           ? response("unsupported", 405)
           : response(
               "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VFREEBUSY\r\nFREEBUSY:20260120T140000Z/20260120T150000Z\r\nEND:VFREEBUSY\r\nEND:VCALENDAR\r\n",
             );
+      }
       return response(multistatus(body.includes("calendar-query")), 207);
     }
     if (["PUT", "DELETE"].includes(method)) {
-      if (options.failWrites) return response("private conflict detail", 412);
-      if (method === "PUT") resources.set(url.href, body);
-      else {
+      if (options.failWrites) {
+        return response("private conflict detail", 412);
+      }
+      if (method === "PUT") {
+        resources.set(url.href, body);
+      } else {
         resources.delete(url.href);
         deleted.push(url.href);
       }
@@ -381,7 +402,9 @@ describe("CalDAV adapter", () => {
       ),
     ).toBe(true);
     const e = changes.find((d) => d.kind === "event" && d.op === "upsert");
-    if (e?.kind !== "event" || e.op !== "upsert") throw new Error("No event");
+    if (e?.kind !== "event" || e.op !== "upsert") {
+      throw new Error("No event");
+    }
     await p.deleteEvent(e.event.providerId);
     const deleted = await collect(p.sync(lastCursor(changes)));
     expect(deleted).toContainEqual({ kind: "event", op: "delete", providerId: e.event.providerId });

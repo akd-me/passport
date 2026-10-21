@@ -28,7 +28,7 @@ export async function request(
   } catch {
     throw new ProviderError("NETWORK_ERROR", "Provider request failed or timed out");
   }
-  if (!response.ok)
+  if (!response.ok) {
     throw new ProviderError(
       response.status === 401
         ? "AUTH_FAILED"
@@ -38,13 +38,16 @@ export async function request(
       `Provider request failed (HTTP ${response.status})`,
       response.status,
     );
+  }
   return response;
 }
 
 export async function readJson<T>(response: Response): Promise<T> {
   try {
     const value: unknown = await response.json();
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error();
+    }
     return value as T;
   } catch {
     throw new ProviderError("INVALID_RESPONSE", "Provider returned invalid JSON");
@@ -68,13 +71,18 @@ export async function exchangeToken(
       body: new URLSearchParams(fields),
     }),
   );
-  if (typeof token.access_token !== "string")
+  if (typeof token.access_token !== "string") {
     throw new ProviderError("INVALID_RESPONSE", "OAuth response has no access_token");
+  }
   const result: AccountCredentials = {};
-  for (const key of ["access_token", "refresh_token", "token_type", "scope"])
-    if (typeof token[key] === "string") result[key] = token[key];
-  if (typeof token.expires_in === "number" || typeof token.expires_in === "string")
+  for (const key of ["access_token", "refresh_token", "token_type", "scope"]) {
+    if (typeof token[key] === "string") {
+      result[key] = token[key];
+    }
+  }
+  if (typeof token.expires_in === "number" || typeof token.expires_in === "string") {
     result.expires_at = String(Date.now() + Number(token.expires_in) * 1000);
+  }
   return result;
 }
 
@@ -91,8 +99,9 @@ export class HttpConnection {
     this.fetcher = options.fetch ?? globalThis.fetch;
   }
   async connect(account: Account, credentials: AccountCredentials): Promise<void> {
-    if (this.connected && this.account.id !== account.id)
+    if (this.connected && this.account.id !== account.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Use a separate provider instance per account");
+    }
     this.account = structuredClone(account);
     this.credentials = { ...credentials };
     this.connected = true;
@@ -102,7 +111,9 @@ export class HttpConnection {
     this.credentials = {};
   }
   protected check(): void {
-    if (!this.connected) throw new ProviderError("NOT_CONNECTED", "Connect the provider first");
+    if (!this.connected) {
+      throw new ProviderError("NOT_CONNECTED", "Connect the provider first");
+    }
   }
   protected now(): Date {
     return this.options.now?.() ?? new Date();
@@ -112,18 +123,25 @@ export class HttpConnection {
     getEmail: (providerId: string) => Promise<Email | null>,
   ): Promise<Email | null> {
     this.check();
-    if (!id) return null;
+    if (!id) {
+      return null;
+    }
     return resolveReplyEmail(this.account.id, id, getEmail, this.options.resolveEmail);
   }
   protected async refresh(): Promise<void> {
-    if (this.refreshing) return this.refreshing;
+    if (this.refreshing) {
+      return this.refreshing;
+    }
     this.refreshing = (async () => {
-      if (!this.oauth) throw new ProviderError("AUTH_FAILED", "The provider token has expired");
-      if (!this.credentials.refresh_token)
+      if (!this.oauth) {
+        throw new ProviderError("AUTH_FAILED", "The provider token has expired");
+      }
+      if (!this.credentials.refresh_token) {
         throw new ProviderError(
           "OAUTH_REFRESH_FAILED",
           "Re-authorize this account to renew access",
         );
+      }
       let token: AccountCredentials;
       try {
         token = await exchangeToken(
@@ -144,11 +162,12 @@ export class HttpConnection {
           },
         );
       } catch (error) {
-        if (error instanceof ProviderError && [400, 401].includes(error.status ?? 0))
+        if (error instanceof ProviderError && [400, 401].includes(error.status ?? 0)) {
           throw new ProviderError(
             "OAUTH_REFRESH_FAILED",
             "Re-authorize this account to renew access",
           );
+        }
         throw error;
       }
       this.credentials = { ...this.credentials, ...token };
@@ -167,17 +186,21 @@ export class HttpConnection {
       (!this.credentials.access_token ||
         (this.credentials.expires_at &&
           Number(this.credentials.expires_at) < this.now().getTime() + 60_000))
-    )
+    ) {
       await this.refresh();
+    }
     const headers = new Headers(init.headers);
     const token = this.credentials.access_token ?? this.credentials.token;
-    if (token) headers.set("authorization", `Bearer ${token}`);
-    else if (this.credentials.password)
+    if (token) {
+      headers.set("authorization", `Bearer ${token}`);
+    } else if (this.credentials.password) {
       headers.set(
         "authorization",
         `Basic ${Buffer.from(`${this.account.settings.username ?? this.account.emailAddress}:${this.credentials.password}`).toString("base64")}`,
       );
-    else throw new ProviderError("CONFIG_REQUIRED", "Missing provider credentials");
+    } else {
+      throw new ProviderError("CONFIG_REQUIRED", "Missing provider credentials");
+    }
     try {
       return await request(this.fetcher, url, { ...init, headers });
     } catch (e) {
@@ -186,10 +209,12 @@ export class HttpConnection {
         e.status !== 401 ||
         !this.oauth ||
         !this.credentials.refresh_token
-      )
+      ) {
         throw e;
-      if (headers.get("authorization") === `Bearer ${this.credentials.access_token}`)
+      }
+      if (headers.get("authorization") === `Bearer ${this.credentials.access_token}`) {
         await this.refresh();
+      }
       headers.set("authorization", `Bearer ${this.credentials.access_token}`);
       return request(this.fetcher, url, { ...init, headers });
     }
@@ -202,11 +227,12 @@ export class HttpConnection {
   }
   protected safeLink(link: string, origin: string): string {
     const url = new URL(link, origin);
-    if (url.origin !== new URL(origin).origin || url.protocol !== "https:")
+    if (url.origin !== new URL(origin).origin || url.protocol !== "https:") {
       throw new ProviderError(
         "INVALID_RESPONSE",
         "Provider supplied an untrusted continuation URL",
       );
+    }
     return url.href;
   }
 }

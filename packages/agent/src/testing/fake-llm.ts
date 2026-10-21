@@ -10,11 +10,17 @@ export class FakeLlm implements LlmClient {
 
   async complete(opts: CompleteOptions): Promise<LlmCompletion> {
     this.calls.push(structuredClone(opts));
-    if (!this.script.length) throw new AgentError("FakeLlm script exhausted", "FAKE_LLM_EXHAUSTED");
+    if (!this.script.length) {
+      throw new AgentError("FakeLlm script exhausted", "FAKE_LLM_EXHAUSTED");
+    }
     const next = this.script.shift();
     const value: unknown = typeof next === "function" ? next(opts) : next;
-    if (value instanceof Error) throw value;
-    if (value && typeof value === "object" && "toolCalls" in value) return value as LlmCompletion;
+    if (value instanceof Error) {
+      throw value;
+    }
+    if (value && typeof value === "object" && "toolCalls" in value) {
+      return value as LlmCompletion;
+    }
     return {
       text: typeof value === "string" ? value : JSON.stringify(value),
       ...(typeof value !== "string" ? { json: value } : {}),

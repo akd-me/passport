@@ -144,8 +144,9 @@ describe("persistent scheduler", () => {
       { type: "daily", at: "25:00" },
       { type: "daily", at: "01:00", timeZone: "Mars/Olympus" },
       { type: "weekly", days: [], at: "07:30" },
-    ])
+    ]) {
       expect(() => validateSchedule(bad)).toThrow();
+    }
   });
   it("coalesces missed runs to one after restart and round trips overrides/history", async () => {
     await scheduler.register(job());
@@ -269,7 +270,9 @@ describe("persistent scheduler", () => {
   it("limits history to 20 and returns independent state snapshots", async () => {
     await scheduler.register(job({ schedule: { type: "manual" } }));
     await scheduler.start();
-    for (let i = 0; i < 25; i++) await scheduler.runNow("test");
+    for (let i = 0; i < 25; i++) {
+      await scheduler.runNow("test");
+    }
     expect(scheduler.get("test")!.history).toHaveLength(20);
     scheduler.get("test")!.history.pop();
     expect(scheduler.get("test")!.history).toHaveLength(20);
@@ -417,7 +420,9 @@ describe("R10 interrupted occurrence recovery", () => {
         expect(run).toHaveBeenCalledTimes(1);
         await again.stop();
       } finally {
-        if (restarted) await restarted.stop();
+        if (restarted) {
+          await restarted.stop();
+        }
         vi.useRealTimers();
       }
     },

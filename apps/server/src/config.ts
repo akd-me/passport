@@ -63,41 +63,48 @@ export function validateConfig(config: PassportConfig): PassportConfig {
   if (
     config.calendarMaxSyncAgeMinutes !== undefined &&
     (!Number.isFinite(config.calendarMaxSyncAgeMinutes) || config.calendarMaxSyncAgeMinutes <= 0)
-  )
+  ) {
     throw new ApiError("INVALID_CONFIG", "calendarMaxSyncAgeMinutes must be positive");
-  if (!Number.isInteger(config.port) || config.port < 0 || config.port > 65535)
+  }
+  if (!Number.isInteger(config.port) || config.port < 0 || config.port > 65535) {
     throw new ApiError("INVALID_CONFIG", "port must be 0–65535");
+  }
   if (
     config.mcpPort !== undefined &&
     (!Number.isInteger(config.mcpPort) || config.mcpPort < 0 || config.mcpPort > 65535)
-  )
+  ) {
     throw new ApiError("INVALID_CONFIG", "mcpPort must be 0–65535");
+  }
   if (
     !Number.isFinite(config.syncIntervalSeconds) ||
     config.syncIntervalSeconds < 1 ||
     config.syncIntervalSeconds > 2147483
-  )
+  ) {
     throw new ApiError(
       "INVALID_CONFIG",
       "syncIntervalSeconds must be 1–2147483 (within Node timer limits)",
     );
+  }
   if (
     !Number.isInteger(config.dailyDigestHour) ||
     config.dailyDigestHour < 0 ||
     config.dailyDigestHour > 23
-  )
+  ) {
     throw new ApiError("INVALID_CONFIG", "dailyDigestHour must be 0–23");
+  }
   if (
     !(LLM_PROVIDERS as readonly string[]).includes(config.llm.provider) ||
     !config.llm.model?.trim()
-  )
+  ) {
     throw new ApiError("INVALID_CONFIG", "A valid LLM provider and model are required");
+  }
   if (
     config.llmSelection !== undefined &&
     config.llmSelection !== "auto" &&
     config.llmSelection !== "explicit"
-  )
+  ) {
     throw new ApiError("INVALID_CONFIG", "llmSelection must be auto or explicit");
+  }
   return config;
 }
 
@@ -117,7 +124,9 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
   try {
     saved = JSON.parse(await readFile(join(dataDir, "passport.config.json"), "utf8"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
   const base = defaultConfig(dataDir);
   const config = {
@@ -126,18 +135,31 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     dataDir,
     llm: { ...base.llm, ...saved.llm },
   };
-  if (env.PASSPORT_HOST) config.host = env.PASSPORT_HOST;
-  if (env.PASSPORT_PORT) config.port = Number(env.PASSPORT_PORT);
-  if (env.PASSPORT_MCP_PORT) config.mcpPort = Number(env.PASSPORT_MCP_PORT);
-  if (env.PASSPORT_SYNC_INTERVAL_SECONDS)
+  if (env.PASSPORT_HOST) {
+    config.host = env.PASSPORT_HOST;
+  }
+  if (env.PASSPORT_PORT) {
+    config.port = Number(env.PASSPORT_PORT);
+  }
+  if (env.PASSPORT_MCP_PORT) {
+    config.mcpPort = Number(env.PASSPORT_MCP_PORT);
+  }
+  if (env.PASSPORT_SYNC_INTERVAL_SECONDS) {
     config.syncIntervalSeconds = Number(env.PASSPORT_SYNC_INTERVAL_SECONDS);
-  if (env.PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES)
+  }
+  if (env.PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES) {
     config.calendarMaxSyncAgeMinutes = Number(env.PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES);
-  if (env.PASSPORT_DIGEST_HOUR) config.dailyDigestHour = Number(env.PASSPORT_DIGEST_HOUR);
-  if (env.PASSPORT_LLM_PROVIDER)
+  }
+  if (env.PASSPORT_DIGEST_HOUR) {
+    config.dailyDigestHour = Number(env.PASSPORT_DIGEST_HOUR);
+  }
+  if (env.PASSPORT_LLM_PROVIDER) {
     config.llm.provider = env.PASSPORT_LLM_PROVIDER as LlmConfig["provider"];
-  if (saved.llm?.provider && saved.llm.provider !== config.llm.provider) delete config.llm.apiKey;
-  if (!saved.llm?.model && !env.PASSPORT_LLM_MODEL)
+  }
+  if (saved.llm?.provider && saved.llm.provider !== config.llm.provider) {
+    delete config.llm.apiKey;
+  }
+  if (!saved.llm?.model && !env.PASSPORT_LLM_MODEL) {
     config.llm.model = {
       anthropic: "claude-sonnet-5-5",
       openai: "gpt-4.1",
@@ -146,16 +168,24 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
       "claude-code": HOST_AGENT_DEFAULT_MODELS["claude-code"].main,
       codex: HOST_AGENT_DEFAULT_MODELS.codex.main,
     }[config.llm.provider];
+  }
   // A host agent switched in by environment must not inherit another provider's endpoint or fast model.
   if (isHostAgentProvider(config.llm.provider) && saved.llm?.provider !== config.llm.provider) {
     delete config.llm.baseUrl;
     delete config.llm.fastModel;
-    if (!env.PASSPORT_LLM_MODEL)
+    if (!env.PASSPORT_LLM_MODEL) {
       config.llm.model = HOST_AGENT_DEFAULT_MODELS[config.llm.provider].main;
+    }
   }
-  if (env.PASSPORT_LLM_MODEL) config.llm.model = env.PASSPORT_LLM_MODEL;
-  if (env.PASSPORT_LLM_BASE_URL) config.llm.baseUrl = env.PASSPORT_LLM_BASE_URL;
-  if (env.PASSPORT_LLM_FAST_MODEL) config.llm.fastModel = env.PASSPORT_LLM_FAST_MODEL;
+  if (env.PASSPORT_LLM_MODEL) {
+    config.llm.model = env.PASSPORT_LLM_MODEL;
+  }
+  if (env.PASSPORT_LLM_BASE_URL) {
+    config.llm.baseUrl = env.PASSPORT_LLM_BASE_URL;
+  }
+  if (env.PASSPORT_LLM_FAST_MODEL) {
+    config.llm.fastModel = env.PASSPORT_LLM_FAST_MODEL;
+  }
   config.llm.apiKey =
     env.PASSPORT_LLM_API_KEY ||
     (config.llm.provider === "anthropic"
@@ -164,7 +194,9 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
         ? env.OPENAI_API_KEY
         : undefined) ||
     config.llm.apiKey;
-  if (isHostAgentProvider(config.llm.provider)) delete config.llm.apiKey;
+  if (isHostAgentProvider(config.llm.provider)) {
+    delete config.llm.apiKey;
+  }
   config.llmSelection = saved.llmSelection ?? inferSelection(saved.llm);
   return validateConfig(config);
 }
@@ -174,7 +206,9 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
  * (Anthropic Sonnet with no key, written even by `passport init` with no model) is a choice.
  */
 function inferSelection(llm: Partial<LlmConfig> | undefined): LlmSelection {
-  if (!llm) return "auto";
+  if (!llm) {
+    return "auto";
+  }
   const placeholder =
     (llm.provider ?? "anthropic") === "anthropic" &&
     (llm.model ?? "claude-sonnet-5-5") === "claude-sonnet-5-5" &&
@@ -194,10 +228,13 @@ export async function saveConfig(config: PassportConfig): Promise<void> {
   // Preserve an operator-authored file key, but never copy an environment override to disk.
   try {
     const saved = JSON.parse(await readFile(join(config.dataDir, "passport.config.json"), "utf8"));
-    if (saved.llm?.provider === source.provider && typeof saved.llm.apiKey === "string")
+    if (saved.llm?.provider === source.provider && typeof saved.llm.apiKey === "string") {
       Object.assign(llm, { apiKey: saved.llm.apiKey });
+    }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
   // Whitelist account metadata; credentials only ever go through Store.accounts.
   const accounts = config.accounts.map(

@@ -19,14 +19,17 @@ import {
 export function normalizeAddresses(
   value: string | EmailAddress[] | undefined | null,
 ): EmailAddress[] {
-  if (Array.isArray(value))
+  if (Array.isArray(value)) {
     return value
       .map((a) => ({
         ...(a.name ? { name: a.name.trim() } : {}),
         email: a.email.trim().toLowerCase(),
       }))
       .filter((a) => a.email);
-  if (!value) return [];
+  }
+  if (!value) {
+    return [];
+  }
   // Split on commas outside quoted display names and angle addresses (also tolerate address groups).
   const pieces = value.match(/(?:"(?:[^"\\]|\\.)*"|<[^>]*>|[^,])+/g) ?? [];
   return pieces.flatMap((piece) => {
@@ -36,7 +39,9 @@ export function normalizeAddresses(
       .replace(/;$/, "")
       .replace(/^[^@<>]*:\s*/, "")
       .toLowerCase();
-    if (!/^[^\s<>@]+@[^\s<>@]+$/.test(email)) return [];
+    if (!/^[^\s<>@]+@[^\s<>@]+$/.test(email)) {
+      return [];
+    }
     const name = match?.[1]
       ?.trim()
       .replace(/^"|"$/g, "")
@@ -49,8 +54,9 @@ export function normalizeAddresses(
 /** All timestamps cross the adapter boundary as ISO UTC. Invalid values fail explicitly. */
 export function toIso(value: string | number | Date): string {
   const date = new Date(value);
-  if (!Number.isFinite(date.getTime()))
+  if (!Number.isFinite(date.getTime())) {
     throw new ProviderError("INVALID_DATE", "Provider returned an invalid timestamp");
+  }
   return date.toISOString();
 }
 
@@ -69,7 +75,9 @@ export function htmlToText(html: string): string {
     .replace(/<(br|hr)\b[^>]*\/?\s*>|<\/(p|div|li|tr|h[1-6])>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&(#x[\da-f]+|#\d+|\w+);/gi, (whole, key: string) => {
-      if (!key.startsWith("#")) return entities[key.toLowerCase()] ?? whole;
+      if (!key.startsWith("#")) {
+        return entities[key.toLowerCase()] ?? whole;
+      }
       const n =
         key[1]?.toLowerCase() === "x" ? parseInt(key.slice(2), 16) : parseInt(key.slice(1), 10);
       return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : "";
@@ -188,7 +196,9 @@ export async function mimeAttachment(
 ): Promise<{ type: string; data: Uint8Array }> {
   const parsed = await simpleParser(Buffer.from(source));
   const a = parsed.attachments[index];
-  if (!a) throw new ProviderError("NOT_FOUND", "Attachment does not exist");
+  if (!a) {
+    throw new ProviderError("NOT_FOUND", "Attachment does not exist");
+  }
   return { type: a.contentType, data: a.content };
 }
 
@@ -202,8 +212,9 @@ export function decodeMimeBlob(blobId: string): [string, number] {
       typeof value[0] === "string" &&
       Number.isInteger(value[1]) &&
       value[1] >= 0
-    )
+    ) {
       return [value[0], value[1]];
+    }
   } catch {
     /* Report a safe, stable error below. */
   }
@@ -216,8 +227,9 @@ export async function composeMime(
   getBlob: (id: string) => Promise<{ data: Uint8Array }>,
   reply?: Email | null,
 ): Promise<Buffer> {
-  if (draft.accountId !== account.id)
+  if (draft.accountId !== account.id) {
     throw new ProviderError("ACCOUNT_MISMATCH", "Draft belongs to a different account");
+  }
   const attachments = await Promise.all(
     (draft.attachments ?? []).map(async (a) => ({
       filename: a.name,
@@ -246,7 +258,8 @@ export async function composeMime(
         }
       : {}),
   });
-  if (!Buffer.isBuffer(message.message))
+  if (!Buffer.isBuffer(message.message)) {
     throw new ProviderError("MIME_COMPOSE_FAILED", "MIME composer did not return a buffer");
+  }
   return message.message;
 }

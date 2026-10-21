@@ -36,8 +36,9 @@ export function registerResources(ctx: Context) {
   }
   const variableId = (value: string | string[] | undefined) => {
     const parsed = id.safeParse(value);
-    if (!parsed.success)
+    if (!parsed.success) {
       throw new MailboxMcpError("INVALID_INPUT", "Resource ID must be one nonempty string.");
+    }
     return parsed.data;
   };
   server.registerResource(

@@ -103,7 +103,9 @@ describe("lifecycle and credentials", () => {
         (await correct.emails.query({ text: '"quick brown"' })).items.map((item) => item.id),
       ).toEqual(["retained"]);
     } finally {
-      for (const openedStore of opened) await openedStore.close();
+      for (const openedStore of opened) {
+        await openedStore.close();
+      }
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -408,7 +410,9 @@ describe("cursor pagination", () => {
       );
       await store.emails.upsertMany(records);
       const expected = records.map((record) => record.id);
-      if (sort === "receivedAt_desc") expected.reverse();
+      if (sort === "receivedAt_desc") {
+        expected.reverse();
+      }
       const ids: string[] = [];
       let cursor: string | null | undefined;
       let pages = 0;
@@ -448,8 +452,9 @@ describe("cursor pagination", () => {
     await expect(
       store.emails.query({ cursor: Buffer.from("{}").toString("base64url") }),
     ).rejects.toMatchObject({ code: "INVALID_CURSOR" });
-    for (const limit of [0, -1, 0.5, Infinity])
+    for (const limit of [0, -1, 0.5, Infinity]) {
       await expect(store.emails.query({ limit })).rejects.toMatchObject({ code: "INVALID_QUERY" });
+    }
   });
 });
 
@@ -744,7 +749,9 @@ describe("actions and trust", () => {
 
   it("paginates 61 actions across timestamp ties without duplicates", async () => {
     const expected = Array.from({ length: 61 }, (_, i) => `action-${String(i).padStart(2, "0")}`);
-    for (const id of expected) await store.actions.insert(action(id));
+    for (const id of expected) {
+      await store.actions.insert(action(id));
+    }
     const ids: string[] = [];
     let cursor: string | null | undefined;
     let pages = 0;
@@ -770,8 +777,9 @@ describe("actions and trust", () => {
       action("no-time", { status: "held" }),
       action("approved", { status: "approved", holdUntil: at }),
       action("executed", { status: "executed", holdUntil: at }),
-    ])
+    ]) {
       await store.actions.insert(record);
+    }
     expect((await store.actions.dueHeld(at)).map((record) => record.id)).toEqual(["past", "exact"]);
     await store.actions.update("past", { status: "executed" });
     expect((await store.actions.dueHeld(at)).map((record) => record.id)).toEqual(["exact"]);

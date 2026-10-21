@@ -2,7 +2,9 @@
 export const authHeaders = { "X-Requested-With": "passport" };
 
 export function handleUnauthorized(response: Response): void {
-  if (response.status === 401) window.location.replace("/");
+  if (response.status === 401) {
+    window.location.replace("/");
+  }
 }
 
 export function websocketUrl(): string {
@@ -14,8 +16,9 @@ export async function checkSession(): Promise<void> {
     const response = await fetch("/api/auth/status", {
       credentials: "same-origin",
     });
-    if (response.ok && !((await response.json()) as { authenticated: boolean }).authenticated)
+    if (response.ok && !((await response.json()) as { authenticated: boolean }).authenticated) {
       window.location.replace("/");
+    }
   } catch {
     /* Reconnect normally while the server is unavailable. */
   }
@@ -65,8 +68,11 @@ function loginPage(tokenPath: string): void {
     button.disabled = true;
     error.textContent = "";
     try {
-      if (await login(input.value.trim())) window.location.replace("/");
-      else error.textContent = "That token was not accepted. Check the terminal and try again.";
+      if (await login(input.value.trim())) {
+        window.location.replace("/");
+      } else {
+        error.textContent = "That token was not accepted. Check the terminal and try again.";
+      }
     } catch {
       error.textContent = "Could not reach Passport. Please try again.";
     } finally {
@@ -90,17 +96,24 @@ export async function initializeAuth(render: () => void): Promise<void> {
     history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   }
   try {
-    if (token !== null) await login(token);
+    if (token !== null) {
+      await login(token);
+    }
     const response = await fetch("/api/auth/status", {
       credentials: "same-origin",
     });
-    if (!response.ok) throw new Error("Authentication service unavailable");
+    if (!response.ok) {
+      throw new Error("Authentication service unavailable");
+    }
     const status = (await response.json()) as {
       authenticated: boolean;
       tokenPath?: string;
     };
-    if (status.authenticated) render();
-    else loginPage(status.tokenPath ?? "<data dir>/api-token");
+    if (status.authenticated) {
+      render();
+    } else {
+      loginPage(status.tokenPath ?? "<data dir>/api-token");
+    }
   } catch {
     loginPage("<data dir>/api-token");
   }

@@ -11,7 +11,9 @@ export async function recordDecision(
   await store.kv.set(key, JSON.stringify(decision));
   const saved = await store.kv.get("agent:pending_decisions");
   const keys = saved ? (JSON.parse(saved) as string[]) : [];
-  if (!keys.includes(key)) keys.push(key);
+  if (!keys.includes(key)) {
+    keys.push(key);
+  }
   await store.kv.set("agent:pending_decisions", JSON.stringify(keys));
 }
 
@@ -27,7 +29,8 @@ export async function pendingDecisions(store: Store): Promise<AgentDecision[]> {
       decisions.push(JSON.parse(value) as AgentDecision);
     }
   }
-  if (active.length !== keys.length)
+  if (active.length !== keys.length) {
     await store.kv.set("agent:pending_decisions", JSON.stringify(active));
+  }
   return decisions;
 }

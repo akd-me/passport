@@ -12,9 +12,13 @@ export type AgentMatterCreateParams = ActionParams["matter_create"] & {
 
 /** Read the package-local metadata extension without changing the frozen shared ActionParams. */
 export function getAgentEmailPatch(request: ActionRequest): AgentEmailPatch | null {
-  if (request.type !== "matter_create" && request.type !== "matter_attach") return null;
+  if (request.type !== "matter_create" && request.type !== "matter_attach") {
+    return null;
+  }
   const params: unknown = request.params;
-  if (!isObject(params) || !isObject(params.emailPatch)) return null;
+  if (!isObject(params) || !isObject(params.emailPatch)) {
+    return null;
+  }
   const patch = params.emailPatch;
   const result: AgentEmailPatch = {};
   if (
@@ -34,10 +38,12 @@ export function getAgentEmailPatch(request: ActionRequest): AgentEmailPatch | nu
         "matters",
         "other",
       ].includes(patch.category))
-  )
+  ) {
     result.category = patch.category as Email["category"];
-  if (Array.isArray(patch.personIds) && patch.personIds.every((id) => typeof id === "string"))
+  }
+  if (Array.isArray(patch.personIds) && patch.personIds.every((id) => typeof id === "string")) {
     result.personIds = patch.personIds;
+  }
   return result;
 }
 

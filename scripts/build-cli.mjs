@@ -25,28 +25,40 @@ function installedVersion(name, manifestPath) {
   for (const directory of ownerRequire.resolve.paths(name) ?? []) {
     try {
       const manifest = JSON.parse(readFileSync(join(directory, name, "package.json"), "utf8"));
-      if (manifest.name === name) return manifest.version;
+      if (manifest.name === name) {
+        return manifest.version;
+      }
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
     }
   }
   let directory = dirname(ownerRequire.resolve(name));
   while (true) {
     try {
       const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
-      if (manifest.name === name) return manifest.version;
+      if (manifest.name === name) {
+        return manifest.version;
+      }
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
     }
     const parent = dirname(directory);
-    if (parent === directory) throw new Error(`Cannot find installed ${name}`);
+    if (parent === directory) {
+      throw new Error(`Cannot find installed ${name}`);
+    }
     directory = parent;
   }
 }
 
 async function collect(manifestPath) {
   const manifest = await readJson(manifestPath);
-  if (visited.has(manifest.name)) return;
+  if (visited.has(manifest.name)) {
+    return;
+  }
   visited.add(manifest.name);
   for (const name of Object.keys(manifest.dependencies ?? {})) {
     if (name.startsWith("@passport/")) {
@@ -55,8 +67,9 @@ async function collect(manifestPath) {
       await collect(join(directory, "package.json"));
     } else {
       const version = installedVersion(name, manifestPath);
-      if (dependencies[name] && dependencies[name] !== version)
+      if (dependencies[name] && dependencies[name] !== version) {
         throw new Error(`Conflicting installed versions of ${name}; resolve before publishing`);
+      }
       dependencies[name] = version;
     }
   }
@@ -74,14 +87,20 @@ const result = await build(
 const builtins = new Set(builtinModules);
 for (const output of Object.values(result.metafile.outputs)) {
   for (const { path, external } of output.imports) {
-    if (!external || path.startsWith("node:") || builtins.has(path)) continue;
+    if (!external || path.startsWith("node:") || builtins.has(path)) {
+      continue;
+    }
     const name = path.startsWith("@") ? path.split("/").slice(0, 2).join("/") : path.split("/")[0];
-    if (!dependencies[name]) throw new Error(`External import missing from dependencies: ${path}`);
+    if (!dependencies[name]) {
+      throw new Error(`External import missing from dependencies: ${path}`);
+    }
   }
 }
 const changelog = await readFile(join(root, "CHANGELOG.md"), "utf8");
 const version = changelog.match(/^## \[(\d+\.\d+\.\d+(?:-[\w.-]+)?)\]/m)?.[1];
-if (!version) throw new Error("CHANGELOG.md must start with a versioned release heading");
+if (!version) {
+  throw new Error("CHANGELOG.md must start with a versioned release heading");
+}
 await writeFile(
   join(packageDir, "package.json"),
   JSON.stringify(
@@ -114,5 +133,7 @@ await writeFile(
 await cp(join(serverDir, "bin"), join(packageDir, "bin"), { recursive: true });
 await chmod(join(packageDir, "bin/passport.js"), 0o755);
 await cp(join(root, "apps/web/dist"), join(packageDir, "web/dist"), { recursive: true });
-for (const name of ["README.md", "LICENSE"]) await cp(join(root, name), join(packageDir, name));
+for (const name of ["README.md", "LICENSE"]) {
+  await cp(join(root, name), join(packageDir, name));
+}
 console.log(`Built @akd-me/passport@${version} in ${packageDir}`);

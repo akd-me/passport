@@ -42,7 +42,9 @@ describe("policy decision matrix", () => {
         actor: { kind: actor, id: "test" },
       });
       expect(decision).toMatchObject({ outcome: expected, reversibility, trustLevel: level });
-      if (expected === "hold") expect(decision.holdUntil).toBe("2026-10-20T12:05:00.000Z");
+      if (expected === "hold") {
+        expect(decision.holdUntil).toBe("2026-10-20T12:05:00.000Z");
+      }
     },
   );
 
@@ -100,11 +102,12 @@ describe("policy decision matrix", () => {
   it("denies non-reversible external work at a supervised ceiling", async () => {
     const { policy } = await setup();
     await policy.setConfig({ externalAgentCeiling: "supervised" });
-    for (const example of [examples.delayed, examples.irreversible])
+    for (const example of [examples.delayed, examples.irreversible]) {
       expect(
         (await policy.evaluate({ ...example, actor: { kind: "external-agent", id: "mcp" } }))
           .outcome,
       ).toBe("deny");
+    }
     expect(
       (
         await policy.evaluate({
@@ -118,8 +121,9 @@ describe("policy decision matrix", () => {
   it("F5 requires approval for reversible and outward-facing alwaysAsk work even at full access", async () => {
     const { policy } = await setup();
     await policy.pinLevel("money", "full_access");
-    for (const example of [examples.delayed, examples.irreversible])
+    for (const example of [examples.delayed, examples.irreversible]) {
       expect((await policy.evaluate({ ...example, category: "money" })).outcome).toBe("ask");
+    }
     expect((await policy.evaluate({ ...examples.reversible, category: "money" })).outcome).toBe(
       "ask",
     );
@@ -151,8 +155,9 @@ describe("policy decision matrix", () => {
         { emailIds: ["email"], until: "2099-01-01T00:00:00.000Z" },
         { category: "legal" },
       ),
-    ])
+    ]) {
       expect((await policy.evaluate(operation)).outcome).toBe("allow");
+    }
     const trash = (await store.mailboxes.get("trash"))!;
     await store.mailboxes.upsertMany([
       { ...trash, id: "junk", providerId: "remote-junk", name: "Junk", role: "junk" },
@@ -232,12 +237,15 @@ describe("trust ladder", () => {
     for (let i = 0; i < 8; i++) {
       await store.actions.insert(action(`approval-${i}`, "receipts"));
       await policy.recordOutcome(`approval-${i}`, "approved_unchanged");
-      if (i === 1) expect((await policy.getTrustFor("receipts")).stage).toBe("learning");
-      if (i === 2)
+      if (i === 1) {
+        expect((await policy.getTrustFor("receipts")).stage).toBe("learning");
+      }
+      if (i === 2) {
         expect(await policy.getTrustFor("receipts")).toMatchObject({
           stage: "trusted",
           level: "auto_accept_edits",
         });
+      }
     }
     expect(await policy.getTrustFor("receipts")).toMatchObject({
       stage: "autonomous",
@@ -334,8 +342,9 @@ describe("promotion offers", () => {
         i === 0 ? "approved_edited" : "approved_unchanged",
         0.5,
       );
-      if (i === 8)
+      if (i === 8) {
         expect((await policy.evaluate(examples.reversible)).promotionOffer).toBeUndefined();
+      }
     }
     expect((await policy.evaluate(examples.reversible)).promotionOffer).toMatchObject({
       from: "supervised",

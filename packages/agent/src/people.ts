@@ -72,12 +72,15 @@ export async function resolvePeople(opts: {
     if (
       action.request.type !== "send" ||
       (action.executedAt ?? action.createdAt) > email.receivedAt
-    )
+    ) {
       continue;
+    }
     const params = action.request.params as import("@passport/types").ActionParams["send"];
     const draft =
       params.draft ?? (action.approvedSnapshot as import("@passport/types").DraftInput | undefined);
-    if (!draft) continue;
+    if (!draft) {
+      continue;
+    }
     const copy = stored.find(
       (item) =>
         isSent(item) &&
@@ -148,15 +151,23 @@ export async function resolvePeople(opts: {
     const priorReceived = receivedIds.size - (receivedIds.has(email.id) ? 1 : 0);
     const baseline = contributions;
     const isSender = senders.has(address);
-    const relationship: Relationship = selfAddresses.has(address)
-      ? "self"
-      : (isSender && serviceSender(email)) || existing?.relationship === "service"
-        ? "service"
-        : existing?.relationship === "known" ||
-            priorSent > 0 ||
-            priorReceived + baseline.received >= 2
-          ? "known"
-          : "stranger";
+    function inferRelationship() {
+      if (selfAddresses.has(address)) {
+        return "self";
+      }
+      if ((isSender && serviceSender(email)) || existing?.relationship === "service") {
+        return "service";
+      }
+      if (
+        existing?.relationship === "known" ||
+        priorSent > 0 ||
+        priorReceived + baseline.received >= 2
+      ) {
+        return "known";
+      }
+      return "stranger";
+    }
+    const relationship: Relationship = inferRelationship();
     const wasBlue = existing?.verification === "blue";
     const blue = isSender && email.verification.passport === "blue";
     const lastSeenBlueAt = blue
@@ -204,11 +215,12 @@ export async function resolvePeople(opts: {
       if (
         persisted.stats.sent === person.stats.sent &&
         persisted.stats.received === person.stats.received
-      )
+      ) {
         await store.kv.set(
           `person-stats:${person.id}`,
           JSON.stringify({ ...baseline, sentIds: [...sentIds], receivedIds: [...receivedIds] }),
         );
+      }
     }
     if (downgrade || forgedSelf) {
       bus.emit({ type: "person.downgraded", person, emailId: email.id });

@@ -46,7 +46,9 @@ beforeAll(async () => {
       return;
     }
     let body = "";
-    for await (const chunk of req) body += String(chunk);
+    for await (const chunk of req) {
+      body += String(chunk);
+    }
     const server = new McpServer({ name: "remote", version: "1.0.0" });
     server.registerTool(
       "get_tracking_number",
@@ -70,7 +72,9 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await new Promise((resolve) => http?.close(resolve));
-  if (dir) await rm(dir, { recursive: true, force: true });
+  if (dir) {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 for (const kind of ["claude-code", "codex"] as const) {

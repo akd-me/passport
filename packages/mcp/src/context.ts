@@ -49,11 +49,12 @@ export class Context {
     let offset = 0;
     if (cursor != null) {
       offset = emails.findIndex((email) => email.id === cursor) + 1;
-      if (offset === 0)
+      if (offset === 0) {
         throw new MailboxMcpError(
           "INVALID_CURSOR",
           "Matter cursor must be an email ID from this matter.",
         );
+      }
     }
     const page = emails.slice(offset, offset + limit);
     const withBodies = includeBodies

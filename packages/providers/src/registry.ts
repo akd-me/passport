@@ -45,15 +45,19 @@ export const MICROSOFT_CALENDAR_SCOPES = [
 
 function oauthDescriptor(kind: ProviderKind, options: ProviderOptions): ProviderSetupDescriptor {
   const google = kind === "gmail" || kind === "google-calendar";
-  const scopes = [
-    ...(kind === "gmail"
-      ? GOOGLE_MAIL_SCOPES
-      : kind === "google-calendar"
-        ? GOOGLE_CALENDAR_SCOPES
-        : kind === "graph"
-          ? MICROSOFT_MAIL_SCOPES
-          : MICROSOFT_CALENDAR_SCOPES),
-  ];
+  function providerScopes() {
+    if (kind === "gmail") {
+      return GOOGLE_MAIL_SCOPES;
+    }
+    if (kind === "google-calendar") {
+      return GOOGLE_CALENDAR_SCOPES;
+    }
+    if (kind === "graph") {
+      return MICROSOFT_MAIL_SCOPES;
+    }
+    return MICROSOFT_CALENDAR_SCOPES;
+  }
+  const scopes = [...providerScopes()];
   return {
     kind,
     label: (
@@ -131,16 +135,18 @@ function oauthDescriptor(kind: ProviderKind, options: ProviderOptions): Provider
         return url.href;
       },
       async exchangeCode(settings, redirectUri, code) {
-        if (!google && !settings.clientSecret && !settings.codeVerifier)
+        if (!google && !settings.clientSecret && !settings.codeVerifier) {
           throw new ProviderError(
             "CONFIG_REQUIRED",
             "Microsoft public clients require a PKCE codeVerifier",
           );
-        if (google && !settings.clientSecret && !settings.codeVerifier)
+        }
+        if (google && !settings.clientSecret && !settings.codeVerifier) {
           throw new ProviderError(
             "CONFIG_REQUIRED",
             "Google public clients require a PKCE codeVerifier",
           );
+        }
         const credentials = await exchangeToken(
           options.fetch ?? globalThis.fetch,
           google ? googleTokenUrl : microsoftTokenUrl(settings.tenantId),
@@ -202,10 +208,13 @@ export function createProviderRegistry(options: ImapProviderOptions = {}): Provi
       }
     },
     describe(kind: ProviderKind): ProviderSetupDescriptor {
-      if (["gmail", "graph", "google-calendar", "graph-calendar"].includes(kind))
+      if (["gmail", "graph", "google-calendar", "graph-calendar"].includes(kind)) {
         return oauthDescriptor(kind, options);
-      if (kind === "mock") return { kind, label: "Demo mail and calendar", fields: [] };
-      if (kind === "jmap")
+      }
+      if (kind === "mock") {
+        return { kind, label: "Demo mail and calendar", fields: [] };
+      }
+      if (kind === "jmap") {
         return {
           kind,
           label: "JMAP",
@@ -222,7 +231,8 @@ export function createProviderRegistry(options: ImapProviderOptions = {}): Provi
             field("jmapAccountId", "JMAP account ID", false, false),
           ],
         };
-      if (kind === "caldav")
+      }
+      if (kind === "caldav") {
         return {
           kind,
           label: "CalDAV",
@@ -239,7 +249,8 @@ export function createProviderRegistry(options: ImapProviderOptions = {}): Provi
             ),
           ],
         };
-      if (kind === "imap")
+      }
+      if (kind === "imap") {
         return {
           kind,
           label: "IMAP / SMTP",
@@ -277,6 +288,7 @@ export function createProviderRegistry(options: ImapProviderOptions = {}): Provi
             ),
           ],
         };
+      }
       throw new NotImplementedError("No setup descriptor is available for JMAP Calendar");
     },
   };

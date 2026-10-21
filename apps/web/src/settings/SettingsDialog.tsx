@@ -48,7 +48,9 @@ export const settingsSections: {
 /** One dialog, five sections; opened from the sidebar gear, ⌘, or the command palette. */
 export function SettingsDialog() {
   const { settings, openSettings, closeSettings } = useUi();
-  if (!settings) return null;
+  if (!settings) {
+    return null;
+  }
   const section = settingsSections.find((s) => s.id === settings)!;
   return (
     <Dialog

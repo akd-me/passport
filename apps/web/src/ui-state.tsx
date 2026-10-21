@@ -57,8 +57,11 @@ const narrow = (width = 860) =>
 
 export function applyTheme(theme: ThemePreference) {
   const root = document.documentElement;
-  if (theme === "system") delete root.dataset.theme;
-  else root.dataset.theme = theme;
+  if (theme === "system") {
+    delete root.dataset.theme;
+  } else {
+    root.dataset.theme = theme;
+  }
 }
 
 export function UiProvider({ children }: { children: ReactNode }) {

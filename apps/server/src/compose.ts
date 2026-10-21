@@ -46,12 +46,16 @@ export interface RealBackend extends Backend {
 }
 
 async function masterKey(dataDir: string): Promise<string> {
-  if (process.env.PASSPORT_MASTER_KEY) return process.env.PASSPORT_MASTER_KEY;
+  if (process.env.PASSPORT_MASTER_KEY) {
+    return process.env.PASSPORT_MASTER_KEY;
+  }
   const path = join(dataDir, "master.key");
   try {
     await readFile(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
     const temp = `${path}.${crypto.randomUUID()}.tmp`;
     try {
       await writeFile(temp, randomBytes(32).toString("base64url") + "\n", {
@@ -61,7 +65,9 @@ async function masterKey(dataDir: string): Promise<string> {
       try {
         await link(temp, path);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw error;
+        }
       }
     } finally {
       await rm(temp, { force: true });
@@ -69,7 +75,9 @@ async function masterKey(dataDir: string): Promise<string> {
   }
   await chmod(path, 0o600);
   const key = (await readFile(path, "utf8")).trim();
-  if (!key) throw new ApiError("INVALID_MASTER_KEY", "Master key file is empty");
+  if (!key) {
+    throw new ApiError("INVALID_MASTER_KEY", "Master key file is empty");
+  }
   return key;
 }
 
@@ -80,17 +88,23 @@ export async function createRealBackend(
 ): Promise<RealBackend> {
   validateConfig(config);
   const memory = options.storePath === ":memory:";
-  if (!memory) await mkdir(config.dataDir, { recursive: true, mode: 0o700 });
+  if (!memory) {
+    await mkdir(config.dataDir, { recursive: true, mode: 0o700 });
+  }
   const store = openStore({
     path: options.storePath ?? join(config.dataDir, "passport.sqlite"),
     ...(memory ? {} : { masterKey: await masterKey(config.dataDir) }),
   });
   try {
     await store.migrate();
-    if ((await store.kv.get("user_profile")) === null)
+    if ((await store.kv.get("user_profile")) === null) {
       await store.kv.set("user_profile", DEFAULT_USER_PROFILE);
-    for (const account of config.accounts)
-      if (!(await store.accounts.get(account.id))) await store.accounts.upsert(account);
+    }
+    for (const account of config.accounts) {
+      if (!(await store.accounts.get(account.id))) {
+        await store.accounts.upsert(account);
+      }
+    }
     config.accounts = await store.accounts.list();
     const bus = new InMemoryEventBus();
     const providers =
@@ -102,10 +116,12 @@ export async function createRealBackend(
       });
     let sync: AccountSyncService;
     const connections = new ProviderConnections(store, providers, async (id, method, result) => {
-      if (["getEmail", "createDraft", "updateDraft"].includes(method) && result)
+      if (["getEmail", "createDraft", "updateDraft"].includes(method) && result) {
         return sync.email(id, result as Email);
-      if (["createEvent", "updateEvent"].includes(method) && result)
+      }
+      if (["createEvent", "updateEvent"].includes(method) && result) {
         return sync.event(id, result as CalendarEvent);
+      }
       return result;
     });
     sync = new AccountSyncService(store, bus, connections.mail, connections.calendar, config);
@@ -118,13 +134,14 @@ export async function createRealBackend(
         ["send", "calendar_propose"].includes(request.type) &&
         (decision.outcome === "allow" || decision.outcome === "hold") &&
         (await policy.getConfig()).outboxHoldMinutes <= 0
-      )
+      ) {
         return {
           ...decision,
           outcome: "ask",
           reason:
             "Start passport serve and approve this outward action; client mode has no delayed outbox owner.",
         };
+      }
       return request.type === "profile_update" && request.actor.kind === "human"
         ? { ...decision, outcome: "allow", reason: "Human profile edit; reversible and logged." }
         : decision;
@@ -177,8 +194,9 @@ export async function createRealBackend(
             (action) => action.request.reason.endsWith(marker),
           );
           if (previous) {
-            if (["failed", "executing"].includes(previous.status))
+            if (["failed", "executing"].includes(previous.status)) {
               throw new ApiError("TRIAGE_ACTION_INCOMPLETE", "Prior triage action requires review");
+            }
             return previous;
           }
         }
@@ -208,12 +226,18 @@ export async function createRealBackend(
         selfAddresses: config.accounts.map((account) => account.emailAddress),
         runId: () => currentTrigger?.runId,
         triageStep: async <T>(step: string, task: () => Promise<T>): Promise<T> => {
-          if (currentTrigger?.kind !== "email.received" || !currentTrigger.runId) return task();
+          if (currentTrigger?.kind !== "email.received" || !currentTrigger.runId) {
+            return task();
+          }
           const key = `arrival:${currentTrigger.emailId}`;
           const entry: Arrival | null = JSON.parse((await store.kv.get(key)) ?? "null");
           // Explicit one-off runs need no arrival journal.
-          if (!entry) return task();
-          if (entry.checkpoints?.[step]) return entry.checkpoints[step].value as T;
+          if (!entry) {
+            return task();
+          }
+          if (entry.checkpoints?.[step]) {
+            return entry.checkpoints[step].value as T;
+          }
           entry.step = step;
           await store.kv.set(key, JSON.stringify(entry));
           currentStep = step;
@@ -233,11 +257,12 @@ export async function createRealBackend(
                 : stepActions[0];
             let value: T;
             if (previous && ["matter", "scheduling", "playbook"].includes(step)) {
-              if (["failed", "executing"].includes(previous.status))
+              if (["failed", "executing"].includes(previous.status)) {
                 throw new ApiError(
                   "TRIAGE_ACTION_INCOMPLETE",
                   "Prior triage action requires review",
                 );
+              }
               const email = await store.emails.get(currentTrigger.emailId);
               const matter = email?.matterId ? await store.matters.get(email.matterId) : null;
               value = (
@@ -248,7 +273,9 @@ export async function createRealBackend(
                     }
                   : undefined
               ) as T;
-            } else value = await task();
+            } else {
+              value = await task();
+            }
             entry.checkpoints = { ...entry.checkpoints, [step]: { value } };
             await store.kv.set(key, JSON.stringify(entry));
             return value;
@@ -257,18 +284,22 @@ export async function createRealBackend(
           }
         },
       });
-      if (!enabled)
+      if (!enabled) {
         logger.warn("LLM not configured; agent disabled. Configure an API key or a local model.");
+      }
     };
     configureAgent();
     const agent: AgentRuntime = {
       getUserProfile: () => runtime.getUserProfile(),
       setUserProfile: (markdown) => runtime.setUserProfile(markdown),
       run: (trigger) => {
-        if (stopped) return Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"));
+        if (stopped) {
+          return Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"));
+        }
         // Digests and outbox processing remain useful without inference.
-        if (!enabled && (trigger.kind !== "schedule" || trigger.name === "matter_review"))
+        if (!enabled && (trigger.kind !== "schedule" || trigger.name === "matter_review")) {
           return Promise.reject(new ApiError("LLM_NOT_CONFIGURED", "LLM not configured"));
+        }
         // Keep one serialization boundary even when account/model settings replace the runtime.
         const job = runQueue.then(async () => {
           currentTrigger = trigger as ArrivalTrigger;
@@ -293,12 +324,16 @@ export async function createRealBackend(
     const unsubscribe = options.clientMode
       ? () => {}
       : bus.on("email.received", ({ email }) => {
-          if (!enabled || stopped) return;
+          if (!enabled || stopped) {
+            return;
+          }
           void arrivals!.enqueue(email.id, email.accountId);
         });
     const drainAgentQueue = async () => {
       await arrivals?.drain();
-      while (agentJobs.size) await Promise.allSettled([...agentJobs]);
+      while (agentJobs.size) {
+        await Promise.allSettled([...agentJobs]);
+      }
     };
     const dependencies = { store, executor, policy, bus };
     const mcp = createMailboxMcpServer(dependencies);
@@ -330,7 +365,9 @@ export async function createRealBackend(
           async updateConfig(patch) {
             await drainAgentQueue();
             const next = validateConfig({ ...config, ...patch });
-            if (!memory) await saveConfig(next);
+            if (!memory) {
+              await saveConfig(next);
+            }
             Object.assign(config, next);
             configureAgent();
           },
@@ -339,14 +376,21 @@ export async function createRealBackend(
               ? Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"))
               : sync.syncAccount(id),
           async waitForChanges(id, signal) {
-            if (signal.aborted) return;
+            if (signal.aborted) {
+              return;
+            }
             const provider = await connections.mail(id);
-            if (provider.waitForChanges) await provider.waitForChanges(signal);
-            else
+            if (provider.waitForChanges) {
+              await provider.waitForChanges(signal);
+            } else {
               await new Promise<void>((resolve) => {
-                if (signal.aborted) resolve();
-                else signal.addEventListener("abort", () => resolve(), { once: true });
+                if (signal.aborted) {
+                  resolve();
+                } else {
+                  signal.addEventListener("abort", () => resolve(), { once: true });
+                }
               });
+            }
           },
           drainAgentQueue,
           processArrivals: (signal) => arrivals?.drainDue(signal) ?? Promise.resolve(),

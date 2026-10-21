@@ -25,21 +25,29 @@ async function mailboxFixture(labels: boolean) {
   const recordChanges = mail.applyChanges.bind(mail);
   mail.applyChanges = async (changes) => {
     await recordChanges(changes);
-    for (const change of changes)
+    for (const change of changes) {
       for (const id of change.providerIds) {
         const message = remote.get(id)!;
         if (change.op === "setKeywords") {
-          for (const key of change.add ?? []) message.keywords[key] = true;
-          for (const key of change.remove ?? []) delete message.keywords[key];
-        } else if (change.op === "move") message.mailboxIds = [change.toMailboxProviderId];
-        else if (!labels)
+          for (const key of change.add ?? []) {
+            message.keywords[key] = true;
+          }
+          for (const key of change.remove ?? []) {
+            delete message.keywords[key];
+          }
+        } else if (change.op === "move") {
+          message.mailboxIds = [change.toMailboxProviderId];
+        } else if (!labels) {
           throw new Error("Folder provider requires move; add copies and remove can trash mail");
-        else if (change.op === "addToMailbox")
+        } else if (change.op === "addToMailbox") {
           message.mailboxIds = [...new Set([...message.mailboxIds, change.mailboxProviderId])];
-        else if (change.op === "removeFromMailbox")
+        } else if (change.op === "removeFromMailbox") {
           message.mailboxIds = message.mailboxIds.filter((box) => box !== change.mailboxProviderId);
-        else throw new Error("Must never purge mail");
+        } else {
+          throw new Error("Must never purge mail");
+        }
       }
+    }
   };
   const expectMirror = async (id = original.id) => {
     const message = (await store.emails.get(id))!;
@@ -68,7 +76,9 @@ describe("provider-aware mailbox actions", () => {
         return changes.flatMap((change) =>
           change.providerIds.map((providerId) => {
             expect(live.has(providerId)).toBe(true);
-            if (change.op !== "move") throw new Error("Expected a move");
+            if (change.op !== "move") {
+              throw new Error("Expected a move");
+            }
             live.delete(providerId);
             const newProviderId = `replacement-${++sequence}`;
             live.add(newProviderId);
@@ -132,7 +142,9 @@ describe("provider-aware mailbox actions", () => {
         { ...archive, id: "all", providerId: "remote-all", role: "all", name: "All mail" },
         { ...archive, id: "named", providerId: "remote-named", role: null, name: "Archive" },
       ]);
-      if (fallback === "name") await store.mailboxes.deleteMany(["all"]);
+      if (fallback === "name") {
+        await store.mailboxes.deleteMany(["all"]);
+      }
       const action = await executor.submit(request("archive", { emailIds: ["email"] }));
       const destination = fallback === "name" ? "named" : fallback;
       expect(mail.changes[0]).toEqual([

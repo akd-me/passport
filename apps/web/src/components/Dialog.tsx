@@ -7,13 +7,17 @@ const focusable =
 
 /** Keep Tab inside `container`; returns true when the key was handled. */
 export function trapTab(event: React.KeyboardEvent, container: HTMLElement | null) {
-  if (event.key !== "Tab" || !container) return false;
+  if (event.key !== "Tab" || !container) {
+    return false;
+  }
   const items = [...container.querySelectorAll<HTMLElement>(focusable)].filter(
     (item) => !item.closest("[inert]"),
   );
   const first = items[0],
     last = items[items.length - 1];
-  if (!first || !last) return false;
+  if (!first || !last) {
+    return false;
+  }
   if (
     event.shiftKey &&
     (document.activeElement === first || document.activeElement === container)
@@ -68,7 +72,9 @@ export function Dialog({
     <div
       className="dialog-backdrop"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
       }}
     >
       <div
@@ -82,7 +88,9 @@ export function Dialog({
           if (e.key === "Escape") {
             e.stopPropagation();
             onClose();
-          } else trapTab(e, ref.current);
+          } else {
+            trapTab(e, ref.current);
+          }
         }}
       >
         <header className={`dialog-header ${hideTitle ? "floating" : ""}`}>

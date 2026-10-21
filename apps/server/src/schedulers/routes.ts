@@ -9,7 +9,9 @@ async function body(request: Request) {
   try {
     return object(await request.json());
   } catch (error) {
-    if (error instanceof ApiError) throw error;
+    if (error instanceof ApiError) {
+      throw error;
+    }
     throw new ApiError("INVALID_JSON", "Expected a JSON object");
   }
 }
@@ -21,18 +23,21 @@ export function installJobRoutes(app: Hono, backend: Backend) {
       !["GET", "HEAD", "OPTIONS"].includes(c.req.method) &&
       c.res.ok &&
       c.req.path.startsWith("/api/accounts")
-    )
+    ) {
       await existingSchedulerService(backend)?.reconcileAccounts();
+    }
   });
   const routes = new Hono();
   routes.onError((error, c) => {
-    if (error instanceof SchedulerError)
+    if (error instanceof SchedulerError) {
       return c.json(
         { error: { code: error.code, message: error.message } },
         error.code === "JOB_NOT_FOUND" ? 404 : error.code === "SYSTEM_JOB" ? 409 : 400,
       );
-    if (error instanceof ApiError)
+    }
+    if (error instanceof ApiError) {
       return c.json({ error: { code: error.code, message: error.message } }, error.status);
+    }
     throw error;
   });
   const service = async () => {
@@ -57,9 +62,10 @@ export function installJobRoutes(app: Hono, backend: Backend) {
   routes.post("/:id/run", async (c) =>
     c.json(await (await service()).scheduler.runNow(c.req.param("id"))),
   );
-  for (const action of ["pause", "resume"] as const)
+  for (const action of ["pause", "resume"] as const) {
     routes.post(`/:id/${action}`, async (c) =>
       c.json(await (await service()).scheduler[action](c.req.param("id"))),
     );
+  }
   app.route("/api/jobs", routes);
 }

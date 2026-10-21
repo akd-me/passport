@@ -52,8 +52,9 @@ export function normalizeGraphEvent(
   accountId: string,
   calendarId: string,
 ): CalendarEvent {
-  if (!event.start || !event.end)
+  if (!event.start || !event.end) {
     throw new ProviderError("INVALID_RESPONSE", "Graph event is missing start or end");
+  }
   return {
     id: localId(accountId, "event", event.id),
     accountId,
@@ -152,23 +153,26 @@ export class GraphCalendarProvider extends HttpConnection implements CalendarPro
     const saved = cursor
       ? decodeCursor<{ account: string; calendar: string; link: string; range: TimeRange }>(cursor)
       : null;
-    if (saved && (saved.account !== this.account.id || saved.calendar !== this.calendarId))
+    if (saved && (saved.account !== this.account.id || saved.calendar !== this.calendarId)) {
       throw new ProviderError("INVALID_CURSOR", "Graph cursor belongs to another calendar");
+    }
     const window = range ??
       saved?.range ?? {
         start: new Date(this.now().getTime() - 30 * 86400_000).toISOString(),
         end: new Date(this.now().getTime() + 365 * 86400_000).toISOString(),
       };
     validateRange(window);
-    if (saved && (window.start !== saved.range.start || window.end !== saved.range.end))
+    if (saved && (window.start !== saved.range.start || window.end !== saved.range.end)) {
       throw new ProviderError(
         "CURSOR_RANGE_MISMATCH",
         "Start a full Graph calendar sync when changing its time window",
       );
-    if (this.calendarId !== "default")
+    }
+    if (this.calendarId !== "default") {
       throw new NotImplementedError(
         "Graph v1.0 calendarView delta supports the primary calendar only; leave calendarId unset",
       );
+    }
     let link: string | undefined =
         saved?.link ??
         `${graphBase}/me/calendarView/delta?${new URLSearchParams({ startDateTime: window.start, endDateTime: window.end })}`,
@@ -178,17 +182,18 @@ export class GraphCalendarProvider extends HttpConnection implements CalendarPro
       try {
         page = await this.api(link);
       } catch (e) {
-        if (e instanceof ProviderError && e.status === 410)
+        if (e instanceof ProviderError && e.status === 410) {
           throw new ProviderError(
             "CURSOR_EXPIRED",
             "Graph calendar delta expired; reset local calendar state and resync",
           );
+        }
         throw e;
       }
       for (const event of page.value ?? []) {
-        if (event["@removed"] || event.isCancelled)
+        if (event["@removed"] || event.isCancelled) {
           yield { kind: "event", op: "delete", providerId: event.id };
-        else {
+        } else {
           // Delta events can be partial. Fetch the complete record before normalizing.
           const full = await this.api<GraphEvent>(
             `${graphBase}/me/events/${encodeURIComponent(event.id)}`,
@@ -216,39 +221,54 @@ export class GraphCalendarProvider extends HttpConnection implements CalendarPro
   private eventBody(input: Partial<CalendarEvent>): Record<string, unknown> {
     validateEvent(input);
     const out: Record<string, unknown> = {};
-    if (input.recurrenceRule)
+    if (input.recurrenceRule) {
       throw new NotImplementedError(
         "Graph recurrence writes require a Graph pattern/range; RRULE conversion is not implemented",
       );
-    if (input.title !== undefined) out.subject = input.title;
-    if (input.description !== undefined)
+    }
+    if (input.title !== undefined) {
+      out.subject = input.title;
+    }
+    if (input.description !== undefined) {
       out.body = { contentType: "Text", content: input.description ?? "" };
-    if (input.location !== undefined) out.location = { displayName: input.location ?? "" };
-    for (const key of ["start", "end"] as const)
-      if (input[key])
+    }
+    if (input.location !== undefined) {
+      out.location = { displayName: input.location ?? "" };
+    }
+    for (const key of ["start", "end"] as const) {
+      if (input[key]) {
         out[key] = input.allDay
           ? {
               dateTime: `${localDate(input[key], input.timeZone ?? "UTC")}T00:00:00`,
               timeZone: input.timeZone ?? "UTC",
             }
           : { dateTime: toIso(input[key]).replace(/Z$/, ""), timeZone: "UTC" };
-    if (input.allDay !== undefined) out.isAllDay = input.allDay;
-    if (input.participants)
+      }
+    }
+    if (input.allDay !== undefined) {
+      out.isAllDay = input.allDay;
+    }
+    if (input.participants) {
       out.attendees = input.participants
         .filter((p) => p.role !== "organizer")
         .map((p) => ({
           emailAddress: { address: p.email, name: p.name ?? "" },
           type: p.role === "optional" ? "optional" : "required",
         }));
-    if (input.status === "cancelled")
+    }
+    if (input.status === "cancelled") {
       throw new ProviderError("UNSUPPORTED_UPDATE", "Use deleteEvent to cancel a Graph event");
-    if (input.status) out.showAs = input.status === "tentative" ? "tentative" : "busy";
+    }
+    if (input.status) {
+      out.showAs = input.status === "tentative" ? "tentative" : "busy";
+    }
     return out;
   }
   async createEvent(input: EventInput): Promise<CalendarEvent> {
     this.check();
-    if (input.accountId !== this.account.id)
+    if (input.accountId !== this.account.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Event belongs to another account");
+    }
     return normalizeGraphEvent(
       await this.api<GraphEvent>(`${this.path}/events`, this.body(this.eventBody(input))),
       this.account.id,
@@ -274,11 +294,12 @@ export class GraphCalendarProvider extends HttpConnection implements CalendarPro
         Record<ParticipationStatus, string>
       >
     )[status];
-    if (!method)
+    if (!method) {
       throw new ProviderError(
         "UNSUPPORTED_RESPONSE",
         "Graph cannot reset a response to needs-action",
       );
+    }
     await this.empty(
       `${graphBase}/me/events/${encodeURIComponent(id)}/${method}`,
       this.body({ comment: comment ?? "", sendResponse: true }),
@@ -301,8 +322,9 @@ export class GraphCalendarProvider extends HttpConnection implements CalendarPro
         availabilityViewInterval: 30,
       }),
     );
-    if (!result.value?.length || result.value.some((v) => v.error))
+    if (!result.value?.length || result.value.some((v) => v.error)) {
       throw new ProviderError("FREEBUSY_FAILED", "Graph could not return calendar availability");
+    }
     return result.value.flatMap((v) =>
       (v.scheduleItems ?? [])
         .filter((i) => i.status !== "free")

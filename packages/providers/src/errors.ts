@@ -29,8 +29,9 @@ export class SubmissionAcceptedError extends ProviderError {
 }
 
 export function required(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value)
+  if (typeof value !== "string" || !value) {
     throw new ProviderError("CONFIG_REQUIRED", `Missing ${name}`);
+  }
   return value;
 }
 
@@ -40,7 +41,9 @@ export function encodeCursor(value: unknown): string {
 export function decodeCursor<T>(value: string): T {
   try {
     const parsed: unknown = JSON.parse(Buffer.from(value, "base64url").toString());
-    if (!parsed || typeof parsed !== "object") throw new Error();
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error();
+    }
     return parsed as T;
   } catch {
     throw new ProviderError("INVALID_CURSOR", "Invalid provider cursor; request a full sync");

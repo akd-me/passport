@@ -83,10 +83,14 @@ export class MemoryStore implements Store {
       copy([...this.data.mailboxes.values()].filter((item) => item.accountId === id)),
     get: async (id) => copy(this.data.mailboxes.get(id) ?? null),
     upsertMany: async (items) => {
-      for (const item of items) this.data.mailboxes.set(item.id, copy(item));
+      for (const item of items) {
+        this.data.mailboxes.set(item.id, copy(item));
+      }
     },
     deleteMany: async (ids) => {
-      for (const id of ids) this.data.mailboxes.delete(id);
+      for (const id of ids) {
+        this.data.mailboxes.delete(id);
+      }
     },
   };
   emails: Store["emails"] = {
@@ -123,37 +127,48 @@ export class MemoryStore implements Store {
             : b.receivedAt.localeCompare(a.receivedAt),
         );
       const result = page(items, query.limit, query.cursor);
-      if (!query.includeBodies)
+      if (!query.includeBodies) {
         for (const item of result.items) {
           delete item.textBody;
           delete item.htmlBody;
         }
+      }
       return result;
     },
     upsertMany: async (items) => {
-      for (const item of items) this.data.emails.set(item.id, copy(item));
+      for (const item of items) {
+        this.data.emails.set(item.id, copy(item));
+      }
     },
     patchMany: async (ids, patch) => {
       for (const id of ids) {
         const email = this.data.emails.get(id);
-        if (email) this.data.emails.set(id, copy({ ...email, ...patch }));
+        if (email) {
+          this.data.emails.set(id, copy({ ...email, ...patch }));
+        }
       }
     },
     deleteMany: async (ids) => {
-      for (const id of ids) this.data.emails.delete(id);
+      for (const id of ids) {
+        this.data.emails.delete(id);
+      }
     },
   };
   threads: Store["threads"] = {
     get: async (id) => copy(this.data.threads.get(id) ?? null),
     upsertMany: async (items) => {
-      for (const item of items) this.data.threads.set(item.id, copy(item));
+      for (const item of items) {
+        this.data.threads.set(item.id, copy(item));
+      }
     },
   };
   calendars: Store["calendars"] = {
     list: async (id) =>
       copy([...this.data.calendars.values()].filter((item) => item.accountId === id)),
     upsertMany: async (items) => {
-      for (const item of items) this.data.calendars.set(item.id, copy(item));
+      for (const item of items) {
+        this.data.calendars.set(item.id, copy(item));
+      }
     },
   };
   events: Store["events"] = {
@@ -174,10 +189,14 @@ export class MemoryStore implements Store {
           .slice(0, query.limit),
       ),
     upsertMany: async (items) => {
-      for (const item of items) this.data.events.set(item.id, copy(item));
+      for (const item of items) {
+        this.data.events.set(item.id, copy(item));
+      }
     },
     deleteMany: async (ids) => {
-      for (const id of ids) this.data.events.delete(id);
+      for (const id of ids) {
+        this.data.events.delete(id);
+      }
     },
   };
   people: Store["people"] = {
@@ -206,7 +225,9 @@ export class MemoryStore implements Store {
     merge: async (keepId, mergeId) => {
       const keep = this.data.people.get(keepId),
         merge = this.data.people.get(mergeId);
-      if (!keep || !merge) throw new AgentError("Missing person in fake merge", "FAKE_NOT_FOUND");
+      if (!keep || !merge) {
+        throw new AgentError("Missing person in fake merge", "FAKE_NOT_FOUND");
+      }
       const person = { ...keep, emails: [...new Set([...keep.emails, ...merge.emails])] };
       this.data.people.set(keepId, person);
       this.data.people.delete(mergeId);
@@ -257,7 +278,9 @@ export class MemoryStore implements Store {
     },
     update: async (id, patch) => {
       const record = this.data.actions.get(id);
-      if (!record) throw new AgentError("Missing fake action", "FAKE_NOT_FOUND");
+      if (!record) {
+        throw new AgentError("Missing fake action", "FAKE_NOT_FOUND");
+      }
       const updated = { ...record, ...patch };
       this.data.actions.set(id, copy(updated));
       return copy(updated);

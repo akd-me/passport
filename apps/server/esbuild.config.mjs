@@ -21,7 +21,9 @@ export default function config({ serverDir, outdir, workspaceEntries }) {
         setup(build) {
           build.onResolve({ filter: noExternal[0] }, ({ path }) => {
             const entry = workspaceEntries.get(path);
-            if (!entry) throw new Error(`Unknown workspace root: ${path}`);
+            if (!entry) {
+              throw new Error(`Unknown workspace root: ${path}`);
+            }
             return { path: entry };
           });
         },

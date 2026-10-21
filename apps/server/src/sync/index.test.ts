@@ -91,7 +91,9 @@ describe("real provider ingestion", () => {
       expect(email.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
       expect(email.personIds).toEqual([]);
       expect((await store.threads.get(email.threadId))!.emailIds).toContain(email.id);
-      for (const id of email.mailboxIds) expect(await store.mailboxes.get(id)).not.toBeNull();
+      for (const id of email.mailboxIds) {
+        expect(await store.mailboxes.get(id)).not.toBeNull();
+      }
     }
     const raw = await mail.getEmail("fixture-40");
     expect((await store.emails.getByProviderId(account.id, "fixture-40"))!.verification).toEqual(
@@ -131,10 +133,11 @@ describe("real provider ingestion", () => {
     const original = mail.sync.bind(mail);
     vi.spyOn(mail, "sync").mockImplementationOnce(async function* (cursor) {
       for await (const delta of original(cursor)) {
-        if (delta.kind === "cursor")
+        if (delta.kind === "cursor") {
           throw Object.assign(new Error("secret-token"), {
             code: "NETWORK_ERROR",
           });
+        }
         yield delta;
       }
     });
@@ -167,15 +170,17 @@ describe("real provider ingestion", () => {
       })
       .mockImplementationOnce(async function* (cursor) {
         expect(cursor).toBeNull();
-        for await (const delta of original(cursor))
+        for await (const delta of original(cursor)) {
           if (
             !(
               delta.kind === "email" &&
               delta.op === "upsert" &&
               delta.email.providerId === staleRaw.providerId
             )
-          )
+          ) {
             yield delta;
+          }
+        }
       });
     await service.syncAccount(account.id);
     expect(await store.emails.getByProviderId(account.id, "stale")).toMatchObject({
@@ -328,13 +333,15 @@ describe("real provider ingestion", () => {
       { ...kept!, matterId: "matter", sourceEmailId: "local-invite" },
     ]);
     let raw: typeof kept;
-    for await (const delta of calendar.sync(null))
+    for await (const delta of calendar.sync(null)) {
       if (
         delta.kind === "event" &&
         delta.op === "upsert" &&
         delta.event.providerId === kept!.providerId
-      )
+      ) {
         raw = delta.event;
+      }
+    }
     const pass = vi
       .spyOn(calendar, "sync")
       .mockImplementationOnce(async function* () {
@@ -387,7 +394,7 @@ describe("real provider ingestion", () => {
         ["sent", "sent"],
         ["drafts", "drafts"],
         ["archive", "archive"],
-      ] as const)
+      ] as const) {
         yield {
           kind: "mailbox",
           op: "upsert",
@@ -401,6 +408,7 @@ describe("real provider ingestion", () => {
             unreadEmails: 0,
           },
         };
+      }
       for (const [id, box, draft, self] of [
         ["incoming", "in", false, false],
         ["outgoing", "sent", false, false],
@@ -408,7 +416,7 @@ describe("real provider ingestion", () => {
         ["draft-keyword", "in", true, false],
         ["self-archive", "archive", false, true],
         ["self-inbox", "in", false, true],
-      ] as const)
+      ] as const) {
         yield {
           kind: "email",
           op: "upsert",
@@ -422,6 +430,7 @@ describe("real provider ingestion", () => {
             ...(id === "outgoing" ? { provenance: "sent" as const } : {}),
           },
         };
+      }
       yield { kind: "cursor", cursor: "complete" };
     });
     await service.syncAccount(account.id);

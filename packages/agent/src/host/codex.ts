@@ -25,8 +25,9 @@ const tomlTable = (entries: Record<string, string>): string =>
 
 /** A positive TOML float; MCP timeouts are seconds. */
 const seconds = (value: number): string => {
-  if (!Number.isFinite(value) || value <= 0)
+  if (!Number.isFinite(value) || value <= 0) {
     throw new LlmError("MCP timeouts must be positive numbers of seconds", "HOST_AGENT_CONFIG");
+  }
   return Number.isInteger(value) ? `${value}.0` : String(value);
 };
 
@@ -60,12 +61,19 @@ export function strictCompatible(schema: JsonSchema): boolean {
   const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
   if (types.includes("object") || schema.properties) {
     const keys = Object.keys(schema.properties ?? {});
-    if (schema.additionalProperties !== false) return false;
-    if (keys.some((key) => !(schema.required ?? []).includes(key))) return false;
-    if (Object.values(schema.properties ?? {}).some((child) => !strictCompatible(child)))
+    if (schema.additionalProperties !== false) {
       return false;
+    }
+    if (keys.some((key) => !(schema.required ?? []).includes(key))) {
+      return false;
+    }
+    if (Object.values(schema.properties ?? {}).some((child) => !strictCompatible(child))) {
+      return false;
+    }
   }
-  if (schema.items && !strictCompatible(schema.items)) return false;
+  if (schema.items && !strictCompatible(schema.items)) {
+    return false;
+  }
   return true;
 }
 
@@ -88,25 +96,35 @@ export async function codexInvocation(spec: HostRunSpec): Promise<HostInvocation
     "never",
   ];
   const env: Record<string, string> = {};
-  if (spec.model) args.push("-m", spec.model);
-  if (spec.reasoning) args.push("-c", `model_reasoning_effort=${toml(spec.reasoning)}`);
-  if (spec.systemPrompt) args.push("-c", `developer_instructions=${toml(spec.systemPrompt)}`);
+  if (spec.model) {
+    args.push("-m", spec.model);
+  }
+  if (spec.reasoning) {
+    args.push("-c", `model_reasoning_effort=${toml(spec.reasoning)}`);
+  }
+  if (spec.systemPrompt) {
+    args.push("-c", `developer_instructions=${toml(spec.systemPrompt)}`);
+  }
   const allowed = spec.allowedTools;
   const shell = !spec.completion && !!allowed?.some((tool) => tool === "Bash" || tool === "shell");
-  for (const feature of spec.completion ? COMPLETION_FEATURES_OFF : SESSION_FEATURES_OFF)
+  for (const feature of spec.completion ? COMPLETION_FEATURES_OFF : SESSION_FEATURES_OFF) {
     args.push("-c", `features.${feature}=false`);
-  if (!shell && !spec.completion)
+  }
+  if (!shell && !spec.completion) {
     args.push("-c", "features.shell_tool=false", "-c", "features.unified_exec=false");
-  if (spec.completion || !allowed?.some((tool) => tool === "WebSearch" || tool === "web_search"))
+  }
+  if (spec.completion || !allowed?.some((tool) => tool === "WebSearch" || tool === "web_search")) {
     args.push("-c", `web_search=${toml("disabled")}`);
+  }
   if (!spec.completion) {
     let envIndex = 0;
     for (const [name, server] of Object.entries(spec.mcpServers ?? {})) {
-      if (!SERVER_NAME.test(name))
+      if (!SERVER_NAME.test(name)) {
         throw new LlmError(
           "MCP server names may contain only letters, digits, - and _",
           "HOST_AGENT_CONFIG",
         );
+      }
       const key = `mcp_servers.${name}`;
       // Secrets travel in the child environment, never in argv (visible in process lists).
       const secret = (value: string) => {
@@ -119,8 +137,9 @@ export async function codexInvocation(spec: HostRunSpec): Promise<HostInvocation
         const headers = Object.fromEntries(
           Object.entries(server.headers ?? {}).map(([header, value]) => [header, secret(value)]),
         );
-        if (Object.keys(headers).length)
+        if (Object.keys(headers).length) {
           args.push("-c", `${key}.env_http_headers=${tomlTable(headers)}`);
+        }
       } else {
         args.push(
           "-c",
@@ -136,29 +155,37 @@ export async function codexInvocation(spec: HostRunSpec): Promise<HostInvocation
             inline[variable] = value;
             continue;
           }
-          if (env[variable] !== undefined && env[variable] !== value)
+          if (env[variable] !== undefined && env[variable] !== value) {
             throw new LlmError(
               "Two MCP servers set the same environment variable differently",
               "HOST_AGENT_CONFIG",
             );
+          }
           env[variable] = value;
           forwarded.push(variable);
         }
-        if (Object.keys(inline).length) args.push("-c", `${key}.env=${tomlTable(inline)}`);
-        if (forwarded.length) args.push("-c", `${key}.env_vars=${toml(forwarded)}`);
+        if (Object.keys(inline).length) {
+          args.push("-c", `${key}.env=${tomlTable(inline)}`);
+        }
+        if (forwarded.length) {
+          args.push("-c", `${key}.env_vars=${toml(forwarded)}`);
+        }
       }
-      if (server.timeouts?.startupSec)
+      if (server.timeouts?.startupSec) {
         args.push("-c", `${key}.startup_timeout_sec=${seconds(server.timeouts.startupSec)}`);
-      if (server.timeouts?.toolSec)
+      }
+      if (server.timeouts?.toolSec) {
         args.push("-c", `${key}.tool_timeout_sec=${seconds(server.timeouts.toolSec)}`);
+      }
       args.push("-c", `${key}.default_tools_approval_mode=${toml("approve")}`);
       if (allowed) {
         const prefix = `mcp__${name}__`;
-        if (!allowed.includes(`mcp__${name}`))
+        if (!allowed.includes(`mcp__${name}`)) {
           args.push(
             "-c",
             `${key}.enabled_tools=${toml(allowed.filter((tool) => tool.startsWith(prefix)).map((tool) => tool.slice(prefix.length)))}`,
           );
+        }
       }
     }
   }
@@ -177,7 +204,9 @@ export async function codexInvocation(spec: HostRunSpec): Promise<HostInvocation
     env,
     schemaEnforced,
     cleanup: async () => {
-      if (dir) await rm(dir, { recursive: true, force: true });
+      if (dir) {
+        await rm(dir, { recursive: true, force: true });
+      }
     },
   };
 }
@@ -192,30 +221,44 @@ function failure(raw: unknown): { message: string; code: string } {
     const inner = record(parsed?.error);
     status = count(parsed?.status);
     code = typeof inner?.code === "string" ? inner.code : "";
-    if (typeof inner?.message === "string") message = inner.message;
+    if (typeof inner?.message === "string") {
+      message = inner.message;
+    }
   } catch {
     /* plain text */
   }
   const lower = message.toLowerCase();
-  const kind =
-    code === "invalid_json_schema"
-      ? "HOST_AGENT_SCHEMA"
-      : status === 401 ||
-          status === 403 ||
-          /\bunauthori[sz]ed\b|\bnot logged in\b|\blog ?in\b|\bsign in\b|\bauthenticat/.test(lower)
-        ? "HOST_AGENT_AUTH"
-        : status === 429 || /rate limit|usage limit|quota/.test(lower)
-          ? "HOST_AGENT_RATE_LIMIT"
-          : /model/.test(lower) &&
-              /not (found|supported|exist)|unknown|invalid|does not exist/.test(lower)
-            ? "HOST_AGENT_MODEL"
-            : "HOST_AGENT_FAILED";
+  function failureCode() {
+    if (code === "invalid_json_schema") {
+      return "HOST_AGENT_SCHEMA";
+    }
+    if (
+      status === 401 ||
+      status === 403 ||
+      /\bunauthori[sz]ed\b|\bnot logged in\b|\blog ?in\b|\bsign in\b|\bauthenticat/.test(lower)
+    ) {
+      return "HOST_AGENT_AUTH";
+    }
+    if (status === 429 || /rate limit|usage limit|quota/.test(lower)) {
+      return "HOST_AGENT_RATE_LIMIT";
+    }
+    if (
+      /model/.test(lower) &&
+      /not (found|supported|exist)|unknown|invalid|does not exist/.test(lower)
+    ) {
+      return "HOST_AGENT_MODEL";
+    }
+    return "HOST_AGENT_FAILED";
+  }
+  const kind = failureCode();
   return { code: kind, message: `Codex run failed${message ? `: ${redact(message)}` : ""}` };
 }
 
 function mcpResultText(result: unknown): string {
   const content = record(result)?.content;
-  if (!Array.isArray(content)) return "";
+  if (!Array.isArray(content)) {
+    return "";
+  }
   return content
     .map((item) => {
       const block = record(item);
@@ -238,28 +281,33 @@ export function createCodexParser(): HostStreamParser {
       } catch {
         return [];
       }
-      if (!message) return [];
+      if (!message) {
+        return [];
+      }
       const events: HostAgentEvent[] = [];
       const item = record(message.item);
       switch (message.type) {
         case "thread.started":
-          if (typeof message.thread_id === "string") state.sessionId = message.thread_id;
+          if (typeof message.thread_id === "string") {
+            state.sessionId = message.thread_id;
+          }
           events.push({
             type: "started",
             ...(state.sessionId ? { sessionId: state.sessionId } : {}),
           });
           break;
         case "item.started":
-          if (item?.type === "mcp_tool_call")
+          if (item?.type === "mcp_tool_call") {
             events.push({
               type: "tool_call",
               name: `mcp__${String(item.server)}__${String(item.tool)}`,
               input: item.arguments ?? {},
             });
-          else if (item?.type === "command_execution")
+          } else if (item?.type === "command_execution") {
             events.push({ type: "tool_call", name: "shell", input: { command: item.command } });
-          else if (item?.type === "web_search")
+          } else if (item?.type === "web_search") {
             events.push({ type: "tool_call", name: "web_search", input: { query: item.query } });
+          }
           break;
         case "item.completed":
           if (item?.type === "agent_message" && typeof item.text === "string") {
@@ -325,7 +373,9 @@ export function createCodexParser(): HostStreamParser {
     },
     outcome() {
       const outcome = { ...state };
-      if (failed || (!state.finished && lastError)) outcome.error = lastError;
+      if (failed || (!state.finished && lastError)) {
+        outcome.error = lastError;
+      }
       return outcome;
     },
   };

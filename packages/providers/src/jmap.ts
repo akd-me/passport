@@ -102,8 +102,9 @@ export async function normalizeJmap(
   headers.inReplyTo ??= message.inReplyTo?.[0]
     ? `<${message.inReplyTo[0]!.replace(/^<|>$/g, "")}>`
     : null;
-  if (!headers.references.length)
+  if (!headers.references.length) {
     headers.references = (message.references ?? []).map((v) => `<${v.replace(/^<|>$/g, "")}>`);
+  }
   const body = (parts: JmapBodyPart[] = []) =>
     parts.map((p) => message.bodyValues?.[p.partId ?? ""]?.value ?? "").join("\n");
   const html = body(message.htmlBody) || null,
@@ -161,23 +162,28 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
             `https://${required(account.settings.host, "host or sessionUrl")}/.well-known/jmap`,
         ),
       );
-      if (url.protocol !== "https:")
+      if (url.protocol !== "https:") {
         throw new ProviderError("CONFIG_INVALID", "JMAP sessionUrl must use HTTPS");
+      }
       this.session = await this.json<JmapSession>(url.href);
-      if (!this.session.capabilities?.[mail])
+      if (!this.session.capabilities?.[mail]) {
         throw new ProviderError("UNSUPPORTED_CAPABILITY", "Server does not support JMAP Mail");
+      }
       this.remoteAccountId = String(
         account.settings.jmapAccountId ?? this.session.primaryAccounts[mail] ?? "",
       );
       if (
         !this.remoteAccountId ||
         !this.session.accounts[this.remoteAccountId]?.accountCapabilities[mail]
-      )
+      ) {
         throw new ProviderError("CONFIG_INVALID", "JMAP Mail account was not found");
+      }
       // Session URLs may legitimately point at a separate API/download host, but always require TLS.
-      for (const value of [this.session.apiUrl, this.session.downloadUrl, this.session.uploadUrl])
-        if (!value?.startsWith("https://"))
+      for (const value of [this.session.apiUrl, this.session.downloadUrl, this.session.uploadUrl]) {
+        if (!value?.startsWith("https://")) {
           throw new ProviderError("INVALID_RESPONSE", "JMAP endpoint must use HTTPS");
+        }
+      }
     } catch (e) {
       await this.disconnect();
       throw e;
@@ -190,7 +196,9 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
   }
   private async call<T>(method: string, args: Record<string, unknown> = {}): Promise<T> {
     this.check();
-    if (!this.session) throw new ProviderError("NOT_CONNECTED", "JMAP session is unavailable");
+    if (!this.session) {
+      throw new ProviderError("NOT_CONNECTED", "JMAP session is unavailable");
+    }
     const using = [
       core,
       mail,
@@ -198,8 +206,9 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
         ? [submission]
         : []),
     ];
-    if (using.includes(submission) && !this.session.capabilities[submission])
+    if (using.includes(submission) && !this.session.capabilities[submission]) {
       throw new ProviderError("UNSUPPORTED_CAPABILITY", "Server does not support JMAP submission");
+    }
     const response = await this.json<{
       methodResponses: Array<[string, T & { type?: string }, string]>;
     }>(
@@ -210,22 +219,26 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
       }),
     );
     const item = response.methodResponses?.find((r) => r[2] === "0");
-    if (!item)
+    if (!item) {
       throw new ProviderError("INVALID_RESPONSE", "JMAP response is missing the requested method");
-    if (item[0] === "error")
+    }
+    if (item[0] === "error") {
       throw new ProviderError(
         item[1].type === "cannotCalculateChanges" ? "CURSOR_EXPIRED" : "JMAP_METHOD_ERROR",
         `JMAP ${method} failed${item[1].type === "cannotCalculateChanges" ? "; reset local sync state and run a full sync" : ""}`,
       );
-    if (item[0] !== method)
+    }
+    if (item[0] !== method) {
       throw new ProviderError("INVALID_RESPONSE", "JMAP returned an unexpected method");
+    }
     const result = item[1] as T & SetResult;
     if (
       Object.keys(result.notCreated ?? {}).length ||
       Object.keys(result.notUpdated ?? {}).length ||
       Object.keys(result.notDestroyed ?? {}).length
-    )
+    ) {
       throw new ProviderError("JMAP_SET_FAILED", `JMAP ${method} rejected one or more mutations`);
+    }
     return result;
   }
   private async mailboxes(): Promise<JmapMailbox[]> {
@@ -245,7 +258,7 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
     };
   }
   async *sync(cursor: string | null, opts: { maxEmails?: number } = {}): AsyncIterable<SyncDelta> {
-    for (const m of await this.mailboxes())
+    for (const m of await this.mailboxes()) {
       yield {
         kind: "mailbox",
         op: "upsert",
@@ -260,6 +273,7 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
           unreadEmails: m.unreadEmails ?? 0,
         },
       };
+    }
     let state: string;
     const changed = new Set<string>(),
       deleted = new Set<string>();
@@ -298,18 +312,26 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
           limit: Math.max(1, opts.maxEmails ?? 100),
           calculateTotal: true,
         });
-        for (const id of page.ids) changed.add(id);
+        for (const id of page.ids) {
+          changed.add(id);
+        }
         total = page.total;
         position += page.ids.length;
-        if (!page.ids.length && position < total)
+        if (!page.ids.length && position < total) {
           throw new ProviderError("INVALID_RESPONSE", "JMAP query pagination made no progress");
+        }
       } while (position < total);
     }
-    for (const providerId of deleted) yield { kind: "email", op: "delete", providerId };
+    for (const providerId of deleted) {
+      yield { kind: "email", op: "delete", providerId };
+    }
     for (const id of changed) {
       const email = await this.getEmail(id);
-      if (email) yield { kind: "email", op: "upsert", email };
-      else yield { kind: "email", op: "delete", providerId: id };
+      if (email) {
+        yield { kind: "email", op: "upsert", email };
+      } else {
+        yield { kind: "email", op: "delete", providerId: id };
+      }
     }
     yield { kind: "cursor", cursor: state };
   }
@@ -347,7 +369,9 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
   }
   async getBlob(blobId: string): Promise<{ type: string; data: Uint8Array }> {
     this.check();
-    if (!this.session) throw new ProviderError("NOT_CONNECTED", "JMAP session is unavailable");
+    if (!this.session) {
+      throw new ProviderError("NOT_CONNECTED", "JMAP session is unavailable");
+    }
     const values: Record<string, string> = {
       accountId: this.remoteAccountId,
       blobId,
@@ -370,32 +394,43 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
       const update: Record<string, Record<string, unknown>> = {};
       const trash =
         c.op === "delete" ? (await this.mailboxes()).find((m) => m.role === "trash") : undefined;
-      if (c.op === "delete" && !trash)
+      if (c.op === "delete" && !trash) {
         throw new ProviderError(
           "MAILBOX_NOT_FOUND",
           "JMAP has no trash mailbox; refusing to permanently destroy mail",
         );
+      }
       for (const id of c.providerIds) {
         const patch: Record<string, unknown> = {};
         if (c.op === "setKeywords") {
-          for (const k of c.add ?? []) patch[`keywords/${escape(k)}`] = true;
-          for (const k of c.remove ?? []) patch[`keywords/${escape(k)}`] = null;
-        } else if (c.op === "move" || c.op === "delete")
+          for (const k of c.add ?? []) {
+            patch[`keywords/${escape(k)}`] = true;
+          }
+          for (const k of c.remove ?? []) {
+            patch[`keywords/${escape(k)}`] = null;
+          }
+        } else if (c.op === "move" || c.op === "delete") {
           patch.mailboxIds = { [c.op === "move" ? c.toMailboxProviderId : trash!.id]: true };
-        else
+        } else {
           patch[`mailboxIds/${escape(c.mailboxProviderId)}`] =
             c.op === "addToMailbox" ? true : null;
+        }
         update[id] = patch;
       }
-      if (Object.keys(update).length) await this.call("Email/set", { update });
+      if (Object.keys(update).length) {
+        await this.call("Email/set", { update });
+      }
     }
   }
   async createDraft(draft: DraftInput): Promise<Email> {
     this.check();
-    if (draft.accountId !== this.account.id)
+    if (draft.accountId !== this.account.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Draft belongs to another account");
+    }
     const drafts = (await this.mailboxes()).find((m) => m.role === "drafts");
-    if (!drafts) throw new ProviderError("MAILBOX_NOT_FOUND", "JMAP has no drafts mailbox");
+    if (!drafts) {
+      throw new ProviderError("MAILBOX_NOT_FOUND", "JMAP has no drafts mailbox");
+    }
     const reply = await this.reply(draft.inReplyToEmailId, (id) => this.getEmail(id));
     const created = await this.call<SetResult>("Email/set", {
       create: {
@@ -431,20 +466,24 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
       },
     });
     const email = await this.getEmail(required(created.created?.draft?.id, "created draft ID"));
-    if (!email) throw new ProviderError("INVALID_RESPONSE", "JMAP created draft is missing");
+    if (!email) {
+      throw new ProviderError("INVALID_RESPONSE", "JMAP created draft is missing");
+    }
     return email;
   }
   async updateDraft(providerId: string, draft: DraftInput): Promise<Email> {
     // JMAP message bodies are immutable. Replacement returns a new providerId; callers must upsert it.
-    if (!(await this.getEmail(providerId))?.keywords.$draft)
+    if (!(await this.getEmail(providerId))?.keywords.$draft) {
       throw new ProviderError("NOT_A_DRAFT", "JMAP message is not a draft");
+    }
     const replacement = await this.createDraft(draft);
     await this.deleteDraft(providerId);
     return replacement;
   }
   async deleteDraft(providerId: string): Promise<void> {
-    if (!(await this.getEmail(providerId))?.keywords.$draft)
+    if (!(await this.getEmail(providerId))?.keywords.$draft) {
       throw new ProviderError("NOT_A_DRAFT", "JMAP message is not a draft");
+    }
     await this.call("Email/set", { destroy: [providerId] });
   }
   async send(input: { draftProviderId?: string; draft?: DraftInput }): Promise<SendResult> {
@@ -452,22 +491,26 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
     const email = input.draft
       ? await this.createDraft(input.draft)
       : await this.getEmail(input.draftProviderId!);
-    if (!email?.keywords.$draft)
+    if (!email?.keywords.$draft) {
       throw new ProviderError("NOT_A_DRAFT", "JMAP draft does not exist");
+    }
     const identities = await this.call<{ list: Array<{ id: string; email: string }> }>(
       "Identity/get",
     );
     const identity = identities.list.find(
       (i) => i.email.toLowerCase() === this.account.emailAddress.toLowerCase(),
     );
-    if (!identity)
+    if (!identity) {
       throw new ProviderError(
         "IDENTITY_NOT_FOUND",
         "JMAP submission identity does not match the account",
       );
+    }
     const sent = (await this.mailboxes()).find((m) => m.role === "sent"),
       update: Record<string, unknown> = { "keywords/$draft": null };
-    if (sent) update.mailboxIds = { [sent.id]: true };
+    if (sent) {
+      update.mailboxIds = { [sent.id]: true };
+    }
     await this.call("EmailSubmission/set", {
       create: { send: { emailId: email.providerId, identityId: identity.id } },
       onSuccessUpdateEmail: { "#send": update },

@@ -148,12 +148,15 @@ interface Ticket {
 
 /** Validated `POST /api/setup/tasks` body. */
 export function parseSetupInput(body: Record<string, unknown>): StartSetupInput {
-  if (body.provider !== "gmail" && body.provider !== "microsoft")
+  if (body.provider !== "gmail" && body.provider !== "microsoft") {
     throw new ApiError("INVALID_PROVIDER", "Choose gmail or microsoft");
-  if (body.calendar !== undefined && typeof body.calendar !== "boolean")
+  }
+  if (body.calendar !== undefined && typeof body.calendar !== "boolean") {
     throw new ApiError("INVALID_FIELD", "calendar must be true or false");
-  if (body.agent !== undefined && body.agent !== "codex" && body.agent !== "claude-code")
+  }
+  if (body.agent !== undefined && body.agent !== "codex" && body.agent !== "claude-code") {
     throw new ApiError("INVALID_FIELD", "agent must be codex or claude-code");
+  }
   return {
     provider: body.provider,
     calendar: body.calendar !== false,
@@ -212,24 +215,29 @@ export class SetupTaskRunner {
 
   get(id: string): SetupTask {
     const run = this.runs.get(id);
-    if (!run) throw new ApiError("NOT_FOUND", "Setup task not found", 404);
+    if (!run) {
+      throw new ApiError("NOT_FOUND", "Setup task not found", 404);
+    }
     return run.state.snapshot();
   }
 
   start(input: StartSetupInput, origin: string): SetupTask {
-    if (this.options.mode === "demo")
+    if (this.options.mode === "demo") {
       throw new ApiError("DEMO_ONLY", "Start passport serve to connect real accounts");
-    if (!loopbackOrigin(origin))
+    }
+    if (!loopbackOrigin(origin)) {
       throw new ApiError(
         "INVALID_REDIRECT",
         "Run Passport on an HTTP loopback address to connect accounts",
       );
-    if ([...this.runs.values()].some((run) => !run.state.terminal))
+    }
+    if ([...this.runs.values()].some((run) => !run.state.terminal)) {
       throw new ApiError(
         "SETUP_BUSY",
         "A setup task is already running; finish or cancel it first",
         409,
       );
+    }
     const id = newId();
     const state = new SetupTaskState(
       id,
@@ -247,8 +255,12 @@ export class SetupTaskRunner {
     };
     this.runs.set(id, run);
     for (const [key, old] of this.runs) {
-      if (this.runs.size <= MAX_TASKS) break;
-      if (old.state.terminal) this.runs.delete(key);
+      if (this.runs.size <= MAX_TASKS) {
+        break;
+      }
+      if (old.state.terminal) {
+        this.runs.delete(key);
+      }
     }
     state.log(
       "info",
@@ -263,13 +275,19 @@ export class SetupTaskRunner {
 
   respond(id: string, promptId: unknown, answer: unknown): SetupTask {
     const run = this.runs.get(id);
-    if (!run) throw new ApiError("NOT_FOUND", "Setup task not found", 404);
-    if (typeof promptId !== "string") throw new ApiError("INVALID_FIELD", "promptId is required");
-    if (typeof answer !== "string" || answer.length > 2000)
+    if (!run) {
+      throw new ApiError("NOT_FOUND", "Setup task not found", 404);
+    }
+    if (typeof promptId !== "string") {
+      throw new ApiError("INVALID_FIELD", "promptId is required");
+    }
+    if (typeof answer !== "string" || answer.length > 2000) {
       throw new ApiError("INVALID_FIELD", "answer must be text up to 2000 characters");
+    }
     const prompt = run.state.answer(promptId);
-    if (prompt.kind === "question" && !answer.trim())
+    if (prompt.kind === "question" && !answer.trim()) {
       throw new ApiError("INVALID_FIELD", "Type an answer");
+    }
     run.state.log(
       "info",
       prompt.kind === "question" ? "You answered the agent's question." : "You clicked Continue.",
@@ -282,7 +300,9 @@ export class SetupTaskRunner {
 
   cancel(id: string): SetupTask {
     const run = this.runs.get(id);
-    if (!run) throw new ApiError("NOT_FOUND", "Setup task not found", 404);
+    if (!run) {
+      throw new ApiError("NOT_FOUND", "Setup task not found", 404);
+    }
     if (!run.state.terminal) {
       run.state.cancel();
       this.stop(run);
@@ -293,25 +313,34 @@ export class SetupTaskRunner {
   /** Single use: the browser that opens the link receives the attempt's cookie. */
   launch(ticket: string): { state: string; nonce: string; authUrl: string } | undefined {
     const entry = this.tickets.get(ticket);
-    if (!entry) return;
+    if (!entry) {
+      return;
+    }
     this.tickets.delete(ticket);
-    if (entry.expiresAt <= Date.now() || entry.run.state.terminal) return;
+    if (entry.expiresAt <= Date.now() || entry.run.state.terminal) {
+      return;
+    }
     return { state: entry.state, nonce: entry.nonce, authUrl: entry.authUrl };
   }
 
   async close(): Promise<void> {
-    for (const run of this.runs.values())
+    for (const run of this.runs.values()) {
       if (!run.state.terminal) {
         run.state.cancel();
         this.stop(run);
       }
+    }
     await this.listener.close();
   }
 
   private stop(run: Run): void {
     run.controller.abort();
     run.session?.cancel();
-    for (const [ticket, entry] of this.tickets) if (entry.run === run) this.tickets.delete(ticket);
+    for (const [ticket, entry] of this.tickets) {
+      if (entry.run === run) {
+        this.tickets.delete(ticket);
+      }
+    }
   }
 
   private async execute(run: Run): Promise<void> {
@@ -322,16 +351,19 @@ export class SetupTaskRunner {
     try {
       state.step("prepare", "running", "Looking for a signed-in agent");
       const statuses = await (this.options.detectAgents ?? (() => detectHostAgents()))();
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        return;
+      }
       const ready = (kind: HostAgentKind) =>
         statuses.find((status) => status.kind === kind && status.ready);
       const kind =
         input.agent ??
         (ready("codex") ? "codex" : ready("claude-code") ? "claude-code" : undefined);
-      if (!kind)
+      if (!kind) {
         return state.fail(
           "No signed-in agent found. Sign in to Codex (`codex login`) or Claude Code (`claude`), or set up manually.",
         );
+      }
       if (!ready(kind)) {
         const status = statuses.find((candidate) => candidate.kind === kind);
         return state.fail(
@@ -345,26 +377,36 @@ export class SetupTaskRunner {
       );
 
       const browser = this.browser.detect();
-      if (!browser) return state.fail(NO_BROWSER_MESSAGE);
+      if (!browser) {
+        return state.fail(NO_BROWSER_MESSAGE);
+      }
       state.step("prepare", "running", "Preparing the browser");
       try {
         await this.browser.prepare(signal);
       } catch {
-        if (signal.aborted) return;
+        if (signal.aborted) {
+          return;
+        }
         return state.fail(
           "Could not download the browser helper (Playwright MCP via npx). Check your network connection and try again.",
         );
       }
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        return;
+      }
       await mkdir(this.profileDir, { recursive: true, mode: 0o700 });
       await mkdir(this.workDir, { recursive: true, mode: 0o700 });
       // A browser left over from an earlier task would hold the profile lock.
       await this.browser.close(this.profileDir);
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        return;
+      }
 
       const binding = await this.listener.bind(this.toolHost(run));
       release = binding.release;
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        return;
+      }
       const { systemPrompt, prompt } = setupPrompt({
         provider: input.provider,
         calendar: input.calendar,
@@ -407,11 +449,13 @@ export class SetupTaskRunner {
       );
       run.session = session;
       const result = await session.done;
-      if (state.terminal) return;
+      if (state.terminal) {
+        return;
+      }
       if (state.connected) {
         state.log("info", "Agent finished.");
         state.complete();
-      } else
+      } else {
         state.fail(
           result.error?.code === "HOST_AGENT_TIMEOUT"
             ? "The agent ran out of time. Start setup again; finished steps are reused."
@@ -419,10 +463,14 @@ export class SetupTaskRunner {
               ? result.error.message
               : "The agent stopped before the mailbox was connected.",
         );
+      }
     } finally {
       run.controller.abort();
-      for (const [ticket, entry] of this.tickets)
-        if (entry.run === run) this.tickets.delete(ticket);
+      for (const [ticket, entry] of this.tickets) {
+        if (entry.run === run) {
+          this.tickets.delete(ticket);
+        }
+      }
       await release?.().catch(() => undefined);
       if (browserStarted) {
         await this.browser.close(this.profileDir).catch(() => undefined);
@@ -436,19 +484,26 @@ export class SetupTaskRunner {
 
   private onEvent(run: Run, event: HostAgentEvent): void {
     const { state } = run;
-    if (event.type === "started") state.log("info", "Agent started.");
-    else if (event.type === "text") state.log("info", `Agent: ${event.text}`);
-    else if (event.type === "tool_call") {
+    if (event.type === "started") {
+      state.log("info", "Agent started.");
+    } else if (event.type === "text") {
+      state.log("info", `Agent: ${event.text}`);
+    } else if (event.type === "tool_call") {
       const line = describeBrowserCall(event.name, event.input);
-      if (line) state.log("info", line);
-    } else if (event.type === "tool_result" && !event.ok)
+      if (line) {
+        state.log("info", line);
+      }
+    } else if (event.type === "tool_result" && !event.ok) {
       state.log("warn", `${event.name.replace(/^mcp__[^_]+__/, "")} failed: ${event.summary}`);
+    }
   }
 
   private toolHost(run: Run): SetupToolHost {
     const { state } = run;
     const ended = () => {
-      if (state.terminal || run.controller.signal.aborted) throw new SetupTaskEnded();
+      if (state.terminal || run.controller.signal.aborted) {
+        throw new SetupTaskEnded();
+      }
     };
     const sleep = (ms: number, signal: AbortSignal) =>
       new Promise<void>((resolve) => {
@@ -468,10 +523,14 @@ export class SetupTaskRunner {
       askUser: async (kind: SetupPromptKind, message: string, signal: AbortSignal) => {
         ended();
         const prompt = state.ask(kind, message);
-        if (prompt.kind === "sign_in")
+        if (prompt.kind === "sign_in") {
           state.log("info", "Waiting for you to sign in in the browser window.");
+        }
         let waiting = run.answers.get(prompt.id);
-        if (!waiting) run.answers.set(prompt.id, (waiting = deferred<string>()));
+        if (!waiting) {
+          waiting = deferred<string>();
+          run.answers.set(prompt.id, waiting);
+        }
         const timeout = new AbortController();
         const timer = setTimeout(() => timeout.abort(), this.waitMs);
         try {
@@ -479,11 +538,15 @@ export class SetupTaskRunner {
           const answer = await Promise.race([
             waiting.promise,
             new Promise<null>((resolve) => {
-              if (stop.aborted) resolve(null);
+              if (stop.aborted) {
+                resolve(null);
+              }
               stop.addEventListener("abort", () => resolve(null), { once: true });
             }),
           ]);
-          if (answer !== null) run.answers.delete(prompt.id);
+          if (answer !== null) {
+            run.answers.delete(prompt.id);
+          }
           ended();
           return answer;
         } finally {
@@ -496,8 +559,9 @@ export class SetupTaskRunner {
       },
       registerOAuthClient: async (input) => {
         ended();
-        if (input.provider !== run.input.provider)
+        if (input.provider !== run.input.provider) {
           throw new ApiError("INVALID_PROVIDER", `This task sets up ${run.input.provider}`);
+        }
         state.addSecret(input.clientSecret);
         const attempt = await this.options.oauth.start(
           {
@@ -533,16 +597,18 @@ export class SetupTaskRunner {
       },
       waitForConnection: async (attemptId, signal) => {
         ended();
-        if (!run.attempts.has(attemptId))
+        if (!run.attempts.has(attemptId)) {
           throw new ApiError("UNKNOWN_STATE", "Use the state that register_oauth_client returned");
+        }
         const deadline = Date.now() + this.waitMs;
         while (!signal.aborted && Date.now() < deadline) {
           const status = this.options.oauth.peek(attemptId);
-          if (!status)
+          if (!status) {
             return {
               status: "failed",
               error: "Authorization expired. Call register_oauth_client again to get a new link.",
             };
+          }
           if (status.status === "connected" && status.accountId) {
             const accounts = await this.options.listAccounts();
             const linked = accounts.filter(
@@ -572,8 +638,9 @@ export class SetupTaskRunner {
       finish: (summary, success) => {
         ended();
         state.log(success ? "info" : "warn", `Agent: ${summary}`);
-        if (success && state.connected) state.complete();
-        else
+        if (success && state.connected) {
+          state.complete();
+        } else {
           state.fail(
             state.connected
               ? summary
@@ -581,6 +648,7 @@ export class SetupTaskRunner {
                 ? `The agent finished, but no mailbox was connected. ${summary}`
                 : summary,
           );
+        }
         // The agent was told to stop; do not let a lingering session hold the browser.
         const session = run.session;
         setTimeout(() => session?.cancel(), this.options.finishGraceMs ?? 20_000).unref();
@@ -592,7 +660,9 @@ export class SetupTaskRunner {
 /** One readable log line per meaningful browser action; reads are omitted, typed text never logged. */
 export function describeBrowserCall(name: string, input: unknown): string | undefined {
   const match = /^mcp__browser__(?:browser_)?(.+)$/.exec(name);
-  if (!match) return;
+  if (!match) {
+    return;
+  }
   const args = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const element = typeof args.element === "string" ? args.element.slice(0, 80) : undefined;
   const tool = match[1]!;

@@ -16,11 +16,14 @@ const windowsZones: Record<string, string> = {
 
 /** Convert a provider's floating wall time using its zone, rather than the machine's local zone. */
 export function zonedToUtc(value: string, zone = "UTC"): string {
-  if (/[zZ]$|[+-]\d\d:\d\d$/.test(value)) return toIso(value);
+  if (/[zZ]$|[+-]\d\d:\d\d$/.test(value)) {
+    return toIso(value);
+  }
   const full = value.length === 10 ? `${value}T00:00:00` : value;
   const target = Date.parse(`${full}Z`);
-  if (!Number.isFinite(target))
+  if (!Number.isFinite(target)) {
     throw new ProviderError("INVALID_DATE", "Calendar timestamp is invalid");
+  }
   let result = target;
   try {
     const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -37,7 +40,9 @@ export function zonedToUtc(value: string, zone = "UTC"): string {
       const p = Object.fromEntries(formatter.formatToParts(result).map((p) => [p.type, p.value]));
       const wall = Date.parse(`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}Z`),
         diff = target - wall;
-      if (!diff) return toIso(result);
+      if (!diff) {
+        return toIso(result);
+      }
       result += diff;
     }
   } catch {
@@ -68,10 +73,15 @@ export function localDate(value: string, zone = "UTC"): string {
 }
 
 export function validateEvent(input: Partial<CalendarEvent>): void {
-  if (input.start) toIso(input.start);
-  if (input.end) toIso(input.end);
-  if (input.start && input.end && Date.parse(input.end) <= Date.parse(input.start))
+  if (input.start) {
+    toIso(input.start);
+  }
+  if (input.end) {
+    toIso(input.end);
+  }
+  if (input.start && input.end && Date.parse(input.end) <= Date.parse(input.start)) {
     throw new ProviderError("INVALID_EVENT", "Event end must be after start");
+  }
 }
 
 export function validateRange(range: TimeRange): void {

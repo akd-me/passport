@@ -46,6 +46,8 @@ export const isFinished = isSetupTaskFinished;
 
 /** The task carried by a WebSocket event, if it is a setup update for `id`. */
 export function setupTaskFromEvent(event: DomainEvent, id?: string): SetupTask | undefined {
-  if (event.type !== "setup.task.updated") return;
+  if (event.type !== "setup.task.updated") {
+    return;
+  }
   return !id || event.task.id === id ? event.task : undefined;
 }

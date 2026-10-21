@@ -22,34 +22,45 @@ export async function calendarsReady(
     maxAgeMinutes === undefined
       ? await relevantCalendars(store, accountId)
       : (await store.accounts.list()).filter((account) => account.capabilities.calendar);
-  if (maxAgeMinutes !== undefined && !accounts.length) return false;
+  if (maxAgeMinutes !== undefined && !accounts.length) {
+    return false;
+  }
   const fresh = (at: string | null | undefined) =>
     !!at &&
     Number.isFinite(Date.parse(at)) &&
     (maxAgeMinutes === undefined || Date.now() - Date.parse(at) <= maxAgeMinutes * 60000);
   for (const account of accounts) {
-    if (maxAgeMinutes !== undefined && (await store.kv.get(`sync-in-progress:${account.id}`)))
+    if (maxAgeMinutes !== undefined && (await store.kv.get(`sync-in-progress:${account.id}`))) {
       return false;
-    if (await store.kv.get(`calendar-sync-in-progress:${account.id}`)) return false;
+    }
+    if (await store.kv.get(`calendar-sync-in-progress:${account.id}`)) {
+      return false;
+    }
     if (
       await store.kv.get(
         ["sync-reconcile", account.id, "calendar"].map(encodeURIComponent).join(":"),
       )
-    )
+    ) {
       return false;
+    }
     const checkpoint = await store.kv.get(`calendar-sync:${account.id}`);
     if (checkpoint) {
       const calendar = JSON.parse(checkpoint);
-      if (calendar.syncState?.cursor && fresh(calendar.lastSyncAt)) continue;
+      if (calendar.syncState?.cursor && fresh(calendar.lastSyncAt)) {
+        continue;
+      }
       return false;
     }
     const state = await store.syncState.get(account.id);
-    if (!fresh(account.lastSyncAt) || !state?.cursor) return false;
+    if (!fresh(account.lastSyncAt) || !state?.cursor) {
+      return false;
+    }
     if (
       state.cursor.startsWith("passport-sync-v1:") &&
       !JSON.parse(state.cursor.slice("passport-sync-v1:".length)).calendar
-    )
+    ) {
       return false;
+    }
   }
   return true;
 }
@@ -74,7 +85,9 @@ export function calendarSafeStore(
           action.request.type === "calendar_propose"
         ) {
           if (!(await calendarsReady(store, action.request.accountId, maxAgeMinutes()))) {
-            if (!(await store.actions.claim!(id, from, to, at))) return null;
+            if (!(await store.actions.claim!(id, from, to, at))) {
+              return null;
+            }
             const key = `calendar-hold-extensions:${id}`;
             const extensions = Number((await store.kv.get(key)) ?? 0);
             if (extensions < 3) {
@@ -115,14 +128,18 @@ export function calendarSafeStore(
               try {
                 conflict ||= expandRecurringEvents(events, slot).length > 0;
               } catch (error) {
-                if (!(error instanceof ApiError)) throw error;
+                if (!(error instanceof ApiError)) {
+                  throw error;
+                }
                 unverified = true;
               }
             }
           }
           if (conflict || unverified) {
             const reason = conflict ? "AVAILABILITY_CHANGED" : "AVAILABILITY_UNVERIFIED";
-            if (!(await store.actions.claim!(id, from, to, at))) return null;
+            if (!(await store.actions.claim!(id, from, to, at))) {
+              return null;
+            }
             const proposed = await store.actions.update(id, {
               status: "proposed",
               holdUntil: null,

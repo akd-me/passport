@@ -20,7 +20,7 @@ export async function hostAgentChecks(
   const anyAgent = statuses.some((status) => status.ready) || llmConfigured(config.llm);
   return statuses.map((status): DoctorCheck => {
     const selected = config.llm.provider === status.kind;
-    if (status.ready)
+    if (status.ready) {
       return {
         name: status.label,
         status: "ok",
@@ -28,6 +28,7 @@ export async function hostAgentChecks(
           .filter(Boolean)
           .join(" · "),
       };
+    }
     const state = status.installed ? "Not logged in." : "Not installed.";
     return {
       name: status.label,
@@ -43,11 +44,14 @@ export async function pingHostAgent(
   options: HostAgentDoctorOptions = {},
 ): Promise<DoctorCheck> {
   const { llm } = config;
-  if (!isHostAgentProvider(llm.provider)) throw new Error("Not a host agent");
+  if (!isHostAgentProvider(llm.provider)) {
+    throw new Error("Not a host agent");
+  }
   const name = llm.provider === "codex" ? "Codex" : "Claude Code";
   try {
-    if (options.pingHostAgent) await options.pingHostAgent(config);
-    else
+    if (options.pingHostAgent) {
+      await options.pingHostAgent(config);
+    } else {
       await new HostAgentLlmClient({
         kind: llm.provider,
         model: llm.model,
@@ -59,6 +63,7 @@ export async function pingHostAgent(
         messages: [{ role: "user", content: "Reply with the single word OK." }],
         model: "fast",
       });
+    }
     return {
       name: "LLM",
       status: "ok",

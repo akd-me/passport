@@ -23,7 +23,9 @@ function terminalPrompts(): InitPrompts {
   let muted = false;
   const output = new Writable({
     write(chunk, _encoding, done) {
-      if (!muted) stdout.write(chunk);
+      if (!muted) {
+        stdout.write(chunk);
+      }
       done();
     },
   });
@@ -37,11 +39,12 @@ function terminalPrompts(): InitPrompts {
   const lines = !stdin.isTTY ? rl[Symbol.asyncIterator]() : undefined;
   return {
     async ask(label, secret = false) {
-      if (secret && !stdin.isTTY)
+      if (secret && !stdin.isTTY) {
         throw new ApiError(
           "SECRET_INPUT",
           "Enter secrets in an interactive terminal, or set PASSPORT_LLM_API_KEY / PASSPORT_SETUP_PASSWORD / PASSPORT_SETUP_CLIENTSECRET",
         );
+      }
       if (secret) {
         stdout.write(`${label} (hidden): `);
         muted = true;
@@ -66,7 +69,9 @@ function terminalPrompts(): InitPrompts {
 }
 
 function describeAgent(agent: HostAgentStatus): string {
-  if (agent.ready) return `${agent.label}${agent.account ? ` (${agent.account} login)` : ""} ✓`;
+  if (agent.ready) {
+    return `${agent.label}${agent.account ? ` (${agent.account} login)` : ""} ✓`;
+  }
   return `${agent.label} ✗ ${agent.installed ? "not logged in" : "not installed"}`;
 }
 
@@ -80,14 +85,16 @@ export async function initializePassport(
     let llm: string | undefined,
       skipAccount = false;
     for (let i = 0; i < args.length; i++) {
-      if (args[i] === "--skip-account") skipAccount = true;
-      else if (args[i] === "--llm" && args[i + 1] && !args[i + 1]!.startsWith("--"))
+      if (args[i] === "--skip-account") {
+        skipAccount = true;
+      } else if (args[i] === "--llm" && args[i + 1] && !args[i + 1]!.startsWith("--")) {
         llm = args[++i];
-      else
+      } else {
         throw new ApiError(
           "INVALID_COMMAND",
           "Use passport init [--llm auto|codex|claude-code|none|anthropic|openai|openai-compatible|ollama] [--skip-account]",
         );
+      }
     }
     const config = await loadConfig();
     prompts.log(`Passport setup → ${config.dataDir}`);
@@ -96,8 +103,9 @@ export async function initializePassport(
       llm && !["auto", "codex", "claude-code"].includes(llm)
         ? []
         : await hostAgents({ refresh: true });
-    if (agents.length)
+    if (agents.length) {
       prompts.log(`Agents on this machine: ${agents.map(describeAgent).join(", ")}`);
+    }
     const anyReady = agents.some((agent) => agent.ready);
     let provider =
       (llm ??
@@ -105,11 +113,12 @@ export async function initializePassport(
           `Agent model (auto / codex / claude-code / advanced / none) [${anyReady ? "auto" : "none"}]`,
         ))) ||
       (anyReady ? "auto" : "none");
-    if (provider === "advanced")
+    if (provider === "advanced") {
       provider =
         (await prompts.ask(
           "API provider (anthropic / openai / openai-compatible / ollama) [anthropic]",
         )) || "anthropic";
+    }
     let enteredKey: string | undefined;
     if (provider === "auto") {
       config.llmSelection = "auto";
@@ -117,14 +126,16 @@ export async function initializePassport(
       prompts.log(describeLlm(resolution));
     } else if (provider === "codex" || provider === "claude-code") {
       const status = agents.find((agent) => agent.kind === provider);
-      if (status && !status.ready)
+      if (status && !status.ready) {
         prompts.log(`${status.label} is not ready yet. ${status.fix ?? ""}`.trim());
+      }
       const model = await prompts.ask(`Model [${HOST_AGENT_DEFAULT_MODELS[provider].main}]`);
       config.llm = hostAgentLlm(provider, model);
       config.llmSelection = "explicit";
     } else if (provider !== "none") {
-      if (!["anthropic", "openai", "openai-compatible", "ollama"].includes(provider))
+      if (!["anthropic", "openai", "openai-compatible", "ollama"].includes(provider)) {
         throw new ApiError("INVALID_PROVIDER", "Choose one of the listed LLM providers");
+      }
       const defaults = {
         anthropic: "claude-sonnet-5-5",
         openai: "gpt-4.1",
@@ -181,7 +192,9 @@ export async function initializePassport(
         clientSecret =
           process.env.PASSPORT_SETUP_CLIENTSECRET ||
           (await prompts.ask("OAuth client secret (optional)", true));
-      if (!clientId) throw new ApiError("MISSING_FIELD", "OAuth client ID is required");
+      if (!clientId) {
+        throw new ApiError("MISSING_FIELD", "OAuth client ID is required");
+      }
       const calendar = (await prompts.ask("Connect calendar too? [Y/n]")).toLowerCase() !== "n";
       const descriptor: ProviderSetupDescriptor = backend.providers.describe(kind);
       const credentials = await authorizeOAuth(
@@ -231,8 +244,9 @@ export async function initializePassport(
       await probeAccount(backend, account, { password });
       await backend.syncAccount(account.id);
       prompts.log(`Connected ${emailAddress}.`);
-    } else if (kind !== "skip")
+    } else if (kind !== "skip") {
       throw new ApiError("INVALID_PROVIDER", "Choose gmail, graph, imap or skip");
+    }
     prompts.log(
       `Configuration saved. Run passport serve, then open http://${config.host}:${config.port}/accounts`,
     );

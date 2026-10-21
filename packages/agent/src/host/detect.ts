@@ -43,7 +43,9 @@ export function resolveHostAgentBinary(
   env: NodeJS.ProcessEnv = process.env,
 ): string | null {
   const override = env[OVERRIDE[kind]];
-  if (override) return executable(override) ? override : null;
+  if (override) {
+    return executable(override) ? override : null;
+  }
   const names =
     process.platform === "win32"
       ? (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").map((ext) => BINARY[kind] + ext.toLowerCase())
@@ -52,11 +54,14 @@ export function resolveHostAgentBinary(
     ...(env.PATH ?? env.Path ?? "").split(delimiter).filter(Boolean),
     ...extraBinDirs(env),
   ];
-  for (const dir of dirs)
+  for (const dir of dirs) {
     for (const name of names) {
       const candidate = join(dir, name);
-      if (executable(candidate)) return candidate;
+      if (executable(candidate)) {
+        return candidate;
+      }
     }
+  }
   return null;
 }
 
@@ -88,7 +93,7 @@ async function probe(
 ): Promise<HostAgentStatus> {
   const base = { kind, label: LABEL[kind], checkedAt: new Date(now()).toISOString() };
   const binaryPath = resolveHostAgentBinary(kind, env);
-  if (!binaryPath)
+  if (!binaryPath) {
     return {
       ...base,
       installed: false,
@@ -99,6 +104,7 @@ async function probe(
       ready: false,
       fix: HOST_AGENT_FIXES[kind].install,
     };
+  }
   const childEnv = hostAgentEnv(env, binaryPath);
   const [ver, auth] = await Promise.all([
     exec(binaryPath, ["--version"], childEnv).catch(() => null),
@@ -129,7 +135,9 @@ async function probe(
     const match = /Logged in using (?:an? )?([^\n.]+)/i.exec(text);
     loggedIn = auth.code === 0 && !!match && !/not logged in/i.test(text);
     // API-key logins append a masked key ("API key - sk-proj-***"); keep only the method.
-    if (loggedIn) account = redact(match![1]!.split(/\s+-\s+/)[0]!.trim(), 40);
+    if (loggedIn) {
+      account = redact(match![1]!.split(/\s+-\s+/)[0]!.trim(), 40);
+    }
   }
   const versionText = ver && ver.code === 0 ? version(ver.stdout) : null;
   return {
@@ -164,7 +172,9 @@ export function detectHostAgents(
 ): Promise<HostAgentStatus[]> {
   const now = options.now ?? Date.now;
   const custom = !!(options.env || options.exec);
-  if (!custom && !options.refresh && cache && now() - cache.at < CACHE_MS) return cache.result;
+  if (!custom && !options.refresh && cache && now() - cache.at < CACHE_MS) {
+    return cache.result;
+  }
   const result = Promise.all(
     HOST_AGENT_KINDS.map((kind) =>
       probe(kind, options.env ?? process.env, options.exec ?? defaultExec, now),
@@ -174,7 +184,9 @@ export function detectHostAgents(
     const entry = { at: now(), result };
     cache = entry;
     result.catch(() => {
-      if (cache === entry) cache = undefined;
+      if (cache === entry) {
+        cache = undefined;
+      }
     });
   }
   return result;

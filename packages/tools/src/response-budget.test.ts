@@ -48,7 +48,9 @@ it("R14 chunk offsets reconstruct Unicode/escaped bodies within a configurable t
     expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(4096);
     expect(result.isError).not.toBe(true);
     body += result.textBody;
-    if (!result.truncated) break;
+    if (!result.truncated) {
+      break;
+    }
     expect(result.continueFrom).toBeGreaterThan(offset);
     expect(result.textBody).not.toMatch(/[\uD800-\uDBFF]$/);
     offset = result.continueFrom as number;

@@ -63,7 +63,9 @@ describe("passport doctor", () => {
       const report = await runDoctor(backend, {
         fetch: fetcher,
         probe: async (_backend, account) => {
-          if (account.id === bad.id) throw new Error("token=secret");
+          if (account.id === bad.id) {
+            throw new Error("token=secret");
+          }
         },
       });
       expect(report.ok).toBe(false);

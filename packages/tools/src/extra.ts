@@ -102,11 +102,12 @@ export function registerExtra(ctx: Context) {
       if (
         Date.parse(window.end) - Date.parse(window.start) > 31 * 86_400_000 ||
         minutes(workingHours.start) >= minutes(workingHours.end)
-      )
+      ) {
         throw new ToolError(
           "INVALID_INPUT",
           "Use a window of at most 31 days and start before end working hours.",
         );
+      }
       let formatter: Intl.DateTimeFormat;
       try {
         formatter = new Intl.DateTimeFormat("en-US", {
@@ -150,19 +151,23 @@ export function registerExtra(ctx: Context) {
           !workingHours.days.includes(from.day) ||
           from.minute < minutes(workingHours.start) ||
           to.minute > minutes(workingHours.end)
-        )
+        ) {
           continue;
+        }
         if (
           busy.some(
             (event) => Date.parse(event.start) < start + duration && Date.parse(event.end) > start,
           )
-        )
+        ) {
           continue;
+        }
         slots.push({
           start: new Date(start).toISOString(),
           end: new Date(start + duration).toISOString(),
         });
-        if (slots.length === limit) break;
+        if (slots.length === limit) {
+          break;
+        }
         start += duration - 60_000;
       }
       return json({ slots, timeZone, source, limitReached: slots.length === limit });
@@ -202,9 +207,12 @@ export function registerExtra(ctx: Context) {
           ),
         );
         next = page.nextCursor ?? undefined;
-        if (next && seen.has(next))
+        if (next && seen.has(next)) {
           throw new ToolError("INVALID_CURSOR", "Store returned a repeated email cursor.");
-        if (next) seen.add(next);
+        }
+        if (next) {
+          seen.add(next);
+        }
       } while (next && items.length < limit);
       return json({
         items: items.map((email) => emailView(email, full)),
@@ -267,7 +275,9 @@ export function registerExtra(ctx: Context) {
             preview: email.preview.slice(0, 160),
           })),
         };
-        if (input.dryRun || !items.length) return json({ dryRun: input.dryRun, ...preview });
+        if (input.dryRun || !items.length) {
+          return json({ dryRun: input.dryRun, ...preview });
+        }
         const batch = await call.emailBatch(
           items.map((email) => email.id),
           input.query.accountId,
@@ -342,8 +352,9 @@ export function registerExtra(ctx: Context) {
     false,
     async ({ date }) => {
       const start = Date.parse(`${date}T00:00:00.000Z`);
-      if (!Number.isFinite(start) || new Date(start).toISOString().slice(0, 10) !== date)
+      if (!Number.isFinite(start) || new Date(start).toISOString().slice(0, 10) !== date) {
         throw new ToolError("INVALID_INPUT", "Invalid calendar date.");
+      }
       const records: ActionRecord[] = [];
       const seen = new Set<string>();
       let cursor: string | undefined;
@@ -356,12 +367,19 @@ export function registerExtra(ctx: Context) {
           ),
         );
         cursor = page.nextCursor ?? undefined;
-        if (cursor && seen.has(cursor))
+        if (cursor && seen.has(cursor)) {
           throw new ToolError("INVALID_CURSOR", "Store returned a repeated action cursor.");
-        if (cursor) seen.add(cursor);
+        }
+        if (cursor) {
+          seen.add(cursor);
+        }
       } while (cursor);
       const groups: Record<string, ReturnType<typeof actionView>[]> = {};
-      for (const action of records) (groups[action.status] ??= []).push(actionView(action));
+      for (const action of records) {
+        const status = action.status;
+        groups[status] ??= [];
+        groups[status].push(actionView(action));
+      }
       return json({ date, count: records.length, groups });
     },
   );
@@ -382,20 +400,24 @@ export function registerExtra(ctx: Context) {
       const changes = [
         "Human approval can authorize a proposed action; held actions wait for the outbox deadline.",
       ];
-      if (config.alwaysAsk.includes(action.request.category))
+      if (config.alwaysAsk.includes(action.request.category)) {
         changes.push("This category is in alwaysAsk; earned trust cannot remove that requirement.");
-      if (trust.level === "supervised" || config.globalMode === "supervised")
+      }
+      if (trust.level === "supervised" || config.globalMode === "supervised") {
         changes.push(
           "Supervised trust requires human review. Approvals without edits build category evidence; the user controls promotions and the global mode.",
         );
-      if (action.request.actor.kind === "external-agent")
+      }
+      if (action.request.actor.kind === "external-agent") {
         changes.push(
           `External-agent trust is capped at ${config.externalAgentCeiling}; category trust cannot exceed that ceiling.`,
         );
-      if (action.decision.outcome === "deny")
+      }
+      if (action.decision.outcome === "deny") {
         changes.push(
           "A fixed policy restriction may still deny the action at higher trust; use the human UI to inspect it.",
         );
+      }
       return json({
         ...actionView(action),
         trust,
@@ -420,13 +442,18 @@ export function registerExtra(ctx: Context) {
       for (const target of targets) {
         try {
           const url = new URL(target.slice(1, -1).trim());
-          if (url.username || url.password) continue;
-          if (url.protocol === "https:") https ??= url.host;
+          if (url.username || url.password) {
+            continue;
+          }
+          if (url.protocol === "https:") {
+            https ??= url.host;
+          }
           if (
             url.protocol === "mailto:" &&
             /^[^\s<>@,;?]+@[^\s<>@,;?]+$/.test(decodeURIComponent(url.pathname))
-          )
+          ) {
             mailto ??= decodeURIComponent(url.pathname);
+          }
         } catch {
           /* An invalid header target provides no capability. */
         }
@@ -434,7 +461,19 @@ export function registerExtra(ctx: Context) {
       const oneClick = /(?:^|[;\s])List-Unsubscribe\s*=\s*One-Click(?:$|[;\s])/i.test(
         email.headers.listUnsubscribePost ?? "",
       );
-      const method = oneClick && https ? "header" : mailto ? "header" : https ? "link" : null;
+      function unsubscribeMethod() {
+        if (oneClick && https) {
+          return "header";
+        }
+        if (mailto) {
+          return "header";
+        }
+        if (https) {
+          return "link";
+        }
+        return null;
+      }
+      const method = unsubscribeMethod();
       const reply = email.replyTo[0]?.email ?? email.from[0]?.email;
       return json({
         emailId,

@@ -128,13 +128,14 @@ export function People() {
 export function PersonPage() {
   const { id } = useParams(),
     { data, error } = useResource<PersonDetail>(`/people/${encodeURIComponent(id!)}`);
-  if (!data)
+  if (!data) {
     return (
       <Surface title="Person" crumbs={[{ label: "People", to: "/people" }, { label: "…" }]}>
         <Feedback error={error} />
         {!error && <Loading />}
       </Surface>
     );
+  }
   const { person } = data;
   return (
     <Surface

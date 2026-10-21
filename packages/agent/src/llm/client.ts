@@ -13,7 +13,9 @@ import type {
 } from "./types.js";
 
 function object(value: unknown): Record<string, unknown> {
-  if (!isObject(value)) throw new LlmError("Invalid LLM response envelope", "LLM_RESPONSE");
+  if (!isObject(value)) {
+    throw new LlmError("Invalid LLM response envelope", "LLM_RESPONSE");
+  }
   return value;
 }
 
@@ -41,8 +43,12 @@ function endpoint(base: string, suffix: string): string {
     );
   }
   let path = url.pathname.replace(/\/+$/, "");
-  if (!path) path = "/v1";
-  if (!path.endsWith(`/${suffix}`)) path += `/${suffix}`;
+  if (!path) {
+    path = "/v1";
+  }
+  if (!path.endsWith(`/${suffix}`)) {
+    path += `/${suffix}`;
+  }
   url.pathname = path;
   return url.toString();
 }
@@ -53,34 +59,42 @@ abstract class HttpLlmClient implements LlmClient {
     protected readonly config: LlmConfig,
     options: LlmClientOptions = {},
   ) {
-    if (!config.model.trim()) throw new LlmError("An LLM model is required", "LLM_CONFIG");
+    if (!config.model.trim()) {
+      throw new LlmError("An LLM model is required", "LLM_CONFIG");
+    }
     if ((config.provider === "anthropic" || config.provider === "openai") && !config.apiKey) {
       throw new LlmError("The selected LLM provider requires an API key", "LLM_CONFIG");
     }
     for (const value of [options.maxRetries, options.retryBaseMs, options.maxRetryDelayMs]) {
-      if (value !== undefined && (!Number.isInteger(value) || value < 0))
+      if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
         throw new LlmError("Invalid LLM retry configuration", "LLM_CONFIG");
+      }
     }
     for (const value of [options.timeoutMs, options.maxTokens]) {
-      if (value !== undefined && (!Number.isInteger(value) || value <= 0))
+      if (value !== undefined && (!Number.isInteger(value) || value <= 0)) {
         throw new LlmError("Invalid LLM timeout or token configuration", "LLM_CONFIG");
+      }
     }
     for (const rate of Object.values(options.pricing ?? {})) {
-      if (!Number.isFinite(rate.inputUsdPerMillion) || !Number.isFinite(rate.outputUsdPerMillion))
+      if (!Number.isFinite(rate.inputUsdPerMillion) || !Number.isFinite(rate.outputUsdPerMillion)) {
         throw new LlmError("Model pricing requires input and output rates", "LLM_CONFIG");
-      for (const value of Object.values(rate))
-        if (!Number.isFinite(value) || value < 0)
+      }
+      for (const value of Object.values(rate)) {
+        if (!Number.isFinite(value) || value < 0) {
           throw new LlmError("Invalid model pricing", "LLM_CONFIG");
+        }
+      }
     }
     this.options = options;
   }
 
   protected model(opts: CompleteOptions): string {
-    if (opts.json && opts.tools?.length)
+    if (opts.json && opts.tools?.length) {
       throw new LlmError(
         "JSON output and interactive tools must be requested separately",
         "LLM_CONFIG",
       );
+    }
     return opts.model === "fast" ? (this.config.fastModel ?? this.config.model) : this.config.model;
   }
 
@@ -104,7 +118,9 @@ abstract class HttpLlmClient implements LlmClient {
           redirect: "error",
         });
       } catch {
-        if (attempt >= retries) throw new LlmError("LLM transport failed", "LLM_TRANSPORT");
+        if (attempt >= retries) {
+          throw new LlmError("LLM transport failed", "LLM_TRANSPORT");
+        }
         await sleep(Math.min(maxDelay, (this.options.retryBaseMs ?? 250) * 2 ** attempt));
         continue;
       }
@@ -112,7 +128,9 @@ abstract class HttpLlmClient implements LlmClient {
         try {
           return object(await response.json());
         } catch (error) {
-          if (error instanceof LlmError) throw error;
+          if (error instanceof LlmError) {
+            throw error;
+          }
           throw new LlmError("LLM returned an invalid response envelope", "LLM_RESPONSE");
         }
       }
@@ -181,7 +199,9 @@ abstract class HttpLlmClient implements LlmClient {
   protected finish(opts: CompleteOptions, result: LlmCompletion): LlmCompletion {
     for (const call of result.toolCalls) {
       const tool = opts.tools?.find((item) => item.name === call.name);
-      if (!tool) throw new LlmError("Model requested an unknown tool", "LLM_TOOL");
+      if (!tool) {
+        throw new LlmError("Model requested an unknown tool", "LLM_TOOL");
+      }
       validateJson(call.arguments, tool.inputSchema);
     }
     if (opts.json) {
@@ -208,8 +228,9 @@ export class OpenAiCompatibleClient extends HttpLlmClient {
       : opts.system;
     const messages = opts.messages.map((message) => {
       if (message.role === "tool") {
-        if (!message.toolCallId)
+        if (!message.toolCallId) {
           throw new LlmError("Tool result is missing a call ID", "LLM_CONFIG");
+        }
         return { role: "tool", content: message.content, tool_call_id: message.toolCallId };
       }
       return {
@@ -249,10 +270,13 @@ export class OpenAiCompatibleClient extends HttpLlmClient {
       },
     );
     const choice = object(Array.isArray(raw.choices) ? raw.choices[0] : undefined);
-    if (choice.finish_reason === "length")
+    if (choice.finish_reason === "length") {
       throw new LlmError("LLM output was truncated", "LLM_TRUNCATED");
+    }
     const message = object(choice.message);
-    if (message.refusal) throw new LlmError("LLM declined the request", "LLM_REFUSAL");
+    if (message.refusal) {
+      throw new LlmError("LLM declined the request", "LLM_REFUSAL");
+    }
     const text = typeof message.content === "string" ? message.content : "";
     const toolCalls: LlmToolCall[] = (
       Array.isArray(message.tool_calls) ? message.tool_calls : []
@@ -263,8 +287,9 @@ export class OpenAiCompatibleClient extends HttpLlmClient {
         typeof call.id !== "string" ||
         typeof fn.name !== "string" ||
         typeof fn.arguments !== "string"
-      )
+      ) {
         throw new LlmError("Invalid LLM tool call", "LLM_RESPONSE");
+      }
       return { id: call.id, name: fn.name, arguments: extractJson(fn.arguments) };
     });
     return this.finish(opts, {
@@ -284,7 +309,9 @@ function anthropicMessages(
     const role = message.role === "tool" ? "user" : message.role;
     const content: unknown[] = [];
     if (message.role === "tool") {
-      if (!message.toolCallId) throw new LlmError("Tool result is missing a call ID", "LLM_CONFIG");
+      if (!message.toolCallId) {
+        throw new LlmError("Tool result is missing a call ID", "LLM_CONFIG");
+      }
       content.push({
         type: "tool_result",
         tool_use_id: message.toolCallId,
@@ -292,13 +319,19 @@ function anthropicMessages(
         ...(message.isError ? { is_error: true } : {}),
       });
     } else {
-      if (message.content) content.push({ type: "text", text: message.content });
-      for (const call of message.toolCalls ?? [])
+      if (message.content) {
+        content.push({ type: "text", text: message.content });
+      }
+      for (const call of message.toolCalls ?? []) {
         content.push({ type: "tool_use", id: call.id, name: call.name, input: call.arguments });
+      }
     }
     const previous = result.at(-1);
-    if (previous?.role === role) previous.content.push(...content);
-    else result.push({ role, content });
+    if (previous?.role === role) {
+      previous.content.push(...content);
+    } else {
+      result.push({ role, content });
+    }
   }
   return result;
 }
@@ -335,23 +368,30 @@ export class AnthropicClient extends HttpLlmClient {
         ...(opts.json ? { tool_choice: { type: "tool", name: "structured_output" } } : {}),
       },
     );
-    if (raw.stop_reason === "max_tokens")
+    if (raw.stop_reason === "max_tokens") {
       throw new LlmError("LLM output was truncated", "LLM_TRUNCATED");
-    if (raw.stop_reason === "refusal")
+    }
+    if (raw.stop_reason === "refusal") {
       throw new LlmError("LLM declined the request", "LLM_REFUSAL");
-    if (!Array.isArray(raw.content))
+    }
+    if (!Array.isArray(raw.content)) {
       throw new LlmError("Invalid LLM response content", "LLM_RESPONSE");
+    }
     let text = "";
     let json: unknown;
     const toolCalls: LlmToolCall[] = [];
     for (const item of raw.content) {
       const block = object(item);
-      if (block.type === "text" && typeof block.text === "string") text += block.text;
+      if (block.type === "text" && typeof block.text === "string") {
+        text += block.text;
+      }
       if (block.type === "tool_use") {
-        if (opts.json && block.name === "structured_output") json = block.input;
-        else {
-          if (typeof block.id !== "string" || typeof block.name !== "string")
+        if (opts.json && block.name === "structured_output") {
+          json = block.input;
+        } else {
+          if (typeof block.id !== "string" || typeof block.name !== "string") {
             throw new LlmError("Invalid LLM tool call", "LLM_RESPONSE");
+          }
           toolCalls.push({ id: block.id, name: block.name, arguments: block.input });
         }
       }

@@ -84,7 +84,9 @@ describe("account sync lifecycle", () => {
   it("recovers from a transient failure and commits the successful cursor", async () => {
     let calls = 0;
     vi.spyOn(mail, "sync").mockImplementation(async function* (): AsyncIterable<SyncDelta> {
-      if (calls++ === 0) throw Object.assign(new Error(), { status: 503, code: "HTTP_503" });
+      if (calls++ === 0) {
+        throw Object.assign(new Error(), { status: 503, code: "HTTP_503" });
+      }
       yield { kind: "cursor", cursor: "finished" };
     });
     const job = service.syncAccount(account.id);

@@ -83,8 +83,9 @@ export function registerSetup(app: Hono, backend: Backend): void {
     c.header("Cache-Control", "no-store");
     c.header("Referrer-Policy", "no-referrer");
     const launch = runner().launch(c.req.param("ticket"));
-    if (!launch)
+    if (!launch) {
       return c.text("This setup link has expired or was already used. Return to Passport.", 404);
+    }
     setCookie(c, oauthCookie(launch.state), launch.nonce, {
       path: "/",
       httpOnly: true,

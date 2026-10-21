@@ -31,7 +31,7 @@ export class AccountSyncService extends SyncService {
         const provider = await mailProvider(id);
         return new Proxy(provider, {
           get(target, property) {
-            if (property === "sync")
+            if (property === "sync") {
               return async function* (cursor: string | null) {
                 const account = required(await accountStore.accounts.get(id), "Account");
                 const window = windows.get(id) ?? Number(account.settings.syncDays ?? days);
@@ -39,6 +39,7 @@ export class AccountSyncService extends SyncService {
                 snapshots.set(id, since);
                 yield* target.sync(cursor, { since });
               };
+            }
             const value = Reflect.get(target, property, target);
             return typeof value === "function" ? value.bind(target) : value;
           },
@@ -57,9 +58,13 @@ export class AccountSyncService extends SyncService {
     return this.snapshots.get(id);
   }
   override syncAccount(id: string): Promise<void> {
-    if (this.retired.has(id)) return Promise.resolve();
+    if (this.retired.has(id)) {
+      return Promise.resolve();
+    }
     const active = this.jobs.get(id);
-    if (active) return active;
+    if (active) {
+      return active;
+    }
     const job = this.runAccount(id).finally(() => this.jobs.delete(id));
     this.jobs.set(id, job);
     return job;
@@ -67,7 +72,9 @@ export class AccountSyncService extends SyncService {
   private async runAccount(id: string): Promise<void> {
     const account = required(await this.accountStore.accounts.get(id), "Account");
     // Revoked tokens need human consent, not another scheduled attempt.
-    if (account.settings.reauthorizationRequired === true) return;
+    if (account.settings.reauthorizationRequired === true) {
+      return;
+    }
     this.events.emit({ type: "account.sync.started", accountId: id });
     for (let retry = 0; ; retry++) {
       try {
@@ -114,16 +121,20 @@ export class AccountSyncService extends SyncService {
   }
   /** Widen the mail snapshot without deleting already ingested messages. */
   async backfill(id: string, days: number): Promise<void> {
-    if (!Number.isInteger(days) || days < 1 || days > 36500)
+    if (!Number.isInteger(days) || days < 1 || days > 36500) {
       throw new ApiError("INVALID_QUERY", "days must be 1–36500");
-    if (this.jobs.has(id))
+    }
+    if (this.jobs.has(id)) {
       throw new ApiError("SYNC_BUSY", "Wait for the current sync to finish", 409);
+    }
     const job = (async () => {
       const account = required(await this.accountStore.accounts.get(id), "Account");
-      if (!account.capabilities.mail)
+      if (!account.capabilities.mail) {
         throw new ApiError("ACCOUNT_CAPABILITY", "Backfill requires a mail account");
-      if (account.settings.reauthorizationRequired)
+      }
+      if (account.settings.reauthorizationRequired) {
         throw new ApiError("REAUTHORIZE_REQUIRED", "Re-authorize this account first", 409);
+      }
       const saved = await this.accountStore.syncState.get(id);
       const prefix = "passport-sync-v1:";
       const cursors = saved?.cursor?.startsWith(prefix)
@@ -163,7 +174,7 @@ export class AccountSyncService extends SyncService {
     await this.jobs.get(id)?.catch(() => undefined);
     const account = required(await this.accountStore.accounts.get(id), "Account");
     const credentials = (await this.accountStore.accounts.getCredentials(id)) ?? {};
-    for (const kind of ["mail", "calendar"] as const)
+    for (const kind of ["mail", "calendar"] as const) {
       if (account.capabilities[kind]) {
         const provider = await (kind === "mail"
           ? this.mailProvider(id)
@@ -171,15 +182,18 @@ export class AccountSyncService extends SyncService {
         await provider.disconnect().catch(() => undefined);
         await provider.connect(account, credentials);
       }
+    }
   }
   async remove(id: string): Promise<void> {
     this.retired.add(id);
     await this.jobs.get(id)?.catch(() => undefined);
     const account = required(await this.accountStore.accounts.get(id), "Account");
-    if (account.capabilities.mail)
+    if (account.capabilities.mail) {
       await (await this.mailProvider(id)).disconnect().catch(() => undefined);
-    if (account.capabilities.calendar)
+    }
+    if (account.capabilities.calendar) {
       await (await this.calendarProvider(id)).disconnect().catch(() => undefined);
+    }
   }
   override async drain(): Promise<void> {
     await Promise.allSettled([...this.jobs.values()]);

@@ -23,10 +23,13 @@ export class ProviderConnections {
     this.get(id, "calendar") as Promise<CalendarProvider>;
 
   private async get(id: string, kind: "mail" | "calendar"): Promise<Provider> {
-    if (this.stopped) throw new ApiError("BACKEND_CLOSED", "Backend is closed");
+    if (this.stopped) {
+      throw new ApiError("BACKEND_CLOSED", "Backend is closed");
+    }
     const account = required(await this.store.accounts.get(id), "Account");
-    if (!account.capabilities[kind])
+    if (!account.capabilities[kind]) {
       throw new ApiError("ACCOUNT_CAPABILITY", `Account does not support ${kind}`);
+    }
     const key = `${kind}:${id}`;
     let entry = this.entries.get(key);
     if (!entry) {
@@ -37,7 +40,9 @@ export class ProviderConnections {
       entry = { raw, proxy: raw };
       const current = entry;
       const connect = async () => {
-        if (this.stopped) throw new ApiError("BACKEND_CLOSED", "Backend is closed");
+        if (this.stopped) {
+          throw new ApiError("BACKEND_CLOSED", "Backend is closed");
+        }
         current.connected ??= (async () => {
           const fresh = required(await this.store.accounts.get(id), "Account");
           await raw.connect(fresh, (await this.store.accounts.getCredentials(id)) ?? {});
@@ -55,8 +60,10 @@ export class ProviderConnections {
       current.proxy = new Proxy(raw, {
         get: (target, property) => {
           const value = Reflect.get(target, property, target);
-          if (typeof value !== "function") return value;
-          if (property === "sync")
+          if (typeof value !== "function") {
+            return value;
+          }
+          if (property === "sync") {
             return async function* (...args: unknown[]) {
               await connect();
               try {
@@ -66,7 +73,10 @@ export class ProviderConnections {
                 throw error;
               }
             };
-          if (property === "connect" || property === "disconnect") return value.bind(target);
+          }
+          if (property === "connect" || property === "disconnect") {
+            return value.bind(target);
+          }
           return async (...args: unknown[]) => {
             await connect();
             try {

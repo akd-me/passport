@@ -34,23 +34,28 @@ export function createDemoPolicy(store: Store, bus: EventBus): PolicyEngine {
       let trustLevel = state.pinnedLevel
         ? minTrust(config.globalMode, state.pinnedLevel)
         : config.globalMode;
-      if (request.actor.kind === "external-agent")
+      if (request.actor.kind === "external-agent") {
         trustLevel = minTrust(trustLevel, config.externalAgentCeiling);
+      }
       const reversibility = BASE_REVERSIBILITY[request.type];
       let outcome: "ask" | "allow" | "hold" | "deny" = "ask";
-      if (request.actor.kind === "human") outcome = "allow";
-      else if (!config.alwaysAsk.includes(request.category)) {
+      if (request.actor.kind === "human") {
+        outcome = "allow";
+      } else if (!config.alwaysAsk.includes(request.category)) {
         if (
           trustLevel === "full_access" ||
           (trustLevel === "auto" && state.score >= 0.75) ||
           (trustLevel === "auto_accept_edits" && reversibility === "reversible")
-        )
+        ) {
           outcome = "allow";
+        }
       }
-      if (request.actor.kind === "external-agent" && reversibility === "irreversible")
+      if (request.actor.kind === "external-agent" && reversibility === "irreversible") {
         outcome = "deny";
-      if (outcome === "allow" && reversibility === "delayed" && config.outboxHoldMinutes > 0)
+      }
+      if (outcome === "allow" && reversibility === "delayed" && config.outboxHoldMinutes > 0) {
         outcome = "hold";
+      }
       return {
         outcome,
         trustLevel,
@@ -113,8 +118,10 @@ export function createDemoPolicy(store: Store, bus: EventBus): PolicyEngine {
     applyDecay: async (now = new Date().toISOString()) => {
       const config = await policy.getConfig(),
         day = now.slice(0, 10);
-      if ((await store.kv.get("demo.decay-day")) === day) return policy.getTrust();
-      for (const state of await policy.getTrust())
+      if ((await store.kv.get("demo.decay-day")) === day) {
+        return policy.getTrust();
+      }
+      for (const state of await policy.getTrust()) {
         if (
           state.lastActivityAt &&
           Date.parse(now) - Date.parse(state.lastActivityAt) > config.decayAfterDays * 86400000
@@ -129,6 +136,7 @@ export function createDemoPolicy(store: Store, bus: EventBus): PolicyEngine {
           });
           bus.emit({ type: "trust.changed", state: updated });
         }
+      }
       await store.kv.set("demo.decay-day", day);
       return policy.getTrust();
     },

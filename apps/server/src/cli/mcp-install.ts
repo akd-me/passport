@@ -39,9 +39,12 @@ function redactString(source: string): string {
             url.username = "<redacted>";
             url.password = "";
           }
-          for (const name of new Set(url.searchParams.keys()))
+          for (const name of new Set(url.searchParams.keys())) {
             url.searchParams.set(name, "<redacted>");
-          if (url.hash) url.hash = "<redacted>";
+          }
+          if (url.hash) {
+            url.hash = "<redacted>";
+          }
           return url.href;
         } catch {
           return "<redacted-url>";
@@ -62,9 +65,15 @@ function redactString(source: string): string {
   );
 }
 function redactJson(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactJson);
-  if (typeof value === "string") return redactString(value);
-  if (!object(value)) return value;
+  if (Array.isArray(value)) {
+    return value.map(redactJson);
+  }
+  if (typeof value === "string") {
+    return redactString(value);
+  }
+  if (!object(value)) {
+    return value;
+  }
   return Object.fromEntries(
     Object.entries(value).map(([key, child]) => [
       redactString(key),
@@ -84,8 +93,9 @@ function quotedEnd(source: string, start: number): number {
       i++;
       continue;
     }
-    if (source[i] === quote && (!triple || source.slice(i, i + 3) === quote.repeat(3)))
+    if (source[i] === quote && (!triple || source.slice(i, i + 3) === quote.repeat(3))) {
       return i + (triple ? 3 : 1);
+    }
   }
   return source.length;
 }
@@ -97,9 +107,14 @@ function valueEnd(source: string, start: number): number {
       i = quotedEnd(source, i) - 1;
       continue;
     }
-    if (depth === 0 && [",", "}", "]", "\n"].includes(char!)) return i;
-    if (char === "[" || char === "{") depth++;
-    else if (char === "]" || char === "}") depth--;
+    if (depth === 0 && [",", "}", "]", "\n"].includes(char!)) {
+      return i;
+    }
+    if (char === "[" || char === "{") {
+      depth++;
+    } else if (char === "]" || char === "}") {
+      depth--;
+    }
   }
   return source.length;
 }
@@ -110,7 +125,9 @@ function redactAssignments(source: string): string {
     const assignment = /^("(?:\\.|[^"\\])*"|'[^']*'|[A-Za-z0-9_.-]+)\s*=\s*/.exec(source.slice(i));
     if (assignment) {
       let key = assignment[1]!;
-      if (key.startsWith('"')) key = JSON.parse(key);
+      if (key.startsWith('"')) {
+        key = JSON.parse(key);
+      }
       output += assignment[0];
       i += assignment[0].length;
       if (sensitive.test(key)) {
@@ -139,8 +156,12 @@ function redactToml(source: string): string {
         return statement;
       }
       const assignment = /^(\s*(?:[A-Za-z0-9_.-]+|"[^"]+"|'[^']+')\s*=)([\s\S]*)$/.exec(statement);
-      if (!assignment) return statement;
-      if (secretTable) return `${assignment[1]} "<redacted>"\n`;
+      if (!assignment) {
+        return statement;
+      }
+      if (secretTable) {
+        return `${assignment[1]} "<redacted>"\n`;
+      }
       return redactAssignments(statement);
     })
     .join("");
@@ -156,24 +177,34 @@ function tomlStatements(source: string): string[] {
     comment = false;
   for (let i = 0; i < source.length; i++) {
     const char = source[i]!;
-    if (comment && char !== "\n") continue;
+    if (comment && char !== "\n") {
+      continue;
+    }
     if (quote) {
       if (quote === '"' && char === "\\") {
         i++;
         continue;
       }
       if (char === quote && (!triple || source.slice(i, i + 3) === quote.repeat(3))) {
-        if (triple) i += 2;
+        if (triple) {
+          i += 2;
+        }
         quote = "";
         triple = false;
       }
-    } else if (char === "#") comment = true;
-    else if (char === '"' || char === "'") {
+    } else if (char === "#") {
+      comment = true;
+    } else if (char === '"' || char === "'") {
       quote = char;
       triple = source.slice(i, i + 3) === char.repeat(3);
-      if (triple) i += 2;
-    } else if (char === "[" || char === "{") depth++;
-    else if (char === "]" || char === "}") depth--;
+      if (triple) {
+        i += 2;
+      }
+    } else if (char === "[" || char === "{") {
+      depth++;
+    } else if (char === "]" || char === "}") {
+      depth--;
+    }
     if (char === "\n") {
       comment = false;
       if (!quote && depth === 0) {
@@ -181,10 +212,16 @@ function tomlStatements(source: string): string[] {
         start = i + 1;
       }
     }
-    if (depth < 0) invalid("Invalid TOML; config was not changed.");
+    if (depth < 0) {
+      invalid("Invalid TOML; config was not changed.");
+    }
   }
-  if (quote || depth !== 0) invalid("Unterminated TOML value; config was not changed.");
-  if (start < source.length) result.push(source.slice(start));
+  if (quote || depth !== 0) {
+    invalid("Unterminated TOML value; config was not changed.");
+  }
+  if (start < source.length) {
+    result.push(source.slice(start));
+  }
   return result;
 }
 
@@ -203,11 +240,14 @@ export function mergeCodexConfig(source: string, fields: string[]): string {
   );
   let section = "";
   const hasInlineEnv = tomlStatements(source).some((statement) => {
-    if (statement.trimStart().startsWith("[")) section = table(statement) ?? "";
+    if (statement.trimStart().startsWith("[")) {
+      section = table(statement) ?? "";
+    }
     return section === "mcp_servers.passport" && /^\s*env\s*=/.test(statement);
   });
-  if (envField && (hasEnvTable || hasInlineEnv))
+  if (envField && (hasEnvTable || hasInlineEnv)) {
     fields = fields.filter((field) => field !== envField);
+  }
   let inPassport = false,
     skipHeaders = false,
     found = false,
@@ -222,8 +262,9 @@ export function mergeCodexConfig(source: string, fields: string[]): string {
   };
   for (const statement of tomlStatements(source)) {
     const header = /^\s*(\[\[?)([^\]\n]+)\]\]?\s*(?:#[^\n]*)?\s*$/.exec(statement);
-    if (statement.trimStart().startsWith("[") && !header)
+    if (statement.trimStart().startsWith("[") && !header) {
       invalid("Unsupported TOML table syntax; config was not changed.");
+    }
     if (header) {
       insert();
       const path = header[2]!.split(".").map((key) => key.trim().replace(/^["']|["']$/g, ""));
@@ -239,14 +280,22 @@ export function mergeCodexConfig(source: string, fields: string[]): string {
         path[1] === "passport" &&
         ["http_headers", "env_http_headers"].includes(path[2]!);
       if (inPassport) {
-        if (found) invalid("Duplicate Passport TOML table; config was not changed.");
+        if (found) {
+          invalid("Duplicate Passport TOML table; config was not changed.");
+        }
         found = true;
       }
-      if (!skipHeaders) output.push(statement);
-      if (inEnv && envValue) output.push(`PASSPORT_DATA_DIR = ${envValue}\n`);
+      if (!skipHeaders) {
+        output.push(statement);
+      }
+      if (inEnv && envValue) {
+        output.push(`PASSPORT_DATA_DIR = ${envValue}\n`);
+      }
       continue;
     }
-    if (skipHeaders) continue;
+    if (skipHeaders) {
+      continue;
+    }
     const key = /^\s*([A-Za-z0-9_.-]+|"[^"]+"|'[^']+')\s*=/
       .exec(statement)?.[1]
       ?.replace(/^["']|["']$/g, "");
@@ -254,20 +303,25 @@ export function mergeCodexConfig(source: string, fields: string[]): string {
       key === "mcp_servers" ||
       key?.startsWith("mcp_servers.passport") ||
       (key === "passport" && !inPassport)
-    )
+    ) {
       invalid(
         "Use [mcp_servers.passport] tables instead of inline/dotted Passport TOML configuration; config was not changed.",
       );
-    if (inPassport && key && connectionKeys.has(key)) continue;
+    }
+    if (inPassport && key && connectionKeys.has(key)) {
+      continue;
+    }
     if (
       envValue &&
       ((inEnv && key === "PASSPORT_DATA_DIR") || (inPassport && key === "env.PASSPORT_DATA_DIR"))
-    )
+    ) {
       continue;
+    }
     if (envValue && inPassport && key === "env") {
       const match = /^(\s*env\s*=\s*\{)([\s\S]*)(\}\s*(?:#[^\n]*)?\s*)$/.exec(statement);
-      if (!match)
+      if (!match) {
         invalid("Use an inline env table or [mcp_servers.passport.env]; config was not changed.");
+      }
       const body = match![2]!
         .replace(
           /(?:^|,)\s*(?:PASSPORT_DATA_DIR|"PASSPORT_DATA_DIR"|'PASSPORT_DATA_DIR')\s*=\s*(?:"(?:\\.|[^"\\])*"|'[^']*')\s*(?=,|$)/g,
@@ -283,21 +337,24 @@ export function mergeCodexConfig(source: string, fields: string[]): string {
     output.push(statement);
   }
   insert();
-  if (!found)
+  if (!found) {
     output.push(
       `${source && !source.endsWith("\n") ? "\n" : ""}\n[mcp_servers.passport]\n${fields.join("\n")}\n`,
     );
+  }
   return output.join("");
 }
 
 function mergeJson(source: string, connection: JsonObject): string {
   const config: unknown = source.trim() ? JSON.parse(source) : {};
-  if (!object(config) || (config.mcpServers !== undefined && !object(config.mcpServers)))
+  if (!object(config) || (config.mcpServers !== undefined && !object(config.mcpServers))) {
     invalid("Config and mcpServers must be JSON objects; config was not changed.");
+  }
   const root = config as JsonObject;
   const servers = (root.mcpServers ?? {}) as JsonObject;
-  if (servers.passport !== undefined && !object(servers.passport))
+  if (servers.passport !== undefined && !object(servers.passport)) {
     invalid("Passport config must be an object; config was not changed.");
+  }
   const previous = (servers.passport ?? {}) as JsonObject;
   const keep = Object.fromEntries(
     Object.entries(previous).filter(([key]) => !connectionKeys.has(key)),
@@ -324,8 +381,9 @@ function httpUrl(raw: string): URL {
     url.password ||
     url.search ||
     url.hash
-  )
+  ) {
     invalid("MCP URL must use HTTP(S) without credentials, query or fragment.");
+  }
   return url;
 }
 
@@ -348,17 +406,28 @@ export async function installMcp(
   const flags = new Map<string, string>();
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (["--http", "--dry-run", "--user"].includes(arg)) flags.set(arg, "true");
-    else if (["--client", "--url"].includes(arg) && args[i + 1] && !args[i + 1]!.startsWith("--"))
+    if (["--http", "--dry-run", "--user"].includes(arg)) {
+      flags.set(arg, "true");
+    } else if (
+      ["--client", "--url"].includes(arg) &&
+      args[i + 1] &&
+      !args[i + 1]!.startsWith("--")
+    ) {
       flags.set(arg, args[++i]!);
-    else invalid(`Unknown or incomplete option: ${arg}`);
+    } else {
+      invalid(`Unknown or incomplete option: ${arg}`);
+    }
   }
   const client = flags.get("--client") as Client;
-  if (!["claude-code", "codex", "cursor", "claude-desktop"].includes(client))
+  if (!["claude-code", "codex", "cursor", "claude-desktop"].includes(client)) {
     invalid("Use --client claude-code|codex|cursor|claude-desktop.");
-  if (flags.has("--user") && client !== "claude-code")
+  }
+  if (flags.has("--user") && client !== "claude-code") {
     invalid("--user is only supported for claude-code.");
-  if (flags.has("--url") && !flags.has("--http")) invalid("--url requires --http.");
+  }
+  if (flags.has("--url") && !flags.has("--http")) {
+    invalid("--url requires --http.");
+  }
   const cwd = options.cwd ?? process.cwd(),
     home = options.home ?? homedir();
   const node = options.nodePath ?? process.execPath;
@@ -372,28 +441,38 @@ export async function installMcp(
             import.meta.url,
           ),
         ));
-  if (!isAbsolute(node) || !isAbsolute(entry))
+  if (!isAbsolute(node) || !isAbsolute(entry)) {
     invalid("Node and server entry paths must be absolute.");
+  }
   const dryRun = flags.has("--dry-run"),
     http = flags.has("--http");
-  if (client === "claude-desktop" && (options.platform ?? process.platform) !== "darwin")
+  if (client === "claude-desktop" && (options.platform ?? process.platform) !== "darwin") {
     invalid("Claude Desktop config installation currently supports macOS.");
-  const path =
-    client === "codex"
-      ? join(home, ".codex", "config.toml")
-      : client === "cursor"
-        ? join(home, ".cursor", "mcp.json")
-        : client === "claude-desktop"
-          ? join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-          : flags.has("--user")
-            ? join(home, ".claude.json")
-            : join(cwd, ".mcp.json");
+  }
+  function installationPath() {
+    if (client === "codex") {
+      return join(home, ".codex", "config.toml");
+    }
+    if (client === "cursor") {
+      return join(home, ".cursor", "mcp.json");
+    }
+    if (client === "claude-desktop") {
+      return join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+    }
+    if (flags.has("--user")) {
+      return join(home, ".claude.json");
+    }
+    return join(cwd, ".mcp.json");
+  }
+  const path = installationPath();
   let before = "",
     exists = true;
   try {
     before = await readFile(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
     exists = false;
   }
   let token: string | undefined;
@@ -478,7 +557,9 @@ export async function installMcp(
 }
 
 async function proxy(args: string[]): Promise<void> {
-  if (args.length !== 2 || args[0] !== "--url") invalid("Use passport mcp proxy --url <http-url>.");
+  if (args.length !== 2 || args[0] !== "--url") {
+    invalid("Use passport mcp proxy --url <http-url>.");
+  }
   const config = await loadConfig();
   const token = await loadMcpToken(config.dataDir);
   const remote = new StreamableHTTPClientTransport(httpUrl(args[1]!), {
@@ -487,7 +568,9 @@ async function proxy(args: string[]): Promise<void> {
   const local = new StdioServerTransport();
   let closing = false;
   const close = async () => {
-    if (closing) return;
+    if (closing) {
+      return;
+    }
     closing = true;
     await remote.close();
     await local.close();
@@ -502,8 +585,9 @@ async function proxy(args: string[]): Promise<void> {
     queue = queue.then(() => remote.send(message)).catch(fail);
   };
   remote.onmessage = (message) => {
-    if ("result" in message && typeof message.result.protocolVersion === "string")
+    if ("result" in message && typeof message.result.protocolVersion === "string") {
       remote.setProtocolVersion(message.result.protocolVersion);
+    }
     void local.send(message).catch(fail);
   };
   local.onerror = remote.onerror = fail;

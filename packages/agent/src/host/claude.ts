@@ -35,10 +35,18 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
     "none",
     "--strict-mcp-config",
   ];
-  if (spec.model) args.push("--model", spec.model);
-  if (spec.reasoning) args.push("--effort", spec.reasoning);
-  if (spec.systemPrompt !== undefined) args.push("--system-prompt", spec.systemPrompt);
-  if (spec.jsonSchema) args.push("--json-schema", JSON.stringify(spec.jsonSchema));
+  if (spec.model) {
+    args.push("--model", spec.model);
+  }
+  if (spec.reasoning) {
+    args.push("--effort", spec.reasoning);
+  }
+  if (spec.systemPrompt !== undefined) {
+    args.push("--system-prompt", spec.systemPrompt);
+  }
+  if (spec.jsonSchema) {
+    args.push("--json-schema", JSON.stringify(spec.jsonSchema));
+  }
   let dir: string | undefined;
   const env: Record<string, string> = {};
   if (spec.completion) {
@@ -47,11 +55,12 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
     const servers = spec.mcpServers ?? {};
     const mcpServers: Record<string, unknown> = {};
     for (const [name, server] of Object.entries(servers)) {
-      if (!SERVER_NAME.test(name))
+      if (!SERVER_NAME.test(name)) {
         throw new LlmError(
           "MCP server names may contain only letters, digits, - and _",
           "HOST_AGENT_CONFIG",
         );
+      }
       mcpServers[name] =
         "url" in server
           ? {
@@ -76,8 +85,12 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
       );
     const startup = longest((server) => server.timeouts?.startupSec),
       tool = longest((server) => server.timeouts?.toolSec);
-    if (startup > 0) env.MCP_TIMEOUT = String(Math.ceil(startup * 1000));
-    if (tool > 0) env.MCP_TOOL_TIMEOUT = String(Math.ceil(tool * 1000));
+    if (startup > 0) {
+      env.MCP_TIMEOUT = String(Math.ceil(startup * 1000));
+    }
+    if (tool > 0) {
+      env.MCP_TOOL_TIMEOUT = String(Math.ceil(tool * 1000));
+    }
     if (Object.keys(mcpServers).length) {
       // A private file keeps MCP env and headers out of the process list.
       dir = await mkdtemp(join(tmpdir(), "passport-claude-"));
@@ -88,8 +101,12 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
     const allowed = spec.allowedTools ?? Object.keys(servers).map((name) => `mcp__${name}`);
     const builtins = allowed.filter((tool) => !tool.startsWith("mcp__"));
     args.push("--tools", builtins.join(","));
-    if (allowed.length) args.push("--allowedTools", allowed.join(","));
-    if (spec.maxTurns !== undefined) args.push("--max-turns", String(spec.maxTurns));
+    if (allowed.length) {
+      args.push("--allowedTools", allowed.join(","));
+    }
+    if (spec.maxTurns !== undefined) {
+      args.push("--max-turns", String(spec.maxTurns));
+    }
   }
   return {
     args,
@@ -97,14 +114,20 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
     env,
     schemaEnforced: !!spec.jsonSchema,
     cleanup: async () => {
-      if (dir) await rm(dir, { recursive: true, force: true });
+      if (dir) {
+        await rm(dir, { recursive: true, force: true });
+      }
     },
   };
 }
 
 function text(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
   return content
     .map((item) => {
       const block = record(item);
@@ -116,10 +139,18 @@ function text(content: unknown): string {
 
 function errorCode(result: Record<string, unknown>): string {
   const status = count(result.api_error_status);
-  if (result.subtype === "error_max_turns") return "HOST_AGENT_MAX_TURNS";
-  if (status === 401 || status === 403) return "HOST_AGENT_AUTH";
-  if (status === 404) return "HOST_AGENT_MODEL";
-  if (status === 429) return "HOST_AGENT_RATE_LIMIT";
+  if (result.subtype === "error_max_turns") {
+    return "HOST_AGENT_MAX_TURNS";
+  }
+  if (status === 401 || status === 403) {
+    return "HOST_AGENT_AUTH";
+  }
+  if (status === 404) {
+    return "HOST_AGENT_MODEL";
+  }
+  if (status === 429) {
+    return "HOST_AGENT_RATE_LIMIT";
+  }
   return "HOST_AGENT_FAILED";
 }
 
@@ -136,40 +167,54 @@ export function createClaudeParser(): HostStreamParser {
       } catch {
         return [];
       }
-      if (!message) return [];
+      if (!message) {
+        return [];
+      }
       const events: HostAgentEvent[] = [];
       if (message.type === "system" && message.subtype === "init") {
-        if (typeof message.session_id === "string") state.sessionId = message.session_id;
-        if (typeof message.model === "string") state.model = message.model;
+        if (typeof message.session_id === "string") {
+          state.sessionId = message.session_id;
+        }
+        if (typeof message.model === "string") {
+          state.model = message.model;
+        }
         events.push({
           type: "started",
           ...(state.sessionId ? { sessionId: state.sessionId } : {}),
         });
       } else if (message.type === "assistant") {
         const body = record(message.message);
-        if (typeof body?.model === "string" && body.model !== "<synthetic>")
+        if (typeof body?.model === "string" && body.model !== "<synthetic>") {
           state.model = body.model;
+        }
         for (const item of Array.isArray(body?.content) ? body.content : []) {
           const block = record(item);
           if (block?.type === "text" && typeof block.text === "string" && block.text) {
             lastText = block.text;
             events.push({ type: "text", text: block.text });
           } else if (block?.type === "tool_use" && typeof block.name === "string") {
-            if (typeof block.id === "string") toolNames.set(block.id, block.name);
+            if (typeof block.id === "string") {
+              toolNames.set(block.id, block.name);
+            }
             // Structured output is delivered through an internal tool; it is not agent activity.
-            if (block.name !== "StructuredOutput")
+            if (block.name !== "StructuredOutput") {
               events.push({ type: "tool_call", name: block.name, input: block.input ?? {} });
+            }
           }
         }
       } else if (message.type === "user") {
         const body = record(message.message);
         for (const item of Array.isArray(body?.content) ? body.content : []) {
           const block = record(item);
-          if (block?.type !== "tool_result") continue;
+          if (block?.type !== "tool_result") {
+            continue;
+          }
           const name =
             (typeof block.tool_use_id === "string" && toolNames.get(block.tool_use_id)) ||
             "unknown";
-          if (name === "StructuredOutput") continue;
+          if (name === "StructuredOutput") {
+            continue;
+          }
           events.push({
             type: "tool_result",
             name,
@@ -179,7 +224,9 @@ export function createClaudeParser(): HostStreamParser {
         }
       } else if (message.type === "result") {
         state.finished = true;
-        if (typeof message.session_id === "string") state.sessionId = message.session_id;
+        if (typeof message.session_id === "string") {
+          state.sessionId = message.session_id;
+        }
         const usage = record(message.usage);
         if (usage) {
           const cached = count(usage.cache_read_input_tokens),
@@ -212,7 +259,9 @@ export function createClaudeParser(): HostStreamParser {
           };
         } else {
           state.text = result || lastText;
-          if (message.structured_output !== undefined) state.structured = message.structured_output;
+          if (message.structured_output !== undefined) {
+            state.structured = message.structured_output;
+          }
         }
       }
       return events;

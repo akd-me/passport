@@ -57,15 +57,20 @@ export async function resolveLlmSelection(
 ): Promise<LlmResolution> {
   const env = options.env ?? process.env;
   const report = (resolution: LlmResolution) => {
-    if (options.log) logger.info(describeLlm(resolution));
+    if (options.log) {
+      logger.info(describeLlm(resolution));
+    }
     return resolution;
   };
-  if (env.PASSPORT_LLM_PROVIDER)
+  if (env.PASSPORT_LLM_PROVIDER) {
     return report({ selection: "explicit", source: "env", llm: config.llm });
-  if ((config.llmSelection ?? "auto") === "explicit")
+  }
+  if ((config.llmSelection ?? "auto") === "explicit") {
     return report({ selection: "explicit", source: "explicit", llm: config.llm });
+  }
   const target = config as ConfigWithFallback;
-  const fallback = (target[AUTO_FALLBACK] ??= config.llm);
+  target[AUTO_FALLBACK] ??= config.llm;
+  const fallback = target[AUTO_FALLBACK];
   const statuses = await hostAgents({ refresh: options.refresh });
   const pick = preferredHostAgent(statuses);
   if (pick) {
@@ -97,8 +102,9 @@ export function describeLlm(resolution: LlmResolution): string {
     const status = resolution.statuses?.find((item) => item.kind === llm.provider);
     return `Agent model: ${NAMES[llm.provider]} (${llm.model})${status?.account ? ` via ${status.account} login` : ""}${resolution.source === "host-agent" ? ", detected automatically" : ""}.`;
   }
-  if (resolution.source === "none")
+  if (resolution.source === "none") {
     return "No agent model available: log in to Codex (`codex login`) or Claude Code (`claude auth login`). Mail sync still works.";
+  }
   return `Agent model: ${llm.provider} (${llm.model}).`;
 }
 

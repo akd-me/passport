@@ -32,32 +32,42 @@ function server(
   handler: (method: string, args: Record<string, unknown>) => unknown = () => undefined,
 ) {
   return fixtureFetch((url, init) => {
-    if (url.pathname === "/.well-known/jmap") return response(session);
-    if (url.pathname.startsWith("/download/"))
+    if (url.pathname === "/.well-known/jmap") {
+      return response(session);
+    }
+    if (url.pathname.startsWith("/download/")) {
       return response("attachment", 200, { "content-type": "text/plain" });
+    }
     const [method, args, tag] = (
       jsonBody(init).methodCalls as Array<[string, Record<string, unknown>, string]>
     )[0]!;
-    const value =
-      handler(method!, args!) ??
-      (method === "Mailbox/get"
-        ? { list: boxes }
-        : method === "Email/get"
-          ? {
-              list: (args!.ids as string[]).length
-                ? [{ ...sample, id: (args!.ids as string[])[0], keywords: { $draft: true } }]
-                : [],
-              state: "initial-state",
-            }
-          : method === "Email/query"
-            ? { ids: [sample.id], total: 1 }
-            : method === "Email/set"
-              ? { created: { draft: { id: "draft-email" } } }
-              : method === "Identity/get"
-                ? { list: [{ id: "identity", email: account.emailAddress }] }
-                : method === "EmailSubmission/set"
-                  ? { created: { send: { id: "submission" } } }
-                  : {});
+    function fixtureResponse() {
+      if (method === "Mailbox/get") {
+        return { list: boxes };
+      }
+      if (method === "Email/get") {
+        return {
+          list: (args!.ids as string[]).length
+            ? [{ ...sample, id: (args!.ids as string[])[0], keywords: { $draft: true } }]
+            : [],
+          state: "initial-state",
+        };
+      }
+      if (method === "Email/query") {
+        return { ids: [sample.id], total: 1 };
+      }
+      if (method === "Email/set") {
+        return { created: { draft: { id: "draft-email" } } };
+      }
+      if (method === "Identity/get") {
+        return { list: [{ id: "identity", email: account.emailAddress }] };
+      }
+      if (method === "EmailSubmission/set") {
+        return { created: { send: { id: "submission" } } };
+      }
+      return {};
+    }
+    const value = handler(method!, args!) ?? fixtureResponse();
     return response({ methodResponses: [[method, value, tag]] });
   });
 }
@@ -105,7 +115,9 @@ describe("JMAP adapter", () => {
     const updates: unknown[] = [];
     const p = new JmapMailProvider({
       fetch: server((method, args) => {
-        if (method === "Email/set") updates.push(args.update);
+        if (method === "Email/set") {
+          updates.push(args.update);
+        }
       }),
     });
     await p.connect(configured, { token: "token" });
@@ -124,10 +136,11 @@ describe("JMAP adapter", () => {
     const p = new JmapMailProvider({
       fetch: server((method, args) => {
         methods.push(method);
-        if (method === "EmailSubmission/set")
+        if (method === "EmailSubmission/set") {
           expect(args.onSuccessUpdateEmail).toEqual({
             "#send": { "keywords/$draft": null, mailboxIds: { sent: true } },
           });
+        }
       }),
     });
     await p.connect(configured, { token: "token" });
@@ -176,8 +189,9 @@ it("T7 creates missing JMAP labels through Mailbox/set before applying membershi
         expect(args.create).toEqual({ label: { name: "Receipts" } });
         return { created: { label: { id: "new-label" } } };
       }
-      if (method === "Email/set")
+      if (method === "Email/set") {
         expect(args.update).toEqual({ message: { "mailboxIds/new-label": true } });
+      }
       return undefined;
     }),
   });

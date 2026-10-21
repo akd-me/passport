@@ -21,9 +21,13 @@ export const suggestions = [
 ];
 
 function outcome(run: AgentRun) {
-  if (run.error) return run.error;
+  if (run.error) {
+    return run.error;
+  }
   const count = run.actionIds.length;
-  if (!count) return run.summary || "Done. Nothing needed changing.";
+  if (!count) {
+    return run.summary || "Done. Nothing needed changing.";
+  }
   return `${count} ${count === 1 ? "action" : "actions"} ready. Anything that needs you is in the queue.`;
 }
 
@@ -53,12 +57,16 @@ export function Composer({
     { refresh } = useWorkspace(),
     { llm, mode } = useAccounts();
   useEffect(() => {
-    if (run.state !== "done") return;
+    if (run.state !== "done") {
+      return;
+    }
     const timer = setTimeout(() => setRun({ state: "idle" }), 12000);
     return () => clearTimeout(timer);
   }, [run]);
   const submit = async (instruction = text.trim()) => {
-    if (!instruction || run.state === "running") return;
+    if (!instruction || run.state === "running") {
+      return;
+    }
     setRun({ state: "running", instruction });
     setText("");
     try {

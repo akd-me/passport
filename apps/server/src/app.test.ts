@@ -203,7 +203,7 @@ describe("HTTP API with DemoBackend", () => {
       { decayAfterDays: 0 },
       { alwaysAsk: ["fake"] },
       { unexpected: true },
-    ])
+    ]) {
       expect(
         (
           await app.request("/api/trust/config", {
@@ -212,6 +212,7 @@ describe("HTTP API with DemoBackend", () => {
           })
         ).status,
       ).toBe(400);
+    }
   });
   it("updates matters through the action gate and allows undo", async () => {
     const old = await backend.store.matters.get("matter-0");
@@ -323,8 +324,9 @@ describe("HTTP API with DemoBackend", () => {
       "/api/people?relationship=alien",
       "/api/events?start=invalid",
       "/api/digest/2026-99-99",
-    ])
+    ]) {
       expect((await app.request(path)).status, path).toBe(400);
+    }
     expect((await app.request("/api/trust/config", { method: "PUT", body: "{" })).status).toBe(400);
     expect(
       (

@@ -16,7 +16,9 @@ async function resolve(
     bus = new MemoryBus(),
     executor = new FakeExecutor(store, policy);
   await store.emails.upsertMany([email, ...history]);
-  if (person) await store.people.upsert(person);
+  if (person) {
+    await store.people.upsert(person);
+  }
   await store.accounts.upsert(accountFixture());
   const tools = createToolRegistry({
     store,
@@ -46,7 +48,9 @@ async function resolve(
             },
             { personSnapshot: person, projectedPeople: [person], runId: "run-people" },
           );
-        if (result.isError) throw new Error(JSON.stringify(result));
+        if (result.isError) {
+          throw new Error(JSON.stringify(result));
+        }
       },
     });
   };

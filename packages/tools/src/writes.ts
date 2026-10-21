@@ -75,8 +75,9 @@ export function registerWrites(ctx: Context) {
     async ({ emailIds, accountId, reason, toMailboxId }, ctx) => {
       const batch = await ctx.emailBatch(emailIds, accountId);
       const mailbox = required(await store.mailboxes.get(toMailboxId), "Destination mailbox");
-      if (mailbox.accountId !== batch.accountId)
+      if (mailbox.accountId !== batch.accountId) {
         throw new ToolError("ACCOUNT_MISMATCH", "Destination mailbox belongs to another account.");
+      }
       return writeResult(
         await ctx.submit("move", batch.accountId, { emailIds, toMailboxId }, reason, batch),
       );
@@ -150,17 +151,20 @@ export function registerWrites(ctx: Context) {
       const unique = (addresses: EmailAddress[]) =>
         addresses.filter((address) => {
           const email = normalize(address.email);
-          if (seen.has(email)) return false;
+          if (seen.has(email)) {
+            return false;
+          }
           seen.add(email);
           return true;
         });
       const to = unique([...primary, ...(replyAll ? original.to : [])]);
       const cc = replyAll ? unique(original.cc) : [];
-      if (to.length === 0)
+      if (to.length === 0) {
         throw new ToolError(
           "NO_REPLY_RECIPIENT",
           "The email has no reply recipient other than the account owner.",
         );
+      }
       const source = original.textBody ?? original.preview;
       const attribution = `On ${original.sentAt ?? original.receivedAt}, ${original.from.map((address) => address.email).join(", ")} wrote:`;
       const draft: DraftInput = {
@@ -199,21 +203,26 @@ export function registerWrites(ctx: Context) {
     },
     true,
     async ({ draftEmailId, draft, reason }, ctx) => {
-      if (Boolean(draftEmailId) === Boolean(draft))
+      if (Boolean(draftEmailId) === Boolean(draft)) {
         throw new ToolError("INVALID_INPUT", "Provide exactly one of draftEmailId or draft.");
-      if (draft)
+      }
+      if (draft) {
         return writeResult(
           await ctx.submit("send", draft.accountId, { draft }, reason, await draftContext(draft)),
         );
+      }
       const saved = await ctx.email(required(draftEmailId, "Draft ID"));
-      if (!saved.keywords.$draft)
+      if (!saved.keywords.$draft) {
         throw new ToolError(
           "NOT_A_DRAFT",
           "draftEmailId must refer to an email with the $draft keyword.",
         );
+      }
       await ctx.account(saved.accountId);
       const target = [...saved.to, ...saved.cc, ...saved.bcc].map((address) => address.email);
-      if (!target.length) throw new ToolError("NO_RECIPIENT", "Draft has no recipients.");
+      if (!target.length) {
+        throw new ToolError("NO_RECIPIENT", "Draft has no recipients.");
+      }
       return writeResult(
         await ctx.submit("send", saved.accountId, { draftEmailId: saved.id }, reason, {
           emails: [saved],
@@ -234,11 +243,12 @@ export function registerWrites(ctx: Context) {
     true,
     async ({ emailId, method, reason }, ctx) => {
       const email = await ctx.email(emailId);
-      if (method === "header" && !email.headers.listUnsubscribe)
+      if (method === "header" && !email.headers.listUnsubscribe) {
         throw new ToolError(
           "NO_UNSUBSCRIBE_HEADER",
           "Email does not have a List-Unsubscribe header.",
         );
+      }
       await ctx.account(email.accountId);
       return writeResult(
         await ctx.submit("unsubscribe", email.accountId, { emailId, method }, reason, {
@@ -303,13 +313,18 @@ export function registerWrites(ctx: Context) {
     input: { emailIds?: string[]; eventIds?: string[]; personIds?: string[] },
     accountId: string,
   ) {
-    if (input.emailIds?.length) await ctx.emailBatch(input.emailIds, accountId);
+    if (input.emailIds?.length) {
+      await ctx.emailBatch(input.emailIds, accountId);
+    }
     for (const id of input.eventIds ?? []) {
       const event = required(await store.events.get(id), "Event");
-      if (event.accountId !== accountId)
+      if (event.accountId !== accountId) {
         throw new ToolError("ACCOUNT_MISMATCH", "Attached event belongs to another account.");
+      }
     }
-    for (const id of input.personIds ?? []) required(await store.people.get(id), "Person");
+    for (const id of input.personIds ?? []) {
+      required(await store.people.get(id), "Person");
+    }
   }
   register(
     ctx,
@@ -382,8 +397,9 @@ export function registerWrites(ctx: Context) {
     true,
     async ({ accountId, matterId, emailIds, eventIds, personIds, reason }, ctx) => {
       required(await store.matters.get(matterId), "Matter");
-      if (!emailIds && !eventIds && !personIds)
+      if (!emailIds && !eventIds && !personIds) {
         throw new ToolError("INVALID_INPUT", "Provide emailIds, eventIds or personIds.");
+      }
       const account = await ctx.account(
         accountId ?? (emailIds ? (await ctx.email(emailIds[0]!)).accountId : undefined),
       );
@@ -415,16 +431,18 @@ export function registerWrites(ctx: Context) {
     true,
     async ({ accountId, personId, patch, reason }, ctx) => {
       const snapshot = ctx.actor().kind === "agent" ? ctx.callContext.personSnapshot : undefined;
-      if (snapshot && snapshot.id !== personId)
+      if (snapshot && snapshot.id !== personId) {
         throw new ToolError("INVALID_INPUT", "Person snapshot ID mismatch.");
+      }
       const person = required((await store.people.get(personId)) ?? snapshot, "Person");
       const emails = patch.emails ?? person.emails;
       if (
         !emails.some(
           (email) => normalize(email) === normalize(patch.primaryEmail ?? person.primaryEmail),
         )
-      )
+      ) {
         throw new ToolError("INVALID_INPUT", "primaryEmail must be included in emails.");
+      }
       const account = await ctx.account(accountId);
       return writeResult(
         await ctx.submit(
@@ -450,11 +468,15 @@ export function registerWrites(ctx: Context) {
     },
     true,
     async ({ accountId, emailIds, matterId, until, reason }, ctx) => {
-      if (!emailIds && !matterId)
+      if (!emailIds && !matterId) {
         throw new ToolError("INVALID_INPUT", "Provide emailIds or matterId.");
-      if (Date.parse(until) <= Date.parse(ctx.now()))
+      }
+      if (Date.parse(until) <= Date.parse(ctx.now())) {
         throw new ToolError("INVALID_INPUT", "Snooze time must be in the future.");
-      if (matterId) required(await store.matters.get(matterId), "Matter");
+      }
+      if (matterId) {
+        required(await store.matters.get(matterId), "Matter");
+      }
       const batch = emailIds
         ? await ctx.emailBatch(emailIds, accountId)
         : { accountId: (await ctx.account(accountId)).id, emails: [] };
@@ -477,11 +499,12 @@ export function registerWrites(ctx: Context) {
     true,
     async ({ actionId, reason }, ctx) => {
       const action = required(await store.actions.get(actionId), "Action");
-      if (action.status !== "executed" || !action.inverse)
+      if (action.status !== "executed" || !action.inverse) {
         throw new ToolError(
           "NOT_REVERSIBLE",
           "Only executed actions with a stored inverse can be undone.",
         );
+      }
       await ctx.account(action.request.accountId);
       return writeResult(
         await ctx.deps.executor.undo(actionId, {
@@ -502,13 +525,15 @@ export function registerWrites(ctx: Context) {
     async ({ actionId }, ctx) => {
       const action = required(await store.actions.get(actionId), "Action");
       const actor = ctx.actor();
-      if (action.status !== "held")
+      if (action.status !== "held") {
         throw new ToolError("NOT_HELD", "Only held actions can be cancelled.");
-      if (action.request.actor.kind !== actor.kind || action.request.actor.id !== actor.id)
+      }
+      if (action.request.actor.kind !== actor.kind || action.request.actor.id !== actor.id) {
         throw new ToolError(
           "NOT_OWNER",
           "Only the originating MCP client's held actions can be cancelled.",
         );
+      }
       return writeResult(await ctx.deps.executor.cancelHold(actionId));
     },
   );

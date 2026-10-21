@@ -13,7 +13,9 @@ export async function authorizeOAuth(
     onAuthUrl: (url: string, redirectUri: string) => void;
   },
 ): Promise<AccountCredentials> {
-  if (!descriptor.oauth) throw new ApiError("OAUTH_UNSUPPORTED", "Provider does not use OAuth");
+  if (!descriptor.oauth) {
+    throw new ApiError("OAUTH_UNSUPPORTED", "Provider does not use OAuth");
+  }
   const redirect = new URL(options.redirectUri ?? "http://127.0.0.1:53682/oauth/callback");
   if (
     redirect.protocol !== "http:" ||
@@ -23,11 +25,12 @@ export async function authorizeOAuth(
     redirect.password ||
     redirect.search ||
     redirect.hash
-  )
+  ) {
     throw new ApiError(
       "INVALID_REDIRECT",
       "OAuth redirect must be an HTTP loopback URL with an explicit port",
     );
+  }
   const state = randomBytes(32).toString("base64url");
   const settings = {
     ...fields,

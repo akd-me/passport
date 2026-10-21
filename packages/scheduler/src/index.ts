@@ -105,11 +105,15 @@ export function createScheduler(options: {
   let stopping: Promise<void> | undefined;
   function find(id: string) {
     const e = entries.get(id);
-    if (!e || e.removed) throw new SchedulerError("JOB_NOT_FOUND", "Job not found");
+    if (!e || e.removed) {
+      throw new SchedulerError("JOB_NOT_FOUND", "Job not found");
+    }
     return e;
   }
   function persist(e: Entry) {
-    if (e.removed || e.detached) return e.writes;
+    if (e.removed || e.detached) {
+      return e.writes;
+    }
     const json = JSON.stringify({ ...e.state, running: false });
     const write = e.writes.then(() => options.store.kv.set(`job:${e.def.id}`, json));
     e.writes = write.catch(() => {});
@@ -121,12 +125,16 @@ export function createScheduler(options: {
   }
   function arm(e: Entry) {
     clear(e);
-    if (!started || e.removed || !e.state.enabled) return;
+    if (!started || e.removed || !e.state.enabled) {
+      return;
+    }
     const interrupted =
       e.recoverInterrupted && e.state.activeRun && !e.active && !e.work
         ? e.state.activeRun
         : undefined;
-    if (!interrupted && !e.state.nextRunAt) return;
+    if (!interrupted && !e.state.nextRunAt) {
+      return;
+    }
     const dueAt = interrupted
       ? Math.max(now(), Date.parse(interrupted.startedAt) + (e.def.timeoutMs ?? 0))
       : Date.parse(e.state.nextRunAt!);
@@ -141,11 +149,15 @@ export function createScheduler(options: {
         const due = interrupted
           ? Date.parse(interrupted.occurrenceAt)
           : Date.parse(e.state.nextRunAt!);
-        if (!interrupted) e.state.nextRunAt = iso(nextOccurrence(e.state.schedule, now(), due));
+        if (!interrupted) {
+          e.state.nextRunAt = iso(nextOccurrence(e.state.schedule, now(), due));
+        }
         void execute(e, new Date(due).toISOString(), !!interrupted).catch(() =>
           options.logger?.warn(`Job ${e.def.id} could not persist its run`),
         );
-        if (!interrupted) arm(e);
+        if (!interrupted) {
+          arm(e);
+        }
       },
       Math.max(0, Math.min(MAX_DELAY, delay)),
     );
@@ -162,13 +174,17 @@ export function createScheduler(options: {
     });
   }
   async function record(e: Entry, run: JobRun, error?: string) {
-    if (e.removed || e.detached) return;
+    if (e.removed || e.detached) {
+      return;
+    }
     Object.assign(e.state, {
       lastRunAt: run.startedAt,
       lastDurationMs: run.durationMs,
       lastStatus: run.status,
     });
-    if (run.status !== "skipped") e.state.lastError = error ?? null;
+    if (run.status !== "skipped") {
+      e.state.lastError = error ?? null;
+    }
     e.state.history = [...e.state.history, run].slice(-20);
     await persist(e);
     finished(e, run);
@@ -200,9 +216,12 @@ export function createScheduler(options: {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
         await persist(e);
-        if (e.removed || e.detached) return run;
-        if (controller.signal.aborted)
+        if (e.removed || e.detached) {
+          return run;
+        }
+        if (controller.signal.aborted) {
           throw new SchedulerError("JOB_ABORTED", "Job aborted before execution");
+        }
         options.bus.emit({
           type: "job.started",
           jobId: e.def.id,
@@ -218,7 +237,9 @@ export function createScheduler(options: {
         );
         e.work = work;
         const workSettled = () => {
-          if (e.work === work) e.work = undefined;
+          if (e.work === work) {
+            e.work = undefined;
+          }
           if (!e.detached && !e.removed && e.state.activeRun?.runId === run.runId) {
             e.state.activeRun = null;
             void persist(e).catch(() =>
@@ -245,17 +266,22 @@ export function createScheduler(options: {
               ]);
         run.status = result.status ?? "ok";
         run.summary = result.summary;
-        if (run.status === "error")
+        if (run.status === "error") {
           throw new SchedulerError("JOB_FAILED", result.summary ?? "Job failed");
+        }
         if (run.status === "ok") {
           e.state.consecutiveFailures = 0;
-          if (hadFailures && e.state.enabled)
+          if (hadFailures && e.state.enabled) {
             e.state.nextRunAt = iso(nextOccurrence(e.state.schedule, now()));
+          }
         }
         if (result.nextRunInMs !== undefined) {
-          if (!Number.isSafeInteger(result.nextRunInMs) || result.nextRunInMs < 1)
+          if (!Number.isSafeInteger(result.nextRunInMs) || result.nextRunInMs < 1) {
             throw new SchedulerError("INVALID_JOB_RESULT", "Invalid nextRunInMs");
-          if (e.state.enabled) e.state.nextRunAt = iso(now() + result.nextRunInMs);
+          }
+          if (e.state.enabled) {
+            e.state.nextRunAt = iso(now() + result.nextRunInMs);
+          }
         }
       } catch (error) {
         run.status = "error";
@@ -295,8 +321,9 @@ export function createScheduler(options: {
         ((recovering && run.status !== "error") ||
           !e.state.nextRunAt ||
           Date.parse(e.state.nextRunAt) <= now())
-      )
+      ) {
         e.state.nextRunAt = iso(nextOccurrence(e.state.schedule, now()));
+      }
       await record(e, run, run.status === "error" ? (e.state.lastError ?? undefined) : undefined);
       return run;
     })();
@@ -306,7 +333,9 @@ export function createScheduler(options: {
       () => settle(),
     );
     function settle() {
-      if (e.active === active) e.active = undefined;
+      if (e.active === active) {
+        e.active = undefined;
+      }
       e.state.running = !!e.work;
       if (e.work) {
         const done = () => {
@@ -314,28 +343,35 @@ export function createScheduler(options: {
           retired.delete(e);
         };
         void e.work.then(done, done);
-      } else retired.delete(e);
+      } else {
+        retired.delete(e);
+      }
       arm(e);
     }
     return active;
   }
   const scheduler: Scheduler = {
     async register(def) {
-      if (entries.has(def.id)) throw new SchedulerError("JOB_EXISTS", "Job is already registered");
-      if ([...retired].some((e) => e.def.id === def.id))
+      if (entries.has(def.id)) {
+        throw new SchedulerError("JOB_EXISTS", "Job is already registered");
+      }
+      if ([...retired].some((e) => e.def.id === def.id)) {
         throw new SchedulerError("JOB_STILL_RUNNING", "The removed job's handler is still running");
+      }
       if (
         !def.id ||
         !def.name ||
         !["system", "user"].includes(def.kind) ||
         (def.concurrency !== undefined && def.concurrency !== "single")
-      )
+      ) {
         throw new SchedulerError("INVALID_JOB", "Invalid job definition");
+      }
       if (
         def.timeoutMs !== undefined &&
         (!Number.isSafeInteger(def.timeoutMs) || def.timeoutMs < 1 || def.timeoutMs > MAX_DELAY)
-      )
+      ) {
         throw new SchedulerError("INVALID_JOB", "Invalid timeout");
+      }
       if (
         def.retry &&
         (!Number.isSafeInteger(def.retry.maxAttempts) ||
@@ -344,8 +380,9 @@ export function createScheduler(options: {
           def.retry.baseMs < 1 ||
           !Number.isSafeInteger(def.retry.maxMs) ||
           def.retry.maxMs < def.retry.baseMs)
-      )
+      ) {
         throw new SchedulerError("INVALID_JOB", "Invalid retry policy");
+      }
       const schedule = validateSchedule(def.schedule);
       const state: JobState = {
         id: def.id,
@@ -387,7 +424,9 @@ export function createScheduler(options: {
             running: false,
           });
           e.recoverInterrupted = !!state.activeRun;
-          if (!state.enabled) state.nextRunAt = null;
+          if (!state.enabled) {
+            state.nextRunAt = null;
+          }
         }
         await persist(e);
         options.bus.emit({ type: "job.updated", jobId: def.id });
@@ -402,23 +441,34 @@ export function createScheduler(options: {
       return clone(state);
     },
     async start() {
-      if (stopping) await stopping;
+      if (stopping) {
+        await stopping;
+      }
       await Promise.all([...entries.values()].map((e) => e.ready));
-      if (started) return;
+      if (started) {
+        return;
+      }
       for (const e of entries.values()) {
-        if (e.detached && (e.active || e.work))
+        if (e.detached && (e.active || e.work)) {
           throw new SchedulerError(
             "JOB_STILL_RUNNING",
             "A previous handler is still running after shutdown",
           );
+        }
         e.detached = false;
-        if (!e.active && !e.work) e.recoverInterrupted = !!e.state.activeRun;
+        if (!e.active && !e.work) {
+          e.recoverInterrupted = !!e.state.activeRun;
+        }
       }
       started = true;
-      for (const e of entries.values()) arm(e);
+      for (const e of entries.values()) {
+        arm(e);
+      }
     },
     stop() {
-      if (stopping) return stopping;
+      if (stopping) {
+        return stopping;
+      }
       started = false;
       const current = [...new Set([...entries.values(), ...retired])];
       for (const e of current) {
@@ -441,7 +491,11 @@ export function createScheduler(options: {
           }),
         ]);
         clearTimeout(limit);
-        for (const e of current) if (e.active || e.work) e.detached = true;
+        for (const e of current) {
+          if (e.active || e.work) {
+            e.detached = true;
+          }
+        }
         await Promise.allSettled(current.map((e) => e.writes));
       })().finally(() => {
         stopping = undefined;
@@ -453,7 +507,9 @@ export function createScheduler(options: {
     async runNow(id) {
       const e = find(id);
       await e.ready;
-      if (stopping) throw new SchedulerError("SCHEDULER_STOPPING", "Scheduler is stopping");
+      if (stopping) {
+        throw new SchedulerError("SCHEDULER_STOPPING", "Scheduler is stopping");
+      }
       return execute(e);
     },
     pause: (id) => scheduler.update(id, { enabled: false }),
@@ -461,17 +517,23 @@ export function createScheduler(options: {
     async update(id, patch) {
       const e = find(id);
       await e.ready;
-      if (patch.enabled !== undefined && typeof patch.enabled !== "boolean")
+      if (patch.enabled !== undefined && typeof patch.enabled !== "boolean") {
         throw new SchedulerError("INVALID_JOB", "enabled must be boolean");
+      }
       const schedule = patch.schedule === undefined ? undefined : validateSchedule(patch.schedule);
-      if (patch.name !== undefined && (typeof patch.name !== "string" || !patch.name.trim()))
+      if (patch.name !== undefined && (typeof patch.name !== "string" || !patch.name.trim())) {
         throw new SchedulerError("INVALID_JOB", "name is required");
-      if (schedule) e.state.schedule = schedule;
+      }
+      if (schedule) {
+        e.state.schedule = schedule;
+      }
       if (patch.name !== undefined) {
         e.state.name = patch.name;
         e.def.name = patch.name;
       }
-      if (patch.enabled !== undefined) e.state.enabled = patch.enabled;
+      if (patch.enabled !== undefined) {
+        e.state.enabled = patch.enabled;
+      }
       e.state.nextRunAt = e.state.enabled ? iso(nextOccurrence(e.state.schedule, now())) : null;
       clear(e);
       await persist(e);
@@ -481,8 +543,9 @@ export function createScheduler(options: {
     },
     async remove(id) {
       const e = find(id);
-      if (e.def.kind !== "user")
+      if (e.def.kind !== "user") {
         throw new SchedulerError("SYSTEM_JOB", "System jobs cannot be deleted");
+      }
       await scheduler.unregister(id);
     },
     async unregister(id) {
@@ -493,7 +556,9 @@ export function createScheduler(options: {
       clearTimeout(e.deadline);
       e.controller?.abort();
       entries.delete(id);
-      if (e.active || e.work) retired.add(e);
+      if (e.active || e.work) {
+        retired.add(e);
+      }
       await e.writes;
       await options.store.kv.delete(`job:${id}`);
       options.bus.emit({ type: "job.updated", jobId: id });

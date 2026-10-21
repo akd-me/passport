@@ -13,8 +13,12 @@ describe("real-account adapter regressions", () => {
     const p = createProviderRegistry({
       fetch: fixtureFetch((url) => {
         calls.push(url.pathname);
-        if (url.pathname.endsWith("/labels")) return response({ labels: [] });
-        if (url.pathname.endsWith("/profile")) return response({ historyId: "watermark" });
+        if (url.pathname.endsWith("/labels")) {
+          return response({ labels: [] });
+        }
+        if (url.pathname.endsWith("/profile")) {
+          return response({ historyId: "watermark" });
+        }
         if (url.pathname.endsWith("/messages")) {
           expect(url.searchParams.get("q")).toBe("after:1767225600");
           return response(
@@ -41,32 +45,42 @@ describe("real-account adapter regressions", () => {
       fetch: fixtureFetch((url, init) => {
         calls.push(url);
         expect(new Headers(init.headers).get("Prefer")).toContain('IdType="ImmutableId"');
-        if (url.pathname.endsWith("/mailFolders/delta")) return response(window.folderPages[0]);
-        if (url.pathname.endsWith("/folder-page-2")) return response(window.folderPages[1]);
-        if (url.pathname.endsWith("/folder-state"))
+        if (url.pathname.endsWith("/mailFolders/delta")) {
+          return response(window.folderPages[0]);
+        }
+        if (url.pathname.endsWith("/folder-page-2")) {
+          return response(window.folderPages[1]);
+        }
+        if (url.pathname.endsWith("/folder-state")) {
           return response({
             value: [],
             "@odata.deltaLink": "https://graph.microsoft.com/v1.0/folder-state",
           });
+        }
         if (
           /\/mailFolders\/(inbox|archive|drafts|sentitems|deleteditems|junkemail)$/.test(
             url.pathname,
           )
-        )
+        ) {
           return response({}, 404);
-        if (url.pathname.endsWith("/child-id/messages/delta"))
+        }
+        if (url.pathname.endsWith("/child-id/messages/delta")) {
           return response({
             value: [],
             "@odata.deltaLink": "https://graph.microsoft.com/v1.0/child-state",
           });
+        }
         if (url.pathname.endsWith("/messages/delta")) {
           expect(new Headers(init.headers).get("Prefer")).toContain("odata.maxpagesize=100");
           expect(url.searchParams.get("$orderby")).toBe("receivedDateTime desc");
           return response(window.messagePages[0]);
         }
-        if (url.pathname.endsWith("/message-page-2")) return response(window.messagePages[1]);
-        if (url.pathname.endsWith("/message-state") || url.pathname.endsWith("/child-state"))
+        if (url.pathname.endsWith("/message-page-2")) {
+          return response(window.messagePages[1]);
+        }
+        if (url.pathname.endsWith("/message-state") || url.pathname.endsWith("/child-state")) {
           return response({ value: [], "@odata.deltaLink": url.href });
+        }
         bodies.push(url.pathname);
         return response({
           ...sample,
@@ -95,13 +109,15 @@ describe("real-account adapter regressions", () => {
     async (kind) => {
       const p = new GraphMailProvider({
         fetch: fixtureFetch((url) => {
-          if (url.pathname.endsWith("/mailFolders/delta") && kind !== "folder")
+          if (url.pathname.endsWith("/mailFolders/delta") && kind !== "folder") {
             return response({
               value: [{ id: "f", displayName: "Inbox" }],
               "@odata.deltaLink": "https://graph.microsoft.com/v1.0/folders-state",
             });
-          if (url.pathname.endsWith("/messages/delta") || kind === "folder")
+          }
+          if (url.pathname.endsWith("/messages/delta") || kind === "folder") {
             return response({}, 410);
+          }
           return response({}, 404);
         }),
       });
@@ -114,12 +130,13 @@ describe("real-account adapter regressions", () => {
   it("uses Google event-feed metadata with calendar.events and keeps all-day timezone normalization", async () => {
     const fetcher = fixtureFetch((url) => {
       expect(url.pathname).not.toContain("calendarList");
-      if (url.searchParams.get("maxResults") === "1")
+      if (url.searchParams.get("maxResults") === "1") {
         return response({
           summary: "Personal",
           timeZone: "America/New_York",
           items: [],
         });
+      }
       return response({
         items: [
           {
@@ -152,7 +169,9 @@ describe("real-account adapter regressions", () => {
         const body = new URLSearchParams(String(init.body));
         expect(body.get("client_secret")).toBeNull();
         expect(body.get("code_verifier")).toBe("verifier");
-        if (kind === "graph") expect(body.get("scope")).toBe("openid email User.Read");
+        if (kind === "graph") {
+          expect(body.get("scope")).toBe("openid email User.Read");
+        }
         return response({ access_token: "new", refresh_token: "refresh" });
       });
       const oauth = createProviderRegistry({ fetch: fetcher }).describe(kind).oauth!;

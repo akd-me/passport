@@ -28,14 +28,16 @@ const services = new WeakMap<Backend, SchedulerService>();
 const ROUTINES_KEY = "scheduler:routines";
 function text(value: unknown, name: string, max: number) {
   const result = string(value, name).trim();
-  if (!result || result.length > max)
+  if (!result || result.length > max) {
     throw new ApiError("INVALID_FIELD", `${name} must contain 1–${max} characters`);
+  }
   return result;
 }
 function instruction(value: unknown) {
   const routine = object(value);
-  if (Object.keys(routine).some((k) => k !== "instruction"))
+  if (Object.keys(routine).some((k) => k !== "instruction")) {
     throw new ApiError("INVALID_FIELD", "Unknown routine field");
+  }
   return { instruction: text(routine.instruction, "instruction", 20000) };
 }
 /** One shared instance per backend; merely creating the HTTP app does not start timers. */
@@ -71,10 +73,11 @@ export class SchedulerService {
     this.ready = this.initialize();
     // Successful onboarding/sync outside the HTTP API also discovers new accounts.
     this.unsubscribe = backend.bus.on("account.synced", () => {
-      if (!this.stopped)
+      if (!this.stopped) {
         void this.reconcileAccounts().catch(() =>
           logger.warn("Scheduler account discovery failed"),
         );
+      }
     });
     void this.ready.catch(() => logger.error("Scheduler initialization failed"));
   }
@@ -135,7 +138,9 @@ export class SchedulerService {
           kind: "schedule",
           name: "daily_digest",
         });
-        if (run.error) throw new Error(run.error);
+        if (run.error) {
+          throw new Error(run.error);
+        }
         return { summary: run.summary };
       },
       { timeoutMs: 300000 },
@@ -149,7 +154,9 @@ export class SchedulerService {
           kind: "schedule",
           name: "matter_review",
         });
-        if (run.error) throw new Error(run.error);
+        if (run.error) {
+          throw new Error(run.error);
+        }
         return { summary: run.summary };
       },
       { timeoutMs: 300000 },
@@ -164,15 +171,17 @@ export class SchedulerService {
           vacuum?: () => Promise<void>;
           optimizeFts?: () => Promise<void>;
         };
-        if (store.maintenance) await store.maintenance();
-        else if (store.vacuum || store.optimizeFts) {
+        if (store.maintenance) {
+          await store.maintenance();
+        } else if (store.vacuum || store.optimizeFts) {
           await store.vacuum?.();
           await store.optimizeFts?.();
-        } else
+        } else {
           return {
             status: "skipped",
             summary: "This store does not expose maintenance operations",
           };
+        }
         return { summary: "Store maintenance complete" };
       },
     );
@@ -187,7 +196,7 @@ export class SchedulerService {
       },
     );
     const saved = await backend.store.kv.get(ROUTINES_KEY);
-    if (saved)
+    if (saved) {
       for (const value of JSON.parse(saved) as RoutineDefinition[]) {
         const def = {
           id: value.id,
@@ -198,6 +207,7 @@ export class SchedulerService {
         this.routines.set(def.id, def);
         await this.registerRoutine(def);
       }
+    }
     await this.discoverAccounts();
   }
   private async registerRoutine(def: RoutineDefinition) {
@@ -212,7 +222,9 @@ export class SchedulerService {
           kind: "manual",
           instruction: this.routines.get(def.id)!.routine.instruction,
         });
-        if (run.error) throw new Error(run.error);
+        if (run.error) {
+          throw new Error(run.error);
+        }
         return { summary: run.summary };
       },
     });
@@ -235,7 +247,9 @@ export class SchedulerService {
         },
         timeoutMs: 300000,
       });
-      if (!this.scheduler.get(id)!.lastRunAt) this.bootRuns.add(id);
+      if (!this.scheduler.get(id)!.lastRunAt) {
+        this.bootRuns.add(id);
+      }
     }
     const watchId = `${id}:watch`;
     const push = !!account.capabilities.push && !!this.backend.waitForChanges;
@@ -258,7 +272,9 @@ export class SchedulerService {
             signal.addEventListener("abort", abort, { once: true });
             timer = setTimeout(abort, everyMs);
             timer.unref?.();
-            if (signal.aborted) abort();
+            if (signal.aborted) {
+              abort();
+            }
           });
           try {
             const changed = await Promise.race([
@@ -267,8 +283,9 @@ export class SchedulerService {
               ),
               ended,
             ]);
-            if (changed && !signal.aborted && this.scheduler.get(id)?.enabled)
+            if (changed && !signal.aborted && this.scheduler.get(id)?.enabled) {
               await this.scheduler.runNow(id);
+            }
             return {
               summary: changed ? "Provider signaled changes" : "Long poll ended",
               nextRunInMs: 1000,
@@ -289,37 +306,51 @@ export class SchedulerService {
     this.launchBootRuns();
   }
   private launchBootRuns() {
-    if (!this.started || this.stopped) return;
+    if (!this.started || this.stopped) {
+      return;
+    }
     for (const id of this.bootRuns) {
       this.bootRuns.delete(id);
-      if (this.scheduler.get(id)?.enabled)
+      if (this.scheduler.get(id)?.enabled) {
         void this.scheduler.runNow(id).catch(() => logger.warn("Initial account job failed"));
+      }
     }
   }
   private async discoverAccounts() {
     const accounts = await this.backend.store.accounts.list();
     const ids = new Set(accounts.map((a) => a.id));
-    for (const id of this.accounts.keys()) if (!ids.has(id)) await this.dropAccount(id);
-    for (const account of accounts) await this.addAccount(account);
+    for (const id of this.accounts.keys()) {
+      if (!ids.has(id)) {
+        await this.dropAccount(id);
+      }
+    }
+    for (const account of accounts) {
+      await this.addAccount(account);
+    }
   }
   private async dropAccount(accountId: string) {
-    for (const id of [`sync:${accountId}`, `sync:${accountId}:watch`])
+    for (const id of [`sync:${accountId}`, `sync:${accountId}:watch`]) {
       if (this.scheduler.get(id)) {
         await this.scheduler.unregister(id);
         this.definitions.delete(id);
         this.bootRuns.delete(id);
       }
+    }
     this.accounts.delete(accountId);
   }
   async reconcileAccounts() {
     await this.ready;
-    if (!this.stopped) await this.exclusive(() => this.discoverAccounts());
+    if (!this.stopped) {
+      await this.exclusive(() => this.discoverAccounts());
+    }
   }
   async registerAccount(accountId: string) {
     await this.ready;
     await this.exclusive(async () => {
       const account = await this.backend.store.accounts.get(accountId);
-      if (!account) throw new ApiError("NOT_FOUND", "Account not found", 404);
+      if (!account) {
+        throw new ApiError("NOT_FOUND", "Account not found", 404);
+      }
       await this.addAccount(account);
     });
   }
@@ -329,7 +360,9 @@ export class SchedulerService {
   }
   async start() {
     await this.ready;
-    if (this.stopped || this.started) return;
+    if (this.stopped || this.started) {
+      return;
+    }
     this.started = true;
     await this.scheduler.start();
     this.launchBootRuns();
@@ -357,8 +390,9 @@ export class SchedulerService {
   async addRoutine(input: unknown) {
     await this.ready;
     const body = object(input);
-    if (Object.keys(body).some((k) => !["name", "schedule", "routine"].includes(k)))
+    if (Object.keys(body).some((k) => !["name", "schedule", "routine"].includes(k))) {
       throw new ApiError("INVALID_FIELD", "Unknown routine field");
+    }
     const def: RoutineDefinition = {
       id: `routine:${crypto.randomUUID()}`,
       name: text(body.name, "name", 200),
@@ -383,15 +417,20 @@ export class SchedulerService {
     return this.exclusive(async () => {
       const body = object(input),
         state = this.scheduler.get(id);
-      if (!state) throw new ApiError("NOT_FOUND", "Job not found", 404);
-      if (Object.keys(body).some((k) => !["schedule", "enabled", "name", "routine"].includes(k)))
+      if (!state) {
+        throw new ApiError("NOT_FOUND", "Job not found", 404);
+      }
+      if (Object.keys(body).some((k) => !["schedule", "enabled", "name", "routine"].includes(k))) {
         throw new ApiError("INVALID_FIELD", "Unknown job field");
-      if (body.enabled !== undefined && typeof body.enabled !== "boolean")
+      }
+      if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
         throw new ApiError("INVALID_FIELD", "enabled must be boolean");
+      }
       const schedule = body.schedule === undefined ? undefined : validateSchedule(body.schedule);
       const routine = this.routines.get(id);
-      if (!routine && (body.name !== undefined || body.routine !== undefined))
+      if (!routine && (body.name !== undefined || body.routine !== undefined)) {
         throw new ApiError("INVALID_FIELD", "System job names and handlers are fixed");
+      }
       const name = body.name === undefined ? undefined : text(body.name, "name", 200);
       const nextInstruction = body.routine === undefined ? undefined : instruction(body.routine);
       if (routine) {
@@ -399,8 +438,12 @@ export class SchedulerService {
           routine.name = name;
           this.definitions.get(id)!.name = name;
         }
-        if (schedule) routine.schedule = schedule;
-        if (nextInstruction) routine.routine = nextInstruction;
+        if (schedule) {
+          routine.schedule = schedule;
+        }
+        if (nextInstruction) {
+          routine.routine = nextInstruction;
+        }
         await this.saveRoutines();
       }
       await this.scheduler.update(id, {

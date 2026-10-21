@@ -86,10 +86,13 @@ function toolInstructions(tools: LlmTool[]): string {
 
 /** Host CLIs take one prompt, so a multi-message exchange is rendered as a transcript. */
 function transcript(messages: LlmMessage[]): string {
-  if (messages.length === 1 && messages[0]!.role === "user") return messages[0]!.content;
+  if (messages.length === 1 && messages[0]!.role === "user") {
+    return messages[0]!.content;
+  }
   const parts = messages.map((message) => {
-    if (message.role === "tool")
+    if (message.role === "tool") {
       return `<tool_result id="${message.toolCallId ?? ""}"${message.isError ? ' error="true"' : ""}>\n${message.content}\n</tool_result>`;
+    }
     const calls = (message.toolCalls ?? [])
       .map(
         (call) =>
@@ -109,21 +112,24 @@ function transcript(messages: LlmMessage[]): string {
  */
 export class HostAgentLlmClient implements LlmClient {
   constructor(private readonly options: HostAgentLlmClientOptions) {
-    if (options.kind !== "claude-code" && options.kind !== "codex")
+    if (options.kind !== "claude-code" && options.kind !== "codex") {
       throw new LlmError("Unsupported host agent", "LLM_CONFIG");
+    }
     if (
       options.timeoutMs !== undefined &&
       (!Number.isInteger(options.timeoutMs) || options.timeoutMs <= 0)
-    )
+    ) {
       throw new LlmError("Invalid host agent timeout", "LLM_CONFIG");
+    }
   }
 
   async complete(opts: CompleteOptions): Promise<LlmCompletion> {
-    if (opts.json && opts.tools?.length)
+    if (opts.json && opts.tools?.length) {
       throw new LlmError(
         "JSON output and interactive tools must be requested separately",
         "LLM_CONFIG",
       );
+    }
     const { kind } = this.options;
     const fast = opts.model === "fast";
     const model =
@@ -136,8 +142,9 @@ export class HostAgentLlmClient implements LlmClient {
     const schema = opts.json ?? (tools ? toolSchema(tools) : undefined);
     let system = opts.system + (tools ? toolInstructions(tools) : "");
     // Codex enforces only strict-compatible schemas; describe any schema in the prompt as well.
-    if (schema && kind === "codex")
+    if (schema && kind === "codex") {
       system += `\n\nReturn only JSON matching this schema: ${JSON.stringify(schema)}`;
+    }
     const run = runHostAgent(
       {
         kind,
@@ -156,7 +163,9 @@ export class HostAgentLlmClient implements LlmClient {
       },
     );
     const outcome = await run.done;
-    if (outcome.error) throw new LlmError(outcome.error.message, outcome.error.code);
+    if (outcome.error) {
+      throw new LlmError(outcome.error.message, outcome.error.code);
+    }
     const usage = outcome.usage ?? {
       inputTokens: 0,
       outputTokens: 0,
@@ -181,7 +190,9 @@ export class HostAgentLlmClient implements LlmClient {
       result.text = value.text;
       result.toolCalls = value.toolCalls.map((call): LlmToolCall => {
         const tool = tools.find((item) => item.name === call.name);
-        if (!tool) throw new LlmError("Model requested an unknown tool", "LLM_TOOL");
+        if (!tool) {
+          throw new LlmError("Model requested an unknown tool", "LLM_TOOL");
+        }
         const args = extractJson(call.argumentsJson);
         validateJson(args, tool.inputSchema);
         return { id: `call_${randomUUID()}`, name: call.name, arguments: args };

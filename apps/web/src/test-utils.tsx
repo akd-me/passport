@@ -14,11 +14,12 @@ export function stubApi(routes: Record<string, unknown>) {
     const key = Object.keys(routes)
       .filter((route) => path === route || path.startsWith(`${route}/`) || path.startsWith(route))
       .sort((a, b) => b.length - a.length)[0];
-    if (key === undefined)
+    if (key === undefined) {
       return Response.json(
         { error: { code: "NOT_FOUND", message: "Unknown API route" } },
         { status: 404 },
       );
+    }
     const value = routes[key];
     const body = typeof value === "function" ? await value(url, init) : value;
     return body instanceof Response ? body : Response.json(body);

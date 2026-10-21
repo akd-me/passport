@@ -142,7 +142,9 @@ export class SyncService {
   }
   syncAccount(accountId: string): Promise<void> {
     const current = this.active.get(accountId);
-    if (current) return current;
+    if (current) {
+      return current;
+    }
     const job = this.sync(accountId).finally(() => this.active.delete(accountId));
     this.active.set(accountId, job);
     return job;
@@ -152,7 +154,9 @@ export class SyncService {
   }
 
   private async markDeleted(email: Email) {
-    if (email.keywords.$deleted) return;
+    if (email.keywords.$deleted) {
+      return;
+    }
     await this.store.emails.patchMany([email.id], {
       keywords: { ...email.keywords, $deleted: true },
     });
@@ -172,8 +176,11 @@ export class SyncService {
         cursor,
         after: this.mailSnapshotSince(accountId),
       });
-      for (const email of page.items)
-        if (!seen.has(email.providerId)) await this.markDeleted(email);
+      for (const email of page.items) {
+        if (!seen.has(email.providerId)) {
+          await this.markDeleted(email);
+        }
+      }
       cursor = page.nextCursor;
     } while (cursor);
   }
@@ -184,19 +191,30 @@ export class SyncService {
     );
   }
   private async isArrival(email: Email): Promise<boolean> {
-    if (email.keywords.$draft) return false;
+    if (email.keywords.$draft) {
+      return false;
+    }
     const roles = (await this.store.mailboxes.list(email.accountId))
       .filter((box) => email.mailboxIds.includes(box.id))
       .map((box) => box.role);
-    if (roles.includes("drafts") || roles.includes("sent")) return false;
+    if (roles.includes("drafts") || roles.includes("sent")) {
+      return false;
+    }
     const self = new Set(
       (await this.store.accounts.list()).map((account) =>
         account.emailAddress.trim().toLowerCase(),
       ),
     );
-    for (const person of await this.store.people.list({ relationship: "self", limit: 2147483647 }))
-      if (person.verifiedSelf)
-        for (const address of person.emails) self.add(address.trim().toLowerCase());
+    for (const person of await this.store.people.list({
+      relationship: "self",
+      limit: 2147483647,
+    })) {
+      if (person.verifiedSelf) {
+        for (const address of person.emails) {
+          self.add(address.trim().toLowerCase());
+        }
+      }
+    }
     return (
       roles.includes("inbox") ||
       !email.from.some((address) => self.has(address.email.trim().toLowerCase()))
@@ -235,8 +253,9 @@ export class SyncService {
         const ingest = async () => {
           const seen = new Set<string>(),
             deleted = new Set<string>();
-          for (const calendar of await provider.listCalendars())
+          for (const calendar of await provider.listCalendars()) {
             await this.store.calendars.upsertMany([await this.calendar(accountId, calendar)]);
+          }
           let final: string | null = null;
           for await (const delta of provider.sync(cursors.calendar)) {
             final = delta.kind === "cursor" ? delta.cursor : null;
@@ -250,9 +269,12 @@ export class SyncService {
               seen.delete(delta.providerId);
             }
           }
-          if (final === null)
+          if (final === null) {
             throw new ApiError("SYNC_INCOMPLETE", "Calendar sync did not finish with a cursor");
-          if (reconcile) await this.reconcileEvents(accountId, seen);
+          }
+          if (reconcile) {
+            await this.reconcileEvents(accountId, seen);
+          }
           const events = await this.store.events.query({ accountId, limit: 2147483647 });
           await this.store.events.deleteMany(
             events.filter((event) => deleted.has(event.providerId)).map((event) => event.id),
@@ -262,7 +284,9 @@ export class SyncService {
         try {
           cursors.calendar = await ingest();
         } catch (error) {
-          if ((error as { code?: string }).code !== "CURSOR_EXPIRED") throw error;
+          if ((error as { code?: string }).code !== "CURSOR_EXPIRED") {
+            throw error;
+          }
           cursors.calendar = null;
           reconcile = true;
           await this.store.kv.set(reconcileKey, "1");
@@ -299,14 +323,15 @@ export class SyncService {
           for await (const delta of provider.sync(cursors.mail)) {
             final = delta.kind === "cursor" ? delta.cursor : null;
             if (delta.kind === "mailbox") {
-              if (delta.op === "upsert")
+              if (delta.op === "upsert") {
                 await this.store.mailboxes.upsertMany([
                   await this.mailbox(accountId, delta.mailbox),
                 ]);
-              else
+              } else {
                 await this.store.mailboxes.deleteMany([
                   await this.reference(accountId, "mailbox", delta.id),
                 ]);
+              }
             }
             if (delta.kind === "email") {
               if (delta.op === "delete") {
@@ -323,17 +348,20 @@ export class SyncService {
                 const seenKey = key("sync-seen", accountId, email.providerId);
                 const isNew = !existing && !(await this.store.kv.get(seenKey));
                 const arrival = isNew && (await this.isArrival(email));
-                if (arrival) await persistArrival(this.store, email);
+                if (arrival) {
+                  await persistArrival(this.store, email);
+                }
                 await this.store.emails.upsertMany([email]);
                 if (existing && existing.threadId !== email.threadId) {
                   const previous = await this.store.threads.get(existing.threadId);
-                  if (previous)
+                  if (previous) {
                     await this.store.threads.upsertMany([
                       {
                         ...previous,
                         emailIds: previous.emailIds.filter((id) => id !== email.id),
                       },
                     ]);
+                  }
                 }
                 const thread = await this.store.threads.get(email.threadId);
                 await this.store.threads.upsertMany([
@@ -374,20 +402,27 @@ export class SyncService {
               ]);
             }
           }
-          if (final === null)
+          if (final === null) {
             throw new ApiError("SYNC_INCOMPLETE", "Mail sync did not finish with a cursor");
+          }
           // A partial full snapshot never removes or tombstones unseen mail.
-          if (reconcile) await this.reconcileMail(accountId, seen);
+          if (reconcile) {
+            await this.reconcileMail(accountId, seen);
+          }
           for (const providerId of deleted) {
             const email = await this.store.emails.getByProviderId(accountId, providerId);
-            if (email) await this.markDeleted(email);
+            if (email) {
+              await this.markDeleted(email);
+            }
           }
           return final;
         };
         try {
           cursors.mail = await ingest();
         } catch (error) {
-          if ((error as { code?: string }).code !== "CURSOR_EXPIRED") throw error;
+          if ((error as { code?: string }).code !== "CURSOR_EXPIRED") {
+            throw error;
+          }
           reconcile = true;
           await this.store.kv.set(reconcileKey, "1");
           cursors.mail = null;
@@ -397,7 +432,9 @@ export class SyncService {
         // Commit the cursor before clearing recovery intent. A crash between these
         // writes safely repeats a full reconciliation from null.
         await persist();
-        if (reconcile) await this.store.kv.delete(reconcileKey);
+        if (reconcile) {
+          await this.store.kv.delete(reconcileKey);
+        }
       }
       await persist();
       const at = new Date().toISOString();

@@ -24,19 +24,27 @@ import { startServer } from "./server.js";
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const [command = "serve", subcommand, kind] = args;
-  if (command === "mcp" && (subcommand === "install" || subcommand === "proxy"))
+  if (command === "mcp" && (subcommand === "install" || subcommand === "proxy")) {
     return (await import("./cli/mcp-install.js")).handleMcpCommand(args);
-  if (command === "jobs") return runJobsCommand(args.slice(1));
-  if (command === "accounts" && subcommand === "connect")
+  }
+  if (command === "jobs") {
+    return runJobsCommand(args.slice(1));
+  }
+  if (command === "accounts" && subcommand === "connect") {
     return (await import("./setup/cli.js")).connectCommand(args.slice(2));
-  if (command === "init") return initializePassport(undefined, args.slice(1));
+  }
+  if (command === "init") {
+    return initializePassport(undefined, args.slice(1));
+  }
   if (command === "mcp" && ["--help", "-h", "help"].includes(subcommand ?? "")) {
     console.log(
       "passport mcp — mailbox tools over stdio (no background jobs)\npassport mcp install --client claude-code|codex|cursor|claude-desktop [--http] [--dry-run] [--user]",
     );
     return;
   }
-  if (command === "doctor") return doctorCommand(args.includes("--demo"));
+  if (command === "doctor") {
+    return doctorCommand(args.includes("--demo"));
+  }
   if (command === "--help" || command === "-h" || command === "help") {
     console.log(
       "passport init | doctor | serve [--allow-remote] | demo [--allow-remote] | token [--rotate] | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | accounts connect --provider gmail|microsoft [--no-calendar] [--agent codex|claude-code] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo]",
@@ -47,26 +55,30 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     !["serve", "demo", "sync", "triage", "mcp", "accounts", "trust", "decisions", "token"].includes(
       command,
     )
-  )
+  ) {
     throw new ApiError("INVALID_COMMAND", "Unknown command. Run passport --help.");
+  }
   const config = await loadConfig();
   if (command === "token") {
     console.log(apiToken(config.dataDir, { rotate: args.includes("--rotate") }));
     return;
   }
-  if (command === "serve" || command === "demo")
+  if (command === "serve" || command === "demo") {
     checkBind(config.host, args.includes("--allow-remote"), process.env, false);
+  }
   if (["trust", "decisions", "sync", "triage"].includes(command) && !args.includes("--demo")) {
     const request = await serverClient(config);
     if (request) {
-      if (command === "triage" && !subcommand)
+      if (command === "triage" && !subcommand) {
         throw new ApiError("INVALID_COMMAND", "Use triage <emailId>");
+      }
       if (command === "sync") {
         const { accounts } = (await request("/api/accounts")) as { accounts: { id: string }[] };
-        for (const account of accounts)
+        for (const account of accounts) {
           await request(`/api/accounts/${encodeURIComponent(account.id)}/sync`, "POST");
+        }
         console.log("Sync complete.");
-      } else
+      } else {
         console.log(
           JSON.stringify(
             await request(
@@ -79,11 +91,13 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
             2,
           ),
         );
+      }
       return;
     }
   }
-  if (["serve", "sync", "triage"].includes(command) && !args.includes("--demo"))
+  if (["serve", "sync", "triage"].includes(command) && !args.includes("--demo")) {
     await resolveLlmSelection(config, { log: command === "serve" });
+  }
   let shutdownOwner: (() => void) | undefined;
   const owner = ["serve", "demo"].includes(command)
     ? acquireOwner(config.dataDir, () => {
@@ -111,10 +125,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
   };
   if (command === "mcp") {
-    if (!activeOwner(config.dataDir))
+    if (!activeOwner(config.dataDir)) {
       console.error(
         "Passport serve is not running; stdio has no background jobs. Held/proposed actions wait for serve.",
       );
+    }
     const server = backend.createMcpServer!();
     let closing: Promise<void> | undefined;
     const shutdown = () =>
@@ -173,7 +188,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   try {
     if (command === "triage") {
-      if (!subcommand) throw new ApiError("INVALID_COMMAND", "Use triage <emailId>");
+      if (!subcommand) {
+        throw new ApiError("INVALID_COMMAND", "Use triage <emailId>");
+      }
       console.log(
         JSON.stringify(
           await backend.agent.run({
@@ -186,11 +203,12 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       );
     }
     if (command === "sync") {
-      for (const account of await backend.store.accounts.list())
+      for (const account of await backend.store.accounts.list()) {
         await backend.syncAccount(account.id);
+      }
       console.log("Sync complete.");
     }
-    if (command === "trust")
+    if (command === "trust") {
       console.log(
         JSON.stringify(
           {
@@ -201,7 +219,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           2,
         ),
       );
-    if (command === "decisions")
+    }
+    if (command === "decisions") {
       console.log(
         JSON.stringify(
           await backend.store.actions.query({ status: ["proposed", "held"] }),
@@ -209,20 +228,24 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           2,
         ),
       );
+    }
     if (command === "accounts") {
-      if (subcommand === "list")
+      if (subcommand === "list") {
         console.log(JSON.stringify(await backend.store.accounts.list(), null, 2));
-      else if (subcommand === "add") {
-        if (!backend.providerKinds.includes(kind as never))
+      } else if (subcommand === "add") {
+        if (!backend.providerKinds.includes(kind as never)) {
           throw new ApiError(
             "INVALID_PROVIDER",
             `Choose a provider: ${backend.providerKinds.join(", ")}`,
           );
+        }
         const descriptor = backend.providers.describe(kind as never),
           fields: Record<string, string> = {},
           output = new Writable({
             write(chunk, _encoding, done) {
-              if (!muted) stdout.write(chunk);
+              if (!muted) {
+                stdout.write(chunk);
+              }
               done();
             },
           });
@@ -236,12 +259,15 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           const emailAddress = await rl.question("Email address: "),
             displayName = await rl.question("Display name: ");
           for (const field of descriptor.fields) {
-            if (field.id === "emailAddress") fields[field.id] = emailAddress;
-            else if (field.id === "displayName") fields[field.id] = displayName;
-            else if (field.secret) {
+            if (field.id === "emailAddress") {
+              fields[field.id] = emailAddress;
+            } else if (field.id === "displayName") {
+              fields[field.id] = displayName;
+            } else if (field.secret) {
               const env = `PASSPORT_SETUP_${field.id.replace(/[^a-zA-Z0-9]/g, "_").toUpperCase()}`;
-              if (process.env[env]) fields[field.id] = process.env[env]!;
-              else if (field.id !== "codeVerifier") {
+              if (process.env[env]) {
+                fields[field.id] = process.env[env]!;
+              } else if (field.id !== "codeVerifier") {
                 stdout.write(`${field.label}${field.required ? "" : " (optional)"} (hidden): `);
                 muted = true;
                 try {
@@ -251,10 +277,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
                   stdout.write("\n");
                 }
               }
-            } else
+            } else {
               fields[field.id] = await rl.question(
                 `${field.label}${field.required ? "" : " (optional)"}: `,
               );
+            }
           }
           const credentials = descriptor.oauth
             ? await authorizeOAuth(descriptor, fields, {
@@ -281,17 +308,18 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         } finally {
           rl.close();
         }
-      } else
+      } else {
         throw new ApiError(
           "INVALID_COMMAND",
           "Use accounts list, accounts add <kind> or accounts connect --provider gmail|microsoft.",
         );
+      }
     }
   } finally {
     await backend.close();
   }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   void main().catch((error: unknown) => {
     logger.error(
       error instanceof ApiError
@@ -300,3 +328,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     );
     process.exitCode = 1;
   });
+}

@@ -8,22 +8,30 @@ export type HeaderInput =
 export function headerValues(input: HeaderInput): Record<string, string[]> {
   const result: Record<string, string[]> = {};
   const add = (name: string, value: string | string[] | undefined | null) => {
-    if (value == null) return;
-    (result[name.toLowerCase()] ??= []).push(...(Array.isArray(value) ? value : [value]));
+    if (value == null) {
+      return;
+    }
+    const key = name.toLowerCase();
+    result[key] ??= [];
+    result[key].push(...(Array.isArray(value) ? value : [value]));
   };
-  if (Array.isArray(input)) input.forEach((h) => add(h.name, h.value));
-  else if ("messageId" in input && "references" in input) {
+  if (Array.isArray(input)) {
+    input.forEach((h) => add(h.name, h.value));
+  } else if ("messageId" in input && "references" in input) {
     const h = input as EmailHeaders;
     Object.entries(h.extra ?? {}).forEach(([k, v]) => add(k, v));
-    if (h.authenticationResults?.length)
+    if (h.authenticationResults?.length) {
       result["authentication-results"] = [...h.authenticationResults];
+    }
     add("message-id", h.messageId);
     add("in-reply-to", h.inReplyTo);
     add("references", h.references.join(" "));
     add("list-id", h.listId);
     add("list-unsubscribe", h.listUnsubscribe);
     add("list-unsubscribe-post", h.listUnsubscribePost);
-  } else Object.entries(input).forEach(([k, v]) => add(k, v as string | string[] | undefined));
+  } else {
+    Object.entries(input).forEach(([k, v]) => add(k, v as string | string[] | undefined));
+  }
   return result;
 }
 
@@ -41,10 +49,18 @@ export function parseAuthenticationResults(headers: HeaderInput): VerificationSt
   const get = (method: string): AuthResult => {
     const pattern = new RegExp(`(?:^|;)\\s*${method}\\s*=\\s*([a-z]+)`, "gi");
     let values = [...direct.matchAll(pattern)].map((m) => m[1]!.toLowerCase());
-    if (!values.length) values = [...arc.matchAll(pattern)].map((m) => m[1]!.toLowerCase());
-    if (values.some((v) => ["fail", "softfail", "permerror"].includes(v))) return "fail";
-    if (values.includes("pass")) return "pass";
-    if (values.includes("none")) return "none";
+    if (!values.length) {
+      values = [...arc.matchAll(pattern)].map((m) => m[1]!.toLowerCase());
+    }
+    if (values.some((v) => ["fail", "softfail", "permerror"].includes(v))) {
+      return "fail";
+    }
+    if (values.includes("pass")) {
+      return "pass";
+    }
+    if (values.includes("none")) {
+      return "none";
+    }
     return "unknown";
   };
   const signer = /(?:^|;)\s*dkim\s*=\s*pass\b[^;]*\bheader\.d\s*=\s*([^\s;]+)/i.exec(

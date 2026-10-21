@@ -11,8 +11,11 @@ describe("passport mcp", () => {
   it("R9: starts a client stdio process with protocol-only stdout, no owner or background jobs", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "passport-stdio-"));
     const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(process.env))
-      if (value !== undefined) env[key] = value;
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
     env.PASSPORT_DATA_DIR = dataDir;
     env.PASSPORT_PORT = "0";
     env.PASSPORT_HOST = "0.0.0.0"; // Stdio must not trigger the HTTP remote-bind guard.

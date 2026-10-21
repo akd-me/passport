@@ -174,21 +174,30 @@ describe("shared tool catalogue", () => {
     async (outcome) => {
       policy.outcome = outcome;
       const result = await call("archive_emails", { emailIds: ["email-1"], reason: "Organize" });
+      function actionStatus() {
+        if (outcome === "allow") {
+          return "executed";
+        }
+        if (outcome === "ask") {
+          return "proposed";
+        }
+        if (outcome === "hold") {
+          return "held";
+        }
+        return "rejected";
+      }
       expect(result).toMatchObject({
         actionId: "action-1",
         outcome,
         reason: expect.any(String),
-        status:
-          outcome === "allow"
-            ? "executed"
-            : outcome === "ask"
-              ? "proposed"
-              : outcome === "hold"
-                ? "held"
-                : "rejected",
+        status: actionStatus(),
       });
-      if (outcome === "hold") expect(result.holdUntil).toBeTruthy();
-      if (outcome === "deny") expect(result.isError).toBe(true);
+      if (outcome === "hold") {
+        expect(result.holdUntil).toBeTruthy();
+      }
+      if (outcome === "deny") {
+        expect(result.isError).toBe(true);
+      }
     },
   );
   it("clips bodies at 2k and strips remote tracking pixels even with full=true", async () => {
@@ -355,10 +364,11 @@ describe("new workflow tools", () => {
     ).toHaveProperty("isError", true);
   });
   it("includes earlier proposals executed today and pages through daily actions", async () => {
-    for (let i = 0; i < 205; i++)
+    for (let i = 0; i < 205; i++) {
       await store.actions.insert(
         f.action({ id: `log-${i}`, createdAt: "2026-10-19T12:00:00Z", executedAt: f.at }),
       );
+    }
     const result = await call("get_daily_log", { date: "2026-10-20" });
     expect(result.count).toBe(207);
     expect((result.groups as { executed: object[] }).executed).toHaveLength(206);
@@ -531,8 +541,9 @@ it("R12 first standing-rule edit preserves the full effective default profile", 
   );
   await call("add_standing_rule", { rule: "Archive newsletters.", reason: "Configure" });
   const markdown = (executor.submitted.at(-1)!.params as { markdown: string }).markdown;
-  for (const section of ["Identity", "Voice", "VIPs", "Draft settings"])
+  for (const section of ["Identity", "Voice", "VIPs", "Draft settings"]) {
     expect(markdown).toContain(`## ${section}`);
+  }
   expect(markdown).toContain("assistant_attribution: false");
   expect(markdown).toContain("- Archive newsletters.");
   expect(await store.kv.get("user_profile")).toBeNull();

@@ -9,7 +9,9 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 
-if (process.argv.length !== 3) throw new Error("Usage: node scripts/smoke-package.mjs <tarball>");
+if (process.argv.length !== 3) {
+  throw new Error("Usage: node scripts/smoke-package.mjs <tarball>");
+}
 const tarball = resolve(process.argv[2]);
 const directory = await mkdtemp(join(tmpdir(), "passport-package-"));
 const env = { ...process.env, PASSPORT_DATA_DIR: join(directory, "data") };
@@ -20,8 +22,9 @@ for (const key of [
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "NODE_PATH",
-])
+]) {
   delete env[key];
+}
 env.PASSPORT_HOST = "127.0.0.1";
 env.PASSPORT_LLM_PROVIDER = "anthropic";
 env.PASSPORT_LLM_MODEL = "smoke-no-model-calls";
@@ -36,7 +39,9 @@ function command(program, args, options = {}) {
     timeout: 120_000,
     ...options,
   });
-  if (result.error) throw result.error;
+  if (result.error) {
+    throw result.error;
+  }
   assert.equal(
     result.status,
     0,
@@ -80,12 +85,18 @@ async function smokeServer(cli, mode) {
     let healthy = false;
     let token = env.PASSPORT_API_TOKEN;
     for (let attempt = 0; attempt < 100; attempt++) {
-      if (spawnError) throw spawnError;
-      if (child.exitCode !== null) throw new Error(`${mode} exited early:\n${logs}`);
+      if (spawnError) {
+        throw spawnError;
+      }
+      if (child.exitCode !== null) {
+        throw new Error(`${mode} exited early:\n${logs}`);
+      }
       if (!token) {
         for (const raw of logs.match(/https?:\/\/[^\s]+/g) ?? []) {
           const url = new URL(raw);
-          if (url.origin === base) token = url.searchParams.get("token") ?? undefined;
+          if (url.origin === base) {
+            token = url.searchParams.get("token") ?? undefined;
+          }
         }
       }
       if (!token) {
@@ -126,7 +137,9 @@ async function smokeServer(cli, mode) {
     assert.equal(health.mode, mode === "serve" ? "real" : "demo");
     const decisions = JSON.parse(command("curl", [...curl, `${base}/api/decisions`]));
     assert(Array.isArray(decisions.items));
-    if (mode === "demo") assert(decisions.items.length > 0, "Demo must contain decisions");
+    if (mode === "demo") {
+      assert(decisions.items.length > 0, "Demo must contain decisions");
+    }
     const response = await fetch(base, { signal: AbortSignal.timeout(5000) });
     const html = await response.text();
     assert(response.ok && html.includes('<div id="root">'), "Built React UI must be served");
@@ -139,7 +152,9 @@ async function smokeServer(cli, mode) {
     );
     console.log(`Installed passport ${mode}: health, decisions and built UI OK`);
   } finally {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGTERM");
+    }
     const timer = globalThis.setTimeout(() => child.kill("SIGKILL"), 10_000);
     await closed;
     clearTimeout(timer);

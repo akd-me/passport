@@ -33,8 +33,9 @@ function timestamp(value: string | undefined): string | undefined {
   if (
     value !== undefined &&
     (!/^\d{4}-\d{2}-\d{2}T/.test(value) || !Number.isFinite(Date.parse(value)))
-  )
+  ) {
     throw new ApiError("INVALID_QUERY", "Expected an ISO timestamp");
+  }
   return value;
 }
 function actionQuery(q: Record<string, string>): ActionQuery {
@@ -53,10 +54,12 @@ function actionQuery(q: Record<string, string>): ActionQuery {
   };
 }
 function emailQuery(q: Record<string, string>): EmailQuery {
-  if (q.includeBodies && !["true", "false"].includes(q.includeBodies))
+  if (q.includeBodies && !["true", "false"].includes(q.includeBodies)) {
     throw new ApiError("INVALID_QUERY", "includeBodies must be true or false");
-  if (q.includeDeleted && !["true", "false"].includes(q.includeDeleted))
+  }
+  if (q.includeDeleted && !["true", "false"].includes(q.includeDeleted)) {
     throw new ApiError("INVALID_QUERY", "includeDeleted must be true or false");
+  }
   return {
     accountId: q.accountId,
     mailboxId: q.mailboxId,
@@ -77,11 +80,15 @@ function emailQuery(q: Record<string, string>): EmailQuery {
 }
 async function jsonBody(request: Request, optional = false): Promise<Record<string, unknown>> {
   const text = await request.text();
-  if (!text.trim() && optional) return {};
+  if (!text.trim() && optional) {
+    return {};
+  }
   try {
     return object(JSON.parse(text));
   } catch (error) {
-    if (error instanceof ApiError) throw error;
+    if (error instanceof ApiError) {
+      throw error;
+    }
     throw new ApiError("INVALID_JSON", "Expected a JSON object");
   }
 }
@@ -91,10 +98,12 @@ export function createApp(
 ) {
   const app = new Hono();
   app.onError((error, c) => {
-    if (error instanceof ApiError)
+    if (error instanceof ApiError) {
       return c.json({ error: { code: error.code, message: error.message } }, error.status);
-    if (error instanceof HTTPException)
+    }
+    if (error instanceof HTTPException) {
       return c.json({ error: { code: "HTTP_ERROR", message: error.message } }, error.status);
+    }
     const code =
       typeof (error as { code?: unknown }).code === "string"
         ? (error as unknown as { code: string }).code
@@ -217,20 +226,30 @@ export function createApp(
     const matter = required(await backend.store.matters.get(c.req.param("id")), "Matter"),
       body = await jsonBody(c.req.raw),
       patch: Partial<Matter> = {};
-    for (const key of Object.keys(body))
-      if (!["title", "summary", "nextStep", "status", "dueAt", "snoozedUntil"].includes(key))
+    for (const key of Object.keys(body)) {
+      if (!["title", "summary", "nextStep", "status", "dueAt", "snoozedUntil"].includes(key)) {
         throw new ApiError("INVALID_FIELD", `Matter field ${key} is not editable here`);
-    for (const key of ["title", "summary", "nextStep"] as const)
-      if (body[key] !== undefined) patch[key] = string(body[key], key);
-    if (body.status !== undefined)
+      }
+    }
+    for (const key of ["title", "summary", "nextStep"] as const) {
+      if (body[key] !== undefined) {
+        patch[key] = string(body[key], key);
+      }
+    }
+    if (body.status !== undefined) {
       patch.status = member(body.status, ["active", "waiting", "snoozed", "done"], "matter status");
-    for (const key of ["dueAt", "snoozedUntil"] as const)
-      if (body[key] !== undefined)
+    }
+    for (const key of ["dueAt", "snoozedUntil"] as const) {
+      if (body[key] !== undefined) {
         patch[key] = body[key] === null ? null : timestamp(string(body[key], key));
+      }
+    }
     const accountId =
       (matter.emailIds[0] ? await backend.store.emails.get(matter.emailIds[0]) : null)?.accountId ??
       (await backend.store.accounts.list())[0]?.id;
-    if (!accountId) throw new ApiError("ACCOUNT_REQUIRED", "Add an account first");
+    if (!accountId) {
+      throw new ApiError("ACCOUNT_REQUIRED", "Add an account first");
+    }
     return c.json(
       await backend.executor.submit({
         type: "matter_update",
@@ -272,7 +291,9 @@ export function createApp(
   app.get("/api/events", async (c) => {
     const start = timestamp(c.req.query("start")),
       end = timestamp(c.req.query("end"));
-    if (!!start !== !!end) throw new ApiError("INVALID_QUERY", "Supply both start and end");
+    if (!!start !== !!end) {
+      throw new ApiError("INVALID_QUERY", "Supply both start and end");
+    }
     return c.json(
       await backend.store.events.query({
         accountId: c.req.query("accountId"),
@@ -285,9 +306,11 @@ export function createApp(
   app.get("/api/trust", async (c) => {
     const actions = await backend.store.actions.query({ limit: 500 }),
       offers = new Map<string, PromotionOffer>();
-    for (const a of actions.items)
-      if (a.decision.promotionOffer)
+    for (const a of actions.items) {
+      if (a.decision.promotionOffer) {
         offers.set(a.decision.promotionOffer.category, a.decision.promotionOffer);
+      }
+    }
     return c.json({
       config: await backend.policy.getConfig(),
       categories: await backend.policy.getTrust(),
@@ -312,7 +335,9 @@ export function createApp(
   app.put("/api/user-profile", async (c) => {
     const body = await jsonBody(c.req.raw),
       markdown = string(body.markdown, "markdown");
-    if (markdown.length > 100000) throw new ApiError("INVALID_FIELD", "Profile is too large");
+    if (markdown.length > 100000) {
+      throw new ApiError("INVALID_FIELD", "Profile is too large");
+    }
     return c.json(
       await backend.executor.submit({
         type: "profile_update",
@@ -359,8 +384,9 @@ export function createApp(
     if (
       body.emailIds !== undefined &&
       (!Array.isArray(body.emailIds) || body.emailIds.some((id) => typeof id !== "string"))
-    )
+    ) {
       throw new ApiError("INVALID_FIELD", "emailIds must be strings");
+    }
     return c.json(
       await backend.agent.run({
         kind: "manual",
@@ -379,8 +405,9 @@ export function createApp(
       !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
       !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) ||
       new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date
-    )
+    ) {
       throw new ApiError("INVALID_DATE", "Use YYYY-MM-DD");
+    }
     return c.json({
       date,
       markdown: required(await backend.store.kv.get(`digest:${date}`), "Digest"),
@@ -393,9 +420,10 @@ export function createApp(
   if (existsSync(`${staticDir}/index.html`)) {
     app.use("*", serveStatic({ root: staticDir }));
     app.get("*", serveStatic({ path: `${staticDir}/index.html` }));
-  } else
+  } else {
     app.get("/", (c) =>
       c.text("Passport API is running. Build @passport/web or start its Vite dev server."),
     );
+  }
   return app;
 }

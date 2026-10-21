@@ -89,13 +89,14 @@ function fakeSessions() {
           },
         });
       } catch (error) {
-        if (signal.aborted)
+        if (signal.aborted) {
           return {
             kind: request.kind,
             ok: false,
             text: "",
             error: { code: "HOST_AGENT_CANCELLED", message: "Codex run was cancelled" },
           };
+        }
         return {
           kind: request.kind,
           ok: false,
@@ -133,8 +134,12 @@ async function until<T>(read: () => T, accept: (value: T) => boolean, ms = 3000)
   const end = Date.now() + ms;
   for (;;) {
     const value = read();
-    if (accept(value)) return value;
-    if (Date.now() > end) throw new Error(`Timed out; last value: ${JSON.stringify(value)}`);
+    if (accept(value)) {
+      return value;
+    }
+    if (Date.now() > end) {
+      throw new Error(`Timed out; last value: ${JSON.stringify(value)}`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
@@ -193,7 +198,9 @@ describe("agent-driven account setup", () => {
     backend.bus.onAny((event) => events.push(event));
     sessions = fakeSessions();
     agents = [status("codex", true), status("claude-code", true)];
-    for (const mock of Object.values(browser)) mock.mockClear();
+    for (const mock of Object.values(browser)) {
+      mock.mockClear();
+    }
     setupTasks(backend, {
       detectAgents: async () => agents,
       runSession: sessions.run,
@@ -688,7 +695,9 @@ describe("setup task state", () => {
 
   it("ignores changes after it ends and bounds the log", () => {
     const { state, published } = make();
-    for (let index = 0; index < 400; index++) state.log("info", `line ${index}`);
+    for (let index = 0; index < 400; index++) {
+      state.log("info", `line ${index}`);
+    }
     expect(state.snapshot().log).toHaveLength(300);
     expect(state.snapshot().log[0]!.text).toBe("line 100");
     state.cancel();

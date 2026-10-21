@@ -18,7 +18,9 @@ export async function getJournal(
 ): Promise<Journal> {
   const key = `agent:journal:${ctx.run.startedAt.slice(0, 10)}`;
   const saved = await ctx.store.kv.get(key);
-  if (saved) return JSON.parse(saved) as Journal;
+  if (saved) {
+    return JSON.parse(saved) as Journal;
+  }
   const baseline = await ctx.store.kv.get("agent:trust_snapshot");
   const journal: Journal = {
     runs: [],
@@ -56,16 +58,17 @@ export async function dailyDigest(ctx: RunContext, policy: PolicyEngine): Promis
   const changes: string[] = [];
   for (const state of trust) {
     const prior = journal.trustBefore.find((item) => item.category === state.category);
-    if (!prior)
+    if (!prior) {
       changes.push(`${state.category}: ${state.level}, score ${state.score.toFixed(2)} (new).`);
-    else if (
+    } else if (
       prior.level !== state.level ||
       prior.score !== state.score ||
       prior.stage !== state.stage
-    )
+    ) {
       changes.push(
         `${state.category}: ${prior.level} → ${state.level}; score ${prior.score.toFixed(2)} → ${state.score.toFixed(2)}.`,
       );
+    }
   }
   const downgrades = journal.runs
     .flatMap((run) => run.downgrades)
@@ -99,18 +102,23 @@ export async function reviewMatters(ctx: RunContext, days: number): Promise<void
   let reviewed = 0;
   for (const matter of await ctx.store.matters.list({ status: ["active"] })) {
     const emails = await allEmails(ctx.store, { matterId: matter.id });
-    for (const id of matter.emailIds)
+    for (const id of matter.emailIds) {
       if (!emails.some((email) => email.id === id)) {
         const email = await ctx.store.emails.get(id);
-        if (email) emails.push(email);
+        if (email) {
+          emails.push(email);
+        }
       }
+    }
     const events = await ctx.store.events.query({ matterId: matter.id });
     const activity = [
       matter.updatedAt,
       ...emails.flatMap((email) => [email.receivedAt, email.sentAt ?? email.receivedAt]),
       ...events.map((event) => event.updatedAt),
     ];
-    if (Math.max(...activity.map((at) => Date.parse(at))) > cutoff) continue;
+    if (Math.max(...activity.map((at) => Date.parse(at))) > cutoff) {
+      continue;
+    }
     const update = await ctx.structured(
       reviewSchema,
       reviewPrompt(
@@ -120,11 +128,12 @@ export async function reviewMatters(ctx: RunContext, days: number): Promise<void
     );
     const accountId =
       emails[0]?.accountId ?? events[0]?.accountId ?? (await ctx.store.accounts.list())[0]?.id;
-    if (!accountId)
+    if (!accountId) {
       throw new AgentError(
         "Matter review requires an account for the action log",
         "ACCOUNT_NOT_FOUND",
       );
+    }
     await ctx.callTool("update_matter", {
       accountId,
       matterId: matter.id,

@@ -37,14 +37,19 @@ function ProviderMark({ provider }: { provider: SetupProvider }) {
 }
 
 function StepIcon({ status }: { status: SetupStep["status"] }) {
-  const name =
-    status === "done"
-      ? "check"
-      : status === "running"
-        ? "spinner"
-        : status === "failed"
-          ? "alert"
-          : "";
+  function stepIcon() {
+    if (status === "done") {
+      return "check";
+    }
+    if (status === "running") {
+      return "spinner";
+    }
+    if (status === "failed") {
+      return "alert";
+    }
+    return "";
+  }
+  const name = stepIcon();
   return (
     <span className={`step-icon ${status}`} aria-hidden="true">
       {name && <Icon name={name} size={13} />}
@@ -78,7 +83,9 @@ function TaskView({
     setError("");
     try {
       const next = asTask(await fn());
-      if (next) onUpdate(next);
+      if (next) {
+        onUpdate(next);
+      }
       setAnswer("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "That did not go through.");
@@ -89,20 +96,24 @@ function TaskView({
   const respond = (value: string) => act(() => setupApi.respond(task.id, task.prompt!.id, value));
   const connected = accounts.filter((a) => task.result?.accountIds.includes(a.id));
   const name = providerNames[task.provider];
+  function setupTitle() {
+    if (task.status === "completed") {
+      return `${name} is connected`;
+    }
+    if (task.status === "failed") {
+      return `${name} could not be connected`;
+    }
+    if (task.status === "cancelled") {
+      return "Setup cancelled";
+    }
+    return `Connecting ${name}`;
+  }
   return (
     <div className="setup-task">
       <div className="setup-heading">
         <ProviderMark provider={task.provider} />
         <div>
-          <h3>
-            {task.status === "completed"
-              ? `${name} is connected`
-              : task.status === "failed"
-                ? `${name} could not be connected`
-                : task.status === "cancelled"
-                  ? "Setup cancelled"
-                  : `Connecting ${name}`}
-          </h3>
+          <h3>{setupTitle()}</h3>
           <p className="hint">
             {task.status === "completed"
               ? "The first sync is running. Proposals will appear in your queue."
@@ -113,24 +124,30 @@ function TaskView({
         </div>
       </div>
       <ol className="steps" aria-label="Setup progress">
-        {task.steps.map((step) => (
-          <li key={step.id} className={step.status}>
-            <StepIcon status={step.status} />
-            <div>
-              <span>{step.title}</span>
-              {step.detail && <small>{step.detail}</small>}
-            </div>
-            <span className="sr-only">
-              {step.status === "done"
-                ? "Done"
-                : step.status === "running"
-                  ? "In progress"
-                  : step.status === "failed"
-                    ? "Failed"
-                    : "Not started"}
-            </span>
-          </li>
-        ))}
+        {task.steps.map((step) => {
+          function stepStatusLabel() {
+            if (step.status === "done") {
+              return "Done";
+            }
+            if (step.status === "running") {
+              return "In progress";
+            }
+            if (step.status === "failed") {
+              return "Failed";
+            }
+            return "Not started";
+          }
+          return (
+            <li key={step.id} className={step.status}>
+              <StepIcon status={step.status} />
+              <div>
+                <span>{step.title}</span>
+                {step.detail && <small>{step.detail}</small>}
+              </div>
+              <span className="sr-only">{stepStatusLabel()}</span>
+            </li>
+          );
+        })}
       </ol>
       {task.status === "waiting_for_user" && task.prompt && (
         <div className="setup-prompt" role="alert">
@@ -149,7 +166,9 @@ function TaskView({
                 className="inline-form"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (answer.trim()) void respond(answer.trim());
+                  if (answer.trim()) {
+                    void respond(answer.trim());
+                  }
                 }}
               >
                 <input
@@ -292,20 +311,28 @@ export function SetupFlow({ onDone }: { onDone: () => void }) {
     [error, setError] = useState("");
   const { refresh } = useWorkspace();
   useWorkspaceEvents((event) => {
-    if (event.type !== "setup.task.updated") return;
+    if (event.type !== "setup.task.updated") {
+      return;
+    }
     const next = event.task as SetupTask;
-    if (next?.id && next.id === task?.id) setTask(next);
+    if (next?.id && next.id === task?.id) {
+      setTask(next);
+    }
   });
   const id = task?.id,
     finished = task ? isFinished(task) : true;
   useEffect(() => {
     // The WebSocket is the fast path; polling covers a missed frame or a reconnect.
-    if (!id || finished) return;
+    if (!id || finished) {
+      return;
+    }
     let stopped = false;
     const timer = setInterval(async () => {
       try {
         const next = await setupApi.get(id);
-        if (!stopped) setTask(next);
+        if (!stopped) {
+          setTask(next);
+        }
       } catch {
         /* Keep the last known state; the next tick retries. */
       }
@@ -316,7 +343,9 @@ export function SetupFlow({ onDone }: { onDone: () => void }) {
     };
   }, [id, finished]);
   useEffect(() => {
-    if (task?.status === "completed") refresh();
+    if (task?.status === "completed") {
+      refresh();
+    }
   }, [task?.status, refresh]);
   const start = async () => {
     setStarting(true);
@@ -325,16 +354,18 @@ export function SetupFlow({ onDone }: { onDone: () => void }) {
       const { id } = await setupApi.start({ provider, calendar });
       setTask(await setupApi.get(id));
     } catch (e) {
-      if (e instanceof ApiError && (e.status === 404 || e.status === 501))
+      if (e instanceof ApiError && (e.status === 404 || e.status === 501)) {
         setManual({
           note: "Automatic setup is not available on this Passport server yet. Set the account up with your own OAuth client instead.",
         });
-      else setError(e instanceof Error ? e.message : "Setup could not start.");
+      } else {
+        setError(e instanceof Error ? e.message : "Setup could not start.");
+      }
     } finally {
       setStarting(false);
     }
   };
-  if (manual)
+  if (manual) {
     return (
       <ManualSetup
         note={manual.note}
@@ -343,7 +374,8 @@ export function SetupFlow({ onDone }: { onDone: () => void }) {
         onDone={onDone}
       />
     );
-  if (task)
+  }
+  if (task) {
     return (
       <TaskView
         task={task}
@@ -356,6 +388,7 @@ export function SetupFlow({ onDone }: { onDone: () => void }) {
         }}
       />
     );
+  }
   return (
     <div className="setup-start">
       <div className="provider-choice" role="radiogroup" aria-label="Provider">

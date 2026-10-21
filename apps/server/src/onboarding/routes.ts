@@ -68,8 +68,9 @@ export function registerOnboarding(
   });
   app.post("/api/accounts/test", async (c) => {
     const input = await body(c.req.raw);
-    if (input.kind !== "imap" && input.kind !== "mock")
+    if (input.kind !== "imap" && input.kind !== "mock") {
       throw new ApiError("INVALID_PROVIDER", "Test an IMAP account, or use mock for offline setup");
+    }
     // Reuse descriptor validation against a temporary, non-persisting backend.
     let credentials = {};
     const transient: Backend = {
@@ -118,14 +119,17 @@ export function registerOnboarding(
       days = Number(c.req.query("days"));
     required(await backend.store.accounts.get(id), "Account");
     const service = accountSync(backend);
-    if (!service) throw new ApiError("BACKFILL_UNAVAILABLE", "Backfill requires passport serve");
+    if (!service) {
+      throw new ApiError("BACKFILL_UNAVAILABLE", "Backfill requires passport serve");
+    }
     await service.backfill(id, days);
     return c.json({ ok: true });
   });
   app.post("/api/accounts/:id/sync", async (c) => {
     const account = required(await backend.store.accounts.get(c.req.param("id")), "Account");
-    if (account.settings.reauthorizationRequired)
+    if (account.settings.reauthorizationRequired) {
       throw new ApiError("REAUTHORIZE_REQUIRED", "Re-authorize this account to resume sync", 409);
+    }
     await backend.syncAccount(account.id);
     return c.json({ ok: true });
   });

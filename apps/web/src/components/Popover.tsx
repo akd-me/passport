@@ -30,9 +30,13 @@ export function Popover({
     button.current?.focus();
   };
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      return;
+    }
     const onDown = (event: MouseEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
+      if (!root.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
     };
     document.addEventListener("mousedown", onDown);
     const popover = root.current?.querySelector<HTMLElement>(".popover");

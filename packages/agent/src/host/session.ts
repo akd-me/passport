@@ -32,21 +32,26 @@ function processFailure(
   result: { timedOut: boolean; aborted: boolean; stderr: string; code: number | null },
 ): { message: string; code: string } {
   const name = NAMES[spec.kind];
-  if (result.aborted) return { code: "HOST_AGENT_CANCELLED", message: `${name} run was cancelled` };
-  if (result.timedOut)
+  if (result.aborted) {
+    return { code: "HOST_AGENT_CANCELLED", message: `${name} run was cancelled` };
+  }
+  if (result.timedOut) {
     return { code: "HOST_AGENT_TIMEOUT", message: `${name} did not finish in time` };
+  }
   // stderr can echo configuration or tokens; classify it, never forward it.
   if (
     /not logged in|log ?in required|please (log|sign) in|unauthori[sz]ed|authentication|invalid api key|oauth/i.test(
       result.stderr,
     )
-  )
+  ) {
     return {
       code: "HOST_AGENT_AUTH",
       message: `${name} is not logged in. ${HOST_AGENT_FIXES[spec.kind].login}`,
     };
-  if (/unrecognized_model|unknown model|model .*not (found|supported)/i.test(result.stderr))
+  }
+  if (/unrecognized_model|unknown model|model .*not (found|supported)/i.test(result.stderr)) {
     return { code: "HOST_AGENT_MODEL", message: `${name} rejected the configured model` };
+  }
   return {
     code: "HOST_AGENT_FAILED",
     message: `${name} exited unexpectedly (code ${result.code ?? "none"})`,
@@ -73,7 +78,7 @@ export function runHostAgent(
   const done = (async (): Promise<HostRunResult> => {
     const source = runtime.env ?? process.env;
     const binary = runtime.binaryPath ?? resolveHostAgentBinary(spec.kind, source);
-    if (!binary)
+    if (!binary) {
       return {
         text: "",
         finished: false,
@@ -83,13 +88,15 @@ export function runHostAgent(
           message: `${NAMES[spec.kind]} is not installed. ${HOST_AGENT_FIXES[spec.kind].install}`,
         },
       };
-    if (signal.aborted)
+    }
+    if (signal.aborted) {
       return {
         text: "",
         finished: false,
         schemaEnforced: false,
         error: { code: "HOST_AGENT_CANCELLED", message: `${NAMES[spec.kind]} run was cancelled` },
       };
+    }
     await mkdir(spec.cwd, { recursive: true, mode: 0o700 });
     const invocation =
       spec.kind === "claude-code" ? await claudeInvocation(spec) : await codexInvocation(spec);
@@ -104,7 +111,9 @@ export function runHostAgent(
         timeoutMs: runtime.timeoutMs,
         signal,
         onLine: (line) => {
-          for (const event of parser.push(line)) emit(event);
+          for (const event of parser.push(line)) {
+            emit(event);
+          }
         },
       });
       let result;
@@ -119,14 +128,16 @@ export function runHostAgent(
         };
       }
       const outcome = parser.outcome();
-      if (result.aborted || result.timedOut)
+      if (result.aborted || result.timedOut) {
         return {
           ...outcome,
           schemaEnforced: invocation.schemaEnforced,
           error: processFailure(spec, result),
         };
-      if (!outcome.error && (!outcome.finished || result.code !== 0))
+      }
+      if (!outcome.error && (!outcome.finished || result.code !== 0)) {
         outcome.error = processFailure(spec, result);
+      }
       return { ...outcome, schemaEnforced: invocation.schemaEnforced };
     } finally {
       await invocation.cleanup().catch(() => undefined);

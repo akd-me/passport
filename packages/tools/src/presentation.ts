@@ -134,7 +134,9 @@ export class ToolError extends Error {
 }
 
 export function required<T>(value: T | null | undefined, label: string): T {
-  if (value == null) throw new ToolError("NOT_FOUND", `${label} not found.`);
+  if (value == null) {
+    throw new ToolError("NOT_FOUND", `${label} not found.`);
+  }
   return value;
 }
 

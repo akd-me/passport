@@ -27,20 +27,26 @@ import { classificationSchema, matterSchema, replySchema, scheduleSchema } from 
 
 /** Cheap, deterministic categories; undefined delegates to the fast model. */
 export function heuristicCategory(email: Email): ActionCategory | undefined {
-  if (email.headers.listUnsubscribe) return "newsletters";
+  if (email.headers.listUnsubscribe) {
+    return "newsletters";
+  }
   if (
     /\b(receipt|invoice|order\s+(confirmation|confirmed|#|number)|payment\s+(received|receipt)|purchase\s+confirmation)\b/i.test(
       `${email.subject}\n${email.preview}`,
     )
-  )
+  ) {
     return "receipts";
+  }
   if (
     email.attachments.some((a) => /text\/calendar/i.test(a.type) || /\.ics$/i.test(a.name)) ||
     /text\/calendar/i.test(email.headers.extra?.["content-type"] ?? "") ||
     /\b(invitation|invite|calendar|meeting request)\b/i.test(email.subject)
-  )
+  ) {
     return "scheduling";
-  if (serviceSender(email)) return "notifications";
+  }
+  if (serviceSender(email)) {
+    return "notifications";
+  }
   return undefined;
 }
 
@@ -49,20 +55,24 @@ export function sensitiveCategory(
   email: Email,
   people: readonly Person[] = [],
 ): ActionCategory | undefined {
-  if (email.category === "money" || email.category === "legal") return email.category;
+  if (email.category === "money" || email.category === "legal") {
+    return email.category;
+  }
   const text = `${email.subject}\n${email.preview}\n${email.textBody ?? ""}\n${email.htmlBody ?? ""}`;
   if (
     /\b(legal|lawsuit|litigation|subpoena|settlement|attorney|court order|contract|cease and desist)\b/i.test(
       text,
     )
-  )
+  ) {
     return "legal";
+  }
   if (
     /\b(wire transfer|bank account|payment required|payment due|overdue|pay now|send money|transfer funds|authorize payment)\b/i.test(
       text,
     )
-  )
+  ) {
     return "money";
+  }
   const stranger = email.from.some((address) =>
     people.some(
       (person) =>
@@ -77,8 +87,9 @@ export function sensitiveCategory(
     /\b(?:please (?:send|provide|sign|approve)|(?:can|could|would) you (?:send|provide|sign|approve))\b/i.test(
       text,
     )
-  )
+  ) {
     return "replies_stranger";
+  }
   return undefined;
 }
 
@@ -99,19 +110,24 @@ async function candidates(store: Store, email: Email, personIds: string[]): Prom
   const addId = async (id?: string | null): Promise<void> => {
     if (id && !matters.has(id)) {
       const matter = await store.matters.get(id);
-      if (matter) matters.set(id, matter);
+      if (matter) {
+        matters.set(id, matter);
+      }
     }
   };
   await addId(email.matterId);
   const thread = await store.emails.query({ threadId: email.threadId, limit: 30 });
-  for (const item of thread.items) await addId(item.matterId);
+  for (const item of thread.items) {
+    await addId(item.matterId);
+  }
   for (const personId of personIds) {
     for (const matter of await store.matters.list({
       personId,
       status: ["active", "waiting"],
       limit: 8,
-    }))
+    })) {
       matters.set(matter.id, matter);
+    }
   }
   // Quote individual tokens, never interpolate a subject as executable FTS syntax.
   const words = email.subject.match(/[\p{L}\p{N}]{3,}/gu)?.slice(0, 6) ?? [];
@@ -120,7 +136,9 @@ async function candidates(store: Store, email: Email, personIds: string[]): Prom
       text: words.map((word) => `"${word}"`).join(" OR "),
       limit: 12,
     });
-    for (const item of similar.items) await addId(item.matterId);
+    for (const item of similar.items) {
+      await addId(item.matterId);
+    }
   }
   return [...matters.values()].slice(0, 12);
 }
@@ -138,16 +156,20 @@ async function attachMatter(
     .trim();
   const purchaseTitle = `Purchases/${vendor}`;
   if (category === "receipts") {
-    for (const matter of await ctx.store.matters.list({ text: purchaseTitle, limit: 10 }))
-      if (!options.some((m) => m.id === matter.id)) options.push(matter);
+    for (const matter of await ctx.store.matters.list({ text: purchaseTitle, limit: 10 })) {
+      if (!options.some((m) => m.id === matter.id)) {
+        options.push(matter);
+      }
+    }
   }
   const proposal = await ctx.structured(matterSchema, matterPrompt(email, options));
   const selected =
     category === "receipts"
       ? options.find((matter) => matter.title === purchaseTitle)
       : options.find((matter) => matter.id === proposal.matterId);
-  if (category !== "receipts" && proposal.matterId !== null && !selected)
+  if (category !== "receipts" && proposal.matterId !== null && !selected) {
     throw new AgentError("Model selected a matter outside the candidate set", "LLM_MATTER");
+  }
   const summary = String(proposal.summary);
   const emailPatch = { category, personIds };
   if (selected) {
@@ -193,28 +215,36 @@ async function attachMatter(
     { emailPatch },
   );
   const record = ctx.actions.at(-1)!;
-  if (record.status !== "executed") return { summary };
+  if (record.status !== "executed") {
+    return { summary };
+  }
   const result = record.result;
   const resultMatter = isObject(result?.matter) ? result.matter : undefined;
-  const id =
-    typeof result?.matterId === "string"
-      ? result.matterId
-      : typeof resultMatter?.id === "string"
-        ? resultMatter.id
-        : typeof result?.id === "string"
-          ? result.id
-          : undefined;
+  function createdMatterId() {
+    if (typeof result?.matterId === "string") {
+      return result.matterId;
+    }
+    if (typeof resultMatter?.id === "string") {
+      return resultMatter.id;
+    }
+    if (typeof result?.id === "string") {
+      return result.id;
+    }
+    return undefined;
+  }
+  const id = createdMatterId();
   const attached = await ctx.store.emails.get(email.id);
   const persisted = id
     ? await ctx.store.matters.get(id)
     : attached?.matterId
       ? await ctx.store.matters.get(attached.matterId)
       : (await ctx.store.matters.list()).find((matter) => matter.emailIds.includes(email.id));
-  if (!persisted)
+  if (!persisted) {
     throw new AgentError(
       "Executed matter_create did not persist or return a discoverable matter",
       "EXECUTOR_RESULT",
     );
+  }
   return { id: persisted.id, summary };
 }
 
@@ -330,7 +360,9 @@ export async function triage(
 ): Promise<void> {
   const step = ctx.triageStep ?? (async <T>(_name: string, task: () => Promise<T>) => task());
   const email = await ctx.store.emails.get(emailId, { includeBodies: true });
-  if (!email) throw new AgentError("Received email was not found in the store", "EMAIL_NOT_FOUND");
+  if (!email) {
+    throw new AgentError("Received email was not found in the store", "EMAIL_NOT_FOUND");
+  }
   const resolved = await step("people", () =>
     resolvePeople({
       email,
@@ -386,8 +418,9 @@ export async function triage(
   });
   const downgraded = resolved.downgraded.length > 0 || email.verification.passport === "downgraded";
   const counterparty = emailCounterparty(email, resolved.people, downgraded);
-  if (counterparty.personId && !resolved.persistedIds.includes(counterparty.personId))
+  if (counterparty.personId && !resolved.persistedIds.includes(counterparty.personId)) {
     counterparty.personId = null;
+  }
   const matter = await step("matter", () =>
     attachMatter(ctx, email, category, resolved.persistedIds, counterparty),
   );
@@ -414,7 +447,7 @@ export async function triage(
       ctx.decisions.push(decision);
       await recordDecision(ctx.store, ctx.run.id, decision);
     } else if (category === "newsletters" || category === "receipts") {
-      if ((await ctx.store.accounts.get(email.accountId))?.capabilities.labels)
+      if ((await ctx.store.accounts.get(email.accountId))?.capabilities.labels) {
         await ctx.callTool(
           "label_emails",
           {
@@ -424,6 +457,7 @@ export async function triage(
           },
           toolContext,
         );
+      }
       await ctx.callTool(
         "archive_emails",
         { ...common, reason: `Archive routine ${category}: ${email.subject}` },

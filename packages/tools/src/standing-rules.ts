@@ -6,13 +6,14 @@ export function standingRules(markdown: string): {
   contentStart: number;
 } {
   const heading = /^## Standing rules[ \t]*\r?$/im.exec(markdown);
-  if (!heading)
+  if (!heading) {
     return {
       rules: [],
       start: markdown.length,
       end: markdown.length,
       contentStart: markdown.length,
     };
+  }
   const contentStart = heading.index + heading[0].length;
   const rest = markdown.slice(contentStart);
   const next = /^(?:#|##)[ \t]+/m.exec(rest);
@@ -44,7 +45,9 @@ export function editStandingRule(markdown: string, rule: string, remove: boolean
       markdown.slice(section.end)
     );
   }
-  if (section.rules.includes(rule)) return markdown;
+  if (section.rules.includes(rule)) {
+    return markdown;
+  }
   return (
     markdown.slice(0, section.end).replace(/\s*$/, "") +
     `\n- ${rule}\n\n` +

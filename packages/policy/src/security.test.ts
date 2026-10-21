@@ -253,7 +253,9 @@ describe("unsubscribe outbox integration", () => {
     const set = env.store.kv.set.bind(env.store.kv);
     vi.spyOn(env.store.kv, "set").mockImplementation(async (key, value) => {
       const prefix = "policy:unsubscribe-parent:";
-      if (key.startsWith(prefix)) await other.approve(key.slice(prefix.length));
+      if (key.startsWith(prefix)) {
+        await other.approve(key.slice(prefix.length));
+      }
       await set(key, value);
     });
     const parent = await env.executor.submit(

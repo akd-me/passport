@@ -55,8 +55,9 @@ export function normalizeGoogleEvent(
   owner: string,
   zone = "UTC",
 ): CalendarEvent {
-  if (!event.start || !event.end)
+  if (!event.start || !event.end) {
     throw new ProviderError("INVALID_RESPONSE", "Google event is missing start or end");
+  }
   const timeZone = event.start.timeZone ?? zone;
   return {
     id: localId(accountId, "event", event.id),
@@ -118,11 +119,12 @@ export class GoogleCalendarProvider extends HttpConnection implements CalendarPr
     return `${base}/calendars/${encodeURIComponent(this.calendarId)}`;
   }
   private async normalize(event: GoogleEvent): Promise<CalendarEvent> {
-    if (event.start?.date && !this.calendarZone && !this.account.settings.timeZone)
+    if (event.start?.date && !this.calendarZone && !this.account.settings.timeZone) {
       this.calendarZone = required(
         (await this.json<{ timeZone: string }>(this.calendarPath)).timeZone,
         "Google calendar timeZone",
       );
+    }
     return normalizeGoogleEvent(
       event,
       this.account.id,
@@ -170,7 +172,9 @@ export class GoogleCalendarProvider extends HttpConnection implements CalendarPr
       out.push(
         ...(page.items ?? []).map((c) => {
           const id = this.calendarId === "primary" && c.primary ? "primary" : c.id;
-          if (id === this.calendarId) this.calendarZone = c.timeZone;
+          if (id === this.calendarId) {
+            this.calendarZone = c.timeZone;
+          }
           return {
             id: localId(this.account.id, "calendar", id),
             accountId: this.account.id,
@@ -204,18 +208,21 @@ export class GoogleCalendarProvider extends HttpConnection implements CalendarPr
       try {
         page = await this.json(`${this.calendarPath}/events?${params}`);
       } catch (e) {
-        if (e instanceof ProviderError && e.status === 410)
+        if (e instanceof ProviderError && e.status === 410) {
           throw new ProviderError(
             "CURSOR_EXPIRED",
             "Google Calendar sync token expired; reset local calendar state and resync",
           );
+        }
         throw e;
       }
       this.calendarZone ??= page.timeZone;
       for (const event of page.items ?? []) {
-        if (event.status === "cancelled")
+        if (event.status === "cancelled") {
           yield { kind: "event", op: "delete", providerId: event.id };
-        else yield { kind: "event", op: "upsert", event: await this.normalize(event) };
+        } else {
+          yield { kind: "event", op: "upsert", event: await this.normalize(event) };
+        }
       }
       state = page.nextSyncToken;
       pageToken = page.nextPageToken;
@@ -225,18 +232,25 @@ export class GoogleCalendarProvider extends HttpConnection implements CalendarPr
   private eventBody(input: Partial<CalendarEvent>): Record<string, unknown> {
     validateEvent(input);
     const out: Record<string, unknown> = {};
-    if (input.title !== undefined) out.summary = input.title;
-    for (const k of ["description", "location", "status"] as const)
-      if (input[k] !== undefined) out[k] = input[k];
-    for (const key of ["start", "end"] as const)
-      if (input[key])
+    if (input.title !== undefined) {
+      out.summary = input.title;
+    }
+    for (const k of ["description", "location", "status"] as const) {
+      if (input[k] !== undefined) {
+        out[k] = input[k];
+      }
+    }
+    for (const key of ["start", "end"] as const) {
+      if (input[key]) {
         out[key] = input.allDay
           ? { date: localDate(input[key], input.timeZone ?? "UTC") }
           : {
               dateTime: toIso(input[key]),
               ...(input.timeZone ? { timeZone: input.timeZone } : {}),
             };
-    if (input.participants)
+      }
+    }
+    if (input.participants) {
       out.attendees = input.participants
         .filter((p) => p.role !== "organizer")
         .map((p) => ({
@@ -245,16 +259,19 @@ export class GoogleCalendarProvider extends HttpConnection implements CalendarPr
           responseStatus: toGoogle(p.status),
           optional: p.role === "optional",
         }));
-    if (input.recurrenceRule !== undefined)
+    }
+    if (input.recurrenceRule !== undefined) {
       out.recurrence = input.recurrenceRule
         ? [`RRULE:${input.recurrenceRule.replace(/^RRULE:/, "")}`]
         : [];
+    }
     return out;
   }
   async createEvent(event: EventInput): Promise<CalendarEvent> {
     this.check();
-    if (event.accountId !== this.account.id)
+    if (event.accountId !== this.account.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Event belongs to another account");
+    }
     return this.normalize(
       await this.json<GoogleEvent>(
         `${this.calendarPath}/events?sendUpdates=all`,
@@ -295,17 +312,21 @@ export class GoogleCalendarProvider extends HttpConnection implements CalendarPr
       `${this.calendarPath}/events/${encodeURIComponent(providerId)}`,
     );
     let found = false;
-    const attendees = (event.attendees ?? []).map((a) =>
-      a.self || a.email.toLowerCase() === this.account.emailAddress.toLowerCase()
-        ? ((found = true),
-          { ...a, responseStatus: toGoogle(status), ...(comment ? { comment } : {}) })
-        : a,
-    );
-    if (!found)
+    const attendees = (event.attendees ?? []).map((attendee) => {
+      const isOwner =
+        attendee.self || attendee.email.toLowerCase() === this.account.emailAddress.toLowerCase();
+      if (!isOwner) {
+        return attendee;
+      }
+      found = true;
+      return { ...attendee, responseStatus: toGoogle(status), ...(comment ? { comment } : {}) };
+    });
+    if (!found) {
       throw new ProviderError(
         "NOT_AN_ATTENDEE",
         "The account is not an attendee of this Google event",
       );
+    }
     await this.http(
       `${this.calendarPath}/events/${encodeURIComponent(providerId)}?sendUpdates=all`,
       this.body({ attendees }, "PATCH"),
@@ -320,8 +341,9 @@ export class GoogleCalendarProvider extends HttpConnection implements CalendarPr
       this.body({ timeMin: range.start, timeMax: range.end, items: [{ id: this.calendarId }] }),
     );
     const calendar = result.calendars[this.calendarId];
-    if (!calendar || calendar.errors?.length)
+    if (!calendar || calendar.errors?.length) {
       throw new ProviderError("FREEBUSY_FAILED", "Google could not return calendar availability");
+    }
     return (calendar.busy ?? []).map((r) => ({ start: toIso(r.start), end: toIso(r.end) }));
   }
 }

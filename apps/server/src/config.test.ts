@@ -25,10 +25,11 @@ describe("configuration and composition", () => {
       (await loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES: "20" }))
         .calendarMaxSyncAgeMinutes,
     ).toBe(20);
-    for (const value of ["0", "-1", "NaN"])
+    for (const value of ["0", "-1", "NaN"]) {
       await expect(
         loadConfig({ PASSPORT_DATA_DIR: path, PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES: value }),
       ).rejects.toThrow("calendarMaxSyncAgeMinutes");
+    }
   });
   it("loads file keys, applies environment overrides, and never persists environment keys", async () => {
     const path = await dataDir();

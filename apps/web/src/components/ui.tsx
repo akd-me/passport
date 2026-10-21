@@ -211,21 +211,22 @@ export const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(
 export const mod = isMac ? "⌘" : "Ctrl+";
 export function relativeTime(at: string) {
   const delta = Math.floor((Date.now() - Date.parse(at)) / 60000);
-  if (delta < -1)
+  if (delta < -1) {
     return -delta < 60
       ? `in ${-delta}m`
       : -delta < 1440
         ? `in ${Math.round(-delta / 60)}h`
         : new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
   const minutes = Math.max(0, delta);
-  return minutes < 1
-    ? "Just now"
-    : minutes < 60
-      ? `${minutes}m ago`
-      : minutes < 1440
-        ? `${Math.floor(minutes / 60)}h ago`
-        : new Date(at).toLocaleDateString(undefined, {
-            month: "short",
-            day: "numeric",
-          });
+  if (minutes < 1) {
+    return "Just now";
+  }
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  if (minutes < 1440) {
+    return `${Math.floor(minutes / 60)}h ago`;
+  }
+  return new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }

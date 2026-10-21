@@ -28,9 +28,13 @@ describe("HTTP + WebSocket listener", () => {
     try {
       await once(handle.server, "listening");
       const mcpUrl = await handle.ready;
-      if (!mcpUrl) throw new Error("Expected MCP URL");
+      if (!mcpUrl) {
+        throw new Error("Expected MCP URL");
+      }
       const address = handle.server.address();
-      if (!address || typeof address === "string") throw new Error("Expected HTTP listener");
+      if (!address || typeof address === "string") {
+        throw new Error("Expected HTTP listener");
+      }
       const root = `http://127.0.0.1:${address.port}`;
       expect(
         (
@@ -64,7 +68,9 @@ describe("HTTP + WebSocket listener", () => {
     const handle = startServer(backend);
     await once(handle.server, "listening");
     const address = handle.server.address();
-    if (!address || typeof address === "string") throw new Error("Expected TCP listener");
+    if (!address || typeof address === "string") {
+      throw new Error("Expected TCP listener");
+    }
     const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws`, { headers });
     try {
       await once(socket, "open");

@@ -17,17 +17,22 @@ describe("Gmail API adapter", () => {
     const seen: string[] = [];
     const fetcher = fixtureFetch((url) => {
       seen.push(url.pathname);
-      if (url.pathname.endsWith("/labels"))
+      if (url.pathname.endsWith("/labels")) {
         return response({ labels: [{ id: "INBOX", name: "Inbox" }] });
-      if (url.pathname.endsWith("/labels/INBOX"))
+      }
+      if (url.pathname.endsWith("/labels/INBOX")) {
         return response({ messagesTotal: 2, messagesUnread: 1 });
-      if (url.pathname.endsWith("/profile")) return response({ historyId: "before-list" });
-      if (url.pathname.endsWith("/messages"))
+      }
+      if (url.pathname.endsWith("/profile")) {
+        return response({ historyId: "before-list" });
+      }
+      if (url.pathname.endsWith("/messages")) {
         return response(
           url.searchParams.has("pageToken")
             ? { messages: [{ id: "m2" }] }
             : { messages: [{ id: "m1" }], nextPageToken: "page2" },
         );
+      }
       return response({ ...sample, id: url.pathname.split("/").at(-1) });
     });
     const p = new GmailMailProvider({ fetch: fetcher });
@@ -41,8 +46,10 @@ describe("Gmail API adapter", () => {
   });
   it("coalesces paginated history updates and deletion tombstones", async () => {
     const fetcher = fixtureFetch((url) => {
-      if (url.pathname.endsWith("/labels")) return response({ labels: [] });
-      if (url.pathname.endsWith("/history"))
+      if (url.pathname.endsWith("/labels")) {
+        return response({ labels: [] });
+      }
+      if (url.pathname.endsWith("/history")) {
         return response(
           url.searchParams.has("pageToken")
             ? { historyId: "102", history: [{ messagesDeleted: [{ message: { id: "gone" } }] }] }
@@ -57,6 +64,7 @@ describe("Gmail API adapter", () => {
                 ],
               },
         );
+      }
       return response({ ...sample, id: "new" });
     });
     const p = new GmailMailProvider({ fetch: fetcher });
@@ -97,11 +105,15 @@ describe("Gmail API adapter", () => {
   it("creates missing labels, applies label membership, and returns blobs", async () => {
     const p = new GmailMailProvider({
       fetch: fixtureFetch((url, init) => {
-        if (url.pathname.endsWith("/labels") && init.method === "POST")
+        if (url.pathname.endsWith("/labels") && init.method === "POST") {
           return response({ id: "new-label", name: "Project" });
-        if (url.pathname.endsWith("/labels")) return response({ labels: [] });
-        if (url.pathname.includes("/attachments/"))
+        }
+        if (url.pathname.endsWith("/labels")) {
+          return response({ labels: [] });
+        }
+        if (url.pathname.includes("/attachments/")) {
           return response({ data: Buffer.from("plan").toString("base64url") });
+        }
         if (url.pathname.endsWith("/modify")) {
           expect(jsonBody(init).addLabelIds).toEqual(["new-label"]);
           return response({});
@@ -160,8 +172,9 @@ describe("Gmail API adapter", () => {
           expect(jsonBody(init).id).toBe("draft-api-id");
           return response({ id: "sent", threadId: "thread" });
         }
-        if (url.pathname.endsWith("/drafts/draft-api-id") && init.method === "DELETE")
+        if (url.pathname.endsWith("/drafts/draft-api-id") && init.method === "DELETE") {
           return response(null, 204);
+        }
         if (url.pathname.includes("/drafts") && ["POST", "PUT"].includes(init.method ?? "")) {
           const m = jsonBody(init).message as { raw: string };
           expect(Buffer.from(m.raw, "base64url").toString()).toContain("Subject: Hello");

@@ -25,11 +25,12 @@ export async function runJobsCommand(args: string[]) {
     command !== "list" &&
     command !== "add-routine" &&
     (!["run", "pause", "resume"].includes(command ?? "") || !id || id.startsWith("--"))
-  )
+  ) {
     throw new ApiError(
       "INVALID_COMMAND",
       "Use jobs list | run <id> | pause <id> | resume <id> | add-routine --name NAME --daily HH:MM --instruction TEXT [--time-zone ZONE] [--demo]",
     );
+  }
   const config = await loadConfig();
   if (!args.includes("--demo")) {
     const request = await serverClient(config);
@@ -53,14 +54,20 @@ export async function runJobsCommand(args: string[]) {
   const service = getSchedulerService(backend);
   try {
     await service.ready;
-    const result =
-      command === "list"
-        ? service.list()
-        : command === "add-routine"
-          ? await service.addRoutine(routine)
-          : command === "run"
-            ? await service.scheduler.runNow(id!)
-            : await service.scheduler[command as "pause" | "resume"](id!);
+    let result;
+    if (command === "list") {
+      result = service.list();
+    } else {
+      if (command === "add-routine") {
+        result = await service.addRoutine(routine);
+      } else {
+        if (command === "run") {
+          result = await service.scheduler.runNow(id!);
+        } else {
+          result = await service.scheduler[command as "pause" | "resume"](id!);
+        }
+      }
+    }
     console.log(JSON.stringify(result, null, 2));
   } finally {
     await service.stop();

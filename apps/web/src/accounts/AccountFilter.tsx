@@ -35,7 +35,9 @@ export function AccountScope({ children }: { children: ReactNode }) {
 export const useAccounts = () => useContext(Accounts);
 export function accountColour(id: string): string {
   let hash = 0;
-  for (const c of id) hash = (Math.imul(hash, 31) + c.charCodeAt(0)) | 0;
+  for (const c of id) {
+    hash = (Math.imul(hash, 31) + c.charCodeAt(0)) | 0;
+  }
   return ["#3b8a64", "#4a6fd4", "#c07a2c", "#2a8f99", "#c2507c", "#7d8a2e"][Math.abs(hash) % 6]!;
 }
 export function AccountDot({ id }: { id: string }) {

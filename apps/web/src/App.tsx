@@ -31,7 +31,9 @@ function OpenSettings({ section }: { section: SettingsSection }) {
   const connected = params.get("connected");
   useEffect(() => {
     openSettings(section);
-    if (connected) notify("Account connected. The first sync is running.");
+    if (connected) {
+      notify("Account connected. The first sync is running.");
+    }
   }, [section, connected, openSettings, notify]);
   return <Navigate to="/" replace />;
 }
@@ -57,7 +59,9 @@ function Welcome() {
 
 function Home() {
   const { accounts, loaded } = useAccounts();
-  if (!loaded) return <Loading />;
+  if (!loaded) {
+    return <Loading />;
+  }
   return accounts.length ? <WorkQueue /> : <Welcome />;
 }
 
@@ -86,7 +90,9 @@ function useGlobalShortcuts() {
         !document.querySelector('[aria-modal="true"]')
       ) {
         event.preventDefault();
-        if (!ui.composer.current) navigate("/");
+        if (!ui.composer.current) {
+          navigate("/");
+        }
         setTimeout(ui.focusComposer, 0);
       }
     };

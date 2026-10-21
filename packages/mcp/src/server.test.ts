@@ -67,7 +67,9 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
   async function call(name: string, args: Record<string, unknown> = {}) {
     const response = CallToolResultSchema.parse(await client.callTool({ name, arguments: args }));
     const text = response.content.find((content) => content.type === "text");
-    if (text?.type !== "text") throw new Error("Expected text tool response");
+    if (text?.type !== "text") {
+      throw new Error("Expected text tool response");
+    }
     return {
       response,
       value: text.text.startsWith("{")
@@ -131,8 +133,9 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
     });
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name).sort()).toEqual(registry.map((tool) => tool.name).sort());
-    for (const tool of registry)
+    for (const tool of registry) {
       expect(tools.find((item) => item.name === tool.name)?.inputSchema).toEqual(tool.inputSchema);
+    }
   });
   it("searches using EmailQuery and passes FTS and pagination to the injected store", async () => {
     const { value } = await call("search_emails", {
@@ -435,8 +438,9 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
       ["archive_emails", { emailIds: ["email-1", "email-2"] }],
       ["move_emails", { emailIds: ["email-2"], toMailboxId: "archive-1" }],
       ["create_draft", { draft: f.draft({ accountId: "account-2", inReplyToEmailId: "email-1" }) }],
-    ] as const)
+    ] as const) {
       expect((await call(name, { ...args, reason: "Change" })).response.isError).toBe(true);
+    }
     expect(executor.submitted).toHaveLength(0);
   });
   it.each([
@@ -523,8 +527,9 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
       ["update_person", { personId: "person-1", patch: { primaryEmail: "other@example.com" } }],
       ["attach_to_matter", { matterId: "matter-1" }],
       ["archive_emails", { emailIds: ["email-1"], reason: "Multiline\nreason" }],
-    ] as const)
+    ] as const) {
       expect((await call(name, { reason: "Change", ...args })).response.isError).toBe(true);
+    }
     expect(executor.submitted).toHaveLength(0);
   });
   it("T3 delegates undo by ID with external identity so a human actor cannot be inherited", async () => {

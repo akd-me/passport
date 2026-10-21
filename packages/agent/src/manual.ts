@@ -41,7 +41,9 @@ export async function manual(
     }
     messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls });
     for (const call of response.toolCalls) {
-      if (calls === 12) break;
+      if (calls === 12) {
+        break;
+      }
       calls++;
       let input = call.arguments;
       if (isObject(input)) {
@@ -64,7 +66,9 @@ export async function manual(
           isError: result.isError,
         });
       } catch (error) {
-        if (!(error instanceof AgentError) || !error.code.startsWith("INPUT_")) throw error;
+        if (!(error instanceof AgentError) || !error.code.startsWith("INPUT_")) {
+          throw error;
+        }
         messages.push({
           role: "tool",
           toolCallId: call.id,

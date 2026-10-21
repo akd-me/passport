@@ -11,7 +11,9 @@ const transportActors = new WeakMap<McpServer, { id: string }>();
 /** Bind only a host-issued, authenticated transport/session identity. */
 export function bindTransportActor(server: McpServer, id: string): void {
   const actor = transportActors.get(server);
-  if (!actor) throw new MailboxMcpError("INVALID_SERVER", "Unknown MCP server");
+  if (!actor) {
+    throw new MailboxMcpError("INVALID_SERVER", "Unknown MCP server");
+  }
   actor.id = id;
 }
 
@@ -19,8 +21,9 @@ const dependencies = new WeakMap<McpServer, MailboxMcpDependencies>();
 
 /** Construct a fresh server per client/session, injecting the host's shared domain collaborators. */
 export function createMailboxMcpServer(deps: MailboxMcpDependencies): McpServer {
-  if (deps.clientName !== undefined && !deps.clientName.trim())
+  if (deps.clientName !== undefined && !deps.clientName.trim()) {
     throw new MailboxMcpError("INVALID_CLIENT_NAME", "clientName must be nonempty");
+  }
   const server = new McpServer(
     { name: "passport-mailbox", version: "0.0.1" },
     {
@@ -44,7 +47,7 @@ export function createMailboxMcpServer(deps: MailboxMcpDependencies): McpServer 
   }));
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const tool = tools.find((tool) => tool.name === request.params.name);
-    if (!tool)
+    if (!tool) {
       return {
         content: [
           {
@@ -54,6 +57,7 @@ export function createMailboxMcpServer(deps: MailboxMcpDependencies): McpServer 
         ],
         isError: true,
       };
+    }
     let result = await tool.handler(request.params.arguments ?? {});
     const budget = responseByteBudget(deps.responseByteBudget);
     const envelope = () => ({
@@ -84,10 +88,11 @@ export function createMailboxMcpServer(deps: MailboxMcpDependencies): McpServer 
 /** Internal cloning for HTTP: an SDK Server owns exactly one transport. */
 export function cloneMailboxServer(server: McpServer): McpServer {
   const deps = dependencies.get(server);
-  if (!deps)
+  if (!deps) {
     throw new MailboxMcpError(
       "INVALID_SERVER",
       "serveHttp requires a server created by createMailboxMcpServer",
     );
+  }
   return createMailboxMcpServer(deps);
 }

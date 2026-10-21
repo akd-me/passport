@@ -112,15 +112,26 @@ export async function normalizeGmail(
 ): Promise<Email> {
   const labels = message.labelIds ?? [],
     keywords: Email["keywords"] = {};
-  if (!labels.includes("UNREAD")) keywords.$seen = true;
-  if (labels.includes("STARRED")) keywords.$flagged = true;
-  if (labels.includes("DRAFT")) keywords.$draft = true;
-  if (labels.includes("SPAM")) keywords.$junk = true;
-  for (const l of labels)
-    if (!roles[l] && !["UNREAD", "STARRED"].includes(l)) keywords[`label:${l}`] = true;
+  if (!labels.includes("UNREAD")) {
+    keywords.$seen = true;
+  }
+  if (labels.includes("STARRED")) {
+    keywords.$flagged = true;
+  }
+  if (labels.includes("DRAFT")) {
+    keywords.$draft = true;
+  }
+  if (labels.includes("SPAM")) {
+    keywords.$junk = true;
+  }
+  for (const l of labels) {
+    if (!roles[l] && !["UNREAD", "STARRED"].includes(l)) {
+      keywords[`label:${l}`] = true;
+    }
+  }
   const mailboxIds = labels.filter((l) => !["UNREAD", "STARRED"].includes(l));
   const receivedAt = toIso(message.internalDate ? Number(message.internalDate) : 0);
-  if (message.raw)
+  if (message.raw) {
     return normalizeMime(Buffer.from(message.raw, "base64url"), {
       accountId,
       providerId: message.id,
@@ -130,6 +141,7 @@ export async function normalizeGmail(
       receivedAt,
       verifier,
     });
+  }
   const headers = normalizeHeaders(message.payload?.headers ?? []);
   // Gmail's full format still exposes RFC 5322 encoded words and address syntax in headers.
   const envelope = await normalizeMime(
@@ -269,11 +281,12 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
         try {
           page = await this.json(`${base}/history?${params}`);
         } catch (e) {
-          if (e instanceof ProviderError && e.status === 404)
+          if (e instanceof ProviderError && e.status === 404) {
             throw new ProviderError(
               "CURSOR_EXPIRED",
               "Gmail history expired; reset local sync state and run a full sync",
             );
+          }
           throw e;
         }
         for (const h of page.history ?? []) {
@@ -311,15 +324,22 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
         const page = await this.json<{ messages?: Array<{ id: string }>; nextPageToken?: string }>(
           `${base}/messages?${params}`,
         );
-        for (const m of page.messages ?? []) changed.add(m.id);
+        for (const m of page.messages ?? []) {
+          changed.add(m.id);
+        }
         pageToken = page.nextPageToken;
       } while (pageToken);
     }
-    for (const providerId of deleted) yield { kind: "email", op: "delete", providerId };
+    for (const providerId of deleted) {
+      yield { kind: "email", op: "delete", providerId };
+    }
     for (const id of changed) {
       const email = await this.getEmail(id);
-      if (email) yield { kind: "email", op: "upsert", email };
-      else yield { kind: "email", op: "delete", providerId: id };
+      if (email) {
+        yield { kind: "email", op: "upsert", email };
+      } else {
+        yield { kind: "email", op: "delete", providerId: id };
+      }
     }
     yield { kind: "cursor", cursor: state };
   }
@@ -333,19 +353,23 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
         `${base}/messages/${encodeURIComponent(providerId)}?format=full`,
       );
     } catch (e) {
-      if (e instanceof ProviderError && e.status === 404) return null;
+      if (e instanceof ProviderError && e.status === 404) {
+        return null;
+      }
       throw e;
     }
-    for (const part of flatten(message.payload))
+    for (const part of flatten(message.payload)) {
       if (!isAttachment(part) && part.body?.attachmentId && part.body.data === undefined) {
         part.body.data = (
           await this.json<{ data: string }>(
             `${base}/messages/${encodeURIComponent(providerId)}/attachments/${encodeURIComponent(part.body.attachmentId)}`,
           )
         ).data;
-        if (typeof part.body.data !== "string")
+        if (typeof part.body.data !== "string") {
           throw new ProviderError("INVALID_RESPONSE", "Gmail omitted a referenced text body");
+        }
       }
+    }
     return normalizeGmail(message, this.account.id, this.options.verifier);
   }
   async getBlob(blobId: string): Promise<{ type: string; data: Uint8Array }> {
@@ -357,38 +381,50 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
       );
       return mimeAttachment(Buffer.from(required(m.raw, "raw MIME"), "base64url"), index);
     }
-    if (!blobId.startsWith("gmail:"))
+    if (!blobId.startsWith("gmail:")) {
       throw new ProviderError("INVALID_BLOB_ID", "Invalid Gmail attachment handle");
+    }
     const [id, attachmentId, partId, type] = decodeCursor<[string, string | null, string, string]>(
       blobId.slice(6),
     );
     let data: string | undefined;
-    if (attachmentId)
+    if (attachmentId) {
       data = (
         await this.json<{ data: string }>(
           `${base}/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}`,
         )
       ).data;
-    else
+    } else {
       data = flatten(
         (await this.json<GmailMessage>(`${base}/messages/${encodeURIComponent(id)}?format=full`))
           .payload,
       ).find((p) => p.partId === partId)?.body?.data;
-    if (data === undefined) throw new ProviderError("NOT_FOUND", "Gmail attachment is missing");
+    }
+    if (data === undefined) {
+      throw new ProviderError("NOT_FOUND", "Gmail attachment is missing");
+    }
     return { type, data: Buffer.from(data, "base64url") };
   }
   private async labelId(name: string): Promise<string> {
-    if (!this.labels.length) await this.getLabels();
+    if (!this.labels.length) {
+      await this.getLabels();
+    }
     const existing = this.labels.find((l) => l.id === name || l.name === name);
-    if (existing) return existing.id;
+    if (existing) {
+      return existing.id;
+    }
     const label = await this.json<GmailLabel>(`${base}/labels`, this.body({ name }));
     this.labels.push(label);
     return label.id;
   }
   private async keyword(keyword: Keyword): Promise<string> {
-    if (keyword.startsWith("label:")) return this.labelId(keyword.slice(6));
+    if (keyword.startsWith("label:")) {
+      return this.labelId(keyword.slice(6));
+    }
     const label = keywordLabels[keyword];
-    if (label) return label;
+    if (label) {
+      return label;
+    }
     throw new ProviderError("UNSUPPORTED_KEYWORD", `Gmail cannot directly set keyword ${keyword}`);
   }
   async applyChanges(changes: MailChange[]): Promise<void> {
@@ -396,16 +432,29 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
       const add = new Set<string>(),
         remove = new Set<string>();
       if (c.op === "setKeywords") {
-        for (const k of c.add ?? [])
-          if (k === "$seen") remove.add("UNREAD");
-          else if (k === "$notjunk") remove.add("SPAM");
-          else add.add(await this.keyword(k));
-        for (const k of c.remove ?? [])
-          if (k === "$seen") add.add("UNREAD");
-          else if (k === "$notjunk") add.add("SPAM");
-          else remove.add(await this.keyword(k));
-      } else if (c.op === "addToMailbox") add.add(await this.labelId(c.mailboxProviderId));
-      else if (c.op === "removeFromMailbox") remove.add(await this.labelId(c.mailboxProviderId));
+        for (const k of c.add ?? []) {
+          if (k === "$seen") {
+            remove.add("UNREAD");
+          } else if (k === "$notjunk") {
+            remove.add("SPAM");
+          } else {
+            add.add(await this.keyword(k));
+          }
+        }
+        for (const k of c.remove ?? []) {
+          if (k === "$seen") {
+            add.add("UNREAD");
+          } else if (k === "$notjunk") {
+            add.add("SPAM");
+          } else {
+            remove.add(await this.keyword(k));
+          }
+        }
+      } else if (c.op === "addToMailbox") {
+        add.add(await this.labelId(c.mailboxProviderId));
+      } else if (c.op === "removeFromMailbox") {
+        remove.add(await this.labelId(c.mailboxProviderId));
+      }
       for (const id of c.providerIds) {
         if (c.op === "delete") {
           await this.http(`${base}/messages/${encodeURIComponent(id)}/trash`, { method: "POST" });
@@ -414,12 +463,16 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
         const removeForId = [...remove];
         if (c.op === "move") {
           const email = await this.getEmail(id);
-          if (!email) throw new ProviderError("NOT_FOUND", "Gmail message does not exist");
+          if (!email) {
+            throw new ProviderError("NOT_FOUND", "Gmail message does not exist");
+          }
           const target = await this.labelId(c.toMailboxProviderId);
           add.add(target);
           for (const mailbox of email.mailboxIds) {
             const label = decodeURIComponent(mailbox.split(":mailbox:")[1]!);
-            if (![target, "DRAFT", "SENT", "IMPORTANT"].includes(label)) removeForId.push(label);
+            if (![target, "DRAFT", "SENT", "IMPORTANT"].includes(label)) {
+              removeForId.push(label);
+            }
           }
         }
         await this.http(
@@ -445,21 +498,29 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
   private async fullDraft(d: GmailDraft): Promise<Email> {
     this.draftIds.set(d.message.id, d.id);
     const email = await this.getEmail(d.message.id);
-    if (!email) throw new ProviderError("INVALID_RESPONSE", "Gmail draft was not readable");
+    if (!email) {
+      throw new ProviderError("INVALID_RESPONSE", "Gmail draft was not readable");
+    }
     return email;
   }
   private async draftId(providerId: string): Promise<string> {
-    if (this.draftIds.has(providerId)) return this.draftIds.get(providerId)!;
+    if (this.draftIds.has(providerId)) {
+      return this.draftIds.get(providerId)!;
+    }
     let pageToken: string | undefined;
     do {
       const page = await this.json<{ drafts?: GmailDraft[]; nextPageToken?: string }>(
         `${base}/drafts?${new URLSearchParams(pageToken ? { pageToken } : {})}`,
       );
-      for (const d of page.drafts ?? []) this.draftIds.set(d.message.id, d.id);
+      for (const d of page.drafts ?? []) {
+        this.draftIds.set(d.message.id, d.id);
+      }
       pageToken = page.nextPageToken;
     } while (pageToken);
     const id = this.draftIds.get(providerId);
-    if (!id) throw new ProviderError("NOT_FOUND", "Gmail draft does not exist");
+    if (!id) {
+      throw new ProviderError("NOT_FOUND", "Gmail draft does not exist");
+    }
     return id;
   }
   async createDraft(draft: DraftInput): Promise<Email> {
@@ -496,7 +557,9 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
           `${base}/messages/send`,
           this.body(await this.rawDraft(input.draft!)),
         );
-    if (input.draftProviderId) this.draftIds.delete(input.draftProviderId);
+    if (input.draftProviderId) {
+      this.draftIds.delete(input.draftProviderId);
+    }
     return { providerId: m.id, messageId: null, threadId: m.threadId ?? null };
   }
 }

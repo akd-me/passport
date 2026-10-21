@@ -47,7 +47,9 @@ const participation: Record<string, ParticipationStatus> = {
 function parseCalendar(source: string): ICAL.Component {
   try {
     const component = new ICAL.Component(ICAL.parse(source));
-    if (component.name !== "vcalendar") throw new Error();
+    if (component.name !== "vcalendar") {
+      throw new Error();
+    }
     return component;
   } catch {
     throw new ProviderError("INVALID_ICALENDAR", "CalDAV returned invalid iCalendar data");
@@ -66,6 +68,38 @@ function providerId(href: string, component: ICAL.Component): string {
   return `caldav:${encodeCursor([href, ...key(component)])}`;
 }
 
+function calendarTimestamp(
+  root: ICAL.Component,
+  component: ICAL.Component,
+  value: ICAL.Time,
+  property: string,
+  defaultZone: string,
+): string {
+  const zone = String(
+    component.getFirstProperty(property)?.getParameter("tzid") ??
+      (!component.hasProperty(property)
+        ? component.getFirstProperty("dtstart")?.getParameter("tzid")
+        : undefined) ??
+      value.zone?.tzid ??
+      defaultZone,
+  );
+  if (zone === "UTC" || zone === "Z") {
+    return toIso(value.toJSDate());
+  }
+  if (zone === "floating" || zone === "local") {
+    return zonedToUtc(value.toString(), defaultZone);
+  }
+  const embedded = root
+    .getAllSubcomponents("vtimezone")
+    .find((t) => String(t.getFirstPropertyValue("tzid")) === zone);
+  if (embedded) {
+    const time = value.clone();
+    time.zone = new ICAL.Timezone({ component: embedded, tzid: zone });
+    return toIso(time.toJSDate());
+  }
+  return zonedToUtc(value.toString(), zone);
+}
+
 /** Preserves masters and stored recurrence overrides; does not expand an infinite recurrence series. */
 export function normalizeIcalendar(
   source: string,
@@ -80,29 +114,10 @@ export function normalizeIcalendar(
     const event = new ICAL.Event(component),
       start = event.startDate,
       end = event.endDate;
-    if (!start || !end)
+    if (!start || !end) {
       throw new ProviderError("INVALID_ICALENDAR", "VEVENT has no usable DTSTART/DTEND");
-    const toTimestamp = (value: ICAL.Time, property: string): string => {
-      const zone = String(
-        component.getFirstProperty(property)?.getParameter("tzid") ??
-          (!component.hasProperty(property)
-            ? component.getFirstProperty("dtstart")?.getParameter("tzid")
-            : undefined) ??
-          value.zone?.tzid ??
-          defaultZone,
-      );
-      if (zone === "UTC" || zone === "Z") return toIso(value.toJSDate());
-      if (zone === "floating" || zone === "local") return zonedToUtc(value.toString(), defaultZone);
-      const embedded = root
-        .getAllSubcomponents("vtimezone")
-        .find((t) => String(t.getFirstPropertyValue("tzid")) === zone);
-      if (embedded) {
-        const time = value.clone();
-        time.zone = new ICAL.Timezone({ component: embedded, tzid: zone });
-        return toIso(time.toJSDate());
-      }
-      return zonedToUtc(value.toString(), zone);
-    };
+    }
+
     const participants = component.getAllProperties("attendee").map((p) => ({
       email: String(p.getFirstValue())
         .replace(/^mailto:/i, "")
@@ -130,8 +145,8 @@ export function normalizeIcalendar(
       title: event.summary ?? "",
       description: String(component.getFirstPropertyValue("description") ?? ""),
       location: String(component.getFirstPropertyValue("location") ?? ""),
-      start: toTimestamp(start, "dtstart"),
-      end: toTimestamp(end, "dtend"),
+      start: calendarTimestamp(root, component, start, "dtstart", defaultZone),
+      end: calendarTimestamp(root, component, end, "dtend", defaultZone),
       allDay: start.isDate,
       timeZone: String(
         component.getFirstProperty("dtstart")?.getParameter("tzid") ??
@@ -164,17 +179,19 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
   private get collection(): string {
     this.check();
     const url = new URL(required(this.account.settings.calendarUrl, "calendarUrl"));
-    if (url.protocol !== "https:")
+    if (url.protocol !== "https:") {
       throw new ProviderError("CONFIG_INVALID", "CalDAV calendarUrl must use HTTPS");
+    }
     return url.href.endsWith("/") ? url.href : `${url.href}/`;
   }
   private resourceUrl(href: string): string {
     const url = this.safeLink(href, this.collection);
-    if (!url.startsWith(this.collection) || url === this.collection)
+    if (!url.startsWith(this.collection) || url === this.collection) {
       throw new ProviderError(
         "INVALID_RESPONSE",
         "CalDAV resource lies outside the configured calendar collection",
       );
+    }
     return url;
   }
   private async dav(method: string, body: string, depth = "1"): Promise<XmlNode> {
@@ -208,23 +225,28 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
   private resources(xml: XmlNode): DavResource[] {
     return descendants(xml, "response").flatMap((node) => {
       const href = xmlText(node, "href");
-      if (!href) throw new ProviderError("INVALID_XML", "WebDAV response is missing href");
+      if (!href) {
+        throw new ProviderError("INVALID_XML", "WebDAV response is missing href");
+      }
       if (
         new URL(href, this.collection).href.replace(/\/$/, "") ===
         this.collection.replace(/\/$/, "")
-      )
+      ) {
         return [];
+      }
       const directStatus = node.children.find((n) => n.name === "status")?.text;
-      if (directStatus && /\s(404|410)\b/.test(directStatus))
+      if (directStatus && /\s(404|410)\b/.test(directStatus)) {
         return [{ href: this.resourceUrl(href), status: 404 }];
+      }
       const successful = descendants(node, "propstat").filter((p) =>
         /\s200\b/.test(xmlText(p, "status") ?? ""),
       );
-      if (!successful.length)
+      if (!successful.length) {
         throw new ProviderError(
           "CALDAV_RESOURCE_ERROR",
           "CalDAV returned an unsuccessful resource response",
         );
+      }
       const data = successful.map((p) => xmlText(p, "calendar-data")).find((v) => v !== undefined),
         etag = successful.map((p) => xmlText(p, "getetag")).find((v) => v !== undefined);
       return [
@@ -256,8 +278,9 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
       previous.account !== this.account.id ||
       previous.collection !== this.collection ||
       !previous.resources
-    )
+    ) {
       throw new ProviderError("INVALID_CURSOR", "CalDAV cursor belongs to another collection");
+    }
     const incremental = Boolean(previous.token),
       next: DavCursor = {
         ...previous,
@@ -272,11 +295,12 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
           `<?xml version="1.0"?><d:sync-collection xmlns:d="DAV:"><d:sync-token>${xmlEscape(previous.token!)}</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`,
         );
       } catch (e) {
-        if (e instanceof ProviderError && [403, 409, 410].includes(e.status ?? 0))
+        if (e instanceof ProviderError && [403, 409, 410].includes(e.status ?? 0)) {
           throw new ProviderError(
             "CURSOR_EXPIRED",
             "CalDAV sync token is invalid or unauthorized; verify credentials and reset calendar state",
           );
+        }
         throw e;
       }
       next.token = required(xmlText(xml, "sync-token"), "CalDAV sync-token");
@@ -292,7 +316,9 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
     for (const resource of this.resources(xml)) {
       const old = previous.resources[resource.href];
       if (resource.status === 404) {
-        for (const id of old?.ids ?? []) yield { kind: "event", op: "delete", providerId: id };
+        for (const id of old?.ids ?? []) {
+          yield { kind: "event", op: "delete", providerId: id };
+        }
         delete next.resources[resource.href];
         continue;
       }
@@ -301,28 +327,40 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
         continue;
       }
       let source = resource.data;
-      if (source === undefined) source = await (await this.http(resource.href)).text();
+      if (source === undefined) {
+        source = await (await this.http(resource.href)).text();
+      }
       const events = this.normalize(source, resource.href),
         ids = events.map((e) => e.providerId);
-      for (const id of old?.ids ?? [])
-        if (!ids.includes(id)) yield { kind: "event", op: "delete", providerId: id };
-      for (const event of events)
+      for (const id of old?.ids ?? []) {
+        if (!ids.includes(id)) {
+          yield { kind: "event", op: "delete", providerId: id };
+        }
+      }
+      for (const event of events) {
         yield event.status === "cancelled"
           ? { kind: "event", op: "delete", providerId: event.providerId }
           : { kind: "event", op: "upsert", event };
+      }
       next.resources[resource.href] = { etag: resource.etag ?? "", ids };
     }
-    if (!incremental)
-      for (const [href, old] of Object.entries(previous.resources))
-        if (!next.resources[href])
-          for (const id of old.ids) yield { kind: "event", op: "delete", providerId: id };
+    if (!incremental) {
+      for (const [href, old] of Object.entries(previous.resources)) {
+        if (!next.resources[href]) {
+          for (const id of old.ids) {
+            yield { kind: "event", op: "delete", providerId: id };
+          }
+        }
+      }
+    }
     yield { kind: "cursor", cursor: encodeCursor(next) };
   }
   private async load(
     id: string,
   ): Promise<{ root: ICAL.Component; component: ICAL.Component; href: string; etag: string }> {
-    if (!id.startsWith("caldav:"))
+    if (!id.startsWith("caldav:")) {
       throw new ProviderError("INVALID_PROVIDER_ID", "Invalid CalDAV event identity");
+    }
     const [rawHref, uid, recurrence] = decodeCursor<[string, string, string]>(id.slice(7)),
       href = this.resourceUrl(rawHref);
     const response = await this.http(href),
@@ -331,7 +369,9 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
       const k = key(c);
       return k[0] === uid && k[1] === recurrence;
     });
-    if (!component) throw new ProviderError("NOT_FOUND", "CalDAV VEVENT does not exist");
+    if (!component) {
+      throw new ProviderError("NOT_FOUND", "CalDAV VEVENT does not exist");
+    }
     return {
       root,
       component,
@@ -345,12 +385,15 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
       ["title", "summary"],
       ["description", "description"],
       ["location", "location"],
-    ] as const)
-      if (patch[from] !== undefined) component.updatePropertyWithValue(to, patch[from] ?? "");
+    ] as const) {
+      if (patch[from] !== undefined) {
+        component.updatePropertyWithValue(to, patch[from] ?? "");
+      }
+    }
     for (const [from, to] of [
       ["start", "dtstart"],
       ["end", "dtend"],
-    ] as const)
+    ] as const) {
       if (patch[from]) {
         const time = patch.allDay
           ? ICAL.Time.fromDateString(localDate(patch[from], patch.timeZone ?? "UTC"))
@@ -358,11 +401,15 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
         component.removeAllProperties(to);
         component.addPropertyWithValue(to, time);
       }
-    if (patch.status) component.updatePropertyWithValue("status", patch.status.toUpperCase());
+    }
+    if (patch.status) {
+      component.updatePropertyWithValue("status", patch.status.toUpperCase());
+    }
     if (patch.organizer !== undefined) {
       component.removeAllProperties("organizer");
-      if (patch.organizer)
+      if (patch.organizer) {
         component.addPropertyWithValue("organizer", `mailto:${patch.organizer.email}`);
+      }
     }
     if (patch.participants) {
       component.removeAllProperties("attendee");
@@ -370,7 +417,9 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
         const property = new ICAL.Property("attendee");
         property.setValue(`mailto:${p.email}`);
         property.setParameter("partstat", p.status.toUpperCase());
-        if (p.name) property.setParameter("cn", p.name);
+        if (p.name) {
+          property.setParameter("cn", p.name);
+        }
         property.setParameter(
           "role",
           p.role === "optional" ? "OPT-PARTICIPANT" : "REQ-PARTICIPANT",
@@ -400,8 +449,9 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
   }
   async createEvent(input: EventInput): Promise<CalendarEvent> {
     this.check();
-    if (input.accountId !== this.account.id)
+    if (input.accountId !== this.account.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Event belongs to another account");
+    }
     const uid = randomUUID(),
       href = `${this.collection}${uid}.ics`,
       root = new ICAL.Component("vcalendar"),
@@ -438,14 +488,16 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
   }
   async deleteEvent(id: string): Promise<void> {
     const { root, component, href, etag } = await this.load(id);
-    if (component.hasProperty("recurrence-id"))
+    if (component.hasProperty("recurrence-id")) {
       throw new NotImplementedError(
         "Deleting a recurrence override requires an EXDATE update on its master; delete the series or update its recurrence rule",
       );
-    if (components(root).filter((c) => key(c)[0] !== key(component)[0]).length)
+    }
+    if (components(root).filter((c) => key(c)[0] !== key(component)[0]).length) {
       throw new NotImplementedError(
         "Deleting one UID from a multi-UID CalDAV resource is not supported",
       );
+    }
     await this.http(href, { method: "DELETE", headers: { "If-Match": etag } });
   }
   async respond(id: string, status: ParticipationStatus, comment?: string): Promise<void> {
@@ -456,13 +508,16 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
           .replace(/^mailto:/i, "")
           .toLowerCase() === this.account.emailAddress.toLowerCase(),
     );
-    if (!attendee)
+    if (!attendee) {
       throw new ProviderError(
         "NOT_AN_ATTENDEE",
         "The account is not an attendee of this CalDAV event",
       );
+    }
     attendee.setParameter("partstat", status.toUpperCase());
-    if (comment) component.updatePropertyWithValue("comment", comment);
+    if (comment) {
+      component.updatePropertyWithValue("comment", comment);
+    }
     this.write(component, {});
     await this.http(href, {
       method: "PUT",
@@ -498,26 +553,31 @@ export class CalDavCalendarProvider extends HttpConnection implements CalendarPr
           ),
       );
     } catch (e) {
-      if (!(e instanceof ProviderError && [403, 405, 501].includes(e.status ?? 0))) throw e;
+      if (!(e instanceof ProviderError && [403, 405, 501].includes(e.status ?? 0))) {
+        throw e;
+      }
       // Documented best effort fallback: materialized event bounds, with bounded recurrence expansion.
       const busy: TimeRange[] = [];
-      for await (const delta of this.sync(null))
+      for await (const delta of this.sync(null)) {
         if (
           delta.kind === "event" &&
           delta.op === "upsert" &&
           delta.event.status !== "cancelled" &&
           delta.event.myStatus !== "declined"
         ) {
-          if (delta.event.recurrenceRule)
+          if (delta.event.recurrenceRule) {
             throw new NotImplementedError(
               "This CalDAV server has no free-busy REPORT; recurring availability cannot be calculated reliably",
             );
-          if (overlaps(delta.event, range))
+          }
+          if (overlaps(delta.event, range)) {
             busy.push({
               start: delta.event.start > range.start ? delta.event.start : range.start,
               end: delta.event.end < range.end ? delta.event.end : range.end,
             });
+          }
         }
+      }
       return busy;
     }
   }

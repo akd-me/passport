@@ -85,15 +85,18 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // A proxy may answer an error with HTML; keep its status meaningful. Successful
   // responses (and aborted reads) must still fail loudly.
   const body = await response.json().catch((error: unknown) => {
-    if (response.ok) throw error;
+    if (response.ok) {
+      throw error;
+    }
     return {};
   });
-  if (!response.ok)
+  if (!response.ok) {
     throw new ApiError(
       body.error?.message ?? "Something went wrong. Please try again.",
       body.error?.code ?? "REQUEST_FAILED",
       response.status,
     );
+  }
   return body as T;
 }
 const write = <T>(path: string, method: string, body?: unknown) =>
@@ -103,9 +106,11 @@ const write = <T>(path: string, method: string, body?: unknown) =>
   });
 export function queryString(query: object = {}): string {
   const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query))
-    if (value !== undefined && value !== "")
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== "") {
       params.set(key, Array.isArray(value) ? value.join(",") : String(value));
+    }
+  }
   return params.size ? `?${params}` : "";
 }
 export const api = {

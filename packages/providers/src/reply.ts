@@ -8,15 +8,18 @@ export async function resolveReplyEmail(
   getEmail: (providerId: string) => Promise<Email | null>,
   resolveEmail?: (id: string) => Promise<Email | null>,
 ): Promise<Email | null> {
-  if (!id) return null;
+  if (!id) {
+    return null;
+  }
   const prefix = `${accountId}:email:`;
   const email =
     (await resolveEmail?.(id)) ??
     (await getEmail(id.startsWith(prefix) ? decodeURIComponent(id.slice(prefix.length)) : id));
-  if (!email || email.accountId !== accountId)
+  if (!email || email.accountId !== accountId) {
     throw new ProviderError(
       "REPLY_NOT_FOUND",
       "Reply email does not exist in this account; provide resolveEmail for store IDs",
     );
+  }
   return email;
 }

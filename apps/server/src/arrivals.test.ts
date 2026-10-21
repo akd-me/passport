@@ -42,7 +42,9 @@ describe("durable email arrivals", () => {
       await getSchedulerService(backend).stop();
       await backend.close();
     }
-    for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true });
+    for (const path of directories.splice(0)) {
+      await rm(path, { recursive: true, force: true });
+    }
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -296,7 +298,7 @@ describe("durable email arrivals", () => {
       await backend.syncAccount(account.id);
       await backend.drainAgentQueue();
       const email = await arrival(backend);
-      if (existingMatter)
+      if (existingMatter) {
         await backend.store.matters.upsert({
           id: "matter",
           title: "Existing history",
@@ -308,6 +310,7 @@ describe("durable email arrivals", () => {
           createdAt: at,
           updatedAt: at,
         });
+      }
       for (const [index, delay] of [60000, 300000, 900000, 3600000].entries()) {
         await vi.advanceTimersByTimeAsync(delay - 1);
         await scheduler.scheduler.runNow("agent.arrivals");
@@ -347,7 +350,9 @@ describe("durable email arrivals", () => {
       expect(action.status).toBe("executed");
       const updated = (await backend.store.emails.get(email.id))!;
       expect(updated.matterId).toBeTruthy();
-      if (existingMatter) expect(updated.matterId).toBe("matter");
+      if (existingMatter) {
+        expect(updated.matterId).toBe("matter");
+      }
       expect((await backend.store.matters.get(updated.matterId!))!.nextStep).toContain("Review");
     },
   );

@@ -104,7 +104,9 @@ const agentEmailPatchOf = (
   request: ActionRequest,
 ): Partial<Pick<Email, "category" | "personIds">> => {
   const patch = (request.params as { emailPatch?: unknown }).emailPatch;
-  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return {};
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    return {};
+  }
   const { category, personIds } = patch as Record<string, unknown>;
   const categories: readonly ActionCategory[] = [
     "triage",
@@ -155,60 +157,77 @@ export function createActionExecutor({
     statuses: ActionRecord["status"][],
   ): Promise<ActionRecord> => {
     const action = await store.actions.get(id);
-    if (!action) throw new PolicyError("ACTION_NOT_FOUND", `Action ${id} does not exist`);
-    if (!statuses.includes(action.status))
+    if (!action) {
+      throw new PolicyError("ACTION_NOT_FOUND", `Action ${id} does not exist`);
+    }
+    if (!statuses.includes(action.status)) {
       throw new PolicyError(
         "INVALID_ACTION_STATE",
         `Cannot perform this operation on a ${action.status} action`,
       );
+    }
     return action;
   };
   const claim = async (
     action: ActionRecord,
     to: ActionRecord["status"] = "executing",
   ): Promise<ActionRecord | null> => {
-    if (!store.actions.claim)
+    if (!store.actions.claim) {
       throw new PolicyError(
         "ACTION_CLAIM_UNSUPPORTED",
         "Store.actions.claim is required for shared action transitions",
       );
+    }
     return store.actions.claim(action.id, action.status, to, now());
   };
   const requireClaim = async (action: ActionRecord): Promise<ActionRecord> => {
     const claimed = await claim(action);
-    if (!claimed)
+    if (!claimed) {
       throw new PolicyError("INVALID_ACTION_STATE", "Another executor already claimed this action");
+    }
     return claimed;
   };
   const emailFor = async (id: string, accountId: string): Promise<Email> => {
     const email = await store.emails.get(id, { includeBodies: true });
-    if (!email) throw new PolicyError("EMAIL_NOT_FOUND", `Email ${id} does not exist`);
-    if (email.accountId !== accountId)
+    if (!email) {
+      throw new PolicyError("EMAIL_NOT_FOUND", `Email ${id} does not exist`);
+    }
+    if (email.accountId !== accountId) {
       throw new PolicyError("ACCOUNT_MISMATCH", "Email belongs to another account");
+    }
     return email;
   };
   const eventFor = async (id: string, accountId: string): Promise<CalendarEvent> => {
     const event = await store.events.get(id);
-    if (!event) throw new PolicyError("EVENT_NOT_FOUND", `Event ${id} does not exist`);
-    if (event.accountId !== accountId)
+    if (!event) {
+      throw new PolicyError("EVENT_NOT_FOUND", `Event ${id} does not exist`);
+    }
+    if (event.accountId !== accountId) {
       throw new PolicyError("ACCOUNT_MISMATCH", "Event belongs to another account");
+    }
     return event;
   };
   const matterFor = async (id: string): Promise<Matter> => {
     const matter = await store.matters.get(id);
-    if (!matter) throw new PolicyError("MATTER_NOT_FOUND", `Matter ${id} does not exist`);
+    if (!matter) {
+      throw new PolicyError("MATTER_NOT_FOUND", `Matter ${id} does not exist`);
+    }
     return matter;
   };
   const allEmails = (ids: string[], accountId: string) =>
     Promise.all([...new Set(ids)].map((id) => emailFor(id, accountId)));
   const resolvedDraft = async (request: ActionRequest): Promise<DraftInput> => {
     const { draft, draftEmailId } = request.params as ActionParams["send"];
-    if (!!draft === !!draftEmailId)
+    if (!!draft === !!draftEmailId) {
       throw new PolicyError("INVALID_PARAMS", "Send requires exactly one draft or draftEmailId");
-    if (draft) return normalizedDraft(draft);
+    }
+    if (draft) {
+      return normalizedDraft(draft);
+    }
     const email = await emailFor(draftEmailId!, request.accountId);
-    if (!email.keywords.$draft)
+    if (!email.keywords.$draft) {
       throw new PolicyError("NOT_A_DRAFT", "Only draft emails can be sent");
+    }
     const resolved = draftOf(email);
     if (email.headers.inReplyTo) {
       let cursor: string | null | undefined;
@@ -230,11 +249,12 @@ export function createActionExecutor({
         }
         cursor = page.nextCursor;
       } while (cursor);
-      if (!resolved.inReplyToEmailId)
+      if (!resolved.inReplyToEmailId) {
         throw new PolicyError(
           "REPLY_NOT_FOUND",
           "The saved draft reply source is unavailable; sync before approving this send",
         );
+      }
     }
     return normalizedDraft(resolved);
   };
@@ -243,10 +263,12 @@ export function createActionExecutor({
       !request.params ||
       typeof request.params !== "object" ||
       Object.hasOwn(request.params, marker)
-    )
+    ) {
       throw new PolicyError("INVALID_PARAMS", "Private inverse data cannot be submitted");
-    if (!["human", "agent", "external-agent"].includes(request.actor?.kind))
+    }
+    if (!["human", "agent", "external-agent"].includes(request.actor?.kind)) {
       throw new PolicyError("INVALID_ACTOR", "Unknown actor kind");
+    }
     const params = request.params as unknown as {
       draft?: DraftInput;
       event?: CalendarEvent;
@@ -262,11 +284,12 @@ export function createActionExecutor({
       request.type === "profile_update" &&
       (request.category !== "matters" ||
         typeof (request.params as ActionParams["profile_update"]).markdown !== "string")
-    )
+    ) {
       throw new PolicyError(
         "INVALID_PARAMS",
         "Profile updates require matters category and markdown",
       );
+    }
     const personParams =
       request.type === "person_update" ? (request.params as ActionParams["person_update"]) : null;
     const completePerson = personParams && isCompletePerson(personParams.patch);
@@ -278,8 +301,9 @@ export function createActionExecutor({
       (params.patch?.id !== undefined &&
         !(completePerson && params.patch.id === personParams.personId)) ||
       params.patch?.providerId !== undefined
-    )
+    ) {
       throw new PolicyError("ACCOUNT_MISMATCH", "Action edits cannot change identity or account");
+    }
     const target = personParams ? await store.people.get(personParams.personId) : null;
     if (
       request.type === "person_update" &&
@@ -290,11 +314,12 @@ export function createActionExecutor({
           "relationship" in params.patch &&
           params.patch.relationship !== "self" &&
           target?.relationship !== "self"))
-    )
+    ) {
       throw new PolicyError(
         "PROTECTED_IDENTITY",
         "Verification must come from trusted identity data; only humans can change relationships",
       );
+    }
   };
   const capture = async (request: Request): Promise<Snapshot | null> => {
     switch (request.type) {
@@ -317,8 +342,9 @@ export function createActionExecutor({
       case "draft_update":
       case "draft_delete": {
         const email = await emailFor(request.params.draftEmailId, request.accountId);
-        if (!email.keywords.$draft)
+        if (!email.keywords.$draft) {
           throw new PolicyError("NOT_A_DRAFT", "Draft operations require a draft email");
+        }
         return { kind: "draft", email };
       }
       case "calendar_create":
@@ -351,25 +377,30 @@ export function createActionExecutor({
                 (request.params.eventIds ?? []).map((id) => eventFor(id, request.accountId)),
               )
             : [];
-        if (request.type === "matter_attach")
-          for (const id of request.params.personIds ?? [])
-            if (!(await store.people.get(id)))
+        if (request.type === "matter_attach") {
+          for (const id of request.params.personIds ?? []) {
+            if (!(await store.people.get(id))) {
               throw new PolicyError("PERSON_NOT_FOUND", `Person ${id} does not exist`);
+            }
+          }
+        }
         return { kind: "matter", matter, id: matter.id, emails: emails.map(patchOf), events };
       }
       case "person_update": {
         const person = await store.people.get(request.params.personId);
         if (!person) {
-          if (!isCompletePerson(request.params.patch))
+          if (!isCompletePerson(request.params.patch)) {
             throw new PolicyError(
               "PERSON_NOT_FOUND",
               `Person ${request.params.personId} does not exist; creation requires a complete Person patch`,
             );
-          if (!store.people.delete)
+          }
+          if (!store.people.delete) {
             throw new PolicyError(
               "PERSON_DELETE_UNSUPPORTED",
               "Creating a person requires Store.people.delete so it can be undone",
             );
+          }
         }
         return {
           kind: "person",
@@ -378,8 +409,9 @@ export function createActionExecutor({
         };
       }
       case "snooze": {
-        if (!Number.isFinite(Date.parse(request.params.until)))
+        if (!Number.isFinite(Date.parse(request.params.until))) {
           throw new PolicyError("INVALID_TIME", "Snooze time must be an ISO timestamp");
+        }
         const emails = await allEmails(request.params.emailIds ?? [], request.accountId);
         const kv = await Promise.all(
           emails.map(async (email) => {
@@ -403,8 +435,12 @@ export function createActionExecutor({
   ) => {
     if (patch.providerId !== undefined) {
       const email = await store.emails.get(id, { includeBodies: true });
-      if (email) await store.emails.upsertMany([{ ...email, ...patch }]);
-    } else await store.emails.patchMany([id], patch);
+      if (email) {
+        await store.emails.upsertMany([{ ...email, ...patch }]);
+      }
+    } else {
+      await store.emails.patchMany([id], patch);
+    }
     bus.emit({ type: "email.updated", emailId: id });
   };
   const mirrorMatter = async (matter: Matter) => {
@@ -413,24 +449,36 @@ export function createActionExecutor({
   };
   const mailboxFor = async (accountId: string, id: string) => {
     const mailbox = await store.mailboxes.get(id);
-    if (!mailbox) throw new PolicyError("MAILBOX_NOT_FOUND", `Mailbox ${id} does not exist`);
-    if (mailbox.accountId !== accountId)
+    if (!mailbox) {
+      throw new PolicyError("MAILBOX_NOT_FOUND", `Mailbox ${id} does not exist`);
+    }
+    if (mailbox.accountId !== accountId) {
       throw new PolicyError("ACCOUNT_MISMATCH", "Mailbox belongs to another account");
+    }
     return mailbox;
   };
   const usesLabels = async (accountId: string) => {
     const account = await store.accounts.get(accountId);
-    if (!account) throw new PolicyError("ACCOUNT_NOT_FOUND", `Account ${accountId} does not exist`);
+    if (!account) {
+      throw new PolicyError("ACCOUNT_NOT_FOUND", `Account ${accountId} does not exist`);
+    }
     return account.capabilities.labels;
   };
   const applyMailChanges = async (accountId: string, changes: MailChange[], emails: Email[]) => {
-    if (!changes.length) return;
+    if (!changes.length) {
+      return;
+    }
     const results = await (await mailProviderFor(accountId)).applyChanges(changes);
     for (const result of results ?? []) {
       // Copy adds another message; it does not replace the original identity.
-      if (result.op === "addToMailbox" || !result.newProviderId) continue;
-      for (const email of emails)
-        if (email.providerId === result.providerId) email.providerId = result.newProviderId;
+      if (result.op === "addToMailbox" || !result.newProviderId) {
+        continue;
+      }
+      for (const email of emails) {
+        if (email.providerId === result.providerId) {
+          email.providerId = result.newProviderId;
+        }
+      }
     }
   };
   const changeMail = async (request: Request, snapshot: Extract<Snapshot, { kind: "mail" }>) => {
@@ -440,28 +488,33 @@ export function createActionExecutor({
       request.type === "label" &&
       !boxes.some((box) => [box.id, box.providerId, box.name].includes(request.params.label))
     ) {
-      if (!labels)
+      if (!labels) {
         throw new PolicyError("MAILBOX_NOT_FOUND", `Label ${request.params.label} does not exist`);
+      }
       const provider = await mailProviderFor(request.accountId);
-      if (!provider.createMailbox)
+      if (!provider.createMailbox) {
         throw new PolicyError(
           "LABEL_CREATE_UNSUPPORTED",
           "Provider does not support creating labels",
         );
+      }
       const created = await provider.createMailbox(request.params.label);
       if (
         created.accountId !== request.accountId ||
         created.role === "trash" ||
         created.role === "junk"
-      )
+      ) {
         throw new PolicyError("INVALID_MAILBOX", "Provider returned an invalid label");
+      }
       await store.mailboxes.upsertMany([created]);
       boxes.push(created);
       snapshot.createdMailboxIds = [created.id];
     }
     const role = (name: string) => {
       const box = boxes.find((item) => item.role === name);
-      if (!box) throw new PolicyError("MAILBOX_NOT_FOUND", `Account has no ${name} mailbox`);
+      if (!box) {
+        throw new PolicyError("MAILBOX_NOT_FOUND", `Account has no ${name} mailbox`);
+      }
       return box;
     };
     const patches: Array<{
@@ -500,26 +553,34 @@ export function createActionExecutor({
           const box = boxes.find(
             (item) => item.id === name || item.name === name || item.providerId === name,
           );
-          if (!box) throw new PolicyError("MAILBOX_NOT_FOUND", `Label ${name} does not exist`);
-          if (request.type === "label") addMailbox(box);
-          else removeMailbox(box);
+          if (!box) {
+            throw new PolicyError("MAILBOX_NOT_FOUND", `Label ${name} does not exist`);
+          }
+          if (request.type === "label") {
+            addMailbox(box);
+          } else {
+            removeMailbox(box);
+          }
           break;
         }
         case "archive": {
           if (labels) {
             const archive = boxes.find((item) => item.role === "archive");
-            if (archive) addMailbox(archive);
+            if (archive) {
+              addMailbox(archive);
+            }
             removeMailbox(role("inbox"));
           } else {
             const archive =
               boxes.find((item) => item.role === "archive") ??
               boxes.find((item) => item.role === "all") ??
               boxes.find((item) => item.name.toLowerCase() === "archive");
-            if (!archive)
+            if (!archive) {
               throw new PolicyError(
                 "ARCHIVE_MAILBOX_MISSING",
                 "Account has no archive mailbox (archive role, all role, or Archive folder); refusing to remove mail",
               );
+            }
             moveMailbox(archive);
           }
           break;
@@ -531,8 +592,12 @@ export function createActionExecutor({
           if (labels) {
             addMailbox(box);
             const archive = boxes.find((item) => item.role === "archive");
-            if (archive && archive.id !== box.id) removeMailbox(archive);
-          } else moveMailbox(box);
+            if (archive && archive.id !== box.id) {
+              removeMailbox(archive);
+            }
+          } else {
+            moveMailbox(box);
+          }
           break;
         }
         case "move":
@@ -551,8 +616,11 @@ export function createActionExecutor({
           const keyword =
             request.type === "mark_read" || request.type === "mark_unread" ? "$seen" : "$flagged";
           const enabled = request.type === "mark_read" || request.type === "flag";
-          if (enabled) keywords[keyword] = true;
-          else delete keywords[keyword];
+          if (enabled) {
+            keywords[keyword] = true;
+          } else {
+            delete keywords[keyword];
+          }
           changes.push({
             op: "setKeywords",
             providerIds: ids,
@@ -566,11 +634,12 @@ export function createActionExecutor({
       patches.push({ id: email.id, patch: { mailboxIds, keywords } });
     }
     await applyMailChanges(request.accountId, changes, snapshot.emails);
-    for (const { id, patch } of patches)
+    for (const { id, patch } of patches) {
       await mirrorEmail(id, {
         ...patch,
         providerId: snapshot.emails.find((email) => email.id === id)!.providerId,
       });
+    }
     return { emailIds: patches.map((item) => item.id) };
   };
   const restore = async (
@@ -592,30 +661,34 @@ export function createActionExecutor({
             (key) => current.keywords[key] && !prior.keywords[key],
           );
           // Apply flags before a folder move, which may change the provider's message ID.
-          if (add.length || remove.length)
+          if (add.length || remove.length) {
             changes.push({ op: "setKeywords", providerIds: [current.providerId], add, remove });
+          }
           if (labels) {
-            for (const id of prior.mailboxIds.filter((id) => !current.mailboxIds.includes(id)))
+            for (const id of prior.mailboxIds.filter((id) => !current.mailboxIds.includes(id))) {
               changes.push({
                 op: "addToMailbox",
                 providerIds: [current.providerId],
                 mailboxProviderId: (await mailboxFor(request.accountId, id)).providerId,
               });
-            for (const id of current.mailboxIds.filter((id) => !prior.mailboxIds.includes(id)))
+            }
+            for (const id of current.mailboxIds.filter((id) => !prior.mailboxIds.includes(id))) {
               changes.push({
                 op: "removeFromMailbox",
                 providerIds: [current.providerId],
                 mailboxProviderId: (await mailboxFor(request.accountId, id)).providerId,
               });
+            }
           } else if (
             prior.mailboxIds.length !== current.mailboxIds.length ||
             prior.mailboxIds.some((id) => !current.mailboxIds.includes(id))
           ) {
-            if (prior.mailboxIds.length !== 1)
+            if (prior.mailboxIds.length !== 1) {
               throw new PolicyError(
                 "INVALID_INVERSE",
                 "Folder-based mail requires exactly one previous mailbox to restore",
               );
+            }
             changes.push({
               op: "move",
               providerIds: [current.providerId],
@@ -625,19 +698,21 @@ export function createActionExecutor({
           }
         }
         await applyMailChanges(request.accountId, changes, currents);
-        for (const prior of snapshot.emails)
+        for (const prior of snapshot.emails) {
           await mirrorEmail(prior.id, {
             mailboxIds: prior.mailboxIds,
             keywords: prior.keywords,
             providerId: currents.find((email) => email.id === prior.id)!.providerId,
           });
+        }
         return { emailIds: snapshot.emails.map((email) => email.id) };
       }
       case "draft": {
         const provider = await mailProviderFor(request.accountId);
         if (!snapshot.email) {
-          if (!snapshot.createdId)
+          if (!snapshot.createdId) {
             throw new PolicyError("INVALID_INVERSE", "Draft inverse is missing its created id");
+          }
           const email = await emailFor(snapshot.createdId, request.accountId);
           await provider.deleteDraft(email.providerId);
           await store.emails.deleteMany([email.id]);
@@ -655,8 +730,9 @@ export function createActionExecutor({
       case "event": {
         const provider = await calendarProviderFor(request.accountId);
         if (!snapshot.event) {
-          if (!snapshot.createdId)
+          if (!snapshot.createdId) {
             throw new PolicyError("INVALID_INVERSE", "Event inverse is missing its created id");
+          }
           const event = await eventFor(snapshot.createdId, request.accountId);
           await provider.deleteEvent(event.providerId);
           await store.events.deleteMany([event.id]);
@@ -668,13 +744,18 @@ export function createActionExecutor({
         return { eventId: snapshot.event.id };
       }
       case "matter": {
-        if (snapshot.matter) await mirrorMatter(snapshot.matter);
-        else await store.matters.delete(snapshot.id);
+        if (snapshot.matter) {
+          await mirrorMatter(snapshot.matter);
+        } else {
+          await store.matters.delete(snapshot.id);
+        }
         for (const email of snapshot.emails) {
           const { id, ...patch } = email;
           await mirrorEmail(id, patch);
         }
-        if (snapshot.events.length) await store.events.upsertMany(snapshot.events);
+        if (snapshot.events.length) {
+          await store.events.upsertMany(snapshot.events);
+        }
         return { matterId: snapshot.id };
       }
       case "person": {
@@ -682,21 +763,28 @@ export function createActionExecutor({
           await store.people.upsert(snapshot.person);
           return { personId: snapshot.person.id };
         }
-        if (!snapshot.createdId)
+        if (!snapshot.createdId) {
           throw new PolicyError("INVALID_INVERSE", "Person inverse is missing its created id");
-        if (!store.people.delete)
+        }
+        if (!store.people.delete) {
           throw new PolicyError(
             "PERSON_DELETE_UNSUPPORTED",
             "Undoing person creation requires Store.people.delete",
           );
+        }
         await store.people.delete(snapshot.createdId);
         return { deletedPersonId: snapshot.createdId };
       }
       case "snooze":
-        if (snapshot.matter) await mirrorMatter(snapshot.matter);
+        if (snapshot.matter) {
+          await mirrorMatter(snapshot.matter);
+        }
         for (const { key, value } of snapshot.kv) {
-          if (value === null) await store.kv.delete(key);
-          else await store.kv.set(key, value);
+          if (value === null) {
+            await store.kv.delete(key);
+          } else {
+            await store.kv.set(key, value);
+          }
         }
         return {};
     }
@@ -709,15 +797,17 @@ export function createActionExecutor({
     let saved: Matter;
     try {
       saved = await store.matters.upsert(matter);
-      if (snapshot.emails.length)
+      if (snapshot.emails.length) {
         await store.emails.patchMany(
           snapshot.emails.map((email) => email.id),
           { matterId: matter.id, ...agentEmailPatchOf(request) },
         );
-      if (snapshot.events.length)
+      }
+      if (snapshot.events.length) {
         await store.events.upsertMany(
           snapshot.events.map((event) => ({ ...event, matterId: matter.id, updatedAt: now() })),
         );
+      }
     } catch (error) {
       // Store has no cross-repository transaction API; compensate within this serialized action.
       try {
@@ -731,16 +821,24 @@ export function createActionExecutor({
       throw error;
     }
     bus.emit({ type: "matter.updated", matter: saved });
-    for (const email of snapshot.emails) bus.emit({ type: "email.updated", emailId: email.id });
+    for (const email of snapshot.emails) {
+      bus.emit({ type: "email.updated", emailId: email.id });
+    }
     return saved;
   };
   const settleUnsubscribeParent = async (child: ActionRecord) => {
     const parentId = await store.kv.get(`policy:unsubscribe-parent:${child.id}`);
-    if (!parentId || !["executed", "failed", "rejected"].includes(child.status)) return;
+    if (!parentId || !["executed", "failed", "rejected"].includes(child.status)) {
+      return;
+    }
     const parent = await store.actions.get(parentId);
-    if (parent?.status !== "executing" || parent.result?.childActionId !== child.id) return;
+    if (parent?.status !== "executing" || parent.result?.childActionId !== child.id) {
+      return;
+    }
     const status = child.status;
-    if (!(await claim(parent, status))) return;
+    if (!(await claim(parent, status))) {
+      return;
+    }
     const updated = await store.actions.update(parentId, {
       status,
       ...(status === "executed"
@@ -768,7 +866,9 @@ export function createActionExecutor({
     action: ActionRecord,
   ): Promise<Record<string, unknown>> => {
     const inverse = snapshotOf(request);
-    if (inverse) return restore(request, inverse);
+    if (inverse) {
+      return restore(request, inverse);
+    }
     switch (request.type) {
       case "label":
       case "unlabel":
@@ -780,8 +880,9 @@ export function createActionExecutor({
       case "unflag":
       case "move":
       case "delete": {
-        if (snapshot?.kind !== "mail")
+        if (snapshot?.kind !== "mail") {
           throw new PolicyError("INVALID_INVERSE", "Mail snapshot is required");
+        }
         return changeMail(request, snapshot);
       }
       case "draft_create":
@@ -795,7 +896,9 @@ export function createActionExecutor({
           ? await provider.updateDraft(prior.providerId, request.params.draft)
           : await provider.createDraft(request.params.draft);
         const saved = { ...email, id: prior?.id ?? email.id, accountId: request.accountId };
-        if (snapshot?.kind === "draft") snapshot.createdId = saved.id;
+        if (snapshot?.kind === "draft") {
+          snapshot.createdId = saved.id;
+        }
         await store.emails.upsertMany([saved]);
         bus.emit({ type: "email.updated", emailId: saved.id });
         return { emailId: saved.id, providerId: saved.providerId };
@@ -813,11 +916,13 @@ export function createActionExecutor({
           request.type === "send" && request.params.draftEmailId
             ? await emailFor(request.params.draftEmailId, request.accountId)
             : null;
-        if (prior && !prior.keywords.$draft)
+        if (prior && !prior.keywords.$draft) {
           throw new PolicyError("NOT_A_DRAFT", "Only draft emails can be sent");
+        }
         const draft = request.params.draft;
-        if (!prior && !draft)
+        if (!prior && !draft) {
           throw new PolicyError("INVALID_PARAMS", "Send requires a draft or draftEmailId");
+        }
         const provider = await mailProviderFor(request.accountId);
         // Submit the authorized content, so a draft edit racing the transport cannot change the send.
         const result = await provider.send({
@@ -919,7 +1024,9 @@ export function createActionExecutor({
         const event = await (await calendarProviderFor(request.accountId)).createEvent(
           request.params.event,
         );
-        if (snapshot?.kind === "event") snapshot.createdId = event.id;
+        if (snapshot?.kind === "event") {
+          snapshot.createdId = event.id;
+        }
         await store.events.upsertMany([event]);
         return { eventId: event.id, providerId: event.providerId };
       }
@@ -951,8 +1058,9 @@ export function createActionExecutor({
         return { eventId: event.id };
       }
       case "matter_create": {
-        if (snapshot?.kind !== "matter")
+        if (snapshot?.kind !== "matter") {
           throw new PolicyError("INVALID_INVERSE", "Matter snapshot is required");
+        }
         const at = now(),
           matter: Matter = {
             ...request.params.matter,
@@ -976,8 +1084,9 @@ export function createActionExecutor({
         return { matterId: matter.id };
       }
       case "matter_attach": {
-        if (snapshot?.kind !== "matter")
+        if (snapshot?.kind !== "matter") {
           throw new PolicyError("INVALID_INVERSE", "Matter snapshot is required");
+        }
         const prior = await matterFor(request.params.matterId);
         const unique = (a: string[], b: string[] = []) => [...new Set([...a, ...b])];
         const matter = {
@@ -991,13 +1100,16 @@ export function createActionExecutor({
         return { matterId: matter.id };
       }
       case "person_update": {
-        if (snapshot?.kind !== "person")
+        if (snapshot?.kind !== "person") {
           throw new PolicyError("INVALID_INVERSE", "Person snapshot is required");
+        }
         const prior = snapshot.person;
         const patch = { ...request.params.patch };
         // Neither model input nor complete inferred snapshots can mint an approved self identity.
         delete patch.verifiedSelf;
-        if (prior?.verifiedSelf !== undefined) patch.verifiedSelf = prior.verifiedSelf;
+        if (prior?.verifiedSelf !== undefined) {
+          patch.verifiedSelf = prior.verifiedSelf;
+        }
         const approved =
           request.actor.kind === "human" ||
           Boolean(await store.kv.get(`policy:feedback:${action.id}`));
@@ -1005,16 +1117,19 @@ export function createActionExecutor({
           (patch.relationship ?? prior?.relationship) === "self" &&
           approved &&
           (await store.kv.get(`policy:feedback:${action.id}`))
-        )
+        ) {
           patch.verifiedSelf = true;
+        }
         if (!approved) {
           delete patch.downgradeAcknowledgedAt;
-          if (prior?.downgradeAcknowledgedAt !== undefined)
+          if (prior?.downgradeAcknowledgedAt !== undefined) {
             patch.downgradeAcknowledgedAt = prior.downgradeAcknowledgedAt;
+          }
         }
         if (!prior) {
-          if (!isCompletePerson(patch))
+          if (!isCompletePerson(patch)) {
             throw new PolicyError("PERSON_NOT_FOUND", "Creation requires a complete Person patch");
+          }
           await store.people.upsert(patch);
           return { personId: request.params.personId };
         }
@@ -1041,8 +1156,9 @@ export function createActionExecutor({
             updatedAt: now(),
           });
         }
-        for (const email of await allEmails(request.params.emailIds ?? [], request.accountId))
+        for (const email of await allEmails(request.params.emailIds ?? [], request.accountId)) {
           await store.kv.set(`policy:snooze:${email.id}`, request.params.until);
+        }
         return { until: request.params.until };
       }
     }
@@ -1059,8 +1175,9 @@ export function createActionExecutor({
           if (
             !(error instanceof PolicyError) ||
             !["EMAIL_NOT_FOUND", "NOT_A_DRAFT", "REPLY_NOT_FOUND"].includes(error.code)
-          )
+          ) {
             throw error;
+          }
         }
         if (!action.approvedSnapshot || !isDeepStrictEqual(resolved, action.approvedSnapshot)) {
           const proposed = await store.actions.update(action.id, {
@@ -1101,11 +1218,12 @@ export function createActionExecutor({
           ? "irreversible"
           : BASE_REVERSIBILITY[request.type];
       const decision = { ...action.decision, reversibility };
-      if (decision.reversibility === "reversible" && !inverse)
+      if (decision.reversibility === "reversible" && !inverse) {
         throw new PolicyError(
           "MISSING_INVERSE",
           "Reversible actions must capture an inverse before execution",
         );
+      }
       current = await store.actions.update(action.id, {
         status: "executing",
         decision,
@@ -1113,8 +1231,9 @@ export function createActionExecutor({
         holdUntil: null,
       });
       const result = await dispatch(request, snapshot, action);
-      if (request.type === "unsubscribe" && result.childActionId)
+      if (request.type === "unsubscribe" && result.childActionId) {
         return (await store.actions.get(action.id))!;
+      }
       current = await store.actions.update(action.id, {
         status: "executed",
         executedAt: now(),
@@ -1126,7 +1245,9 @@ export function createActionExecutor({
       return current;
     } catch (error) {
       // A post-execution notification/parent write must not turn a delivered send into a retryable failure.
-      if (current.status === "executed") throw error;
+      if (current.status === "executed") {
+        throw error;
+      }
       if (
         ["send", "calendar_propose"].includes(action.request.type) &&
         (error as { code?: string } | null)?.code === "SUBMISSION_ACCEPTED"
@@ -1162,7 +1283,9 @@ export function createActionExecutor({
     claimedOriginal?: ActionRecord,
   ): Promise<ActionRecord> => {
     const original = claimedOriginal ?? (await requireAction(originalId, ["executed"]));
-    if (!claimedOriginal) await requireClaim(original);
+    if (!claimedOriginal) {
+      await requireClaim(original);
+    }
     try {
       const executed = await execute(action, original);
       const undone = await store.actions.update(originalId, { status: "undone", undoneAt: now() });
@@ -1175,7 +1298,9 @@ export function createActionExecutor({
   };
   const holdOrExecute = async (action: ActionRecord): Promise<ActionRecord> => {
     const undoOf = await store.kv.get(`policy:undo:${action.id}`);
-    if (undoOf) return executeUndo(action, undoOf);
+    if (undoOf) {
+      return executeUndo(action, undoOf);
+    }
     if (action.request.type === "send" || action.request.type === "calendar_propose") {
       try {
         action = await store.actions.update(action.id, {
@@ -1231,7 +1356,9 @@ export function createActionExecutor({
       return record;
     }
     bus.emit({ type: "action.decided", action: record });
-    if (decision.outcome === "deny") return record;
+    if (decision.outcome === "deny") {
+      return record;
+    }
     return holdOrExecute(record);
   };
   return {
@@ -1242,19 +1369,21 @@ export function createActionExecutor({
         let distance = 0;
         if (edited) {
           await assertPublic(edited);
-          if (await store.kv.get(`policy:undo:${actionId}`))
+          if (await store.kv.get(`policy:undo:${actionId}`)) {
             throw new PolicyError("INVALID_EDIT", "Stored undo snapshots cannot be edited");
+          }
           if (
             edited.type !== original.request.type ||
             edited.accountId !== original.request.accountId ||
             edited.category !== original.request.category ||
             edited.actor.kind !== original.request.actor.kind ||
             edited.actor.id !== original.request.actor.id
-          )
+          ) {
             throw new PolicyError(
               "INVALID_EDIT",
               "Approval edits must preserve action type, account, actor, and category",
             );
+          }
           const text = (request: ActionRequest): string | null => {
             const draft = (request.params as { draft?: DraftInput }).draft;
             return draft ? `${draft.subject}\n${draft.textBody}` : null;
@@ -1267,15 +1396,18 @@ export function createActionExecutor({
               : editDistanceRatio(original.request.params, edited.params);
         }
         const decision = await policy.evaluate(edited ?? original.request);
-        if (decision.outcome === "deny") throw new PolicyError("ACTION_DENIED", decision.reason);
+        if (decision.outcome === "deny") {
+          throw new PolicyError("ACTION_DENIED", decision.reason);
+        }
         await requireClaim(original);
         // A changed held draft needs reapproval, but feedback is still counted once per record.
-        if (!(await store.kv.get(`policy:feedback:${actionId}`)))
+        if (!(await store.kv.get(`policy:feedback:${actionId}`))) {
           await policy.recordOutcome(
             actionId,
             edited ? "approved_edited" : "approved_unchanged",
             distance,
           );
+        }
         const approved = await store.actions.update(actionId, {
           decision,
           decidedAt: now(),
@@ -1288,8 +1420,9 @@ export function createActionExecutor({
     reject: (actionId, reason) =>
       serial(async () => {
         await requireClaim(await requireAction(actionId, ["proposed"]));
-        if (!(await store.kv.get(`policy:feedback:${actionId}`)))
+        if (!(await store.kv.get(`policy:feedback:${actionId}`))) {
           await policy.recordOutcome(actionId, "rejected");
+        }
         const rejected = await store.actions.update(actionId, {
           status: "rejected",
           decidedAt: now(),
@@ -1315,8 +1448,9 @@ export function createActionExecutor({
     undo: (actionId, context) =>
       serial(async () => {
         const original = await requireAction(actionId, ["executed"]);
-        if (!original.inverse)
+        if (!original.inverse) {
           throw new PolicyError("IRREVERSIBLE_ACTION", "This action has no inverse");
+        }
         const at = now();
         const request = {
           ...structuredClone(original.inverse),
@@ -1384,7 +1518,9 @@ export function createActionExecutor({
               "The external agent ceiling forbids restoring protected or destructive state.";
           }
         }
-        if (decision.outcome !== "deny" && decision.outcome !== "ask") await requireClaim(original);
+        if (decision.outcome !== "deny" && decision.outcome !== "ask") {
+          await requireClaim(original);
+        }
         const inverse = await store.actions.insert({
           id: newId(at),
           request,
@@ -1404,30 +1540,39 @@ export function createActionExecutor({
           return inverse;
         }
         bus.emit({ type: "action.decided", action: inverse });
-        if (decision.outcome === "deny") return inverse;
+        if (decision.outcome === "deny") {
+          return inverse;
+        }
         const executed = await executeUndo(inverse, actionId, original);
         return context ? executed : (await store.actions.get(actionId))!;
       }),
     releaseDue: (at = now()) =>
       serial(async () => {
-        if (!Number.isFinite(Date.parse(at)))
+        if (!Number.isFinite(Date.parse(at))) {
           throw new PolicyError("INVALID_TIME", "Release time must be an ISO timestamp");
+        }
         const executed: ActionRecord[] = [];
         let firstError: unknown;
         for (const candidate of await store.actions.dueHeld(at)) {
           const current = await store.actions.get(candidate.id);
-          if (current?.status !== "held" || !current.holdUntil || current.holdUntil > at) continue;
+          if (current?.status !== "held" || !current.holdUntil || current.holdUntil > at) {
+            continue;
+          }
           try {
             const claimed = await claim(current);
             if (claimed) {
               const result = await execute(claimed);
-              if (result.status === "executed") executed.push(result);
+              if (result.status === "executed") {
+                executed.push(result);
+              }
             }
           } catch (error) {
             firstError ??= error;
           }
         }
-        if (firstError) throw firstError;
+        if (firstError) {
+          throw firstError;
+        }
         return executed;
       }),
   };

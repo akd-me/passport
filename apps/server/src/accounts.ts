@@ -21,30 +21,41 @@ export async function addAccount(
     fields = object(body.fields);
   const settings: Account["settings"] = {},
     credentials: AccountCredentials = {};
-  for (const key of Object.keys(fields))
-    if (!descriptor.fields.some((f) => f.id === key))
+  for (const key of Object.keys(fields)) {
+    if (!descriptor.fields.some((f) => f.id === key)) {
       throw new ApiError("INVALID_FIELD", `Unknown provider field ${key}`);
+    }
+  }
   for (const field of descriptor.fields) {
     const value = fields[field.id];
-    if (field.required && (typeof value !== "string" || !value.trim()))
+    if (field.required && (typeof value !== "string" || !value.trim())) {
       throw new ApiError("MISSING_FIELD", `${field.label} is required`);
-    if (value === undefined || value === "") continue;
+    }
+    if (value === undefined || value === "") {
+      continue;
+    }
     const text = string(value, field.label);
-    if (field.secret) credentials[field.id] = text;
-    else if (["port", "smtpPort"].includes(field.id)) {
+    if (field.secret) {
+      credentials[field.id] = text;
+    } else if (["port", "smtpPort"].includes(field.id)) {
       const port = Number(text);
-      if (!Number.isInteger(port) || port < 1 || port > 65535)
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
         throw new ApiError("INVALID_FIELD", `${field.label} must be 1–65535`);
+      }
       settings[field.id] = port;
     } else if (["tls", "smtpTls"].includes(field.id)) {
-      if (!["true", "false"].includes(text))
+      if (!["true", "false"].includes(text)) {
         throw new ApiError("INVALID_FIELD", `${field.label} must be true or false`);
+      }
       settings[field.id] = text === "true";
-    } else settings[field.id] = text;
+    } else {
+      settings[field.id] = text;
+    }
   }
   const emailAddress = string(body.emailAddress ?? settings.emailAddress, "emailAddress");
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress))
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress)) {
     throw new ApiError("INVALID_FIELD", "Enter a valid email address");
+  }
   const capabilities: AccountCapabilities =
     kind === "mock" && backend.mode === "demo"
       ? {

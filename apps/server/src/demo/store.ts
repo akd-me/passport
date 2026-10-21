@@ -28,20 +28,25 @@ function table<T extends { id: string }>() {
       return copy(value);
     },
     upsertMany: async (values: T[]) => {
-      for (const value of values) rows.set(value.id, copy(value));
+      for (const value of values) {
+        rows.set(value.id, copy(value));
+      }
     },
     delete: async (id: string) => {
       rows.delete(id);
     },
     deleteMany: async (ids: string[]) => {
-      ids.forEach((id) => rows.delete(id));
+      ids.forEach((id) => {
+        rows.delete(id);
+      });
     },
   };
 }
 function page<T>(items: T[], limit = 50, cursor?: string | null): Page<T> {
   const offset = Number(cursor || 0);
-  if (!Number.isInteger(offset) || offset < 0)
+  if (!Number.isInteger(offset) || offset < 0) {
     throw new ApiError("INVALID_CURSOR", "Cursor must be a positive offset");
+  }
   return {
     items: items.slice(offset, offset + limit),
     total: items.length,
@@ -126,19 +131,21 @@ export function createDemoStore(): Store {
           (a, b) =>
             (q.sort === "receivedAt_asc" ? 1 : -1) * a.receivedAt.localeCompare(b.receivedAt),
         );
-        if (!q.includeBodies)
+        if (!q.includeBodies) {
           rows.forEach((e) => {
             delete e.textBody;
             delete e.htmlBody;
           });
+        }
         return page(rows, q.limit, q.cursor);
       },
       patchMany: async (ids, patch) => {
-        for (const id of ids)
+        for (const id of ids) {
           await emails.upsert({
             ...required(await emails.get(id), "Email"),
             ...patch,
           });
+        }
       },
     },
     threads,
@@ -204,8 +211,9 @@ export function createDemoStore(): Store {
     actions: {
       ...actions,
       insert: async (row) => {
-        if (await actions.get(row.id))
+        if (await actions.get(row.id)) {
           throw new ApiError("DUPLICATE", "Action already exists", 409);
+        }
         return actions.upsert(row);
       },
       update: async (id, patch) =>

@@ -46,7 +46,9 @@ function recurrenceClock(zone: string) {
     let result = target;
     for (let i = 0; i < 4; i++) {
       const difference = target - wall(result);
-      if (!difference) return result;
+      if (!difference) {
+        return result;
+      }
       result += difference;
     }
     return null; // A nonexistent wall time during a DST jump is not an occurrence.
@@ -69,10 +71,16 @@ export function expandRecurringEvents(
       ]),
   );
   for (const event of events) {
-    if (event.recurringEventId && event.originalStart) continue;
-    if (event.status === "cancelled" || event.myStatus === "declined") continue;
+    if (event.recurringEventId && event.originalStart) {
+      continue;
+    }
+    if (event.status === "cancelled" || event.myStatus === "declined") {
+      continue;
+    }
     if (!event.recurrenceRule) {
-      if (overlaps(event, range)) result.push(event);
+      if (overlaps(event, range)) {
+        result.push(event);
+      }
       continue;
     }
     const parts: Record<string, string> = Object.fromEntries(
@@ -88,19 +96,21 @@ export function expandRecurringEvents(
       Object.keys(parts).some(
         (key) => !["FREQ", "INTERVAL", "BYDAY", "COUNT", "UNTIL", "WKST"].includes(key),
       )
-    )
+    ) {
       throw new ApiError(
         "UNSUPPORTED_RECURRENCE",
         "Unsupported recurrence rule; connect live calendar availability for this series.",
       );
+    }
     const interval = Number(parts.INTERVAL ?? 1),
       count = Number(parts.COUNT ?? Infinity);
     if (
       !Number.isSafeInteger(interval) ||
       interval < 1 ||
       !(count === Infinity || (Number.isSafeInteger(count) && count > 0))
-    )
+    ) {
       throw new ApiError("INVALID_RECURRENCE", "Invalid recurrence interval or count.");
+    }
     const untilText = parts.UNTIL;
     const until = untilText
       ? Date.parse(
@@ -111,21 +121,25 @@ export function expandRecurringEvents(
           ),
         )
       : Infinity;
-    if (Number.isNaN(until))
+    if (Number.isNaN(until)) {
       throw new ApiError("INVALID_RECURRENCE", "Invalid recurrence end date.");
+    }
     const byDay = parts.BYDAY?.split(",").map((value) => {
       const match = /^([+-]?\d+)?(SU|MO|TU|WE|TH|FR|SA)$/.exec(value);
-      if (!match || (match[1] && parts.FREQ !== "MONTHLY"))
+      if (!match || (match[1] && parts.FREQ !== "MONTHLY")) {
         throw new ApiError("UNSUPPORTED_RECURRENCE", "Unsupported BYDAY recurrence.");
+      }
       const ordinal = match[1] ? Number(match[1]) : 0;
-      if (ordinal < -5 || ordinal > 5 || (match[1] && ordinal === 0))
+      if (ordinal < -5 || ordinal > 5 || (match[1] && ordinal === 0)) {
         throw new ApiError("INVALID_RECURRENCE", "Invalid BYDAY ordinal.");
+      }
       return { weekday: weekdays.indexOf(match[2]!), ordinal };
     });
     const startInstant = Date.parse(event.start),
       duration = Date.parse(event.end) - startInstant;
-    if (!Number.isFinite(startInstant) || duration <= 0)
+    if (!Number.isFinite(startInstant) || duration <= 0) {
       throw new ApiError("INVALID_RECURRENCE", "Invalid recurring event duration.");
+    }
     const clock = recurrenceClock(event.timeZone ?? "UTC"),
       first = clock.wall(startInstant);
     const firstDate = new Date(first),
@@ -136,7 +150,9 @@ export function expandRecurringEvents(
       );
     const firstWeekday = firstDate.getUTCDay(),
       weekStart = weekdays.indexOf(parts.WKST ?? "MO");
-    if (weekStart < 0) throw new ApiError("INVALID_RECURRENCE", "Invalid recurrence week start.");
+    if (weekStart < 0) {
+      throw new ApiError("INVALID_RECURRENCE", "Invalid recurrence week start.");
+    }
     const weekAnchor = firstMidnight - ((firstWeekday - weekStart + 7) % 7) * day;
     const end = clock.wall(Math.min(Date.parse(range.end), until)) + day;
     // No COUNT means we can jump near the window while preserving the series phase.
@@ -175,18 +191,28 @@ export function expandRecurringEvents(
             ? week % interval === 0 && (matchingDay ?? weekday === firstWeekday)
             : monthSince % interval === 0 &&
               (matchingDay ?? current.getUTCDate() === firstDate.getUTCDate());
-      if (!matches) continue;
+      if (!matches) {
+        continue;
+      }
       const occurrenceStart = clock.instant(date);
-      if (occurrenceStart === null) continue;
-      if (occurrenceStart > until || occurrenceStart >= Date.parse(range.end)) break;
-      if (++emitted > count) break;
+      if (occurrenceStart === null) {
+        continue;
+      }
+      if (occurrenceStart > until || occurrenceStart >= Date.parse(range.end)) {
+        break;
+      }
+      if (++emitted > count) {
+        break;
+      }
       const exception =
         exceptions.get(`${event.accountId}:${event.providerId}:${occurrenceStart}`) ??
         exceptions.get(`${event.accountId}:${event.id}:${occurrenceStart}`);
       const occurrenceEnd = event.allDay
         ? clock.instant(date + clock.wall(Date.parse(event.end)) - first)
         : occurrenceStart + duration;
-      if (occurrenceEnd === null) continue;
+      if (occurrenceEnd === null) {
+        continue;
+      }
       const occurrence = exception ?? {
         ...event,
         start: new Date(occurrenceStart).toISOString(),
@@ -196,18 +222,21 @@ export function expandRecurringEvents(
         occurrence.status !== "cancelled" &&
         occurrence.myStatus !== "declined" &&
         overlaps(occurrence, range)
-      )
+      ) {
         result.push(occurrence);
+      }
     }
   }
   // Moved overrides can overlap the window even when their original start does not.
-  for (const exception of exceptions.values())
+  for (const exception of exceptions.values()) {
     if (
       exception.status !== "cancelled" &&
       exception.myStatus !== "declined" &&
       overlaps(exception, range) &&
       !result.some((item) => item.id === exception.id && item.start === exception.start)
-    )
+    ) {
       result.push(exception);
+    }
+  }
   return result;
 }

@@ -92,8 +92,9 @@ export function createPolicyEngine({
             action.request.type === "send" &&
             (action.request.params as { draftEmailId?: string }).draftEmailId === draftEmailId,
         )
-      )
+      ) {
         return true;
+      }
       cursor = page.nextCursor;
     } while (cursor);
     return false;
@@ -118,7 +119,9 @@ export function createPolicyEngine({
     state.score = clamp(state.score);
     state.stage = stageFor(state);
     state.level = state.pinnedLevel ?? earnedLevel(state.stage);
-    if (state.stage === "autonomous") meta.everAutonomous = true;
+    if (state.stage === "autonomous") {
+      meta.everAutonomous = true;
+    }
     await store.kv.set(metaKey(state.category), JSON.stringify(meta));
     const saved = await store.trust.upsert(state);
     bus.emit({ type: "trust.changed", state: saved });
@@ -134,10 +137,13 @@ export function createPolicyEngine({
       (meta.approvals ?? 0) < 10 ||
       (meta.unchanged ?? 0) / meta.approvals! < 0.9 ||
       compareTrust(state.level, config.globalMode) >= 0
-    )
+    ) {
       return;
+    }
     const key = `policy:promotion:${state.category}:${state.level}`;
-    if (await store.kv.get(key)) return;
+    if (await store.kv.get(key)) {
+      return;
+    }
     const to = TRUST_LEVELS[TRUST_LEVELS.indexOf(state.level) + 1]!;
     const offer: PromotionOffer = {
       category: state.category,
@@ -170,15 +176,17 @@ export function createPolicyEngine({
           config.decayAfterDays < 0 ||
           !Array.isArray(config.alwaysAsk) ||
           !config.alwaysAsk.every((item) => categories.includes(item))
-        )
+        ) {
           throw new PolicyError("INVALID_CONFIG", "Invalid global policy configuration");
+        }
         await store.trust.setConfig(config);
         return config;
       }),
     pinLevel: (category, level) =>
       serial(async () => {
-        if (level !== null && !TRUST_LEVELS.includes(level))
+        if (level !== null && !TRUST_LEVELS.includes(level)) {
           throw new PolicyError("INVALID_LEVEL", "Unknown trust level");
+        }
         const state = await getTrustFor(category),
           meta = await readMeta(category);
         state.pinnedLevel = level;
@@ -196,17 +204,22 @@ export function createPolicyEngine({
           !Object.hasOwn(BASE_RISK, request.type) ||
           !categories.includes(request.category) ||
           !["human", "agent", "external-agent"].includes(request.actor?.kind)
-        )
+        ) {
           throw new PolicyError("INVALID_ACTION", "Unknown action type, category, or actor");
+        }
         const config = await getConfig(),
           state = await getTrustFor(request.category);
         let trustLevel = minTrust(config.globalMode, state.pinnedLevel ?? state.level);
         const external = request.actor.kind === "external-agent";
-        if (external) trustLevel = minTrust(trustLevel, config.externalAgentCeiling);
+        if (external) {
+          trustLevel = minTrust(trustLevel, config.externalAgentCeiling);
+        }
         const reversibility = BASE_REVERSIBILITY[request.type];
         let riskIndex = risks.indexOf(BASE_RISK[request.type]);
         const destructive = request.type === "delete" || request.destructive === true;
-        if (destructive) riskIndex = Math.max(1, riskIndex);
+        if (destructive) {
+          riskIndex = Math.max(1, riskIndex);
+        }
         let selfChange = false,
           knownAddressAddition = false,
           downgradeAcknowledgement = false;
@@ -231,18 +244,25 @@ export function createPolicyEngine({
           downgradeAcknowledgement =
             patch.downgradeAcknowledgedAt !== undefined &&
             patch.downgradeAcknowledgedAt !== person?.downgradeAcknowledgedAt;
-          if (selfChange || knownAddressAddition) riskIndex = Math.max(1, riskIndex);
+          if (selfChange || knownAddressAddition) {
+            riskIndex = Math.max(1, riskIndex);
+          }
         }
         if (request.counterparty?.class === "stranger") {
           riskIndex++;
-          if (request.type === "send" || request.type.startsWith("calendar_")) riskIndex++;
+          if (request.type === "send" || request.type.startsWith("calendar_")) {
+            riskIndex++;
+          }
         }
-        if (request.type === "unsubscribe") riskIndex++;
+        if (request.type === "unsubscribe") {
+          riskIndex++;
+        }
         if (destructive) {
           const ids = (request.params as { emailIds: string[] }).emailIds;
           const emails = await Promise.all(ids.map((id) => store.emails.get(id)));
-          if (emails.some((email) => email && (email.keywords.$flagged || !email.keywords.$seen)))
+          if (emails.some((email) => email && (email.keywords.$flagged || !email.keywords.$seen))) {
             riskIndex++;
+          }
         }
         const risk = risks[Math.min(risks.length - 1, riskIndex)]!;
         let bookkeeping =
@@ -258,7 +278,9 @@ export function createPolicyEngine({
             !["trash", "junk"].includes(box.role ?? "") &&
             !(request.type === "unlabel" && box.role === "inbox");
         }
-        if (destructive) bookkeeping = false;
+        if (destructive) {
+          bookkeeping = false;
+        }
         const heldDraft =
           (request.type === "draft_update" || request.type === "draft_delete") &&
           (await hasHeldSend(
@@ -293,19 +315,27 @@ export function createPolicyEngine({
             ["matter_create", "matter_update", "matter_attach", "person_update", "snooze"].includes(
               request.type,
             )
-          )
+          ) {
             outcome = "allow";
-        } else if (reversibility === "reversible") outcome = "allow";
-        else if (trustLevel === "full_access")
+          }
+        } else if (reversibility === "reversible") {
+          outcome = "allow";
+        } else if (trustLevel === "full_access") {
           outcome = reversibility === "delayed" ? "hold" : risk === "critical" ? "ask" : "allow";
-        else if (trustLevel === "auto") {
-          if (reversibility === "delayed" && state.stage !== "learning") outcome = "hold";
-          if (reversibility === "irreversible" && state.stage === "autonomous" && riskIndex <= 1)
+        } else if (trustLevel === "auto") {
+          if (reversibility === "delayed" && state.stage !== "learning") {
+            outcome = "hold";
+          }
+          if (reversibility === "irreversible" && state.stage === "autonomous" && riskIndex <= 1) {
             outcome = "allow";
+          }
         }
-        if (outcome === "allow") reason = "The effective trust level permits this action.";
-        if (outcome === "hold")
+        if (outcome === "allow") {
+          reason = "The effective trust level permits this action.";
+        }
+        if (outcome === "hold") {
           reason = "Trusted outward-facing action; held for cancellation before release.";
+        }
         const decision: PolicyDecision = {
           outcome,
           risk,
@@ -314,33 +344,42 @@ export function createPolicyEngine({
           category: request.category,
           reason,
         };
-        if (outcome === "hold")
+        if (outcome === "hold") {
           decision.holdUntil = new Date(
             Date.parse(now()) + config.outboxHoldMinutes * 60_000,
           ).toISOString();
+        }
         if (outcome !== "deny") {
           const offer = await promotion(state, config);
-          if (offer) decision.promotionOffer = offer;
+          if (offer) {
+            decision.promotionOffer = offer;
+          }
         }
         return decision;
       }),
     recordOutcome: (actionId, feedback: OutcomeFeedback, editDistance = 0) =>
       serial(async () => {
         const action = await store.actions.get(actionId);
-        if (!action) throw new PolicyError("ACTION_NOT_FOUND", `Action ${actionId} does not exist`);
+        if (!action) {
+          throw new PolicyError("ACTION_NOT_FOUND", `Action ${actionId} does not exist`);
+        }
         if (
           !["approved_unchanged", "approved_edited", "rejected"].includes(feedback) ||
           !Number.isFinite(editDistance) ||
           editDistance < 0 ||
           editDistance > 1
-        )
+        ) {
           throw new PolicyError("INVALID_FEEDBACK", "Feedback or edit distance is invalid");
+        }
         const feedbackKey = `policy:feedback:${actionId}`;
-        if (await store.kv.get(feedbackKey))
+        if (await store.kv.get(feedbackKey)) {
           throw new PolicyError("FEEDBACK_RECORDED", "This action already has human feedback");
+        }
         const state = await getTrustFor(action.request.category),
           meta = await readMeta(state.category);
-        if (state.stage === "autonomous") meta.everAutonomous = true;
+        if (state.stage === "autonomous") {
+          meta.everAutonomous = true;
+        }
         if (meta.windowLevel !== state.level) {
           meta.windowLevel = state.level;
           meta.approvals = 0;
@@ -376,15 +415,20 @@ export function createPolicyEngine({
       }),
     applyDecay: (at = now()) =>
       serial(async () => {
-        if (!Number.isFinite(Date.parse(at)))
+        if (!Number.isFinite(Date.parse(at))) {
           throw new PolicyError("INVALID_TIME", "Decay time must be an ISO timestamp");
+        }
         const config = await getConfig(),
           changed: TrustState[] = [];
         for (const raw of await store.trust.list()) {
           const state = await getTrustFor(raw.category);
-          if (!state.lastActivityAt) continue;
+          if (!state.lastActivityAt) {
+            continue;
+          }
           const meta = await readMeta(state.category);
-          if (state.stage === "autonomous") meta.everAutonomous = true;
+          if (state.stage === "autonomous") {
+            meta.everAutonomous = true;
+          }
           const days = Math.max(
             0,
             Math.floor(
@@ -392,7 +436,9 @@ export function createPolicyEngine({
             ),
           );
           const additional = days - (meta.decayedDays ?? 0);
-          if (additional <= 0) continue;
+          if (additional <= 0) {
+            continue;
+          }
           meta.decayedDays = days;
           const score = Math.max(
             Math.min(state.score, meta.everAutonomous ? 0.3 : 0),

@@ -108,10 +108,18 @@ export async function normalizeGraph(
   const html = message.body?.contentType.toLowerCase() === "html" ? message.body.content : null;
   const text = html ? htmlToText(html) : (message.body?.content ?? "");
   const keywords: Email["keywords"] = {};
-  if (message.isRead) keywords.$seen = true;
-  if (message.isDraft) keywords.$draft = true;
-  if (message.flag?.flagStatus === "flagged") keywords.$flagged = true;
-  for (const c of message.categories ?? []) keywords[`label:${c}`] = true;
+  if (message.isRead) {
+    keywords.$seen = true;
+  }
+  if (message.isDraft) {
+    keywords.$draft = true;
+  }
+  if (message.flag?.flagStatus === "flagged") {
+    keywords.$flagged = true;
+  }
+  for (const c of message.categories ?? []) {
+    keywords[`label:${c}`] = true;
+  }
   return {
     id: localId(accountId, "email", message.id),
     accountId,
@@ -194,13 +202,17 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
       try {
         page = await this.api(link, { headers: { Prefer: "odata.maxpagesize=100" } });
       } catch (error) {
-        if (error instanceof ProviderError && [404, 410].includes(error.status ?? 0))
+        if (error instanceof ProviderError && [404, 410].includes(error.status ?? 0)) {
           throw new ProviderError("CURSOR_EXPIRED", "Graph folder delta expired; run a full sync");
+        }
         throw error;
       }
       for (const folder of page.value ?? []) {
-        if (folder["@removed"]) delete items[folder.id];
-        else items[folder.id] = { ...items[folder.id], ...folder };
+        if (folder["@removed"]) {
+          delete items[folder.id];
+        } else {
+          items[folder.id] = { ...items[folder.id], ...folder };
+        }
       }
       final = page["@odata.deltaLink"];
       link = page["@odata.nextLink"];
@@ -221,8 +233,9 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
           hierarchy?: { link: string; items: Record<string, GraphFolder> };
         }>(cursor)
       : { account: this.account.id, folders: {}, members: {} };
-    if (previous.account !== this.account.id || !previous.folders)
+    if (previous.account !== this.account.id || !previous.folders) {
       throw new ProviderError("INVALID_CURSOR", "Invalid Graph folder cursor");
+    }
     const hierarchy = await this.folders("hierarchy" in previous ? previous.hierarchy : undefined);
     const since = "since" in previous ? previous.since : opts.since;
     const folders = Object.values(hierarchy.items),
@@ -239,17 +252,22 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
       try {
         roleIds.set((await this.api<GraphFolder>(`${graphBase}/me/mailFolders/${name}`)).id, role);
       } catch (e) {
-        if (!(e instanceof ProviderError && e.status === 404)) throw e;
+        if (!(e instanceof ProviderError && e.status === 404)) {
+          throw e;
+        }
       }
     }
     const next: Record<string, string> = {},
       members: Record<string, string[]> = {},
       changed = new Set<string>();
-    for (const missing of Object.keys(previous.folders))
+    for (const missing of Object.keys(previous.folders)) {
       if (!folders.some((f) => f.id === missing)) {
         yield { kind: "mailbox", op: "delete", id: localId(this.account.id, "mailbox", missing) };
-        for (const id of previous.members?.[missing] ?? []) changed.add(id);
+        for (const id of previous.members?.[missing] ?? []) {
+          changed.add(id);
+        }
       }
+    }
     for (const f of folders) {
       yield {
         kind: "mailbox",
@@ -281,11 +299,12 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
             },
           });
         } catch (e) {
-          if (e instanceof ProviderError && [410, 404].includes(e.status ?? 0))
+          if (e instanceof ProviderError && [410, 404].includes(e.status ?? 0)) {
             throw new ProviderError(
               "CURSOR_EXPIRED",
               "Graph delta expired; reset local sync state and run a full sync",
             );
+          }
           throw e;
         }
         // Drain metadata pages through deltaLink even beyond the window. Stopping early loses the cursor.
@@ -302,21 +321,26 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
             folderMembers.add(message.id);
           }
         }
-        if (page["@odata.deltaLink"])
+        if (page["@odata.deltaLink"]) {
           next[f.id] = this.safeLink(page["@odata.deltaLink"], graphBase);
+        }
         link = page["@odata.nextLink"];
       }
-      if (!next[f.id])
+      if (!next[f.id]) {
         throw new ProviderError("INVALID_RESPONSE", "Graph did not return a final deltaLink");
+      }
       members[f.id] = [...folderMembers];
     }
     // A folder tombstone can mean a move. Resolve every changed immutable ID globally before deleting.
     for (const providerId of changed) {
       const email = await this.getEmail(providerId);
       if (email) {
-        if (!since || Date.parse(email.receivedAt) >= Date.parse(since))
+        if (!since || Date.parse(email.receivedAt) >= Date.parse(since)) {
           yield { kind: "email", op: "upsert", email };
-      } else yield { kind: "email", op: "delete", providerId };
+        }
+      } else {
+        yield { kind: "email", op: "delete", providerId };
+      }
     }
     yield {
       kind: "cursor",
@@ -335,30 +359,36 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
         `${graphBase}/me/messages/${encodeURIComponent(providerId)}?$select=${properties}`,
       );
     } catch (e) {
-      if (e instanceof ProviderError && e.status === 404) return null;
+      if (e instanceof ProviderError && e.status === 404) {
+        return null;
+      }
       throw e;
     }
-    if (message.hasAttachments || /cid:/i.test(message.body?.content ?? ""))
+    if (message.hasAttachments || /cid:/i.test(message.body?.content ?? "")) {
       message.attachments = await this.all<GraphAttachment>(
         `${graphBase}/me/messages/${encodeURIComponent(providerId)}/attachments`,
       );
+    }
     return normalizeGraph(message, this.account.id, this.options.verifier);
   }
   async getBlob(blobId: string): Promise<{ type: string; data: Uint8Array }> {
-    if (!blobId.startsWith("graph:"))
+    if (!blobId.startsWith("graph:")) {
       throw new ProviderError("INVALID_BLOB_ID", "Invalid Graph attachment handle");
+    }
     const [message, attachment] = decodeCursor<[string, string]>(blobId.slice(6));
     const url = `${graphBase}/me/messages/${encodeURIComponent(message)}/attachments/${encodeURIComponent(attachment)}`;
     const a = await this.api<GraphAttachment>(url);
-    if (a.contentBytes !== undefined)
+    if (a.contentBytes !== undefined) {
       return {
         type: a.contentType ?? "application/octet-stream",
         data: Buffer.from(a.contentBytes, "base64"),
       };
-    if (a["@odata.type"] === "#microsoft.graph.referenceAttachment")
+    }
+    if (a["@odata.type"] === "#microsoft.graph.referenceAttachment") {
       throw new NotImplementedError(
         "Graph cloud reference attachments must be downloaded through their owning service",
       );
+    }
     return {
       type: a.contentType ?? "message/rfc822",
       data: new Uint8Array(
@@ -370,7 +400,7 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
   }
   async applyChanges(changes: MailChange[]): Promise<MailChangeResult[]> {
     const results: MailChangeResult[] = [];
-    for (const c of changes)
+    for (const c of changes) {
       for (const id of c.providerIds) {
         const path = `${graphBase}/me/messages/${encodeURIComponent(id)}`;
         if (c.op === "setKeywords") {
@@ -378,32 +408,42 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
             categories = new Set<string>();
           if ([...(c.add ?? []), ...(c.remove ?? [])].some((k) => k.startsWith("label:"))) {
             const current = await this.api<GraphMessage>(path);
-            for (const category of current.categories ?? []) categories.add(category);
+            for (const category of current.categories ?? []) {
+              categories.add(category);
+            }
           }
           for (const [list, value] of [
             [c.add ?? [], true],
             [c.remove ?? [], false],
-          ] as const)
+          ] as const) {
             for (const keyword of list) {
-              if (keyword === "$seen") patch.isRead = value;
-              else if (keyword === "$flagged")
+              if (keyword === "$seen") {
+                patch.isRead = value;
+              } else if (keyword === "$flagged") {
                 patch.flag = { flagStatus: value ? "flagged" : "notFlagged" };
-              else if (keyword.startsWith("label:")) {
-                if (value) categories.add(keyword.slice(6));
-                else categories.delete(keyword.slice(6));
+              } else if (keyword.startsWith("label:")) {
+                if (value) {
+                  categories.add(keyword.slice(6));
+                } else {
+                  categories.delete(keyword.slice(6));
+                }
                 patch.categories = [...categories];
-              } else
+              } else {
                 throw new ProviderError(
                   "UNSUPPORTED_KEYWORD",
                   `Graph cannot directly set keyword ${keyword}`,
                 );
+              }
             }
-          if (Object.keys(patch).length) await this.empty(path, this.body(patch, "PATCH"));
-        } else if (c.op === "removeFromMailbox")
+          }
+          if (Object.keys(patch).length) {
+            await this.empty(path, this.body(patch, "PATCH"));
+          }
+        } else if (c.op === "removeFromMailbox") {
           throw new NotImplementedError(
             "Graph messages require one folder; use move with a destination folder",
           );
-        else {
+        } else {
           const destinationId =
             c.op === "delete"
               ? "deleteditems"
@@ -414,11 +454,12 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
             `${path}/${c.op === "addToMailbox" ? "copy" : "move"}`,
             this.body({ destinationId }),
           );
-          if (!moved?.id)
+          if (!moved?.id) {
             throw new ProviderError(
               "INVALID_RESPONSE",
               "Graph did not return the moved message identity; resync before retrying",
             );
+          }
           results.push({
             op: c.op,
             providerId: id,
@@ -427,12 +468,14 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
           });
         }
       }
+    }
     return results;
   }
   private async draftBody(draft: DraftInput): Promise<Record<string, unknown>> {
     this.check();
-    if (draft.accountId !== this.account.id)
+    if (draft.accountId !== this.account.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Draft belongs to another account");
+    }
     const addresses = (a: DraftInput["to"] = []) =>
       a.map((v) => ({ emailAddress: { address: v.email, name: v.name ?? "" } }));
     return {
@@ -470,13 +513,16 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
   }
   private async requireEmail(id: string): Promise<Email> {
     const e = await this.getEmail(id);
-    if (!e) throw new ProviderError("NOT_FOUND", "Graph draft does not exist");
+    if (!e) {
+      throw new ProviderError("NOT_FOUND", "Graph draft does not exist");
+    }
     return e;
   }
   async updateDraft(providerId: string, draft: DraftInput): Promise<Email> {
     const existing = await this.requireEmail(providerId);
-    if (!existing.keywords.$draft)
+    if (!existing.keywords.$draft) {
       throw new ProviderError("NOT_A_DRAFT", "Graph message is not a draft");
+    }
     const { attachments, ...body } = await this.draftBody(draft);
     await this.empty(
       `${graphBase}/me/messages/${encodeURIComponent(providerId)}`,
@@ -489,16 +535,18 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
         { method: "DELETE" },
       );
     }
-    for (const a of attachments as unknown[])
+    for (const a of attachments as unknown[]) {
       await this.empty(
         `${graphBase}/me/messages/${encodeURIComponent(providerId)}/attachments`,
         this.body(a),
       );
+    }
     return this.requireEmail(providerId);
   }
   async deleteDraft(providerId: string): Promise<void> {
-    if (!(await this.requireEmail(providerId)).keywords.$draft)
+    if (!(await this.requireEmail(providerId)).keywords.$draft) {
       throw new ProviderError("NOT_A_DRAFT", "Graph message is not a draft");
+    }
     await this.empty(`${graphBase}/me/messages/${encodeURIComponent(providerId)}`, {
       method: "DELETE",
     });
@@ -509,8 +557,9 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
     const email = input.draft
       ? await this.createDraft(input.draft)
       : await this.requireEmail(input.draftProviderId!);
-    if (!email.keywords.$draft)
+    if (!email.keywords.$draft) {
       throw new ProviderError("NOT_A_DRAFT", "Graph message is not a draft");
+    }
     await this.empty(`${graphBase}/me/messages/${encodeURIComponent(email.providerId)}/send`, {
       method: "POST",
     });

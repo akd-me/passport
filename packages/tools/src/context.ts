@@ -29,13 +29,16 @@ export class Context {
   }
 
   async account(accountId?: string) {
-    if (accountId) return required(await this.store.accounts.get(accountId), "Account");
+    if (accountId) {
+      return required(await this.store.accounts.get(accountId), "Account");
+    }
     const accounts = await this.store.accounts.list();
-    if (accounts.length !== 1)
+    if (accounts.length !== 1) {
       throw new ToolError(
         "ACCOUNT_REQUIRED",
         "Provide accountId when there is not exactly one account.",
       );
+    }
     return required(accounts[0], "Account");
   }
 
@@ -46,11 +49,12 @@ export class Context {
   async emailBatch(ids: string[], accountId?: string) {
     const emails = await Promise.all([...new Set(ids)].map((id) => this.email(id)));
     const inferredId = accountId ?? required(emails[0], "Email").accountId;
-    if (emails.some((email) => email.accountId !== inferredId))
+    if (emails.some((email) => email.accountId !== inferredId)) {
       throw new ToolError(
         "ACCOUNT_MISMATCH",
         "Split mail operations into separate calls per account.",
       );
+    }
     await this.account(inferredId);
     return { accountId: inferredId, emails };
   }
@@ -96,13 +100,15 @@ export class Context {
     if (
       context.sensitiveCategory === "legal" ||
       (context.sensitiveCategory === "money" && inference.category !== "legal")
-    )
+    ) {
       inference.category = context.sensitiveCategory;
+    }
     if (
       trusted.classification &&
       !["money", "legal", "matters", "unsubscribe", "scheduling"].includes(inference.category)
-    )
+    ) {
       inference.category = trusted.classification;
+    }
     const destructive = await destinationGuard(
       this.store,
       type,
@@ -110,8 +116,9 @@ export class Context {
       params,
       context.emails ?? [],
     );
-    if (destructive && !["money", "legal"].includes(inference.category))
+    if (destructive && !["money", "legal"].includes(inference.category)) {
       inference.category = "other";
+    }
     const request: ActionRequest<T> = {
       type,
       accountId,
@@ -153,11 +160,12 @@ export class Context {
     let offset = 0;
     if (cursor != null) {
       offset = emails.findIndex((email) => email.id === cursor) + 1;
-      if (offset === 0)
+      if (offset === 0) {
         throw new ToolError(
           "INVALID_CURSOR",
           "Matter cursor must be an email ID from this matter.",
         );
+      }
     }
     const page = emails.slice(offset, offset + limit);
     const withBodies = includeBodies

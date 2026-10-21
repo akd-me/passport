@@ -29,7 +29,9 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(async () => {
-  for (const backend of backends.splice(0)) await backend.close();
+  for (const backend of backends.splice(0)) {
+    await backend.close();
+  }
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -69,8 +71,10 @@ function completion(json: Record<string, unknown>): LlmCompletion {
 it("B1: retries failed scheduling after matter creation exactly once", async () => {
   let scheduleCalls = 0;
   const complete = vi.fn(async (options: CompleteOptions) => {
-    if (options.json?.properties?.category) return completion({ category: "scheduling" });
-    if (options.json?.properties?.matterId)
+    if (options.json?.properties?.category) {
+      return completion({ category: "scheduling" });
+    }
+    if (options.json?.properties?.matterId) {
       return completion({
         matterId: null,
         title: "Meeting",
@@ -78,7 +82,10 @@ it("B1: retries failed scheduling after matter creation exactly once", async () 
         summary: "Arrange a meeting",
         nextStep: "Offer times",
       });
-    if (++scheduleCalls === 1) throw new Error("Scheduling model unavailable");
+    }
+    if (++scheduleCalls === 1) {
+      throw new Error("Scheduling model unavailable");
+    }
     return completion({ status: "tentative", textBody: "Can we meet?", slots: [slot] });
   });
   const { backend, mail } = await fixture({ complete });
@@ -181,8 +188,10 @@ it.each(["people", "matter", "scheduling", "done"])(
 
 it("B1: exhausted scheduling retries surface one attention item naming the incomplete step", async () => {
   const complete = vi.fn(async (options: CompleteOptions) => {
-    if (options.json?.properties?.category) return completion({ category: "scheduling" });
-    if (options.json?.properties?.matterId)
+    if (options.json?.properties?.category) {
+      return completion({ category: "scheduling" });
+    }
+    if (options.json?.properties?.matterId) {
       return completion({
         matterId: null,
         title: "Meeting",
@@ -190,6 +199,7 @@ it("B1: exhausted scheduling retries surface one attention item naming the incom
         summary: "Arrange meeting",
         nextStep: "Offer times",
       });
+    }
     throw new Error("Private model error");
   });
   const { backend, mail } = await fixture({ complete });
@@ -349,10 +359,11 @@ it.each([false, true])(
       entered = resolve;
     });
     const sync = vi.spyOn(calendar, "sync");
-    if (reconcile)
+    if (reconcile) {
       sync.mockImplementationOnce(async function* () {
         throw Object.assign(new Error("Expired"), { code: "CURSOR_EXPIRED" });
       });
+    }
     sync.mockImplementationOnce(async function* () {
       entered();
       await paused;
@@ -446,10 +457,11 @@ it.each(["stale", "missing", "reconcile", "failed-pass"])(
     if (state === "missing") {
       await backend.store.kv.delete(`calendar-sync:${account.id}`);
       await backend.store.syncState.set({ accountId: account.id, cursor: null, updatedAt: at });
-    } else if (state === "reconcile")
+    } else if (state === "reconcile") {
       await backend.store.kv.set(`sync-reconcile:${account.id}:calendar`, "1");
-    else if (state === "failed-pass")
+    } else if (state === "failed-pass") {
       await backend.store.kv.set(`calendar-sync-in-progress:${account.id}`, "1");
+    }
     vi.setSystemTime(new Date(state === "stale" ? Date.parse(at) + 11 * 60000 : held.holdUntil!));
     const proposed = vi.fn();
     backend.bus.on("action.proposed", proposed);

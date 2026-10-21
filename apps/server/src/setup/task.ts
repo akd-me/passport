@@ -81,50 +81,70 @@ export class SetupTaskState {
 
   /** Values that must never appear in anything the task publishes. */
   addSecret(value: string | undefined): void {
-    if (value && value.length >= 4) this.secrets.add(value);
+    if (value && value.length >= 4) {
+      this.secrets.add(value);
+    }
   }
 
   scrub(text: string, max = 400): string {
     let out = text;
-    for (const secret of this.secrets) out = out.split(secret).join("[redacted]");
-    for (const [pattern, replacement] of CLIENT_SECRETS) out = out.replace(pattern, replacement);
+    for (const secret of this.secrets) {
+      out = out.split(secret).join("[redacted]");
+    }
+    for (const [pattern, replacement] of CLIENT_SECRETS) {
+      out = out.replace(pattern, replacement);
+    }
     return redact(out, max);
   }
 
   private change(mutate: () => void): void {
-    if (this.terminal) return;
+    if (this.terminal) {
+      return;
+    }
     mutate();
     this.publish(this.snapshot());
   }
 
   log(level: SetupLogEntry["level"], text: string): void {
     const clean = this.scrub(text);
-    if (!clean) return;
+    if (!clean) {
+      return;
+    }
     this.change(() => {
       this.task.log.push({ at: this.now().toISOString(), level, text: clean });
-      if (this.task.log.length > MAX_LOG) this.task.log.splice(0, this.task.log.length - MAX_LOG);
+      if (this.task.log.length > MAX_LOG) {
+        this.task.log.splice(0, this.task.log.length - MAX_LOG);
+      }
     });
   }
 
   /** Unknown ids are rejected so the checklist stays the one the user was shown. */
   step(id: string, status: SetupStepStatus | "skipped", detail?: string): void {
     const step = this.task.steps.find((candidate) => candidate.id === id);
-    if (!step)
+    if (!step) {
       throw new ApiError(
         "UNKNOWN_STEP",
         `Unknown step ${id}; use one of ${this.stepIds().join(", ")}`,
       );
+    }
     this.change(() => {
       step.status = status === "skipped" ? "done" : status;
       const text = status === "skipped" ? `Already set up${detail ? `: ${detail}` : ""}` : detail;
-      if (text) step.detail = this.scrub(text, 200);
-      else delete step.detail;
+      if (text) {
+        step.detail = this.scrub(text, 200);
+      } else {
+        delete step.detail;
+      }
     });
   }
 
   /** The running step, if any, becomes failed: the user sees where it stopped. */
   private failRunningSteps(): void {
-    for (const step of this.task.steps) if (step.status === "running") step.status = "failed";
+    for (const step of this.task.steps) {
+      if (step.status === "running") {
+        step.status = "failed";
+      }
+    }
   }
 
   /**
@@ -134,7 +154,9 @@ export class SetupTaskState {
   ask(kind: SetupPromptKind, message: string): SetupPrompt {
     const clean = this.scrub(message, 500);
     const current = this.task.prompt;
-    if (current && current.kind === kind && current.message === clean) return current;
+    if (current && current.kind === kind && current.message === clean) {
+      return current;
+    }
     const prompt: SetupPrompt = { id: randomBytes(8).toString("hex"), kind, message: clean };
     this.change(() => {
       this.task.prompt = prompt;
@@ -145,11 +167,13 @@ export class SetupTaskState {
 
   /** Accept the user's answer to the current prompt. */
   answer(promptId: string): SetupPrompt {
-    if (this.terminal)
+    if (this.terminal) {
       throw new ApiError("TASK_FINISHED", "This setup task has already finished", 409);
+    }
     const prompt = this.task.prompt;
-    if (!prompt || prompt.id !== promptId)
+    if (!prompt || prompt.id !== promptId) {
       throw new ApiError("PROMPT_STALE", "That question is no longer being asked", 409);
+    }
     this.change(() => {
       delete this.task.prompt;
       this.task.status = "running";
@@ -166,7 +190,11 @@ export class SetupTaskState {
   complete(): void {
     this.change(() => {
       delete this.task.prompt;
-      for (const step of this.task.steps) if (step.status !== "failed") step.status = "done";
+      for (const step of this.task.steps) {
+        if (step.status !== "failed") {
+          step.status = "done";
+        }
+      }
       this.task.status = "completed";
     });
   }
@@ -185,7 +213,11 @@ export class SetupTaskState {
     this.change(() => {
       delete this.task.prompt;
       // Cancelling is the user's choice, not a failure of the step in progress.
-      for (const step of this.task.steps) if (step.status === "running") step.status = "pending";
+      for (const step of this.task.steps) {
+        if (step.status === "running") {
+          step.status = "pending";
+        }
+      }
       this.task.log.push({ at: this.now().toISOString(), level: "warn", text: "Cancelled." });
       this.task.status = "cancelled";
     });

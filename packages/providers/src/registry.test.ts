@@ -77,8 +77,9 @@ describe("registry and setup", () => {
       expect(registry.mail(kind)).not.toBe(registry.mail(kind));
       expect(registry.describe(kind).label).toBeTruthy();
     }
-    for (const kind of ["google-calendar", "graph-calendar", "caldav", "mock"] as const)
+    for (const kind of ["google-calendar", "graph-calendar", "caldav", "mock"] as const) {
       expect(registry.calendar(kind).kind).toBe(kind);
+    }
     expect(() => registry.calendar("jmap-calendar")).toThrow(
       expect.objectContaining({ code: "NOT_IMPLEMENTED" }),
     );
@@ -118,8 +119,9 @@ describe("registry and setup", () => {
   it("retries one expired Microsoft access token after HTTP 401", async () => {
     let calls = 0;
     const fetcher = fixtureFetch((url, init) => {
-      if (url.hostname === "login.microsoftonline.com")
+      if (url.hostname === "login.microsoftonline.com") {
         return response({ access_token: "new-token", expires_in: 3600 });
+      }
       calls++;
       return calls === 1
         ? response({ error: "expired" }, 401)
@@ -155,13 +157,15 @@ describe("registry and setup", () => {
   });
   it("all unconnected sync adapters fail with a coded error", async () => {
     const r = createProviderRegistry();
-    for (const kind of ["gmail", "graph", "imap", "jmap", "mock"] as const)
+    for (const kind of ["gmail", "graph", "imap", "jmap", "mock"] as const) {
       await expect(collect(r.mail(kind).sync(null))).rejects.toMatchObject({
         code: "NOT_CONNECTED",
       });
-    for (const kind of ["google-calendar", "graph-calendar", "caldav", "mock"] as const)
+    }
+    for (const kind of ["google-calendar", "graph-calendar", "caldav", "mock"] as const) {
       await expect(collect(r.calendar(kind).sync(null))).rejects.toMatchObject({
         code: "NOT_CONNECTED",
       });
+    }
   });
 });

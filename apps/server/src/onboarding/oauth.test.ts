@@ -21,12 +21,13 @@ describe("browser account OAuth", () => {
   beforeEach(async () => {
     now = Date.now();
     fetcher = vi.fn<typeof fetch>(async (url, init) => {
-      if (String(url).includes("/token"))
+      if (String(url).includes("/token")) {
         return Response.json({
           access_token: "access-secret",
           refresh_token: "refresh-secret",
           expires_in: 3600,
         });
+      }
       return Response.json({
         email: "alex@example.com",
         email_verified: true,

@@ -22,7 +22,9 @@ async function run() {
     const child = spawn(process.execPath, ["--experimental-sqlite", shimPath, ...args], {
       stdio: "inherit",
     });
-    for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      process.on(signal, () => child.kill(signal));
+    }
     child.on("error", () => {
       console.error("Could not start Passport with built-in SQLite.");
       process.exitCode = 1;
@@ -56,7 +58,9 @@ async function run() {
     await readFile(bundled);
     entry = bundled;
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
     entry = new URL("../dist/cli.js", import.meta.url);
   }
   const { main } = await import(entry.href);

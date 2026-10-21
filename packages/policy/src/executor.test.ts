@@ -521,7 +521,9 @@ describe("internal store actions", () => {
       await store.emails.upsertMany(before);
       await store.people.upsert(person());
       const originalMatter = matter();
-      if (type === "matter_attach") await store.matters.upsert(originalMatter);
+      if (type === "matter_attach") {
+        await store.matters.upsert(originalMatter);
+      }
       const emailIds = before.map((email) => email.id);
       const emailPatch = { category: "receipts", personIds: ["person"] } as const;
       const params: (ActionParams["matter_create"] | ActionParams["matter_attach"]) & {
@@ -550,10 +552,12 @@ describe("internal store actions", () => {
       expect(created.status).toBe("executed");
       expect(created.inverse).not.toBeNull();
       expect(await store.matters.get(matterId)).toMatchObject({ emailIds, personIds: ["person"] });
-      if (type === "matter_create")
+      if (type === "matter_create") {
         expect(created.result!.matter).toEqual(await store.matters.get(matterId));
-      for (const id of emailIds)
+      }
+      for (const id of emailIds) {
         expect(await store.emails.get(id)).toMatchObject({ matterId, ...emailPatch });
+      }
       expect((await store.actions.get(created.id))?.result).toEqual(created.result);
       await store.actions.update(created.id, {
         inverse: JSON.parse(JSON.stringify(created.inverse)),
@@ -587,7 +591,9 @@ describe("internal store actions", () => {
       });
       const before = await store.emails.get("email");
       const originalMatter = matter();
-      if (type === "matter_attach") await store.matters.upsert(originalMatter);
+      if (type === "matter_attach") {
+        await store.matters.upsert(originalMatter);
+      }
       const patchMany = store.emails.patchMany.bind(store.emails);
       const failure = new Error("Email metadata write failed");
       vi.spyOn(store.emails, "patchMany").mockImplementationOnce(async (ids, patch) => {
@@ -1189,10 +1195,11 @@ describe("gate invariants", () => {
       await original(changes);
     };
     await executor.submit(request("archive", { emailIds: ["email"] }));
-    for (const record of (await store.actions.query({ status: ["executed"] })).items)
+    for (const record of (await store.actions.query({ status: ["executed"] })).items) {
       expect(record.inverse !== null || record.decision.reversibility === "irreversible").toBe(
         true,
       );
+    }
   });
 
   it("rejects private inverse payloads, cross-account operations, and forged verification", async () => {

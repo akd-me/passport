@@ -83,9 +83,14 @@ it.each(
       expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
     }
     const saved = await readFile(result.path, "utf8");
-    if (client === "codex") expect(saved).toContain(before.trim());
-    else expect(JSON.parse(saved).mcpServers.other).toEqual(other);
-    if (result.backup) expect(await readFile(result.backup, "utf8")).toBe(before);
+    if (client === "codex") {
+      expect(saved).toContain(before.trim());
+    } else {
+      expect(JSON.parse(saved).mcpServers.other).toEqual(other);
+    }
+    if (result.backup) {
+      expect(await readFile(result.backup, "utf8")).toBe(before);
+    }
   },
 );
 it("B3: redacts opaque credentials in printed config and backup paths", async () => {
@@ -149,8 +154,9 @@ it("R15: redacts TOML secrets in multiline values, nested tables and inline tabl
   );
   vi.spyOn(console, "log").mockImplementation(() => {});
   const result = await installMcp(["--client", "codex", "--dry-run"], options);
-  for (const secret of ["secret-value", "bearer-secret", "password-secret", "table-secret"])
+  for (const secret of ["secret-value", "bearer-secret", "password-secret", "table-secret"]) {
     expect(result.content).not.toContain(secret);
+  }
   expect(result.content).toContain(`PASSPORT_DATA_DIR = ${JSON.stringify(options.dataDir)}`);
   expect(result.content.match(/PASSPORT_DATA_DIR\s*=/g)).toHaveLength(1);
   expect(await readdir(dirname(path))).toEqual(["config.toml"]);
@@ -163,9 +169,11 @@ it.each(["claude-code", "codex", "cursor", "claude-desktop"])(
     await installMcp(["--client", client], options);
     const result = await installMcp(["--client", client], options);
     const content = await readFile(result.path, "utf8");
-    if (client === "codex") expect(content.match(/env.PASSPORT_DATA_DIR\s*=/g)).toHaveLength(1);
-    else
+    if (client === "codex") {
+      expect(content.match(/env.PASSPORT_DATA_DIR\s*=/g)).toHaveLength(1);
+    } else {
       expect(JSON.parse(content).mcpServers.passport.env.PASSPORT_DATA_DIR).toBe(options.dataDir);
+    }
   },
 );
 it("MCP_INSTALL: packaged shim delegates Codex HTTP dry-run and user installs to the bundled CLI", async () => {
@@ -191,10 +199,14 @@ it("MCP_INSTALL: packaged shim delegates Codex HTTP dry-run and user installs to
         target = await realpath(join(owner, "node_modules", name));
         break;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
       }
     }
-    if (!target) throw new Error(`Missing locked dependency ${name}`);
+    if (!target) {
+      throw new Error(`Missing locked dependency ${name}`);
+    }
     const link = join(installed, "node_modules", name);
     await mkdir(dirname(link), { recursive: true });
     await symlink(target, link, "dir");
@@ -230,7 +242,9 @@ it("MCP_INSTALL: packaged shim delegates Codex HTTP dry-run and user installs to
   for (const client of ["claude-code", "cursor", "claude-desktop"]) {
     const args = ["--client", client, ...(client === "claude-code" ? ["--user"] : [])];
     // Desktop is macOS-only; this repository's packaged smoke runs on other OSes too.
-    if (client === "claude-desktop" && process.platform !== "darwin") continue;
+    if (client === "claude-desktop" && process.platform !== "darwin") {
+      continue;
+    }
     const first = JSON.parse(await invoke(args));
     expect(first.dryRun).toBe(false);
     const second = JSON.parse(await invoke(args));

@@ -342,8 +342,9 @@ describe("local token security", () => {
     checkBind("0.0.0.0", true, {});
     checkBind("192.168.1.20", false, { PASSPORT_API_TOKEN: "explicit" });
     expect(warning).toHaveBeenCalledTimes(2);
-    for (const host of ["localhost", "127.0.0.1", "127.0.0.2", "::1"])
+    for (const host of ["localhost", "127.0.0.1", "127.0.0.2", "::1"]) {
       expect(() => checkBind(host, false, {})).not.toThrow();
+    }
     expect(auth.loginUrl("::1", 3000)).toContain("http://[::1]:3000/?token=");
     expect(auth.loginUrl("0.0.0.0", 3000)).toContain("http://127.0.0.1:3000/?token=");
   });
@@ -352,7 +353,9 @@ describe("local token security", () => {
     try {
       await once(handle.server, "listening");
       const address = handle.server.address();
-      if (!address || typeof address === "string") throw new Error("Expected listener");
+      if (!address || typeof address === "string") {
+        throw new Error("Expected listener");
+      }
       const original = (await backend.policy.getConfig()).globalMode;
       const status = await new Promise<number>((resolve, reject) => {
         const request = httpRequest(
@@ -386,7 +389,9 @@ describe("local token security", () => {
     try {
       await once(handle.server, "listening");
       const address = handle.server.address();
-      if (!address || typeof address === "string") throw new Error("Expected listener");
+      if (!address || typeof address === "string") {
+        throw new Error("Expected listener");
+      }
       const root = `http://127.0.0.1:${address.port}`;
       const token = getAuth(backend).token;
       const response = await fetch(`${root}/?token=${token}`, {

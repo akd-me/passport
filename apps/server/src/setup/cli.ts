@@ -25,11 +25,12 @@ export function parseConnectArgs(args: string[]): Record<string, unknown> {
     return index >= 0 ? args[index + 1] : undefined;
   };
   const provider = value("--provider");
-  if (!provider)
+  if (!provider) {
     throw new ApiError(
       "INVALID_COMMAND",
       "Use passport accounts connect --provider gmail|microsoft [--no-calendar] [--agent codex|claude-code]",
     );
+  }
   const agent = value("--agent");
   return { provider, calendar: !args.includes("--no-calendar"), ...(agent ? { agent } : {}) };
 }
@@ -55,29 +56,41 @@ export async function followSetupTask(
     const task = await client.get(id);
     for (const step of task.steps) {
       const key = `${step.status}|${step.detail ?? ""}`;
-      if (steps.get(step.id) === key || step.status === "pending") continue;
+      if (steps.get(step.id) === key || step.status === "pending") {
+        continue;
+      }
       steps.set(step.id, key);
       print(`[${MARK[step.status]}] ${step.title}${step.detail ? ` — ${step.detail}` : ""}`);
     }
     for (const line of task.log) {
       const key = `${line.at}|${line.text}`;
-      if (printed.has(key)) continue;
+      if (printed.has(key)) {
+        continue;
+      }
       printed.add(key);
       print(`    ${line.level === "info" ? "" : `${line.level}: `}${line.text}`);
     }
-    if (TERMINAL.includes(task.status)) return task;
+    if (TERMINAL.includes(task.status)) {
+      return task;
+    }
     if (task.prompt && task.prompt.id !== answered) {
       answered = task.prompt.id;
       const answer = await ask(task.prompt);
       try {
         await client.respond(id, task.prompt.id, answer);
       } catch (error) {
-        if (!(error instanceof ApiError) || !["PROMPT_STALE", "TASK_FINISHED"].includes(error.code))
+        if (
+          !(error instanceof ApiError) ||
+          !["PROMPT_STALE", "TASK_FINISHED"].includes(error.code)
+        ) {
           throw error;
+        }
       }
       continue;
     }
-    if (options.signal?.aborted) return client.get(id);
+    if (options.signal?.aborted) {
+      return client.get(id);
+    }
     await new Promise((resolve) => setTimeout(resolve, options.intervalMs ?? 1000));
   }
 }
@@ -154,7 +167,9 @@ export async function connectCommand(args: string[]): Promise<void> {
   const interrupt = () => {
     console.log("\nCancelling…");
     interrupted.abort();
-    if (id) void client.cancel(id).catch(() => undefined);
+    if (id) {
+      void client.cancel(id).catch(() => undefined);
+    }
   };
   process.once("SIGINT", interrupt);
   rl.on("SIGINT", interrupt);
@@ -170,8 +185,9 @@ export async function connectCommand(args: string[]): Promise<void> {
         console.log(`\n>> ${prompt.message}`);
         // An interrupted question resolves; the next poll then sees the cancelled task.
         try {
-          if (prompt.kind === "question")
+          if (prompt.kind === "question") {
             return await rl.question("Your answer: ", { signal: interrupted.signal });
+          }
           await rl.question("Press Enter when done… ", { signal: interrupted.signal });
         } catch {
           /* interrupted */
@@ -181,9 +197,9 @@ export async function connectCommand(args: string[]): Promise<void> {
       (line) => console.log(line),
       { signal: interrupted.signal },
     );
-    if (task.status === "completed")
+    if (task.status === "completed") {
       console.log(`\nConnected. Accounts: ${task.result?.accountIds.join(", ") ?? "none"}.`);
-    else {
+    } else {
       console.log(
         `\nSetup ${task.status}.${task.error ? ` ${task.error}` : ""} See docs/accounts.md to set up manually.`,
       );

@@ -229,25 +229,32 @@ export class MockMailProvider implements MailProvider {
     return clone(this.sent);
   }
   async connect(account: Account, _credentials: AccountCredentials = {}): Promise<void> {
-    if (this.account && this.account.id !== account.id)
+    if (this.account && this.account.id !== account.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Use a separate mock instance per account");
+    }
     const first = !this.account;
     this.account = clone(account);
     this.connected = true;
-    if (first && this.options.fixtures !== false)
-      for (const email of createMockEmails(account.id, account.emailAddress)) this.store(email);
+    if (first && this.options.fixtures !== false) {
+      for (const email of createMockEmails(account.id, account.emailAddress)) {
+        this.store(email);
+      }
+    }
   }
   async disconnect(): Promise<void> {
     this.connected = false;
     this.wake();
   }
   private check(): Account {
-    if (!this.account || !this.connected)
+    if (!this.account || !this.connected) {
       throw new ProviderError("NOT_CONNECTED", "Connect the mock provider first");
+    }
     return this.account;
   }
   private wake(): void {
-    for (const done of [...this.waiters]) done();
+    for (const done of [...this.waiters]) {
+      done();
+    }
   }
   private store(email: Email): Email {
     this.emails.set(email.providerId, clone(email));
@@ -288,7 +295,9 @@ export class MockMailProvider implements MailProvider {
   }
   async createMailbox(name: string): Promise<Mailbox> {
     const account = this.check();
-    if (!this.folderNames.includes(name)) this.folderNames.push(name);
+    if (!this.folderNames.includes(name)) {
+      this.folderNames.push(name);
+    }
     return {
       id: localId(account.id, "mailbox", name),
       accountId: account.id,
@@ -310,8 +319,9 @@ export class MockMailProvider implements MailProvider {
         !Number.isInteger(c.revision) ||
         c.revision < 0 ||
         c.revision > end
-      )
+      ) {
         throw new ProviderError("INVALID_CURSOR", "Mock cursor does not belong to this mailbox");
+      }
       start = c.revision;
     }
     const emails = clone([...this.emails.values()]);
@@ -344,67 +354,86 @@ export class MockMailProvider implements MailProvider {
       ? clone(this.changes.slice(start, end))
       : emails.map((email) => ({ kind: "email", op: "upsert", email }) as const);
     for (const delta of deltas) {
-      if (delta.kind === "email" && delta.op === "upsert" && this.options.verifier)
+      if (delta.kind === "email" && delta.op === "upsert" && this.options.verifier) {
         delta.email.verification = await verifyHeaders(delta.email.headers, this.options.verifier);
+      }
       yield delta;
     }
     const threads = new Map<string, string[]>();
-    for (const e of emails)
+    for (const e of emails) {
       (threads.get(e.threadId) ?? (threads.set(e.threadId, []), threads.get(e.threadId)!)).push(
         e.id,
       );
-    for (const [id, emailIds] of threads)
+    }
+    for (const [id, emailIds] of threads) {
       yield { kind: "thread", op: "upsert", thread: { id, accountId: account.id, emailIds } };
+    }
     yield { kind: "cursor", cursor: encodeCursor({ account: account.id, revision: end }) };
   }
   async getEmail(providerId: string): Promise<Email | null> {
     this.check();
     const email = clone(this.emails.get(providerId) ?? null);
-    if (email && this.options.verifier)
+    if (email && this.options.verifier) {
       email.verification = await verifyHeaders(email.headers, this.options.verifier);
+    }
     return email;
   }
   async getBlob(blobId: string): Promise<{ type: string; data: Uint8Array }> {
     this.check();
     const stored = this.blobs.get(blobId);
-    if (stored) return clone(stored);
+    if (stored) {
+      return clone(stored);
+    }
     const email = this.emails.get(blobId.replace(/^mock-invite:/, ""));
-    if (!blobId.startsWith("mock-invite:") || !email?.attachments.some((a) => a.blobId === blobId))
+    if (
+      !blobId.startsWith("mock-invite:") ||
+      !email?.attachments.some((a) => a.blobId === blobId)
+    ) {
       throw new ProviderError("NOT_FOUND", "Mock attachment does not exist");
+    }
     return { type: "text/calendar", data: Buffer.from(mockInvite(email.providerId)) };
   }
   async applyChanges(changes: MailChange[]): Promise<void> {
     const account = this.check();
-    for (const change of changes)
+    for (const change of changes) {
       for (const id of change.providerIds) {
         const email = this.emails.get(id);
-        if (!email) throw new ProviderError("NOT_FOUND", "Mock email does not exist");
+        if (!email) {
+          throw new ProviderError("NOT_FOUND", "Mock email does not exist");
+        }
         const next = clone(email);
         if (change.op === "setKeywords") {
-          for (const k of change.add ?? []) next.keywords[k] = true;
-          for (const k of change.remove ?? []) delete next.keywords[k];
-        } else if (change.op === "move")
+          for (const k of change.add ?? []) {
+            next.keywords[k] = true;
+          }
+          for (const k of change.remove ?? []) {
+            delete next.keywords[k];
+          }
+        } else if (change.op === "move") {
           next.mailboxIds = [localId(account.id, "mailbox", change.toMailboxProviderId)];
-        else if (change.op === "delete")
+        } else if (change.op === "delete") {
           next.mailboxIds = [localId(account.id, "mailbox", "Trash")];
-        else if (change.op === "addToMailbox")
+        } else if (change.op === "addToMailbox") {
           next.mailboxIds = [
             ...new Set([
               ...next.mailboxIds,
               localId(account.id, "mailbox", change.mailboxProviderId),
             ]),
           ];
-        else
+        } else {
           next.mailboxIds = next.mailboxIds.filter(
             (id) => id !== localId(account.id, "mailbox", change.mailboxProviderId),
           );
+        }
         this.store(next);
       }
+    }
   }
   private async draftEmail(draft: DraftInput, providerId: string): Promise<Email> {
     const account = this.check();
-    if (draft.accountId !== account.id)
+    if (draft.accountId !== account.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Draft belongs to a different account");
+    }
     const reply = await resolveReplyEmail(
       account.id,
       draft.inReplyToEmailId,
@@ -413,8 +442,9 @@ export class MockMailProvider implements MailProvider {
     );
     // Store thread IDs have also been remapped; retain the provider's native thread here.
     const nativeReply = reply ? await this.getEmail(reply.providerId) : null;
-    if (reply && !nativeReply)
+    if (reply && !nativeReply) {
       throw new ProviderError("NOT_FOUND", "Mock reply email does not exist");
+    }
     return {
       ...createMockEmails(account.id, account.emailAddress)[0]!,
       id: localId(account.id, "email", providerId),
@@ -452,20 +482,26 @@ export class MockMailProvider implements MailProvider {
   }
   async createDraft(draft: DraftInput): Promise<Email> {
     const email = await this.draftEmail(draft, `draft-${++this.sequence}`);
-    for (const a of email.attachments) a.size = (await this.getBlob(a.blobId)).data.byteLength;
+    for (const a of email.attachments) {
+      a.size = (await this.getBlob(a.blobId)).data.byteLength;
+    }
     return this.store(email);
   }
   async updateDraft(providerId: string, draft: DraftInput): Promise<Email> {
-    if (!this.emails.get(providerId)?.keywords.$draft)
+    if (!this.emails.get(providerId)?.keywords.$draft) {
       throw new ProviderError("NOT_FOUND", "Mock draft does not exist");
+    }
     const email = await this.draftEmail(draft, providerId);
-    for (const a of email.attachments) a.size = (await this.getBlob(a.blobId)).data.byteLength;
+    for (const a of email.attachments) {
+      a.size = (await this.getBlob(a.blobId)).data.byteLength;
+    }
     return this.store(email);
   }
   async deleteDraft(providerId: string): Promise<void> {
     this.check();
-    if (!this.emails.get(providerId)?.keywords.$draft)
+    if (!this.emails.get(providerId)?.keywords.$draft) {
       throw new ProviderError("NOT_FOUND", "Mock draft does not exist");
+    }
     this.emails.delete(providerId);
     this.changes.push({ kind: "email", op: "delete", providerId });
     this.wake();
@@ -476,7 +512,9 @@ export class MockMailProvider implements MailProvider {
     const email = input.draft
       ? await this.createDraft(input.draft)
       : await this.getEmail(input.draftProviderId!);
-    if (!email?.keywords.$draft) throw new ProviderError("NOT_FOUND", "Mock draft does not exist");
+    if (!email?.keywords.$draft) {
+      throw new ProviderError("NOT_FOUND", "Mock draft does not exist");
+    }
     delete email.keywords.$draft;
     email.mailboxIds = [localId(account.id, "mailbox", "Sent")];
     email.sentAt = (this.options.now?.() ?? new Date(fixtureEpoch)).toISOString();
@@ -490,7 +528,9 @@ export class MockMailProvider implements MailProvider {
   }
   async waitForChanges(signal: AbortSignal): Promise<void> {
     this.check();
-    if (signal.aborted) return;
+    if (signal.aborted) {
+      return;
+    }
     await new Promise<void>((resolve) => {
       const done = () => {
         this.waiters.delete(done);
@@ -519,13 +559,14 @@ export class MockCalendarProvider implements CalendarProvider {
   private sequence = 0;
   private folderNames = [...folderNames];
   async connect(account: Account, _credentials: AccountCredentials = {}): Promise<void> {
-    if (this.account && this.account.id !== account.id)
+    if (this.account && this.account.id !== account.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Use a separate mock instance per account");
+    }
     const first = !this.account;
     this.account = clone(account);
     this.connected = true;
-    if (first)
-      for (let i = 0; i < 6; i++)
+    if (first) {
+      for (let i = 0; i < 6; i++) {
         await this.createEvent({
           accountId: account.id,
           calendarId: localId(account.id, "calendar", "primary"),
@@ -544,13 +585,16 @@ export class MockCalendarProvider implements CalendarProvider {
           participants: [{ email: account.emailAddress, status: "accepted" }],
           myStatus: "accepted",
         });
+      }
+    }
   }
   async disconnect(): Promise<void> {
     this.connected = false;
   }
   private check(): Account {
-    if (!this.account || !this.connected)
+    if (!this.account || !this.connected) {
       throw new ProviderError("NOT_CONNECTED", "Connect the mock calendar first");
+    }
     return this.account;
   }
   async listCalendars(): Promise<Calendar[]> {
@@ -572,19 +616,23 @@ export class MockCalendarProvider implements CalendarProvider {
     const c = cursor
       ? decodeCursor<{ account: string; revision: number }>(cursor)
       : { account: a.id, revision: 0 };
-    if (c.account !== a.id || !Number.isInteger(c.revision) || c.revision < 0 || c.revision > end)
+    if (c.account !== a.id || !Number.isInteger(c.revision) || c.revision < 0 || c.revision > end) {
       throw new ProviderError("INVALID_CURSOR", "Invalid mock calendar cursor");
+    }
     const events = cursor
       ? this.changes.slice(c.revision, end)
       : [...this.events.values()].map((event) => ({ kind: "event", op: "upsert", event }) as const);
     // Sync a complete collection; moving an event out of a display window must reach the store.
-    for (const delta of clone(events)) yield delta;
+    for (const delta of clone(events)) {
+      yield delta;
+    }
     yield { kind: "cursor", cursor: encodeCursor({ account: a.id, revision: end }) };
   }
   async createEvent(input: EventInput): Promise<CalendarEvent> {
     const a = this.check();
-    if (input.accountId !== a.id)
+    if (input.accountId !== a.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Event belongs to another account");
+    }
     validateEvent(input);
     const providerId = `event-${++this.sequence}`,
       event: CalendarEvent = {
@@ -602,7 +650,9 @@ export class MockCalendarProvider implements CalendarProvider {
   async updateEvent(providerId: string, patch: Partial<CalendarEvent>): Promise<CalendarEvent> {
     this.check();
     const previous = this.events.get(providerId);
-    if (!previous) throw new ProviderError("NOT_FOUND", "Mock event does not exist");
+    if (!previous) {
+      throw new ProviderError("NOT_FOUND", "Mock event does not exist");
+    }
     const event = {
       ...previous,
       ...clone(patch),
@@ -620,14 +670,17 @@ export class MockCalendarProvider implements CalendarProvider {
   }
   async deleteEvent(providerId: string): Promise<void> {
     this.check();
-    if (!this.events.delete(providerId))
+    if (!this.events.delete(providerId)) {
       throw new ProviderError("NOT_FOUND", "Mock event does not exist");
+    }
     this.changes.push({ kind: "event", op: "delete", providerId });
   }
   async respond(providerId: string, status: ParticipationStatus): Promise<void> {
     const a = this.check(),
       event = this.events.get(providerId);
-    if (!event) throw new ProviderError("NOT_FOUND", "Mock event does not exist");
+    if (!event) {
+      throw new ProviderError("NOT_FOUND", "Mock event does not exist");
+    }
     await this.updateEvent(providerId, {
       myStatus: status,
       participants: event.participants.map((p) =>

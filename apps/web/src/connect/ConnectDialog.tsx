@@ -4,7 +4,9 @@ import { SetupFlow } from "./SetupFlow";
 
 export function ConnectDialog() {
   const { connecting, setConnecting } = useUi();
-  if (!connecting) return null;
+  if (!connecting) {
+    return null;
+  }
   return (
     <Dialog
       title="Connect an account"

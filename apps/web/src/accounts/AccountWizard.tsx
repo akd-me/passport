@@ -52,26 +52,33 @@ export function AccountWizard({
     task = useTask(),
     { refresh } = useWorkspace();
   useEffect(() => {
-    if (!attempt) return;
+    if (!attempt) {
+      return;
+    }
     let stopped = false,
       timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
         const result = await accountApi.status(attempt.attemptId);
-        if (stopped) return;
+        if (stopped) {
+          return;
+        }
         setStatus(result);
         if (result.status === "connected") {
           refresh();
           return;
         }
-        if (result.status === "failed") return;
+        if (result.status === "failed") {
+          return;
+        }
         timer = setTimeout(poll, 2000);
       } catch {
-        if (!stopped)
+        if (!stopped) {
           setStatus({
             status: "failed",
             error: "Authorization expired. Connect again to retry.",
           });
+        }
       }
     };
     void poll();
@@ -100,6 +107,21 @@ export function AccountWizard({
     setTested(false);
   };
   const callback = `${location.origin}/oauth/callback`;
+  function connectionMessage() {
+    if (status?.status === "connected") {
+      if (linked?.lastSyncError) {
+        return `Connected. Sync needs attention: ${linked.lastSyncError}`;
+      }
+      if (linked?.lastSyncAt && !linked.syncing) {
+        return `Connected and synced ${linked.messageCount ?? 0} messages.`;
+      }
+      return "Connected. Initial sync is running…";
+    }
+    if (status?.status === "failed") {
+      return "Connection was not completed.";
+    }
+    return "Waiting for authorization in the other tab…";
+  }
   return (
     <form
       className="manual-setup"
@@ -108,7 +130,9 @@ export function AccountWizard({
         if (oauth) {
           // Reserve the tab during the click, before the asynchronous API response.
           const tab = window.open("about:blank", "_blank");
-          if (tab) tab.opener = null;
+          if (tab) {
+            tab.opener = null;
+          }
           const ok = await task.run(async () => {
             const result = await accountApi.start({
               kind,
@@ -120,16 +144,22 @@ export function AccountWizard({
             setAttempt(result);
             setStatus({ status: "authorizing" });
             setFields((f) => ({ ...f, clientSecret: "" }));
-            if (tab) tab.location.href = result.authUrl;
+            if (tab) {
+              tab.location.href = result.authUrl;
+            }
           }, "Authorization opened. Return here after granting access.");
-          if (!ok) tab?.close();
+          if (!ok) {
+            tab?.close();
+          }
         } else {
           const ok = await task.run(async () => {
             const added = await api.addAccount(input());
             setFields({});
             await api.sync(added.id);
           }, "Account connected and synced.");
-          if (ok) onClose();
+          if (ok) {
+            onClose();
+          }
         }
       }}
     >
@@ -304,17 +334,7 @@ export function AccountWizard({
       {attempt && (
         <div className="progress-note" role="status">
           {status?.status === "authorizing" && <Icon name="spinner" size={14} />}
-          <span>
-            {status?.status === "connected"
-              ? linked?.lastSyncError
-                ? `Connected. Sync needs attention: ${linked.lastSyncError}`
-                : linked?.lastSyncAt && !linked.syncing
-                  ? `Connected and synced ${linked.messageCount ?? 0} messages.`
-                  : "Connected. Initial sync is running…"
-              : status?.status === "failed"
-                ? "Connection was not completed."
-                : "Waiting for authorization in the other tab…"}
-          </span>
+          <span>{connectionMessage()}</span>
           {status?.status === "authorizing" && (
             <a href={attempt.authUrl} target="_blank" rel="noopener noreferrer">
               Open authorization tab

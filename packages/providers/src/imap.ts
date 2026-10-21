@@ -77,17 +77,20 @@ const flagMap: Record<string, string> = {
 export function imapFlagsToKeywords(flags: Iterable<string>): Email["keywords"] {
   const reverse = Object.fromEntries(Object.entries(flagMap).map(([k, v]) => [v.toLowerCase(), k]));
   const result: Email["keywords"] = {};
-  for (const flag of flags)
-    if (flag !== "\\Deleted" && flag !== "\\Recent")
+  for (const flag of flags) {
+    if (flag !== "\\Deleted" && flag !== "\\Recent") {
       result[reverse[flag.toLowerCase()] ?? flag] = true;
+    }
+  }
   return result;
 }
 function identity(path: string, validity: string, uid: number): string {
   return `imap:${encodeCursor([path, validity, uid])}`;
 }
 function parseIdentity(providerId: string): [string, string, number] {
-  if (!providerId.startsWith("imap:"))
+  if (!providerId.startsWith("imap:")) {
     throw new ProviderError("INVALID_PROVIDER_ID", "Invalid IMAP message identity");
+  }
   const v = decodeCursor<unknown>(providerId.slice(5));
   if (
     !Array.isArray(v) ||
@@ -95,8 +98,9 @@ function parseIdentity(providerId: string): [string, string, number] {
     typeof v[1] !== "string" ||
     !Number.isInteger(v[2]) ||
     v[2] < 1
-  )
+  ) {
     throw new ProviderError("INVALID_PROVIDER_ID", "Invalid IMAP UID identity");
+  }
   return v as [string, string, number];
 }
 
@@ -110,11 +114,12 @@ export class ImapMailProvider implements MailProvider {
   private terminalError?: ProviderError;
   constructor(private readonly options: ImapProviderOptions = {}) {}
   async connect(account: Account, credentials: AccountCredentials): Promise<void> {
-    if (this.client)
+    if (this.client) {
       throw new ProviderError(
         "ALREADY_CONNECTED",
         "Disconnect the IMAP provider before connecting again",
       );
+    }
     this.account = structuredClone(account);
     this.terminalError = undefined;
     const auth = credentials.access_token
@@ -173,15 +178,21 @@ export class ImapMailProvider implements MailProvider {
     }
   }
   private check(): ImapFlow {
-    if (this.terminalError) throw this.terminalError;
-    if (!this.client) throw new ProviderError("NOT_CONNECTED", "Connect the IMAP provider first");
+    if (this.terminalError) {
+      throw this.terminalError;
+    }
+    if (!this.client) {
+      throw new ProviderError("NOT_CONNECTED", "Connect the IMAP provider first");
+    }
     return this.client;
   }
   private async guard<T>(fn: () => Promise<T>): Promise<T> {
     try {
       return await fn();
     } catch (e) {
-      if (e instanceof ProviderError) throw e;
+      if (e instanceof ProviderError) {
+        throw e;
+      }
       throw new ProviderError("IMAP_ERROR", "IMAP operation failed");
     }
   }
@@ -190,7 +201,7 @@ export class ImapMailProvider implements MailProvider {
     this.client = undefined;
     this.smtp?.close();
     this.smtp = undefined;
-    if (client)
+    if (client) {
       await this.guard(async () => {
         try {
           await client.logout();
@@ -198,14 +209,16 @@ export class ImapMailProvider implements MailProvider {
           client.close();
         }
       });
+    }
   }
   private async normalize(
     message: FetchMessageObject,
     path: string,
     validity: string,
   ): Promise<Email> {
-    if (!message.source)
+    if (!message.source) {
       throw new ProviderError("INVALID_RESPONSE", "IMAP FETCH did not return message source");
+    }
     return normalizeMime(message.source, {
       accountId: this.account.id,
       providerId: identity(path, validity, message.uid),
@@ -224,22 +237,27 @@ export class ImapMailProvider implements MailProvider {
         previous: ImapCursor = cursor
           ? decodeCursor<ImapCursor>(cursor)
           : { account: this.account.id, folders: {} };
-      if (previous.account !== this.account.id || !previous.folders)
+      if (previous.account !== this.account.id || !previous.folders) {
         throw new ProviderError("INVALID_CURSOR", "Invalid IMAP account cursor");
+      }
       const since = previous.since ?? opts.since;
       const next: ImapCursor = { account: this.account.id, since, folders: {} },
         folders = (await client.list()).filter((f) => !f.flags.has("\\Noselect"));
-      for (const [path, saved] of Object.entries(previous.folders))
+      for (const [path, saved] of Object.entries(previous.folders)) {
         if (!folders.some((f) => f.path === path)) {
           yield { kind: "mailbox", op: "delete", id: localId(this.account.id, "mailbox", path) };
-          for (const uid of saved.uids)
+          for (const uid of saved.uids) {
             yield { kind: "email", op: "delete", providerId: identity(path, saved.validity, uid) };
+          }
         }
+      }
       for (const folder of folders) {
         const lock = await client.getMailboxLock(folder.path);
         try {
           const selected = client.mailbox;
-          if (!selected) throw new ProviderError("IMAP_ERROR", "IMAP mailbox selection failed");
+          if (!selected) {
+            throw new ProviderError("IMAP_ERROR", "IMAP mailbox selection failed");
+          }
           const validity = String(selected.uidValidity),
             modseq = selected.highestModseq ? String(selected.highestModseq) : null,
             uidNext = selected.uidNext;
@@ -248,17 +266,21 @@ export class ImapMailProvider implements MailProvider {
           const uids = await client.search(since ? { since: new Date(since) } : { all: true }, {
             uid: true,
           });
-          if (!Array.isArray(uids))
+          if (!Array.isArray(uids)) {
             throw new ProviderError("IMAP_ERROR", "IMAP UID enumeration failed");
+          }
           const current = new Set(uids);
-          if (old)
-            for (const uid of old.uids)
-              if (!same || !current.has(uid))
+          if (old) {
+            for (const uid of old.uids) {
+              if (!same || !current.has(uid)) {
                 yield {
                   kind: "email",
                   op: "delete",
                   providerId: identity(folder.path, old.validity, uid),
                 };
+              }
+            }
+          }
           const status = await client.status(folder.path, { messages: true, unseen: true });
           yield {
             kind: "mailbox",
@@ -286,7 +308,7 @@ export class ImapMailProvider implements MailProvider {
                   uids.slice(i * 100, i * 100 + 100).join(","),
                 )
               : ["1:*"];
-            for (const range of ranges)
+            for (const range of ranges) {
               for await (const message of client.fetch(
                 range,
                 { uid: true, flags: true, source: true, internalDate: true },
@@ -297,13 +319,15 @@ export class ImapMailProvider implements MailProvider {
                   (!since ||
                     !message.internalDate ||
                     new Date(message.internalDate).getTime() >= Date.parse(since))
-                )
+                ) {
                   yield {
                     kind: "email",
                     op: "upsert",
                     email: await this.normalize(message, folder.path, validity),
                   };
+                }
               }
+            }
           }
           next.folders[folder.path] = {
             validity,
@@ -317,7 +341,9 @@ export class ImapMailProvider implements MailProvider {
       }
       yield { kind: "cursor", cursor: encodeCursor(next) };
     } catch (e) {
-      if (e instanceof ProviderError) throw e;
+      if (e instanceof ProviderError) {
+        throw e;
+      }
       throw new ProviderError("IMAP_SYNC_FAILED", "IMAP synchronization failed");
     }
   }
@@ -330,8 +356,9 @@ export class ImapMailProvider implements MailProvider {
         [path, validity, uid] = parseIdentity(providerId),
         lock = await client.getMailboxLock(path);
       try {
-        if (!client.mailbox || String(client.mailbox.uidValidity) !== validity)
+        if (!client.mailbox || String(client.mailbox.uidValidity) !== validity) {
           throw new ProviderError("STALE_ID", "IMAP UIDVALIDITY changed; resync this mailbox");
+        }
         return await fn(client, path, validity, uid);
       } finally {
         lock.release();
@@ -349,7 +376,9 @@ export class ImapMailProvider implements MailProvider {
         return message ? this.normalize(message, path, validity) : null;
       });
     } catch (e) {
-      if (e instanceof ProviderError && e.code === "STALE_ID") return null;
+      if (e instanceof ProviderError && e.code === "STALE_ID") {
+        return null;
+      }
       throw e;
     }
   }
@@ -357,32 +386,36 @@ export class ImapMailProvider implements MailProvider {
     const [id, index] = decodeMimeBlob(blobId);
     return this.withMessage(id, async (client, _path, _validity, uid) => {
       const message = await client.fetchOne(uid, { source: true }, { uid: true });
-      if (!message || !message.source)
+      if (!message || !message.source) {
         throw new ProviderError("NOT_FOUND", "IMAP message source is missing");
+      }
       return mimeAttachment(message.source, index);
     });
   }
   private async folder(role: string): Promise<string> {
     const configured = this.account.settings[`${role}Folder`];
-    if (typeof configured === "string") return configured;
+    if (typeof configured === "string") {
+      return configured;
+    }
     const names: Record<string, string> = { drafts: "\\Drafts", sent: "\\Sent", trash: "\\Trash" };
     const found = (await this.check().list()).find((f) => f.specialUse === names[role]);
-    if (!found)
+    if (!found) {
       throw new ProviderError("MAILBOX_NOT_FOUND", `Configure ${role}Folder for this IMAP server`);
+    }
     return found.path;
   }
   async applyChanges(changes: MailChange[]): Promise<MailChangeResult[]> {
     const results: MailChangeResult[] = [];
     for (const c of changes) {
-      const destination =
-        c.op === "delete"
-          ? await this.folder("trash")
-          : c.op === "move"
-            ? c.toMailboxProviderId
-            : c.op === "addToMailbox"
-              ? c.mailboxProviderId
-              : undefined;
-      for (const id of c.providerIds)
+      let destination: string | undefined;
+      if (c.op === "delete") {
+        destination = await this.folder("trash");
+      } else if (c.op === "move") {
+        destination = c.toMailboxProviderId;
+      } else if (c.op === "addToMailbox") {
+        destination = c.mailboxProviderId;
+      }
+      for (const id of c.providerIds) {
         await this.withMessage(id, async (client, path, _validity, uid) => {
           if (c.op === "setKeywords") {
             if (
@@ -392,8 +425,9 @@ export class ImapMailProvider implements MailProvider {
                 c.add.map((k) => flagMap[k] ?? k),
                 { uid: true },
               ))
-            )
+            ) {
               throw new ProviderError("IMAP_ERROR", "IMAP flag update failed");
+            }
             if (
               c.remove?.length &&
               !(await client.messageFlagsRemove(
@@ -401,8 +435,9 @@ export class ImapMailProvider implements MailProvider {
                 c.remove.map((k) => flagMap[k] ?? k),
                 { uid: true },
               ))
-            )
+            ) {
               throw new ProviderError("IMAP_ERROR", "IMAP flag update failed");
+            }
           } else {
             const target =
               c.op === "removeFromMailbox"
@@ -410,18 +445,23 @@ export class ImapMailProvider implements MailProvider {
                   ? await this.folder("trash")
                   : undefined
                 : destination;
-            if (!target || path === target) return;
+            if (!target || path === target) {
+              return;
+            }
             const result =
               c.op === "addToMailbox"
                 ? await client.messageCopy(uid, target, { uid: true })
                 : await client.messageMove(uid, target, { uid: true });
-            if (!result) throw new ProviderError("IMAP_ERROR", "IMAP copy or move failed");
+            if (!result) {
+              throw new ProviderError("IMAP_ERROR", "IMAP copy or move failed");
+            }
             const newUid = result.uidMap?.get(uid);
-            if (!result.uidValidity || !newUid)
+            if (!result.uidValidity || !newUid) {
               throw new ProviderError(
                 "IMAP_UIDPLUS_REQUIRED",
                 "Mail changed folders without COPYUID; resync before retrying",
               );
+            }
             results.push({
               op: c.op,
               providerId: id,
@@ -430,6 +470,7 @@ export class ImapMailProvider implements MailProvider {
             });
           }
         });
+      }
     }
     return results;
   }
@@ -447,46 +488,57 @@ export class ImapMailProvider implements MailProvider {
     return this.guard(async () => {
       const path = await this.folder("drafts"),
         result = await this.check().append(path, await this.raw(draft), ["\\Draft", "\\Seen"]);
-      if (!result || !result.uid || !result.uidValidity)
+      if (!result || !result.uid || !result.uidValidity) {
         throw new ProviderError(
           "IMAP_UIDPLUS_REQUIRED",
           "Draft was appended, but the server did not return APPENDUID; resync Drafts before retrying",
         );
+      }
       const email = await this.getEmail(identity(path, String(result.uidValidity), result.uid));
-      if (!email) throw new ProviderError("NOT_FOUND", "Appended IMAP draft was not readable");
+      if (!email) {
+        throw new ProviderError("NOT_FOUND", "Appended IMAP draft was not readable");
+      }
       return email;
     });
   }
   async updateDraft(providerId: string, draft: DraftInput): Promise<Email> {
-    if (!(await this.getEmail(providerId))?.keywords.$draft)
+    if (!(await this.getEmail(providerId))?.keywords.$draft) {
       throw new ProviderError("NOT_A_DRAFT", "IMAP message is not a draft");
+    }
     const replacement = await this.createDraft(draft);
     await this.deleteDraft(providerId);
     return replacement;
   }
   async deleteDraft(providerId: string): Promise<void> {
-    if (!(await this.getEmail(providerId))?.keywords.$draft)
+    if (!(await this.getEmail(providerId))?.keywords.$draft) {
       throw new ProviderError("NOT_A_DRAFT", "IMAP message is not a draft");
+    }
     await this.withMessage(providerId, async (client, _path, _validity, uid) => {
-      if (!(await client.messageDelete(uid, { uid: true })))
+      if (!(await client.messageDelete(uid, { uid: true }))) {
         throw new ProviderError("IMAP_ERROR", "IMAP draft removal failed");
+      }
     });
   }
   async send(input: { draftProviderId?: string; draft?: DraftInput }): Promise<SendResult> {
     assertSend(input);
     this.check();
-    if (!this.smtp)
+    if (!this.smtp) {
       throw new ProviderError("SMTP_NOT_CONFIGURED", "Configure smtpHost to submit IMAP mail");
+    }
     let raw: Buffer,
       email: Email | null = null;
-    if (input.draft) raw = await this.raw(input.draft);
-    else {
+    if (input.draft) {
+      raw = await this.raw(input.draft);
+    } else {
       email = await this.getEmail(input.draftProviderId!);
-      if (!email?.keywords.$draft)
+      if (!email?.keywords.$draft) {
         throw new ProviderError("NOT_A_DRAFT", "IMAP draft does not exist");
+      }
       raw = await this.withMessage(email.providerId, async (client, _path, _validity, uid) => {
         const m = await client.fetchOne(uid, { source: true }, { uid: true });
-        if (!m || !m.source) throw new ProviderError("NOT_FOUND", "IMAP draft source is missing");
+        if (!m || !m.source) {
+          throw new ProviderError("NOT_FOUND", "IMAP draft source is missing");
+        }
         return m.source;
       });
     }
@@ -523,9 +575,12 @@ export class ImapMailProvider implements MailProvider {
     try {
       const path = await this.folder("sent"),
         appended = await this.check().append(path, raw, ["\\Seen"]);
-      if (!appended || !appended.uid || !appended.uidValidity)
+      if (!appended || !appended.uid || !appended.uidValidity) {
         throw new SubmissionAcceptedError(messageId);
-      if (email) await this.deleteDraft(email.providerId);
+      }
+      if (email) {
+        await this.deleteDraft(email.providerId);
+      }
       return { providerId: identity(path, String(appended.uidValidity), appended.uid), messageId };
     } catch {
       throw new SubmissionAcceptedError(messageId);
@@ -533,21 +588,28 @@ export class ImapMailProvider implements MailProvider {
   }
   async waitForChanges(signal: AbortSignal): Promise<void> {
     const client = this.check();
-    if (signal.aborted) return;
+    if (signal.aborted) {
+      return;
+    }
     if (!client.mailbox || client.mailbox.path.toUpperCase() !== "INBOX") {
       const lock = await client.getMailboxLock("INBOX");
       lock.release();
     }
     await new Promise<void>((resolve) => {
       const done = () => {
-        for (const event of ["exists", "flags", "expunge", "close", "error"])
+        for (const event of ["exists", "flags", "expunge", "close", "error"]) {
           client.off(event, done);
+        }
         signal.removeEventListener("abort", done);
         resolve();
       };
-      for (const event of ["exists", "flags", "expunge", "close", "error"]) client.on(event, done);
+      for (const event of ["exists", "flags", "expunge", "close", "error"]) {
+        client.on(event, done);
+      }
       signal.addEventListener("abort", done, { once: true });
-      if (signal.aborted) done();
+      if (signal.aborted) {
+        done();
+      }
     });
   }
 }

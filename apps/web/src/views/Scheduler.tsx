@@ -5,7 +5,9 @@ import { useResource, useTask } from "../state";
 
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export function describeSchedule(schedule: JobSchedule) {
-  if (schedule.type === "manual") return "On demand";
+  if (schedule.type === "manual") {
+    return "On demand";
+  }
   if (schedule.type === "interval") {
     const seconds = schedule.everyMs / 1000;
     const value =
@@ -23,15 +25,19 @@ export function describeSchedule(schedule: JobSchedule) {
 const duration = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
 function countdown(at: string, now: number) {
   const seconds = Math.max(0, Math.ceil((Date.parse(at) - now) / 1000));
-  return seconds === 0
-    ? "Due now"
-    : seconds < 60
-      ? `in ${seconds}s`
-      : seconds < 3600
-        ? `in ${Math.ceil(seconds / 60)}m`
-        : seconds < 86400
-          ? `in ${Math.floor(seconds / 3600)}h ${Math.ceil((seconds % 3600) / 60)}m`
-          : `in ${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
+  if (seconds === 0) {
+    return "Due now";
+  }
+  if (seconds < 60) {
+    return `in ${seconds}s`;
+  }
+  if (seconds < 3600) {
+    return `in ${Math.ceil(seconds / 60)}m`;
+  }
+  if (seconds < 86400) {
+    return `in ${Math.floor(seconds / 3600)}h ${Math.ceil((seconds % 3600) / 60)}m`;
+  }
+  return `in ${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
 }
 function JobRow({ job, now, onHistory }: { job: Job; now: number; onHistory(job: Job): void }) {
   const task = useTask();
@@ -96,7 +102,9 @@ function JobRow({ job, now, onHistory }: { job: Job; now: number; onHistory(job:
             onClick={() =>
               task.run(async () => {
                 const run = await jobsApi.run(job.id);
-                if (run.status === "error") throw new Error(run.summary ?? "Job failed");
+                if (run.status === "error") {
+                  throw new Error(run.summary ?? "Job failed");
+                }
               }, "Run complete.")
             }
           >
@@ -205,7 +213,9 @@ function JobHistory({ job, onClose }: { job: Job; onClose(): void }) {
           className="btn btn-danger"
           disabled={task.busy}
           onClick={async () => {
-            if (await task.run(() => jobsApi.remove(job.id), "Routine deleted.")) onClose();
+            if (await task.run(() => jobsApi.remove(job.id), "Routine deleted.")) {
+              onClose();
+            }
           }}
         >
           Delete routine
@@ -250,8 +260,9 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
             () => jobsApi.add({ name, schedule, routine: { instruction } }),
             "Routine created.",
           )
-        )
+        ) {
           onCreated();
+        }
       }}
     >
       <label className="field">

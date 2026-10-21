@@ -26,9 +26,13 @@ function limitOf(limit = 50): number {
 
 function decodeCursor(value: string, sort: string): Cursor {
   try {
-    if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error();
+    if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+      throw new Error();
+    }
     const cursor: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-    if (!cursor || typeof cursor !== "object") throw new Error();
+    if (!cursor || typeof cursor !== "object") {
+      throw new Error();
+    }
     const c = cursor as Partial<Cursor>;
     if (
       c.v !== 1 ||
@@ -37,8 +41,9 @@ function decodeCursor(value: string, sort: string): Cursor {
       !Number.isFinite(Date.parse(c.at)) ||
       typeof c.id !== "string" ||
       !c.id
-    )
+    ) {
       throw new Error();
+    }
     return c as Cursor;
   } catch {
     throw new StoreError(
@@ -75,9 +80,14 @@ class SQLiteStore implements Store {
   ) {}
 
   private statement(sql: string): StatementSync {
-    if (this.closed) throw new StoreError("STORE_CLOSED", "The store is closed");
+    if (this.closed) {
+      throw new StoreError("STORE_CLOSED", "The store is closed");
+    }
     let statement = this.statements.get(sql);
-    if (!statement) this.statements.set(sql, (statement = this.db.prepare(sql)));
+    if (!statement) {
+      statement = this.db.prepare(sql);
+      this.statements.set(sql, statement);
+    }
     return statement;
   }
 
@@ -153,7 +163,9 @@ class SQLiteStore implements Store {
   }
 
   async close(): Promise<void> {
-    if (this.closed) return;
+    if (this.closed) {
+      return;
+    }
     this.db.close();
     this.closed = true;
     this.statements.clear();
@@ -169,16 +181,19 @@ class SQLiteStore implements Store {
     },
     delete: async (id) =>
       this.transaction(() => {
-        for (const row of this.all("SELECT id FROM emails WHERE account_id = ?", [id]))
+        for (const row of this.all("SELECT id FROM emails WHERE account_id = ?", [id])) {
           this.deleteEmail(row.id as string);
-        for (const row of this.all("SELECT id FROM events WHERE account_id = ?", [id]))
+        }
+        for (const row of this.all("SELECT id FROM events WHERE account_id = ?", [id])) {
           this.deleteEvent(row.id as string);
+        }
         this.run(
           "DELETE FROM email_mailboxes WHERE mailbox_id IN (SELECT id FROM mailboxes WHERE account_id = ?)",
           [id],
         );
-        for (const table of ["mailboxes", "threads", "calendars"])
+        for (const table of ["mailboxes", "threads", "calendars"]) {
           this.run(`DELETE FROM ${table} WHERE account_id = ?`, [id]);
+        }
         this.run("DELETE FROM credentials WHERE account_id = ?", [id]);
         this.run("DELETE FROM sync_state WHERE account_id = ?", [id]);
         this.run("DELETE FROM accounts WHERE id = ?", [id]);
@@ -193,7 +208,9 @@ class SQLiteStore implements Store {
     },
     getCredentials: async (accountId) => {
       const row = this.one("SELECT encrypted FROM credentials WHERE account_id = ?", [accountId]);
-      if (!row) return null;
+      if (!row) {
+        return null;
+      }
       return decryptCredentials(this.key, accountId, row.encrypted as Uint8Array);
     },
   };
@@ -216,11 +233,12 @@ class SQLiteStore implements Store {
     get: async (id) => this.get("mailboxes", id),
     upsertMany: async (mailboxes) =>
       this.transaction(() => {
-        for (const mailbox of mailboxes)
+        for (const mailbox of mailboxes) {
           this.put("mailboxes", mailbox.id, mailbox, {
             account_id: mailbox.accountId,
             provider_id: mailbox.providerId,
           });
+        }
       }),
     deleteMany: async (ids) =>
       this.transaction(() => {
@@ -258,11 +276,16 @@ class SQLiteStore implements Store {
     const email = this.parse<Email>(row);
     email.mailboxIds = this.ids("email_mailboxes", "email_id", email.id, "mailbox_id");
     email.personIds = this.ids("email_people", "email_id", email.id, "person_id");
-    if (row.matter_id !== null || email.matterId !== undefined)
+    if (row.matter_id !== null || email.matterId !== undefined) {
       email.matterId = row.matter_id as string | null;
+    }
     if (includeBodies) {
-      if (row.textBody !== null) email.textBody = row.textBody as string;
-      if (row.html_body !== null) email.htmlBody = row.html_body as string;
+      if (row.textBody !== null) {
+        email.textBody = row.textBody as string;
+      }
+      if (row.html_body !== null) {
+        email.htmlBody = row.html_body as string;
+      }
     } else {
       delete email.textBody;
       delete email.htmlBody;
@@ -300,18 +323,24 @@ class SQLiteStore implements Store {
     const previous = this.getEmail(input.id);
     const pending = this.one("SELECT matter_id FROM matter_emails WHERE email_id = ?", [input.id]);
     const email = { ...input };
-    if (email.textBody === undefined && previous?.textBody !== undefined)
+    if (email.textBody === undefined && previous?.textBody !== undefined) {
       email.textBody = previous.textBody;
-    if (email.htmlBody === undefined && previous?.htmlBody !== undefined)
+    }
+    if (email.htmlBody === undefined && previous?.htmlBody !== undefined) {
       email.htmlBody = previous.htmlBody;
+    }
     const matterId =
       email.matterId === undefined
         ? ((pending?.matter_id as string | undefined) ?? previous?.matterId ?? null)
         : email.matterId;
     const data = { ...email };
     // Store only presence markers in JSON; bodies live in separately selectable columns.
-    if (data.textBody !== undefined) data.textBody = null;
-    if (data.htmlBody !== undefined) data.htmlBody = null;
+    if (data.textBody !== undefined) {
+      data.textBody = null;
+    }
+    if (data.htmlBody !== undefined) {
+      data.htmlBody = null;
+    }
     this.put("emails", email.id, data, {
       account_id: email.accountId,
       provider_id: email.providerId,
@@ -361,15 +390,19 @@ class SQLiteStore implements Store {
           params.push(value);
         }
       };
-      if (!q.includeDeleted)
+      if (!q.includeDeleted) {
         where.push(
           "NOT EXISTS (SELECT 1 FROM json_each(e.data, '$.keywords') k WHERE k.key = '$deleted' AND k.type = 'true')",
         );
+      }
       equal("account_id", q.accountId);
       equal("thread_id", q.threadId);
       equal("category", q.category);
-      if (q.matterId === null) where.push("e.matter_id IS NULL");
-      else equal("matter_id", q.matterId);
+      if (q.matterId === null) {
+        where.push("e.matter_id IS NULL");
+      } else {
+        equal("matter_id", q.matterId);
+      }
       for (const [value, table, column] of [
         [q.mailboxId, "email_mailboxes", "mailbox_id"],
         [q.personId, "email_people", "person_id"],
@@ -433,20 +466,26 @@ class SQLiteStore implements Store {
     },
     upsertMany: async (emails) =>
       this.transaction(() => {
-        for (const email of emails) this.saveEmail(email);
+        for (const email of emails) {
+          this.saveEmail(email);
+        }
       }),
     patchMany: async (ids, patch) =>
       this.transaction(() => {
         for (const id of unique(ids)) {
           const email = this.getEmail(id);
-          if (!email) continue;
+          if (!email) {
+            continue;
+          }
           // Like other top-level patches, keywords and membership arrays replace their fields.
           this.saveEmail({ ...email, ...definedPatch(patch) });
         }
       }),
     deleteMany: async (ids) =>
       this.transaction(() => {
-        for (const id of unique(ids)) this.deleteEmail(id);
+        for (const id of unique(ids)) {
+          this.deleteEmail(id);
+        }
       }),
   };
 
@@ -454,8 +493,9 @@ class SQLiteStore implements Store {
     get: async (id) => this.get("threads", id),
     upsertMany: async (threads) =>
       this.transaction(() => {
-        for (const thread of threads)
+        for (const thread of threads) {
           this.put("threads", thread.id, thread, { account_id: thread.accountId });
+        }
       }),
   };
 
@@ -464,18 +504,20 @@ class SQLiteStore implements Store {
       this.rows("SELECT data FROM calendars WHERE account_id = ? ORDER BY id", [accountId]),
     upsertMany: async (calendars) =>
       this.transaction(() => {
-        for (const calendar of calendars)
+        for (const calendar of calendars) {
           this.put("calendars", calendar.id, calendar, {
             account_id: calendar.accountId,
             provider_id: calendar.providerId,
           });
+        }
       }),
   };
 
   private readEvent(row: Row): CalendarEvent {
     const event = this.parse<CalendarEvent>(row);
-    if (row.matter_id !== null || event.matterId !== undefined)
+    if (row.matter_id !== null || event.matterId !== undefined) {
       event.matterId = row.matter_id as string | null;
+    }
     return event;
   }
   private deleteEvent(id: string): void {
@@ -505,7 +547,9 @@ class SQLiteStore implements Store {
             : "start < ? AND end > ?",
         );
         params.push(q.range.end, q.range.start);
-        if (q.includeRecurring) params.push(q.range.end);
+        if (q.includeRecurring) {
+          params.push(q.range.end);
+        }
       }
       return this.all(
         `SELECT data, matter_id FROM events ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY start, id LIMIT ?`,
@@ -535,7 +579,9 @@ class SQLiteStore implements Store {
       }),
     deleteMany: async (ids) =>
       this.transaction(() => {
-        for (const id of unique(ids)) this.deleteEvent(id);
+        for (const id of unique(ids)) {
+          this.deleteEvent(id);
+        }
       }),
   };
 
@@ -544,7 +590,9 @@ class SQLiteStore implements Store {
     const emails = [...person.emails, person.primaryEmail]
       .filter((email) => {
         const normalized = email.trim().toLowerCase();
-        if (!normalized || seen.has(normalized)) return false;
+        if (!normalized || seen.has(normalized)) {
+          return false;
+        }
         seen.add(normalized);
         return true;
       })
@@ -588,17 +636,21 @@ class SQLiteStore implements Store {
     upsert: async (person) => this.transaction(() => this.savePerson(person)),
     delete: async (id) =>
       this.transaction(() => {
-        for (const table of ["email_people", "matter_people", "person_emails"])
+        for (const table of ["email_people", "matter_people", "person_emails"]) {
           this.run(`DELETE FROM ${table} WHERE person_id = ?`, [id]);
+        }
         this.run("DELETE FROM people WHERE id = ?", [id]);
       }),
     merge: async (keepId, mergeId) =>
       this.transaction(() => {
         const keep = this.get<Person>("people", keepId);
         const merge = this.get<Person>("people", mergeId);
-        if (!keep || !merge)
+        if (!keep || !merge) {
           throw new StoreError("NOT_FOUND", "Both people must exist to merge them");
-        if (keepId === mergeId) return keep;
+        }
+        if (keepId === mergeId) {
+          return keep;
+        }
         for (const [table, ownerColumn] of [
           ["email_people", "email_id"],
           ["matter_people", "matter_id"],
@@ -690,8 +742,9 @@ class SQLiteStore implements Store {
       this.transaction(() => {
         this.run("UPDATE emails SET matter_id = NULL WHERE matter_id = ?", [id]);
         this.run("UPDATE events SET matter_id = NULL WHERE matter_id = ?", [id]);
-        for (const table of ["matter_emails", "matter_events", "matter_people"])
+        for (const table of ["matter_emails", "matter_events", "matter_people"]) {
           this.run(`DELETE FROM ${table} WHERE matter_id = ?`, [id]);
+        }
         this.run("DELETE FROM matters WHERE id = ?", [id]);
       }),
   };
@@ -772,9 +825,12 @@ class SQLiteStore implements Store {
     update: async (id, patch) =>
       this.transaction(() => {
         const record = this.get<ActionRecord>("actions", id);
-        if (!record) throw new StoreError("NOT_FOUND", "Action does not exist");
-        if (patch.id !== undefined && patch.id !== id)
+        if (!record) {
+          throw new StoreError("NOT_FOUND", "Action does not exist");
+        }
+        if (patch.id !== undefined && patch.id !== id) {
           throw new StoreError("INVALID_PATCH", "An action's id cannot change");
+        }
         const updated = { ...record, ...definedPatch(patch), id };
         this.put("actions", id, updated, this.actionScalars(updated));
         return this.get<ActionRecord>("actions", id)!;
@@ -832,8 +888,9 @@ export function openStore(opts: { path: string | ":memory:"; masterKey?: string 
     );
   }
   const configured = opts.masterKey ?? process.env.PASSPORT_MASTER_KEY;
-  if (configured !== undefined && !configured.trim())
+  if (configured !== undefined && !configured.trim()) {
     throw new StoreError("MASTER_KEY_REQUIRED", "Master key must not be empty");
+  }
   if (configured === undefined && opts.path !== ":memory:") {
     throw new StoreError(
       "MASTER_KEY_REQUIRED",

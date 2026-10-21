@@ -43,7 +43,9 @@ describe("passport init with host agents", () => {
       {
         ask: async (label, secret) => {
           asked.push(label);
-          if (secret) throw new Error("No secret should be requested");
+          if (secret) {
+            throw new Error("No secret should be requested");
+          }
           return replies.shift() ?? "";
         },
         log: (text) => logged.push(text),

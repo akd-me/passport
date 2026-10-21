@@ -34,12 +34,16 @@ export async function persistOAuthCredentials(
   credentials: AccountCredentials,
 ): Promise<void> {
   const account = await store.accounts.get(id);
-  if (!account) return;
+  if (!account) {
+    return;
+  }
   const group = account.settings.oauthGroup;
   const accounts = group
     ? (await store.accounts.list()).filter((a) => a.settings.oauthGroup === group)
     : [account];
-  for (const sibling of accounts) await store.accounts.setCredentials(sibling.id, credentials);
+  for (const sibling of accounts) {
+    await store.accounts.setCredentials(sibling.id, credentials);
+  }
 }
 
 export async function accountIdentity(
@@ -56,8 +60,9 @@ export async function accountIdentity(
     redirect: "error",
     signal: AbortSignal.timeout(30000),
   });
-  if (!response.ok)
+  if (!response.ok) {
     throw new ApiError("OAUTH_IDENTITY_FAILED", "Could not read the authorized account identity");
+  }
   const identity = (await response.json()) as {
     email?: string;
     mail?: string;
@@ -69,8 +74,9 @@ export async function accountIdentity(
     !address ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address) ||
     (kind === "gmail" && identity.email_verified === false)
-  )
+  ) {
     throw new ApiError("OAUTH_IDENTITY_FAILED", "Provider did not return a verified email address");
+  }
   return address.toLowerCase();
 }
 
@@ -94,11 +100,12 @@ export async function connectOAuthAccount(
   if (
     existing &&
     (existing.kind !== input.kind || existing.emailAddress.toLowerCase() !== emailAddress)
-  )
+  ) {
     throw new ApiError(
       "OAUTH_IDENTITY_MISMATCH",
       "Authorize the same address as the account being reconnected",
     );
+  }
   const oldCredentials = existing ? await backend.store.accounts.getCredentials(existing.id) : null;
   const sameClient = existing?.settings.clientId === input.clientId;
   const tokens: AccountCredentials = {
@@ -118,11 +125,12 @@ export async function connectOAuthAccount(
     input.kind === "gmail"
       ? ["https://www.googleapis.com/auth/gmail.modify"]
       : ["Mail.ReadWrite", "Mail.Send"];
-  if (!mailScopes.every((scope) => granted.includes(scope)))
+  if (!mailScopes.every((scope) => granted.includes(scope))) {
     throw new ApiError(
       "OAUTH_SCOPE_REQUIRED",
       "Grant the requested mail permissions to connect this account",
     );
+  }
   const at = new Date().toISOString(),
     group = existing?.id ?? newId();
   const mail: Account = {
@@ -147,7 +155,9 @@ export async function connectOAuthAccount(
   const created: string[] = [];
   try {
     await backend.store.accounts.upsert(mail);
-    if (!existing) created.push(mail.id);
+    if (!existing) {
+      created.push(mail.id);
+    }
     await backend.store.accounts.setCredentials(mail.id, tokens);
     if (calendar) {
       const kind = input.kind === "gmail" ? "google-calendar" : "graph-calendar";
@@ -174,10 +184,12 @@ export async function connectOAuthAccount(
         settings: { ...mail.settings, mailAccountId: group },
       };
       await backend.store.accounts.upsert(companion);
-      if (!oldCalendar) created.push(companion.id);
+      if (!oldCalendar) {
+        created.push(companion.id);
+      }
       await backend.store.accounts.setCredentials(companion.id, tokens);
     }
-    if (!calendar)
+    if (!calendar) {
       for (const sibling of accounts.filter((a) => a.settings.mailAccountId === group)) {
         await backend.store.accounts.upsert({
           ...sibling,
@@ -185,12 +197,15 @@ export async function connectOAuthAccount(
           lastSyncError: "CALENDAR_SCOPE_NOT_GRANTED",
         });
       }
+    }
     await persistOAuthCredentials(backend.store, mail.id, tokens);
     await backend.updateConfig({
       accounts: await backend.store.accounts.list(),
     });
   } catch (error) {
-    for (const id of created.reverse()) await backend.store.accounts.delete(id);
+    for (const id of created.reverse()) {
+      await backend.store.accounts.delete(id);
+    }
     throw error;
   }
   const linked = (await backend.store.accounts.list()).filter(
@@ -238,37 +253,51 @@ export class BrowserOAuth {
     return this.options.now?.() ?? Date.now();
   }
   private prune() {
-    for (const [state, entry] of this.pending)
-      if (entry.expiresAt <= this.now()) this.pending.delete(state);
-    for (const [state, entry] of this.statuses)
-      if (entry.expiresAt <= this.now()) this.statuses.delete(state);
+    for (const [state, entry] of this.pending) {
+      if (entry.expiresAt <= this.now()) {
+        this.pending.delete(state);
+      }
+    }
+    for (const [state, entry] of this.statuses) {
+      if (entry.expiresAt <= this.now()) {
+        this.statuses.delete(state);
+      }
+    }
   }
   async start(input: Record<string, unknown>, origin: string) {
     this.prune();
-    if (this.pending.size >= 100)
+    if (this.pending.size >= 100) {
       throw new ApiError("OAUTH_BUSY", "Too many pending connections; try again later", 409);
-    if (input.kind !== "gmail" && input.kind !== "graph")
+    }
+    if (input.kind !== "gmail" && input.kind !== "graph") {
       throw new ApiError("INVALID_PROVIDER", "Choose Gmail or Outlook");
-    if (this.backend.mode === "demo")
+    }
+    if (this.backend.mode === "demo") {
       throw new ApiError("DEMO_ONLY", "Start passport serve to connect real accounts");
-    if (typeof input.clientId !== "string" || !input.clientId.trim())
+    }
+    if (typeof input.clientId !== "string" || !input.clientId.trim()) {
       throw new ApiError("MISSING_FIELD", "Client ID is required");
-    if (input.clientSecret !== undefined && typeof input.clientSecret !== "string")
+    }
+    if (input.clientSecret !== undefined && typeof input.clientSecret !== "string") {
       throw new ApiError("INVALID_FIELD", "Client secret must be text");
-    if (input.calendar !== undefined && typeof input.calendar !== "boolean")
+    }
+    if (input.calendar !== undefined && typeof input.calendar !== "boolean") {
       throw new ApiError("INVALID_FIELD", "Calendar must be a checkbox value");
+    }
     const url = new URL(origin);
-    if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))
+    if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
       throw new ApiError(
         "INVALID_REDIRECT",
         "Open Passport on an HTTP loopback address to connect accounts",
       );
+    }
     const accountId = typeof input.accountId === "string" ? input.accountId : undefined;
     if (
       accountId &&
       required(await this.backend.store.accounts.get(accountId), "Account").kind !== input.kind
-    )
+    ) {
       throw new ApiError("INVALID_PROVIDER", "Re-authorize using the account's provider");
+    }
     const state = randomBytes(32).toString("base64url");
     const entry: Pending = {
       kind: input.kind,
@@ -308,8 +337,9 @@ export class BrowserOAuth {
   status(state: string, nonce?: string) {
     this.prune();
     const status = this.statuses.get(state);
-    if (!status || !nonce || status.nonce !== nonce)
+    if (!status || !nonce || status.nonce !== nonce) {
       throw new ApiError("OAUTH_STATE", "Authorization expired or belongs to another browser");
+    }
     const { nonce: _nonce, expiresAt: _expires, ...safe } = status;
     return safe;
   }
@@ -317,7 +347,9 @@ export class BrowserOAuth {
   peek(state: string) {
     this.prune();
     const status = this.statuses.get(state);
-    if (!status) return;
+    if (!status) {
+      return;
+    }
     const { nonce: _nonce, expiresAt: _expires, ...safe } = status;
     return safe;
   }
@@ -340,8 +372,9 @@ export class BrowserOAuth {
     this.pending.delete(state); // consume before any network work; callbacks cannot race or replay
     const status = this.statuses.get(state)!;
     try {
-      if (url.searchParams.has("error") || !url.searchParams.get("code"))
+      if (url.searchParams.has("error") || !url.searchParams.get("code")) {
         throw new ApiError("OAUTH_DENIED", "Authorization was not completed");
+      }
       const credentials = await this.backend.providers.describe(entry.kind).oauth!.exchangeCode(
         {
           clientId: entry.clientId,
@@ -377,6 +410,9 @@ const instances = new WeakMap<Backend, BrowserOAuth>();
 /** One attempt table per backend, so routes and setup tasks see the same callbacks. */
 export function browserOAuth(backend: Backend): BrowserOAuth {
   let oauth = instances.get(backend);
-  if (!oauth) instances.set(backend, (oauth = new BrowserOAuth(backend)));
+  if (!oauth) {
+    oauth = new BrowserOAuth(backend);
+    instances.set(backend, oauth);
+  }
   return oauth;
 }

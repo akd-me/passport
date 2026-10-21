@@ -16,18 +16,20 @@ describe("Microsoft Graph mail adapter", () => {
     let incremental = false;
     const fetcher = fixtureFetch((url, init) => {
       expect(new Headers(init.headers).get("Prefer")).toContain('IdType="ImmutableId"');
-      if (url.pathname.endsWith("/mailFolders/delta"))
+      if (url.pathname.endsWith("/mailFolders/delta")) {
         return response({
           value: [{ id: "folder-inbox", displayName: "Inbox" }],
           "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/mailFolders/delta?token=folders",
         });
+      }
       if (
         /\/mailFolders\/(inbox|archive|drafts|sentitems|deleteditems|junkemail)$/.test(url.pathname)
-      )
+      ) {
         return url.pathname.endsWith("/inbox")
           ? response({ id: "folder-inbox" })
           : response({}, 404);
-      if (url.pathname.endsWith("/delta"))
+      }
+      if (url.pathname.endsWith("/delta")) {
         return response({
           value: incremental
             ? [
@@ -37,8 +39,13 @@ describe("Microsoft Graph mail adapter", () => {
             : [{ id: "m" }],
           "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta?token=one",
         });
-      if (url.pathname.includes("/messages/gone")) return response({}, 404);
-      if (url.pathname.endsWith("/attachments")) return response({ value: sample.attachments });
+      }
+      if (url.pathname.includes("/messages/gone")) {
+        return response({}, 404);
+      }
+      if (url.pathname.endsWith("/attachments")) {
+        return response({ value: sample.attachments });
+      }
       expect(url.searchParams.get("$select")).toContain("internetMessageHeaders");
       return response({
         ...sample,
@@ -73,7 +80,7 @@ describe("Microsoft Graph mail adapter", () => {
     let removed = false;
     const p = new GraphMailProvider({
       fetch: fixtureFetch((url) => {
-        if (url.pathname.endsWith("/mailFolders/delta"))
+        if (url.pathname.endsWith("/mailFolders/delta")) {
           return response({
             value: removed
               ? [{ id: "folder-inbox", "@removed": {} }]
@@ -81,17 +88,20 @@ describe("Microsoft Graph mail adapter", () => {
             "@odata.deltaLink":
               "https://graph.microsoft.com/v1.0/me/mailFolders/delta?token=folders",
           });
+        }
         if (
           /\/mailFolders\/(inbox|archive|drafts|sentitems|deleteditems|junkemail)$/.test(
             url.pathname,
           )
-        )
+        ) {
           return response({}, 404);
-        if (url.pathname.endsWith("/delta"))
+        }
+        if (url.pathname.endsWith("/delta")) {
           return response({
             value: [{ id: "m" }],
             "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta",
           });
+        }
         return removed
           ? response({}, 404)
           : response({ ...sample, id: "m", hasAttachments: false, attachments: [] });
@@ -109,7 +119,9 @@ describe("Microsoft Graph mail adapter", () => {
     const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
     const p = new GraphMailProvider({
       fetch: fixtureFetch((url, init) => {
-        if (!init.method) return response(sample);
+        if (!init.method) {
+          return response(sample);
+        }
         calls.push({ path: url.pathname, body: jsonBody(init) });
         return init.method === "PATCH"
           ? response(null, 204)
@@ -217,8 +229,12 @@ describe("Microsoft Graph mail adapter", () => {
     const p = new GraphMailProvider({
       fetch: fixtureFetch((url, init) => {
         methods.push(init.method ?? "GET");
-        if (url.pathname.endsWith("/attachments/att-1")) return response(sample.attachments[0]);
-        if (init.method) return response(null, 204);
+        if (url.pathname.endsWith("/attachments/att-1")) {
+          return response(sample.attachments[0]);
+        }
+        if (init.method) {
+          return response(null, 204);
+        }
         return response({
           ...sample,
           id: "draft-id",

@@ -79,7 +79,9 @@ export function TrustPicker({
       role="radiogroup"
       aria-label="Permission mode"
       onKeyDown={(e) => {
-        if (!["ArrowDown", "ArrowUp"].includes(e.key)) return;
+        if (!["ArrowDown", "ArrowUp"].includes(e.key)) {
+          return;
+        }
         e.preventDefault();
         const radios = [...(group.current?.querySelectorAll<HTMLElement>('[role="radio"]') ?? [])];
         const index = radios.indexOf(document.activeElement as HTMLElement);
@@ -121,12 +123,13 @@ export function ModeMenu({
     task = useTask(),
     { openSettings } = useUi();
   const level = trust.data?.config.globalMode;
-  if (!level)
+  if (!level) {
     return (
       <span className={`mode-trigger in-${variant} placeholder`} aria-hidden="true">
         <TrustLadder level="supervised" />
       </span>
     );
+  }
   const current = modes.find((m) => m.id === level)!;
   return (
     <Popover
@@ -150,7 +153,9 @@ export function ModeMenu({
             value={level}
             disabled={task.busy}
             onChange={(mode) => {
-              if (mode === level) return close();
+              if (mode === level) {
+                return close();
+              }
               void task
                 .run(
                   () => api.setTrust({ globalMode: mode }),
@@ -206,7 +211,9 @@ export function PromotionPrompts() {
         !dismissed.includes(offerKey(offer)) &&
         !trust.data!.categories.find((c) => c.category === offer.category)?.pinnedLevel,
     ) ?? [];
-  if (!offers.length) return null;
+  if (!offers.length) {
+    return null;
+  }
   const dismiss = (offer: PromotionOffer) => {
     const next = [...dismissed, offerKey(offer)];
     setDismissed(next);
@@ -444,7 +451,9 @@ export function TrustSettings() {
   const { data, error } = useResource<TrustData>("/trust"),
     profile = useResource<{ markdown: string }>("/user-profile"),
     task = useTask();
-  if (!data) return error ? <Feedback error={error} /> : <Loading />;
+  if (!data) {
+    return error ? <Feedback error={error} /> : <Loading />;
+  }
   return (
     <>
       <section className="settings-block">

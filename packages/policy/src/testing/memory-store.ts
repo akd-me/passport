@@ -51,10 +51,14 @@ export function createMemoryStore(): Store {
     kv = new Map<string, string>();
   let config: GlobalPolicyConfig | null = null;
   const setMany = <T extends { id: string }>(map: Map<string, T>, items: T[]) => {
-    for (const item of items) map.set(item.id, clone(item));
+    for (const item of items) {
+      map.set(item.id, clone(item));
+    }
   };
   const deleteMany = <T>(map: Map<string, T>, ids: string[]) => {
-    for (const id of ids) map.delete(id);
+    for (const id of ids) {
+      map.delete(id);
+    }
   };
   return {
     async migrate() {},
@@ -145,7 +149,9 @@ export function createMemoryStore(): Store {
       async patchMany(ids, patch) {
         for (const id of ids) {
           const item = emails.get(id);
-          if (!item) throw new PolicyError("EMAIL_NOT_FOUND", `Email ${id} does not exist`);
+          if (!item) {
+            throw new PolicyError("EMAIL_NOT_FOUND", `Email ${id} does not exist`);
+          }
           emails.set(id, { ...item, ...clone(patch) });
         }
       },
@@ -223,22 +229,25 @@ export function createMemoryStore(): Store {
       },
       async delete(id) {
         people.delete(id);
-        for (const [key, email] of emails)
+        for (const [key, email] of emails) {
           emails.set(key, {
             ...email,
             personIds: email.personIds.filter((personId) => personId !== id),
           });
-        for (const [key, matter] of matters)
+        }
+        for (const [key, matter] of matters) {
           matters.set(key, {
             ...matter,
             personIds: matter.personIds.filter((personId) => personId !== id),
           });
+        }
       },
       async merge(keepId, mergeId) {
         const keep = people.get(keepId),
           merge = people.get(mergeId);
-        if (!keep || !merge)
+        if (!keep || !merge) {
           throw new PolicyError("PERSON_NOT_FOUND", "Both people must exist to merge");
+        }
         const result = { ...keep, emails: [...new Set([...keep.emails, ...merge.emails])] };
         people.set(keepId, result);
         people.delete(mergeId);
@@ -271,7 +280,9 @@ export function createMemoryStore(): Store {
     actions: {
       async claim(id, from, to, now) {
         const record = actions.get(id);
-        if (!record || record.status !== from) return null;
+        if (!record || record.status !== from) {
+          return null;
+        }
         const updated = { ...record, status: to, decidedAt: now };
         actions.set(id, updated);
         return clone(updated);
@@ -298,14 +309,17 @@ export function createMemoryStore(): Store {
         );
       },
       async insert(record) {
-        if (actions.has(record.id))
+        if (actions.has(record.id)) {
           throw new PolicyError("DUPLICATE_ACTION", "Action already exists");
+        }
         actions.set(record.id, clone(record));
         return clone(record);
       },
       async update(id, patch) {
         const record = actions.get(id);
-        if (!record) throw new PolicyError("ACTION_NOT_FOUND", `Action ${id} does not exist`);
+        if (!record) {
+          throw new PolicyError("ACTION_NOT_FOUND", `Action ${id} does not exist`);
+        }
         const updated = { ...record, ...clone(patch), id };
         actions.set(id, updated);
         return clone(updated);
@@ -356,11 +370,15 @@ export function createMemoryEventBus(): EventBus & { events: DomainEvent[] } {
     events,
     emit(event) {
       events.push(clone(event));
-      for (const handler of handlers) handler(clone(event));
+      for (const handler of handlers) {
+        handler(clone(event));
+      }
     },
     on(type, handler) {
       const wrapped = (event: DomainEvent) => {
-        if (event.type === type) handler(event as Parameters<typeof handler>[0]);
+        if (event.type === type) {
+          handler(event as Parameters<typeof handler>[0]);
+        }
       };
       handlers.add(wrapped);
       return () => {

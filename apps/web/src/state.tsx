@@ -45,7 +45,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       stopped = false,
       attempts = 0;
     const connect = () => {
-      if (stopped) return;
+      if (stopped) {
+        return;
+      }
       socket = new WebSocket(websocketUrl());
       socket.onopen = () => {
         attempts = 0;
@@ -55,8 +57,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       socket.onmessage = (message) => {
         try {
           const event = JSON.parse(message.data) as WorkspaceEvent;
-          if (!event.type) return;
-          for (const listener of listeners.current) listener(event);
+          if (!event.type) {
+            return;
+          }
+          for (const listener of listeners.current) {
+            listener(event);
+          }
           clearTimeout(debounce);
           debounce = setTimeout(refresh, 120);
         } catch {
@@ -84,7 +90,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh]);
   useEffect(() => {
-    if (!notice) return;
+    if (!notice) {
+      return;
+    }
     const timer = setTimeout(() => notify(""), 5500);
     return () => clearTimeout(timer);
   }, [notice]);
@@ -119,7 +127,9 @@ export function useResource<T>(path: string | null) {
     request<T>(path, { signal: controller.signal })
       .then((data) => setState({ data, loading: false }))
       .catch((error) => {
-        if (!controller.signal.aborted) setState({ error: error.message, loading: false });
+        if (!controller.signal.aborted) {
+          setState({ error: error.message, loading: false });
+        }
       });
     return () => controller.abort();
   }, [path, version]);
@@ -131,7 +141,9 @@ export function useTask() {
     running = useRef(false);
   const { refresh, notify } = useWorkspace();
   const run = async (task: () => Promise<unknown>, message = "Saved.") => {
-    if (running.current) return;
+    if (running.current) {
+      return;
+    }
     running.current = true;
     setBusy(true);
     setError("");

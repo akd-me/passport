@@ -29,9 +29,13 @@ let exitHook = false;
 
 /** Detached groups do not receive the parent's Ctrl-C; stop them when Passport exits. */
 function track(pid: number | undefined): void {
-  if (!pid || process.platform === "win32") return;
+  if (!pid || process.platform === "win32") {
+    return;
+  }
   live.add(pid);
-  if (exitHook) return;
+  if (exitHook) {
+    return;
+  }
   exitHook = true;
   process.once("exit", () => {
     for (const group of live) {
@@ -61,19 +65,26 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
   });
   track(child.pid);
   const kill = () => {
-    if (killed || child.exitCode !== null || child.signalCode !== null) return;
+    if (killed || child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
     killed = true;
     const signal = (sig: NodeJS.Signals) => {
       try {
-        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, sig);
-        else child.kill(sig);
+        if (process.platform !== "win32" && child.pid) {
+          process.kill(-child.pid, sig);
+        } else {
+          child.kill(sig);
+        }
       } catch {
         /* already gone */
       }
     };
     signal("SIGTERM");
     setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) signal("SIGKILL");
+      if (child.exitCode === null && child.signalCode === null) {
+        signal("SIGKILL");
+      }
     }, 2000).unref();
   };
   const timer = setTimeout(() => {
@@ -85,8 +96,11 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
     aborted = true;
     kill();
   };
-  if (options.signal?.aborted) onAbort();
-  else options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (options.signal?.aborted) {
+    onAbort();
+  } else {
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+  }
 
   let stdout = "",
     stderr = "",
@@ -94,13 +108,18 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
-    if (stdout.length < MAX_CAPTURE * 16) stdout += chunk;
+    if (stdout.length < MAX_CAPTURE * 16) {
+      stdout += chunk;
+    }
     pending += chunk;
-    let index: number;
-    while ((index = pending.indexOf("\n")) >= 0) {
+    let index = pending.indexOf("\n");
+    while (index >= 0) {
       const line = pending.slice(0, index).trim();
       pending = pending.slice(index + 1);
-      if (line) options.onLine?.(line);
+      if (line) {
+        options.onLine?.(line);
+      }
+      index = pending.indexOf("\n");
     }
   });
   child.stderr.on("data", (chunk: string) => {
@@ -119,11 +138,15 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
     });
     child.once("close", (code, signal) => {
       clearTimeout(timer);
-      if (child.pid) live.delete(child.pid);
+      if (child.pid) {
+        live.delete(child.pid);
+      }
       options.signal?.removeEventListener("abort", onAbort);
       const rest = pending.trim();
       pending = "";
-      if (rest) options.onLine?.(rest);
+      if (rest) {
+        options.onLine?.(rest);
+      }
       resolve({ code, signal, stdout, stderr, timedOut, aborted });
     });
   });

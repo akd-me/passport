@@ -53,7 +53,9 @@ function useHostAgents(): Detection {
       .hostAgents()
       .then((agents) => active && setDetection({ state: "ready", agents }))
       .catch((error) => {
-        if (!active) return;
+        if (!active) {
+          return;
+        }
         setDetection(
           error instanceof ApiError && error.status === 404
             ? { state: "unsupported" }
@@ -68,12 +70,15 @@ function useHostAgents(): Detection {
 }
 
 function agentStatus(agent: HostAgent | undefined) {
-  if (!agent?.installed) return { tone: "off", text: "Not installed" };
-  if (!agent.loggedIn)
+  if (!agent?.installed) {
+    return { tone: "off", text: "Not installed" };
+  }
+  if (!agent.loggedIn) {
     return {
       tone: "warn",
       text: `Installed${agent.version ? ` (${agent.version})` : ""}, not signed in`,
     };
+  }
   return {
     tone: "good",
     text: `Signed in${agent.account ? ` as ${agent.account}` : ""}${agent.version ? `, ${agent.version}` : ""}`,

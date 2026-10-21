@@ -69,14 +69,22 @@ export function categorize(input: CategorizeInput): {
       ? senderMessages.every((message) => message.verification.passport === "blue")
       : person?.verification === "blue";
     let kind: Counterparty["class"] = "stranger";
-    if ((self.has(email) || (person?.relationship === "self" && person.verifiedSelf)) && failedSelf)
+    if (
+      (self.has(email) || (person?.relationship === "self" && person.verifiedSelf)) &&
+      failedSelf
+    ) {
       kind = "stranger";
-    else if (self.has(email) || (person?.relationship === "self" && person.verifiedSelf))
+    } else if (self.has(email) || (person?.relationship === "self" && person.verifiedSelf)) {
       kind = "self";
-    else if (downgraded) kind = "stranger";
-    else if (person?.relationship === "service") kind = "service";
-    else if (blue) kind = "blue";
-    else if (person?.relationship === "known") kind = "green_known";
+    } else if (downgraded) {
+      kind = "stranger";
+    } else if (person?.relationship === "service") {
+      kind = "service";
+    } else if (blue) {
+      kind = "blue";
+    } else if (person?.relationship === "known") {
+      kind = "green_known";
+    }
     return { email, person, kind };
   });
   const riskiest = [...parties].sort(
@@ -96,16 +104,19 @@ export function categorize(input: CategorizeInput): {
       input.type,
     ) ||
     (input.type === "snooze" && input.matterId && emails.length === 0)
-  )
+  ) {
     category = "matters";
-  else if (input.type === "unsubscribe") category = "unsubscribe";
-  else if (input.type.startsWith("calendar_")) category = "scheduling";
-  else {
+  } else if (input.type === "unsubscribe") {
+    category = "unsubscribe";
+  } else if (input.type.startsWith("calendar_")) {
+    category = "scheduling";
+  } else {
     const sensitive = emails
       .map((email) => email.category)
       .filter((value): value is "money" | "legal" => value === "money" || value === "legal");
-    if (sensitive.length) category = sensitive.includes("legal") ? "legal" : "money";
-    else if (["draft_create", "draft_update", "send"].includes(input.type)) {
+    if (sensitive.length) {
+      category = sensitive.includes("legal") ? "legal" : "money";
+    } else if (["draft_create", "draft_update", "send"].includes(input.type)) {
       category =
         parties.length &&
         parties.every(

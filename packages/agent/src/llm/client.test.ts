@@ -69,10 +69,11 @@ describe("JSON extraction and validation", () => {
 
   it("validates enums, required fields, unknown properties, and nested array types", () => {
     expect(() => validateJson({ category: "newsletters" }, schema)).not.toThrow();
-    for (const value of [{}, { category: "other" }, { category: "newsletters", injected: true }])
+    for (const value of [{}, { category: "other" }, { category: "newsletters", injected: true }]) {
       expect(() => validateJson(value, schema)).toThrow(
         expect.objectContaining({ code: "LLM_SCHEMA" }),
       );
+    }
     expect(() => validateJson(["text", 2], { type: "array", items: { type: "string" } })).toThrow();
     expect(() =>
       validateJson(
@@ -259,9 +260,13 @@ describe("OpenAI-compatible adapter", () => {
     ];
     const codes = ["LLM_SCHEMA", "LLM_TRUNCATED", "LLM_REFUSAL", "LLM_RESPONSE"];
     const fetcher = vi.fn<typeof fetch>();
-    for (const reply of replies) fetcher.mockResolvedValueOnce(response(reply));
+    for (const reply of replies) {
+      fetcher.mockResolvedValueOnce(response(reply));
+    }
     const client = createLlmClient({ provider: "ollama", model: "local" }, { fetch: fetcher });
-    for (const code of codes) await expect(client.complete(opts)).rejects.toMatchObject({ code });
+    for (const code of codes) {
+      await expect(client.complete(opts)).rejects.toMatchObject({ code });
+    }
   });
 
   it("does not forward credentials to a URL containing user-info or query parameters", async () => {

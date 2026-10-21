@@ -166,7 +166,9 @@ export class FakeMailProvider implements MailProvider {
   }
   async applyChanges(changes: MailChange[]): Promise<void | MailChangeResult[]> {
     this.changes.push(structuredClone(changes));
-    if (this.failure) throw this.failure;
+    if (this.failure) {
+      throw this.failure;
+    }
   }
   async createDraft(input: DraftInput) {
     this.drafts.push({ operation: "create", draft: input });
@@ -188,7 +190,9 @@ export class FakeMailProvider implements MailProvider {
   }
   async send(input: Parameters<MailProvider["send"]>[0]): Promise<SendResult> {
     this.sends.push(structuredClone(input));
-    if (this.failure) throw this.failure;
+    if (this.failure) {
+      throw this.failure;
+    }
     return { providerId: `sent-${++this.count}`, messageId: "<sent@example.com>" };
   }
 }

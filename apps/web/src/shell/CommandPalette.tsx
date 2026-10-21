@@ -23,12 +23,16 @@ export interface Command {
 /** Every token must appear in the label, hint or keywords; earlier label matches rank first. */
 export function filterCommands(commands: Command[], query: string): Command[] {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!tokens.length) return commands;
+  if (!tokens.length) {
+    return commands;
+  }
   return commands
     .map((command) => {
       const haystack =
         `${command.label} ${command.hint ?? ""} ${command.keywords ?? ""}`.toLowerCase();
-      if (!tokens.every((t) => haystack.includes(t))) return null;
+      if (!tokens.every((t) => haystack.includes(t))) {
+        return null;
+      }
       const at = command.label.toLowerCase().indexOf(tokens[0]!);
       return { command, score: at < 0 ? 1000 : at };
     })
@@ -61,7 +65,9 @@ function useCommands(close: () => void): Command[] {
         shortcut: "/",
         keywords: "instruct agent composer",
         run: act(() => {
-          if (!ui.composer.current) navigate("/");
+          if (!ui.composer.current) {
+            navigate("/");
+          }
           setTimeout(ui.focusComposer, 50);
         }),
       },
@@ -208,7 +214,9 @@ const groupOrder: Command["group"][] = ["Actions", "Go to", "Matters", "People",
 
 export function CommandPalette() {
   const { palette, setPalette } = useUi();
-  if (!palette) return null;
+  if (!palette) {
+    return null;
+  }
   return <PaletteBody onClose={() => setPalette(false)} />;
 }
 

@@ -16,8 +16,9 @@ function readOwner(dataDir: string): OwnerRecord | null {
   try {
     return JSON.parse(readFileSync(join(dataDir, "owner.lock"), "utf8"));
   } catch (error) {
-    if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT")
+    if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT") {
       return null;
+    }
     throw error;
   }
 }
@@ -29,12 +30,15 @@ export function activeOwner(dataDir: string): OwnerRecord | null {
     owner.pid < 1 ||
     !Number.isFinite(Date.parse(owner.heartbeatAt)) ||
     Date.now() - Date.parse(owner.heartbeatAt) >= OWNER_STALE_MS
-  )
+  ) {
     return null;
+  }
   try {
     process.kill(owner.pid, 0);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ESRCH") return null;
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+      return null;
+    }
   }
   return owner;
 }
@@ -45,9 +49,12 @@ function guarded<T>(dataDir: string, task: () => T): T {
   try {
     mkdirSync(guard, { mode: 0o700 });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    if (Date.now() - statSync(guard).mtimeMs < OWNER_STALE_MS)
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
+    }
+    if (Date.now() - statSync(guard).mtimeMs < OWNER_STALE_MS) {
       throw new ApiError("OWNER_BUSY", "Workspace ownership is being updated; retry the command.");
+    }
     rmSync(guard, { recursive: true, force: true });
     mkdirSync(guard, { mode: 0o700 });
   }
@@ -79,23 +86,28 @@ export function acquireOwner(dataDir: string, onLost: () => void = () => {}) {
   };
   guarded(dataDir, () => {
     const existing = activeOwner(dataDir);
-    if (existing)
+    if (existing) {
       throw new ApiError(
         "OWNER_RUNNING",
         `Passport already owns this data directory (pid ${existing.pid}). Use the running server or stop it first.`,
       );
+    }
     publish(dataDir, owner);
   });
   let released = false;
   const timer = setInterval(() => {
     try {
       guarded(dataDir, () => {
-        if (readOwner(dataDir)?.id !== owner.id) throw new Error("Owner replaced");
+        if (readOwner(dataDir)?.id !== owner.id) {
+          throw new Error("Owner replaced");
+        }
         owner.heartbeatAt = new Date().toISOString();
         publish(dataDir, owner);
       });
     } catch (error) {
-      if ((error as { code?: string }).code === "OWNER_BUSY") return;
+      if ((error as { code?: string }).code === "OWNER_BUSY") {
+        return;
+      }
       clearInterval(timer);
       onLost();
     }
@@ -103,11 +115,14 @@ export function acquireOwner(dataDir: string, onLost: () => void = () => {}) {
   timer.unref();
   return {
     release() {
-      if (released) return;
+      if (released) {
+        return;
+      }
       clearInterval(timer);
       guarded(dataDir, () => {
-        if (readOwner(dataDir)?.id === owner.id)
+        if (readOwner(dataDir)?.id === owner.id) {
           rmSync(join(dataDir, "owner.lock"), { force: true });
+        }
       });
       released = true;
     },

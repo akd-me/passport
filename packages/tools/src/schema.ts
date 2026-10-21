@@ -53,7 +53,9 @@ export class Schema<T> {
       { ...this.json, ...json },
       (input) => {
         const value = this.parse(input);
-        if (!test(value)) invalid(message);
+        if (!test(value)) {
+          invalid(message);
+        }
         return value;
       },
       this.optionalInput,
@@ -150,15 +152,21 @@ export class ObjectSchema<S extends Shape> extends Schema<Output<S>> {
         additionalProperties: false,
       },
       (input) => {
-        if (!input || typeof input !== "object" || Array.isArray(input))
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
           return invalid("Expected an object.");
+        }
         const values = input as Record<string, unknown>;
-        for (const key of Object.keys(values))
-          if (!Object.hasOwn(shape, key)) invalid(`Unknown field: ${key}.`);
+        for (const key of Object.keys(values)) {
+          if (!Object.hasOwn(shape, key)) {
+            invalid(`Unknown field: ${key}.`);
+          }
+        }
         const output: Record<string, unknown> = {};
         for (const [key, child] of Object.entries(shape)) {
           const value = child.parse(Object.hasOwn(values, key) ? values[key] : undefined);
-          if (value !== undefined) output[key] = value;
+          if (value !== undefined) {
+            output[key] = value;
+          }
         }
         return output as Output<S>;
       },

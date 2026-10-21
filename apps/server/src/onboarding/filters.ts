@@ -6,14 +6,18 @@ import { categories, integer, member, statuses } from "../validation.js";
 
 /** Filter before paging; the frozen Store ActionQuery has no accountId field. */
 export function registerAccountFilters(app: Hono, backend: Backend): void {
-  for (const route of ["decisions", "actions"] as const)
+  for (const route of ["decisions", "actions"] as const) {
     app.get(`/api/${route}`, async (c, next) => {
       const accountId = c.req.query("accountId");
-      if (!accountId) return next();
+      if (!accountId) {
+        return next();
+      }
       const q = c.req.query();
-      for (const key of ["after", "before"])
-        if (q[key] && !Number.isFinite(Date.parse(q[key]!)))
+      for (const key of ["after", "before"]) {
+        if (q[key] && !Number.isFinite(Date.parse(q[key]!))) {
           throw new ApiError("INVALID_QUERY", "Expected an ISO timestamp");
+        }
+      }
       const query: ActionQuery = {
         status:
           route === "decisions"
@@ -48,6 +52,7 @@ export function registerAccountFilters(app: Hono, backend: Backend): void {
         nextCursor: offset + limit < items.length ? String(offset + limit) : null,
       });
     });
+  }
   app.get("/api/matters", async (c) => {
     const q = c.req.query();
     // Include participating account IDs for colour dots even in the global view.
@@ -68,8 +73,9 @@ export function registerAccountFilters(app: Hono, backend: Backend): void {
       const accountIds = [
         ...new Set([...emails, ...events].flatMap((item) => (item ? [item.accountId] : []))),
       ];
-      if (!q.accountId || accountIds.includes(q.accountId))
+      if (!q.accountId || accountIds.includes(q.accountId)) {
         decorated.push({ ...matter, accountIds });
+      }
     }
     return c.json(
       decorated.slice(0, q.limit ? integer(Number(q.limit), "limit", 1, 500) : undefined),

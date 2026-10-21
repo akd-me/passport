@@ -45,20 +45,25 @@ function imapServer() {
     status: vi.fn(async () => ({ messages: messages.get(path)!.size, unseen: 0 })),
     search: vi.fn(async () => [...messages.get(path)!.keys()]),
     fetch: vi.fn(async function* (_range, _query, _options) {
-      for (const [uid, m] of messages.get(path)!)
+      for (const [uid, m] of messages.get(path)!) {
         yield { uid, ...m, internalDate: new Date("2026-01-20T14:00:00Z") };
+      }
     }),
     fetchOne: vi.fn(async (uid: number) => {
       const m = messages.get(path)!.get(uid);
       return m ? { uid, ...m } : false;
     }),
     messageFlagsAdd: vi.fn(async (uid: number, flags: string[]) => {
-      flags.forEach((f) => messages.get(path)!.get(uid)!.flags.add(f));
+      flags.forEach((f) => {
+        messages.get(path)!.get(uid)!.flags.add(f);
+      });
       modseq++;
       return true;
     }),
     messageFlagsRemove: vi.fn(async (uid: number, flags: string[]) => {
-      flags.forEach((f) => messages.get(path)!.get(uid)!.flags.delete(f));
+      flags.forEach((f) => {
+        messages.get(path)!.get(uid)!.flags.delete(f);
+      });
       modseq++;
       return true;
     }),
@@ -103,7 +108,9 @@ describe("IMAP/SMTP adapter", () => {
       const delta = (await collect(p.sync(null))).find(
         (d) => d.kind === "email" && d.op === "upsert",
       );
-      if (delta?.kind !== "email" || delta.op !== "upsert") throw new Error("No fixture");
+      if (delta?.kind !== "email" || delta.op !== "upsert") {
+        throw new Error("No fixture");
+      }
       const original = delta.email;
       const [moved] = await p.applyChanges([
         op === "move"
@@ -138,7 +145,9 @@ describe("IMAP/SMTP adapter", () => {
     const delta = (await collect(p.sync(null))).find(
       (d) => d.kind === "email" && d.op === "upsert",
     );
-    if (delta?.kind !== "email" || delta.op !== "upsert") throw new Error("No fixture");
+    if (delta?.kind !== "email" || delta.op !== "upsert") {
+      throw new Error("No fixture");
+    }
     server.fake.messageMove.mockResolvedValueOnce({ uidValidity: 10n, uidMap: new Map() });
     await expect(
       p.applyChanges([
@@ -159,7 +168,9 @@ describe("IMAP/SMTP adapter", () => {
       const delta = (await collect(p.sync(null))).find(
         (d) => d.kind === "email" && d.op === "upsert",
       );
-      if (delta?.kind !== "email" || delta.op !== "upsert") throw new Error("No fixture");
+      if (delta?.kind !== "email" || delta.op !== "upsert") {
+        throw new Error("No fixture");
+      }
       const original = delta.email;
       const stored = { ...original, id: "store-email-ulid", threadId: "store-thread-ulid" };
       resolveEmail.mockImplementation(async (id) => (id === stored.id ? stored : null));
@@ -224,15 +235,18 @@ describe("IMAP/SMTP adapter", () => {
     server.resetValidity();
     const changes = await collect(p.sync(cursor));
     expect(changes.some((d) => d.kind === "email" && d.op === "delete")).toBe(true);
-    if (e?.kind === "email" && e.op === "upsert")
+    if (e?.kind === "email" && e.op === "upsert") {
       expect(await p.getEmail(e.email.providerId)).toBeNull();
+    }
   });
   it("supports flags, copy, move, draft replacement/deletion, and MIME blobs", async () => {
     const server = imapServer(),
       p = new ImapMailProvider({ imapFactory: () => server.client });
     await p.connect(configured, { password: "secret" });
     const e = (await collect(p.sync(null))).find((d) => d.kind === "email" && d.op === "upsert");
-    if (e?.kind !== "email" || e.op !== "upsert") throw new Error("No fixture");
+    if (e?.kind !== "email" || e.op !== "upsert") {
+      throw new Error("No fixture");
+    }
     expect(
       Buffer.from((await p.getBlob(e.email.attachments[0]!.blobId)).data).toString(),
     ).toContain("BEGIN:VEVENT");

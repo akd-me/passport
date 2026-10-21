@@ -14,7 +14,9 @@ function ScopeChip() {
   const [params, setParams] = useSearchParams(),
     { accounts } = useAccounts();
   const id = params.get("accountId");
-  if (!id) return null;
+  if (!id) {
+    return null;
+  }
   const account = accounts.find((a) => a.id === id);
   return (
     <span className="scope-chip">

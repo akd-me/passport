@@ -25,7 +25,9 @@ describe.skipIf(!codexReady)("live setup task (codex)", () => {
     dir = await mkdtemp(join(tmpdir(), "passport-setup-live-"));
   });
   afterAll(async () => {
-    if (dir) await rm(dir, { recursive: true, force: true });
+    if (dir) {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("asks the user to sign in, registers the client it reads, and finishes once connected", async () => {
@@ -84,11 +86,17 @@ describe.skipIf(!codexReady)("live setup task (codex)", () => {
     const answered = new Set<string>();
     bus.on("setup.task.updated", ({ task }) => {
       const prompt = task.prompt;
-      if (!prompt || answered.has(prompt.id)) return;
+      if (!prompt || answered.has(prompt.id)) {
+        return;
+      }
       answered.add(prompt.id);
       asked.push(prompt.kind);
-      if (prompt.kind === "sign_in") appendFileSync(signedIn, "yes");
-      if (prompt.kind === "confirm") appendFileSync(consented, "yes");
+      if (prompt.kind === "sign_in") {
+        appendFileSync(signedIn, "yes");
+      }
+      if (prompt.kind === "confirm") {
+        appendFileSync(consented, "yes");
+      }
       setTimeout(
         () =>
           runner.respond(
@@ -106,8 +114,11 @@ describe.skipIf(!codexReady)("live setup task (codex)", () => {
     const final = await new Promise<SetupTask>((resolve) => {
       const check = () => {
         const current = runner.get(task.id);
-        if (["completed", "failed", "cancelled"].includes(current.status)) resolve(current);
-        else setTimeout(check, 250);
+        if (["completed", "failed", "cancelled"].includes(current.status)) {
+          resolve(current);
+        } else {
+          setTimeout(check, 250);
+        }
       };
       check();
     });
@@ -117,7 +128,9 @@ describe.skipIf(!codexReady)("live setup task (codex)", () => {
       null,
       2,
     );
-    if (process.env.PASSPORT_SETUP_LIVE_VERBOSE) console.log(summary);
+    if (process.env.PASSPORT_SETUP_LIVE_VERBOSE) {
+      console.log(summary);
+    }
     expect(final.status, summary).toBe("completed");
     expect(asked[0], summary).toBe("sign_in");
     expect(asked, summary).toContain("confirm");

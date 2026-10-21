@@ -38,17 +38,23 @@ export const eventInput: EventInput = {
 };
 export async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
   const out: T[] = [];
-  for await (const item of iterable) out.push(item);
+  for await (const item of iterable) {
+    out.push(item);
+  }
   return out;
 }
 export function lastCursor(deltas: Array<SyncDelta | CalendarDelta>): string {
   const final = deltas.at(-1);
   expect(final?.kind).toBe("cursor");
-  if (final?.kind !== "cursor") throw new Error("Missing cursor");
+  if (final?.kind !== "cursor") {
+    throw new Error("Missing cursor");
+  }
   return final.cursor;
 }
 export function response(body: unknown, status = 200, headers?: Record<string, string>): Response {
-  if (status === 204 || status === 202) return new Response(null, { status, headers });
+  if (status === 204 || status === 202) {
+    return new Response(null, { status, headers });
+  }
   return new Response(typeof body === "string" ? body : JSON.stringify(body), {
     status,
     headers: {

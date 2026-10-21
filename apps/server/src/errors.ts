@@ -15,6 +15,8 @@ export class NotImplementedError extends ApiError {
 }
 
 export function required<T>(value: T | null | undefined, label: string): T {
-  if (value == null) throw new ApiError("NOT_FOUND", `${label} not found`, 404);
+  if (value == null) {
+    throw new ApiError("NOT_FOUND", `${label} not found`, 404);
+  }
   return value;
 }

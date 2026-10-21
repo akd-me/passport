@@ -38,9 +38,11 @@ export async function probeAccount(
     : backend.providers.calendar(account.kind as CalendarProvider["kind"]);
   try {
     await provider.connect(account, credentials);
-    if (provider.checkConnection) await provider.checkConnection();
-    else if ("listCalendars" in provider) await provider.listCalendars();
-    else {
+    if (provider.checkConnection) {
+      await provider.checkConnection();
+    } else if ("listCalendars" in provider) {
+      await provider.listCalendars();
+    } else {
       const iterator = provider.sync(null, { maxEmails: 1 })[Symbol.asyncIterator]();
       try {
         await iterator.next();
@@ -76,13 +78,13 @@ export async function runDoctor(
       });
     }
   };
-  if (backend.mode === "demo")
+  if (backend.mode === "demo") {
     checks.push({
       name: "Storage",
       status: "ok",
       detail: "Demo uses ephemeral storage.",
     });
-  else {
+  } else {
     await check("Data directory", async () => {
       const probe = join(backend.config.dataDir, `.doctor-${crypto.randomUUID()}`);
       await writeFile(probe, "", { flag: "wx", mode: 0o600 });
@@ -90,9 +92,13 @@ export async function runDoctor(
       return "Writable";
     });
     await check("Master key", async () => {
-      if (process.env.PASSPORT_MASTER_KEY) return "Configured in environment";
+      if (process.env.PASSPORT_MASTER_KEY) {
+        return "Configured in environment";
+      }
       const key = await stat(join(backend.config.dataDir, "master.key"));
-      if (!key.isFile() || (key.mode & 0o777) !== 0o600 || key.size < 32) throw new Error();
+      if (!key.isFile() || (key.mode & 0o777) !== 0o600 || key.size < 32) {
+        throw new Error();
+      }
       return "Present, mode 0600";
     });
   }
@@ -100,8 +106,10 @@ export async function runDoctor(
     validateConfig(backend.config);
     return "Valid";
   });
-  if (backend.mode !== "demo") checks.push(...(await hostAgentChecks(backend.config, options)));
-  if (backend.mode === "demo" || !llmConfigured(backend.config.llm))
+  if (backend.mode !== "demo") {
+    checks.push(...(await hostAgentChecks(backend.config, options)));
+  }
+  if (backend.mode === "demo" || !llmConfigured(backend.config.llm)) {
     checks.push({
       name: "LLM",
       status: "warning",
@@ -110,9 +118,9 @@ export async function runDoctor(
           ? "Demo agent; no network ping"
           : "No agent model: run `codex login` or `claude auth login` (no API key needed). Mail sync remains available.",
     });
-  else if (isHostAgentProvider(backend.config.llm.provider))
+  } else if (isHostAgentProvider(backend.config.llm.provider)) {
     checks.push(await pingHostAgent(backend.config, options));
-  else
+  } else {
     await check("LLM", async () => {
       const llm = backend.config.llm,
         anthropic = llm.provider === "anthropic";
@@ -130,8 +138,9 @@ export async function runDoctor(
         endpoint.password ||
         endpoint.search ||
         endpoint.hash
-      )
+      ) {
         throw new Error();
+      }
       endpoint.pathname = endpoint.pathname.replace(/\/$/, "") || "/v1";
       endpoint.pathname += anthropic ? "/messages" : "/chat/completions";
       const response = await (options.fetch ?? globalThis.fetch)(endpoint, {
@@ -153,26 +162,29 @@ export async function runDoctor(
         }),
       });
       await response.body?.cancel();
-      if (!response.ok) throw new Error();
+      if (!response.ok) {
+        throw new Error();
+      }
       return "One-token request accepted";
     });
+  }
   for (const account of await backend.store.accounts.list()) {
     const name = `${account.emailAddress} (${account.kind})`;
-    if (backend.mode === "demo")
+    if (backend.mode === "demo") {
       checks.push({
         name,
         status: "warning",
         detail: "Demo account; provider network checks are disabled.",
         accountId: account.id,
       });
-    else if (account.settings.reauthorizationRequired === true)
+    } else if (account.settings.reauthorizationRequired === true) {
       checks.push({
         name,
         status: "error",
         detail: "Re-authorize this account from Accounts.",
         accountId: account.id,
       });
-    else
+    } else {
       await check(
         name,
         async () => {
@@ -184,6 +196,7 @@ export async function runDoctor(
         },
         account.id,
       );
+    }
     const age = account.lastSyncAt ? now - Date.parse(account.lastSyncAt) : Infinity;
     checks.push({
       name: `${account.emailAddress} sync`,
@@ -221,7 +234,9 @@ export async function runDoctor(
         /* try next */
       }
     }
-    if (!cli) throw new Error(`CLI entry not found next to ${import.meta.url}`);
+    if (!cli) {
+      throw new Error(`CLI entry not found next to ${import.meta.url}`);
+    }
     return `${JSON.stringify(process.execPath)} ${JSON.stringify(cli)} mcp`;
   });
   return {
@@ -275,7 +290,9 @@ export async function doctorCommand(demo = false): Promise<void> {
     if (!process.env.PASSPORT_MASTER_KEY) {
       try {
         const key = await stat(join(config.dataDir, "master.key"));
-        if (!key.isFile() || (key.mode & 0o777) !== 0o600 || key.size < 32) throw new Error();
+        if (!key.isFile() || (key.mode & 0o777) !== 0o600 || key.size < 32) {
+          throw new Error();
+        }
       } catch {
         checks.push({
           name: "Master key",
@@ -291,14 +308,18 @@ export async function doctorCommand(demo = false): Promise<void> {
       return;
     }
   }
-  if (!demo) await resolveLlmSelection(config);
+  if (!demo) {
+    await resolveLlmSelection(config);
+  }
   const backend = demo
     ? await (await import("./demo/index.js")).createDemoBackend(config)
     : await (await import("./compose.js")).createRealBackend(config, { clientMode: true });
   try {
     const report = await runDoctor(backend);
     printDoctor(report);
-    if (!report.ok) process.exitCode = 1;
+    if (!report.ok) {
+      process.exitCode = 1;
+    }
   } finally {
     await backend.close();
   }

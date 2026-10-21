@@ -4,17 +4,20 @@ export const DEFAULT_RESPONSE_BYTE_BUDGET = 512 * 1024;
 const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
 
 export function responseByteBudget(value = DEFAULT_RESPONSE_BYTE_BUDGET): number {
-  if (!Number.isSafeInteger(value) || value < 1024)
+  if (!Number.isSafeInteger(value) || value < 1024) {
     throw new ToolError(
       "INVALID_RESPONSE_BUDGET",
       "Response byte budget must be an integer of at least 1024.",
     );
+  }
   return value;
 }
 
 /** Prefix offsets use UTF-16 code units, without splitting a surrogate pair. */
 export function bodyPrefix(text: string, length: number): string {
-  if (length > 0 && length < text.length && /[\uD800-\uDBFF]/.test(text[length - 1]!)) length--;
+  if (length > 0 && length < text.length && /[\uD800-\uDBFF]/.test(text[length - 1]!)) {
+    length--;
+  }
   return text.slice(0, length);
 }
 
@@ -24,7 +27,9 @@ export function limitResponse<T extends object>(
   budget = DEFAULT_RESPONSE_BYTE_BUDGET,
 ): T {
   responseByteBudget(budget);
-  if (bytes(value) <= budget) return value;
+  if (bytes(value) <= budget) {
+    return value;
+  }
   const result = structuredClone(value);
   const strings: Array<{
     parent: Record<string, unknown>;
@@ -33,7 +38,9 @@ export function limitResponse<T extends object>(
     body: boolean;
   }> = [];
   const visit = (node: unknown) => {
-    if (!node || typeof node !== "object") return;
+    if (!node || typeof node !== "object") {
+      return;
+    }
     for (const [key, child] of Object.entries(node)) {
       // Identifiers, cursors and policy outcomes must remain intact.
       if (
@@ -48,7 +55,9 @@ export function limitResponse<T extends object>(
           original: child,
           body: /^(textBody|htmlBody|body|text|markdown)$/.test(key),
         });
-      } else if (typeof child === "object") visit(child);
+      } else if (typeof child === "object") {
+        visit(child);
+      }
     }
   };
   visit(result);
@@ -64,19 +73,25 @@ export function limitResponse<T extends object>(
     for (const [parent, original] of parents) {
       parent.truncated = original.truncated;
       delete parent.continueFrom;
-      if (original.continueFrom !== undefined) parent.continueFrom = original.continueFrom;
+      if (original.continueFrom !== undefined) {
+        parent.continueFrom = original.continueFrom;
+      }
     }
     for (const { parent, key, original } of bodies) {
       const text = bodyPrefix(original, Math.min(length, original.length));
       parent[key] = text;
-      if (text.length === original.length) continue;
+      if (text.length === original.length) {
+        continue;
+      }
       parent.truncated = true;
       const next = (typeof parent.offset === "number" ? parent.offset : 0) + text.length;
       parent.continueFrom = Math.min(
         typeof parent.continueFrom === "number" ? parent.continueFrom : Infinity,
         next,
       );
-      if (parent.uri) parent._meta = { truncated: true, continueFrom: parent.continueFrom };
+      if (parent.uri) {
+        parent._meta = { truncated: true, continueFrom: parent.continueFrom };
+      }
     }
   };
   const fit = (max: number, mark: (length: number) => void) => {
@@ -85,8 +100,11 @@ export function limitResponse<T extends object>(
     while (low < high) {
       const mid = Math.ceil((low + high) / 2);
       mark(mid);
-      if (bytes(result) <= budget) low = mid;
-      else high = mid - 1;
+      if (bytes(result) <= budget) {
+        low = mid;
+      } else {
+        high = mid - 1;
+      }
     }
     mark(low);
   };
@@ -103,7 +121,9 @@ export function limitResponse<T extends object>(
   for (const { parent, key, original } of metadata) {
     parent.truncated = true;
     parent[key] = "";
-    if (bytes(result) > budget) continue;
+    if (bytes(result) > budget) {
+      continue;
+    }
     fit(original.length, (length) => {
       parent[key] = bodyPrefix(original, length);
     });

@@ -28,8 +28,9 @@ class PersonalAgentRuntime implements AgentRuntime {
     if (
       options.matterReviewDays !== undefined &&
       (!Number.isFinite(options.matterReviewDays) || options.matterReviewDays <= 0)
-    )
+    ) {
       throw new AgentError("matterReviewDays must be positive", "AGENT_CONFIG");
+    }
     this.llm = "complete" in options.llm ? options.llm : createLlmClient(options.llm);
     this.now = options.now ?? (() => new Date().toISOString());
   }
@@ -84,7 +85,9 @@ class PersonalAgentRuntime implements AgentRuntime {
         }
         for (const call of response.toolCalls) {
           const tool = opts.tools?.find((item) => item.name === call.name);
-          if (!tool) throw new AgentError("Model requested an unknown tool", "LLM_TOOL");
+          if (!tool) {
+            throw new AgentError("Model requested an unknown tool", "LLM_TOOL");
+          }
           validateJson(call.arguments, tool.inputSchema);
         }
         return response;
@@ -100,23 +103,28 @@ class PersonalAgentRuntime implements AgentRuntime {
           json: schema,
           model,
         });
-        if (!isObject(response.json))
+        if (!isObject(response.json)) {
           throw new AgentError("Expected structured object output", "LLM_SCHEMA");
+        }
         return response.json;
       },
       callTool: async (name, input, context) => {
         const tool = ctx.tools.find((tool) => tool.name === name);
-        if (!tool) throw new AgentError("Unknown registry tool", "INPUT_TOOL");
+        if (!tool) {
+          throw new AgentError("Unknown registry tool", "INPUT_TOOL");
+        }
         ctx.toolCalls++;
         const result = await tool.handler(input, { ...context, runId: run.id });
         const data = result;
-        if (data.error === "DEPENDENCY_ERROR" || data.status === "failed")
+        if (data.error === "DEPENDENCY_ERROR" || data.status === "failed") {
           throw new AgentError("Tool dependency failed", "ACTION_FAILED");
-        if (result.isError && data.error)
+        }
+        if (result.isError && data.error) {
           throw new AgentError(
             typeof data.reason === "string" ? data.reason : "Invalid tool input",
             "INPUT_TOOL",
           );
+        }
         return result;
       },
     };
@@ -135,8 +143,9 @@ class PersonalAgentRuntime implements AgentRuntime {
           run.actionIds.push(record.id);
           ctx.actions.push(record);
           await store.kv.set(`run:${run.id}`, JSON.stringify(run));
-          if (record.status === "failed")
+          if (record.status === "failed") {
             throw new AgentError("Action executor reported a failed action", "ACTION_FAILED");
+          }
           return record;
         },
         approve: (...args) => executor.approve(...args),
@@ -232,7 +241,9 @@ class PersonalAgentRuntime implements AgentRuntime {
       ...(ctx.digest ? { digest: ctx.digest } : {}),
     };
     bus.emit(event);
-    if (failure) throw failure;
+    if (failure) {
+      throw failure;
+    }
     return run;
   }
 }

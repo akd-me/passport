@@ -34,7 +34,9 @@ function page<T>(items: T[], limit = 25, cursor?: string | null): Page<T> {
   };
 }
 const upsert = <T extends { id: string }>(map: Map<string, T>, items: T[]) => {
-  for (const item of items) map.set(item.id, clone(item));
+  for (const item of items) {
+    map.set(item.id, clone(item));
+  }
 };
 
 /** Full contract fake. Text matching is intentionally simple; FTS parsing belongs to the store. */
@@ -88,7 +90,9 @@ export class MemoryStore implements Store {
     get: async (id) => clone(this.data.mailboxes.get(id) ?? null),
     upsertMany: async (items) => upsert(this.data.mailboxes, items),
     deleteMany: async (ids) => {
-      for (const id of ids) this.data.mailboxes.delete(id);
+      for (const id of ids) {
+        this.data.mailboxes.delete(id);
+      }
     },
   };
   emails: Store["emails"] = {
@@ -134,15 +138,21 @@ export class MemoryStore implements Store {
     patchMany: async (ids, patch) => {
       for (const id of ids) {
         const value = this.data.emails.get(id);
-        if (value) this.data.emails.set(id, { ...value, ...clone(patch) });
+        if (value) {
+          this.data.emails.set(id, { ...value, ...clone(patch) });
+        }
       }
     },
     deleteMany: async (ids) => {
-      for (const id of ids) this.data.emails.delete(id);
+      for (const id of ids) {
+        this.data.emails.delete(id);
+      }
     },
   };
   private withBodies(value?: Email, includeBodies = false): Email | null {
-    if (!value) return null;
+    if (!value) {
+      return null;
+    }
     const copy = clone(value);
     if (!includeBodies) {
       delete copy.textBody;
@@ -178,7 +188,9 @@ export class MemoryStore implements Store {
       ),
     upsertMany: async (items) => upsert(this.data.events, items),
     deleteMany: async (ids) => {
-      for (const id of ids) this.data.events.delete(id);
+      for (const id of ids) {
+        this.data.events.delete(id);
+      }
     },
   };
   people: Store["people"] = {
@@ -255,7 +267,9 @@ export class MemoryStore implements Store {
     },
     update: async (id, patch) => {
       const value = this.data.actions.get(id);
-      if (!value) throw error("Action not found");
+      if (!value) {
+        throw error("Action not found");
+      }
       const updated = { ...value, ...clone(patch) };
       this.data.actions.set(id, updated);
       return clone(updated);
@@ -352,18 +366,23 @@ export class MemoryExecutor implements ActionExecutor {
   async submit(request: ActionRequest): Promise<ActionRecord> {
     this.submitted.push(clone(request));
     const decision = await this.policy.evaluate(request);
+    function actionStatus() {
+      if (decision.outcome === "ask") {
+        return "proposed";
+      }
+      if (decision.outcome === "hold") {
+        return "held";
+      }
+      if (decision.outcome === "deny") {
+        return "rejected";
+      }
+      return "executed";
+    }
     return this.store.actions.insert({
       id: `action-${this.submitted.length}`,
       request: clone(request),
       decision,
-      status:
-        decision.outcome === "ask"
-          ? "proposed"
-          : decision.outcome === "hold"
-            ? "held"
-            : decision.outcome === "deny"
-              ? "rejected"
-              : "executed",
+      status: actionStatus(),
       holdUntil: decision.holdUntil ?? null,
       createdAt: new Date().toISOString(),
     });
@@ -383,7 +402,9 @@ export class MemoryExecutor implements ActionExecutor {
     context?: Parameters<ActionExecutor["undo"]>[1],
   ): Promise<ActionRecord> {
     const original = await this.store.actions.get(actionId);
-    if (!original?.inverse) throw error("Missing inverse");
+    if (!original?.inverse) {
+      throw error("Missing inverse");
+    }
     return this.submit({
       ...original.inverse,
       category: original.request.category,
@@ -403,14 +424,18 @@ export class MemoryBus implements EventBus {
     return this.handlers.size;
   }
   emit(event: DomainEvent) {
-    for (const handler of this.handlers) handler(clone(event));
+    for (const handler of this.handlers) {
+      handler(clone(event));
+    }
   }
   on<T extends DomainEvent["type"]>(
     type: T,
     handler: (event: Extract<DomainEvent, { type: T }>) => void,
   ) {
     return this.onAny((event) => {
-      if (event.type === type) handler(event as Extract<DomainEvent, { type: T }>);
+      if (event.type === type) {
+        handler(event as Extract<DomainEvent, { type: T }>);
+      }
     });
   }
   onAny(handler: (event: DomainEvent) => void) {

@@ -25,8 +25,9 @@ export function createDemoExecutor(
   const restorers = new Map<string, () => Promise<void>>(),
     busy = new Set<string>();
   async function lock<T>(id: string, task: () => Promise<T>): Promise<T> {
-    if (busy.has(id))
+    if (busy.has(id)) {
       throw new ApiError("ACTION_BUSY", "This action is already being processed", 409);
+    }
     busy.add(id);
     try {
       return await task();
@@ -36,8 +37,9 @@ export function createDemoExecutor(
   }
   async function get(id: string, status: ActionRecord["status"]): Promise<ActionRecord> {
     const record = required(await store.actions.get(id), "Action");
-    if (record.status !== status)
+    if (record.status !== status) {
       throw new ApiError("INVALID_ACTION_STATE", `Expected ${status}, found ${record.status}`, 409);
+    }
     return record;
   }
   async function apply(record: ActionRecord): Promise<ActionRequest | null> {
@@ -114,31 +116,37 @@ export function createDemoExecutor(
           keywords: { ...email.keywords },
           mailboxIds: [...email.mailboxIds],
         };
-        if (r.type === "archive")
+        if (r.type === "archive") {
           patch.mailboxIds = [
             ...patch.mailboxIds.filter((id) => id !== "mailbox-inbox"),
             "mailbox-archive",
           ];
-        if (r.type === "unarchive")
+        }
+        if (r.type === "unarchive") {
           patch.mailboxIds = [
             ...patch.mailboxIds.filter((id) => id !== "mailbox-archive"),
             p.toMailboxId ?? "mailbox-inbox",
           ];
-        if (r.type === "move" || r.type === "delete")
+        }
+        if (r.type === "move" || r.type === "delete") {
           patch.mailboxIds = [r.type === "delete" ? "mailbox-trash" : p.toMailboxId!];
+        }
         const keyword = r.type.includes("read")
           ? "$seen"
           : r.type.includes("flag")
             ? "$flagged"
             : `label:${p.label}`;
-        if (["mark_read", "mark_unread", "flag", "unflag", "label", "unlabel"].includes(r.type))
+        if (["mark_read", "mark_unread", "flag", "unflag", "label", "unlabel"].includes(r.type)) {
           patch.keywords[keyword] = ["mark_read", "flag", "label"].includes(r.type);
+        }
         await store.emails.patchMany([email.id], patch);
         bus.emit({ type: "email.updated", emailId: email.id });
       }
       restorers.set(record.id, async () => {
         await store.emails.upsertMany(previous);
-        previous.forEach((e) => bus.emit({ type: "email.updated", emailId: e.id }));
+        previous.forEach((e) => {
+          bus.emit({ type: "email.updated", emailId: e.id });
+        });
       });
       const pairs: Partial<Record<ActionType, ActionType>> = {
         archive: "unarchive",
@@ -174,7 +182,9 @@ export function createDemoExecutor(
                 : undefined,
             )
           : undefined);
-      if (!draft) throw new ApiError("INVALID_DRAFT", "A draft is required");
+      if (!draft) {
+        throw new ApiError("INVALID_DRAFT", "A draft is required");
+      }
       const account = required(await store.accounts.get(r.accountId), "Account"),
         id = crypto.randomUUID();
       const email: Email = {
@@ -244,11 +254,12 @@ export function createDemoExecutor(
         ]);
         if (r.matterId) {
           const matter = await store.matters.get(r.matterId);
-          if (matter)
+          if (matter) {
             await store.matters.upsert({
               ...matter,
               emailIds: matter.emailIds.filter((e) => e !== id),
             });
+          }
         }
         bus.emit({ type: "email.updated", emailId: id });
       });
@@ -310,13 +321,15 @@ export function createDemoExecutor(
         status: decision.outcome === "deny" ? "rejected" : "proposed",
         createdAt: now(),
       });
-      if (decision.outcome === "ask" || decision.outcome === "deny")
+      if (decision.outcome === "ask" || decision.outcome === "deny") {
         bus.emit({ type: "action.proposed", action: record });
-      if (decision.promotionOffer)
+      }
+      if (decision.promotionOffer) {
         bus.emit({
           type: "trust.promotion_offered",
           offer: decision.promotionOffer,
         });
+      }
       return decision.outcome === "allow" || decision.outcome === "hold"
         ? approved(record)
         : record;
@@ -327,11 +340,12 @@ export function createDemoExecutor(
         if (
           edited &&
           (edited.type !== record.request.type || edited.accountId !== record.request.accountId)
-        )
+        ) {
           throw new ApiError(
             "INVALID_EDIT",
             "Edited approvals must preserve action type and account",
           );
+        }
         const changed =
           edited && JSON.stringify(edited.params) !== JSON.stringify(record.request.params);
         const action = await store.actions.update(id, {
@@ -371,8 +385,9 @@ export function createDemoExecutor(
     undo: (id) =>
       lock(id, async () => {
         const record = await get(id, "executed");
-        if (!record.inverse || !restorers.has(id))
+        if (!record.inverse || !restorers.has(id)) {
           throw new ApiError("NOT_UNDOABLE", "This action cannot be undone", 409);
+        }
         const inverseRecord = await store.actions.insert({
           id: crypto.randomUUID(),
           request: record.inverse,
@@ -405,7 +420,9 @@ export function createDemoExecutor(
     releaseDue: async (at = now()) => {
       const released: ActionRecord[] = [];
       for (const record of await store.actions.dueHeld(at)) {
-        if (busy.has(record.id)) continue;
+        if (busy.has(record.id)) {
+          continue;
+        }
         await lock(record.id, async () => {
           if ((await store.actions.get(record.id))?.status === "held") {
             try {

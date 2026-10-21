@@ -74,7 +74,9 @@ export class ArrivalQueue {
         delete index[emailId];
         return JSON.stringify(index);
       });
-      if (!keepEntry) await this.store.kv.delete(arrivalKey(emailId));
+      if (!keepEntry) {
+        await this.store.kv.delete(arrivalKey(emailId));
+      }
     });
   }
   private save(emailId: string, entry: Arrival) {
@@ -136,10 +138,14 @@ export class ArrivalQueue {
     await this.acknowledge(email.id, true);
   }
   private async process(emailId: string) {
-    if (!this.enabled()) return;
+    if (!this.enabled()) {
+      return;
+    }
     const claimKey = `arrival-claim:${emailId}`;
     let claim = await this.store.kv.get(claimKey);
-    if (claim && Date.parse(JSON.parse(claim).expiresAt) > Date.now()) return;
+    if (claim && Date.parse(JSON.parse(claim).expiresAt) > Date.now()) {
+      return;
+    }
     const id = crypto.randomUUID();
     const renewed = () =>
       JSON.stringify({
@@ -148,13 +154,18 @@ export class ArrivalQueue {
         expiresAt: new Date(Date.now() + 60000).toISOString(),
       });
     const next = renewed();
-    if (!compareAndSetKv(this.store, claimKey, claim, next)) return;
+    if (!compareAndSetKv(this.store, claimKey, claim, next)) {
+      return;
+    }
     claim = next;
     const timer = setInterval(() => {
       try {
         const next = renewed();
-        if (compareAndSetKv(this.store, claimKey, claim, next)) claim = next;
-        else clearInterval(timer);
+        if (compareAndSetKv(this.store, claimKey, claim, next)) {
+          claim = next;
+        } else {
+          clearInterval(timer);
+        }
       } catch {
         logger.warn("Arrival claim heartbeat failed; retrying at the next heartbeat");
       }
@@ -169,7 +180,9 @@ export class ArrivalQueue {
   }
   private async processClaimed(emailId: string) {
     const saved = await this.store.kv.get(arrivalKey(emailId));
-    if (!saved) return;
+    if (!saved) {
+      return;
+    }
     const entry: Arrival = JSON.parse(saved);
     const runId = `arrival:${emailId}`;
     const journal = await this.store.kv.get(`run:${runId}`);
@@ -185,7 +198,9 @@ export class ArrivalQueue {
     const email = await this.store.emails.get(emailId);
     if (!email) {
       // An indexed arrival can precede its email if sync was interrupted.
-      if (!(await this.store.accounts.get(entry.accountId))) await this.acknowledge(emailId);
+      if (!(await this.store.accounts.get(entry.accountId))) {
+        await this.acknowledge(emailId);
+      }
       return;
     }
     if (email.keywords.$deleted) {
@@ -196,7 +211,9 @@ export class ArrivalQueue {
       await this.attention(email, entry);
       return;
     }
-    if (!entry.nextAttemptAt || Date.parse(entry.nextAttemptAt) > Date.now()) return;
+    if (!entry.nextAttemptAt || Date.parse(entry.nextAttemptAt) > Date.now()) {
+      return;
+    }
     const ready = await calendarsReady(this.store, email.accountId);
     if (!ready) {
       entry.calendarWaitStartedAt ??= new Date().toISOString();
@@ -221,16 +238,18 @@ export class ArrivalQueue {
         ...(!ready ? { availabilityUnverified: true } : {}),
       };
       const run = await this.agent.run(trigger);
-      if (run.error) throw new Error(run.error);
+      if (run.error) {
+        throw new Error(run.error);
+      }
     } catch (error) {
       // The runtime persists progress while inference runs; retain its latest steps.
       Object.assign(entry, JSON.parse((await this.store.kv.get(arrivalKey(emailId))) ?? "{}"));
       const code = (error as { code?: unknown })?.code;
       entry.lastError =
         typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : "TRIAGE_FAILED";
-      if (entry.attempts === 5)
+      if (entry.attempts === 5) {
         await this.attention((await this.store.emails.get(emailId)) ?? email, entry);
-      else {
+      } else {
         entry.nextAttemptAt = new Date(Date.now() + delays[entry.attempts - 1]!).toISOString();
         await this.save(emailId, entry);
       }
@@ -243,7 +262,9 @@ export class ArrivalQueue {
   }
   enqueue(emailId: string, accountId: string): Promise<void> {
     const active = this.active.get(emailId);
-    if (active) return active;
+    if (active) {
+      return active;
+    }
     const job = (this.accounts.get(accountId) ?? Promise.resolve()).then(() =>
       this.process(emailId),
     );
@@ -255,18 +276,26 @@ export class ArrivalQueue {
     this.accounts.set(accountId, settled);
     void settled.then(() => {
       this.active.delete(emailId);
-      if (this.accounts.get(accountId) === settled) this.accounts.delete(accountId);
+      if (this.accounts.get(accountId) === settled) {
+        this.accounts.delete(accountId);
+      }
     });
     return settled;
   }
   drainDue(signal?: AbortSignal): Promise<void> {
-    if (this.draining) return this.draining;
+    if (this.draining) {
+      return this.draining;
+    }
     const job = (async () => {
-      if (!this.enabled() || signal?.aborted) return;
+      if (!this.enabled() || signal?.aborted) {
+        return;
+      }
       const index = await pending(this.store);
       const jobs: Promise<void>[] = [];
       for (const [emailId, accountId] of Object.entries(index)) {
-        if (signal?.aborted) break;
+        if (signal?.aborted) {
+          break;
+        }
         jobs.push(this.enqueue(emailId, accountId));
       }
       await Promise.all(jobs);
@@ -277,7 +306,8 @@ export class ArrivalQueue {
     return job;
   }
   async drain(): Promise<void> {
-    while (this.draining || this.active.size)
+    while (this.draining || this.active.size) {
       await Promise.all([this.draining, ...this.active.values()]);
+    }
   }
 }

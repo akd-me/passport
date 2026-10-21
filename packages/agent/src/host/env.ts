@@ -70,11 +70,16 @@ export function hostAgentEnv(
   const env: Record<string, string> = {};
   for (const key of FORWARDED) {
     const value = source[key];
-    if (value !== undefined) env[key] = value;
+    if (value !== undefined) {
+      env[key] = value;
+    }
   }
   const path = (source.PATH ?? source.Path ?? "").split(delimiter).filter(Boolean);
-  for (const dir of [...(binaryPath ? [dirname(binaryPath)] : []), ...extraBinDirs(source)])
-    if (!path.includes(dir)) path.push(dir);
+  for (const dir of [...(binaryPath ? [dirname(binaryPath)] : []), ...extraBinDirs(source)]) {
+    if (!path.includes(dir)) {
+      path.push(dir);
+    }
+  }
   env.PATH = path.join(delimiter);
   env.NO_COLOR = "1";
   return env;
@@ -93,7 +98,9 @@ const SECRET_PATTERNS: RegExp[] = [
 /** Remove token-shaped strings and bound length before text reaches an error or log. */
 export function redact(text: string, max = 300): string {
   let out = text;
-  for (const pattern of SECRET_PATTERNS) out = out.replace(pattern, "[redacted]");
+  for (const pattern of SECRET_PATTERNS) {
+    out = out.replace(pattern, "[redacted]");
+  }
   out = out.replace(/\s+/g, " ").trim();
   return out.length > max ? `${out.slice(0, max)}…` : out;
 }

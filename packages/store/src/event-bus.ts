@@ -13,13 +13,18 @@ export class InMemoryEventBus implements EventBus {
     handler: (event: Extract<DomainEvent, { type: T }>) => void,
   ): () => void {
     let handlers = this.handlers.get(type);
-    if (!handlers) this.handlers.set(type, (handlers = new Set()));
+    if (!handlers) {
+      handlers = new Set();
+      this.handlers.set(type, handlers);
+    }
     // A wrapper keeps separate subscriptions independent even for the same callback.
     const callback: Handler = (event) => handler(event as Extract<DomainEvent, { type: T }>);
     handlers.add(callback);
     return () => {
       handlers.delete(callback);
-      if (handlers.size === 0 && this.handlers.get(type) === handlers) this.handlers.delete(type);
+      if (handlers.size === 0 && this.handlers.get(type) === handlers) {
+        this.handlers.delete(type);
+      }
     };
   }
 

@@ -17,7 +17,9 @@ export function createDemoBus(): EventBus {
   const listeners = new Set<(event: DomainEvent) => void>();
   return {
     emit: (event) => {
-      for (const listener of listeners) listener(structuredClone(event));
+      for (const listener of listeners) {
+        listener(structuredClone(event));
+      }
     },
     onAny: (handler) => {
       listeners.add(handler);
@@ -27,7 +29,9 @@ export function createDemoBus(): EventBus {
     },
     on: (type, handler) => {
       const listener = (event: DomainEvent) => {
-        if (event.type === type) (handler as (event: DomainEvent) => void)(event);
+        if (event.type === type) {
+          (handler as (event: DomainEvent) => void)(event);
+        }
       };
       listeners.add(listener);
       return () => {
@@ -48,10 +52,11 @@ export async function createDemoBackend(
     executor = createDemoExecutor(store, policy, bus);
   const providers: ProviderRegistry = {
     describe: (kind) => {
-      if (kind !== "mock")
+      if (kind !== "mock") {
         throw new NotImplementedError(
           `Only the mock provider is available in demo mode (${kind} requested)`,
         );
+      }
       return {
         kind,
         label: "Demo mailbox",
@@ -181,7 +186,9 @@ export async function createDemoBackend(
     },
   };
   // Seed decisions through the action gate, including a held send and undoable history.
-  for (const i of [0, 2, 3]) await executor.submit(await draftRequest(i));
+  for (const i of [0, 2, 3]) {
+    await executor.submit(await draftRequest(i));
+  }
   const held = await executor.submit(await draftRequest(1));
   await executor.approve(held.id);
   await executor.submit({

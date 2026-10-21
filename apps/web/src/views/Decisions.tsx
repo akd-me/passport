@@ -58,7 +58,9 @@ export function DecisionCard({
   const task = useTask(),
     held = action.status === "held";
   useEffect(() => {
-    if (editing) textarea.current?.focus();
+    if (editing) {
+      textarea.current?.focus();
+    }
   }, [editing]);
   const approve = () =>
     task.run(
@@ -114,7 +116,9 @@ export function DecisionCard({
                   setBody(draft.textBody ?? "");
                 } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
-                  if (body.trim()) void approve();
+                  if (body.trim()) {
+                    void approve();
+                  }
                 }
               }}
             />
@@ -167,7 +171,9 @@ export function DecisionCard({
                 data-action="edit"
                 disabled={task.busy}
                 onClick={() => {
-                  if (editing) setBody(draft.textBody ?? "");
+                  if (editing) {
+                    setBody(draft.textBody ?? "");
+                  }
                   setEditing(!editing);
                 }}
               >
@@ -281,7 +287,9 @@ function HandledToday({ accountId }: { accountId: string }) {
   const { data } = useResource<Page<ActionRecord>>(
     `/actions${queryString({ accountId, status: "executed", after, limit: 8 })}`,
   );
-  if (!data?.items.length) return null;
+  if (!data?.items.length) {
+    return null;
+  }
   return (
     <section className="handled" aria-labelledby="handled-title">
       <div className="group-head">
@@ -328,12 +336,13 @@ export function ProposalDetails({ action }: { action?: ActionRecord }) {
   );
   const trust = useResource<TrustData>("/trust"),
     { openSettings } = useUi();
-  if (!action)
+  if (!action) {
     return (
       <p className="details-empty">
         Select a proposal to see the message it answers, its matter and why Passport is asking.
       </p>
     );
+  }
   const state: TrustState | undefined = trust.data?.categories.find(
     (c) => c.category === action.request.category,
   );
@@ -426,8 +435,9 @@ export function groupProposals(
   proposed: ActionRecord[],
   grouping: Grouping,
 ): Array<[string, ActionRecord[]]> {
-  if (grouping === "newest")
+  if (grouping === "newest") {
     return [["newest", [...proposed].sort((a, b) => b.createdAt.localeCompare(a.createdAt))]];
+  }
   const grouped = new Map<string, ActionRecord[]>();
   for (const action of proposed) {
     const key = action.request.matterId ?? "unassigned";
@@ -455,14 +465,18 @@ function useQueueKeys(
         event.altKey ||
         isTyping(event.target) ||
         document.querySelector('[aria-modal="true"]')
-      )
+      ) {
         return;
-      if (!["j", "k", "a", "r", "e", "ArrowDown", "ArrowUp"].includes(event.key)) return;
+      }
+      if (!["j", "k", "a", "r", "e", "ArrowDown", "ArrowUp"].includes(event.key)) {
+        return;
+      }
       if (
         event.key.startsWith("Arrow") &&
         !(event.target as HTMLElement)?.closest?.("[data-decision]")
-      )
+      ) {
         return;
+      }
       event.preventDefault();
       const index = Math.max(
         0,
@@ -505,10 +519,19 @@ export function WorkQueue() {
   const items = decisions.data?.items ?? [],
     proposed = items.filter((a) => a.status === "proposed"),
     held = items.filter((a) => a.status === "held");
-  const groups = useMemo(() => groupProposals(proposed, grouping), [decisions.data, grouping]);
+  const groups = useMemo(
+    () =>
+      groupProposals(
+        (decisions.data?.items ?? []).filter((a) => a.status === "proposed"),
+        grouping,
+      ),
+    [decisions.data, grouping],
+  );
   const ordered = useMemo(() => groups.flatMap(([, list]) => list), [groups]);
   useEffect(() => {
-    if (!ordered.some((a) => a.id === selected)) setSelected(ordered[0]?.id);
+    if (!ordered.some((a) => a.id === selected)) {
+      setSelected(ordered[0]?.id);
+    }
   }, [ordered, selected]);
   useQueueKeys(ordered, selected, setSelected);
   const current = ordered.find((a) => a.id === selected);
@@ -533,7 +556,9 @@ export function WorkQueue() {
             }
             onRun={(run) => {
               setFresh(run.actionIds);
-              if (run.actionIds[0]) setSelected(run.actionIds[0]);
+              if (run.actionIds[0]) {
+                setSelected(run.actionIds[0]);
+              }
             }}
           />
         </>

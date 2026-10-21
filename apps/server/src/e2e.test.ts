@@ -17,33 +17,40 @@ import { defaultConfig } from "./config.js";
 class FixtureLlm implements LlmClient {
   async complete(options: CompleteOptions): Promise<LlmCompletion> {
     const properties = options.json?.properties;
-    const json = properties?.category
-      ? {
+    function fixtureResponse() {
+      if (properties?.category) {
+        return {
           category: options.messages[0]?.content.includes("sam@example.com")
             ? "replies_known"
             : "other",
-        }
-      : properties?.matterId
-        ? {
-            matterId: null,
-            title: "Fixture matter",
-            kind: "project",
-            summary: "Review the conversation.",
-            nextStep: "Review reply",
-          }
-        : properties?.slots
-          ? {
-              status: "tentative",
-              textBody: "Here are some possible times.",
-              slots: [],
-            }
-          : properties?.textBody
-            ? { textBody: "Thanks for the update. I can help review the plan." }
-            : {
-                summary: "Waiting for review",
-                nextStep: "Review",
-                status: "waiting",
-              };
+        };
+      }
+      if (properties?.matterId) {
+        return {
+          matterId: null,
+          title: "Fixture matter",
+          kind: "project",
+          summary: "Review the conversation.",
+          nextStep: "Review reply",
+        };
+      }
+      if (properties?.slots) {
+        return {
+          status: "tentative",
+          textBody: "Here are some possible times.",
+          slots: [],
+        };
+      }
+      if (properties?.textBody) {
+        return { textBody: "Thanks for the update. I can help review the plan." };
+      }
+      return {
+        summary: "Waiting for review",
+        nextStep: "Review",
+        status: "waiting",
+      };
+    }
+    const json = fixtureResponse();
     return {
       text: JSON.stringify(json),
       json,
@@ -102,8 +109,9 @@ describe("real backend end to end", () => {
     expect(await backend.store.mailboxes.list(account.id)).toHaveLength(8);
     expect(await backend.store.calendars.list(account.id)).toHaveLength(1);
     expect(await backend.store.events.query({ accountId: account.id })).toHaveLength(6);
-    for (const email of emails.items)
+    for (const email of emails.items) {
       expect((await backend.store.threads.get(email.threadId))!.emailIds).toContain(email.id);
+    }
     expect(events.filter((event) => event.type === "email.received")).toHaveLength(40);
     expect(events.filter((event) => event.type === "agent.run.finished")).toHaveLength(40);
     await backend.syncAccount(account.id);
@@ -167,7 +175,9 @@ describe("real backend end to end", () => {
       reason: "File reviewed conversation",
       params: { emailIds: [email.id] },
     });
-    if (archive.status === "proposed") expect((await post(archive.id, "approve")).status).toBe(200);
+    if (archive.status === "proposed") {
+      expect((await post(archive.id, "approve")).status).toBe(200);
+    }
     expect((await backend.store.emails.get(email.id))!.mailboxIds).not.toEqual(original);
     expect((await post(archive.id, "undo")).status).toBe(200);
     expect((await backend.store.emails.get(email.id))!.mailboxIds).toEqual(original);
@@ -292,7 +302,9 @@ describe("real backend end to end", () => {
     const llm = new FixtureLlm();
     const complete = llm.complete.bind(llm);
     vi.spyOn(llm, "complete").mockImplementation(async (options) => {
-      if (!options.json?.properties?.slots) return complete(options);
+      if (!options.json?.properties?.slots) {
+        return complete(options);
+      }
       const result = await complete(options);
       return { ...result, json: { status: "tentative", textBody: "Can we meet?", slots: [slot] } };
     });
@@ -325,8 +337,9 @@ describe("real backend end to end", () => {
         key.startsWith("agent:journal:") &&
         (await backend.store.actions.query({ category: "scheduling", status: ["held"] })).items
           .length
-      )
+      ) {
         throw new Error("Journal unavailable");
+      }
       await set(key, value);
     });
     const trigger = {
@@ -383,7 +396,7 @@ describe("real backend end to end", () => {
         updatedAt: new Date().toISOString(),
       };
       await backend.store.events.upsertMany([master]);
-      if (scenario === "override")
+      if (scenario === "override") {
         await backend.store.events.upsertMany([
           {
             ...master,
@@ -396,6 +409,7 @@ describe("real backend end to end", () => {
             status: "cancelled",
           },
         ]);
+      }
       const cancelled = await backend.executor.submit(request);
       await backend.executor.approve(cancelled.id);
       expect((await backend.executor.cancelHold(cancelled.id)).status).toBe("rejected");
@@ -474,7 +488,9 @@ describe("real backend end to end", () => {
         id: string;
       };
       let action = (await backend.store.actions.get(id))!;
-      if (action.status === "proposed") action = await backend.executor.approve(id);
+      if (action.status === "proposed") {
+        action = await backend.executor.approve(id);
+      }
       expect(action).toMatchObject({
         status: "executed",
         request: {

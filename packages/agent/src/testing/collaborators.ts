@@ -25,14 +25,18 @@ export class MemoryBus implements EventBus {
   private handlers = new Set<(event: DomainEvent) => void>();
   emit(event: DomainEvent): void {
     this.events.push(structuredClone(event));
-    for (const handler of this.handlers) handler(event);
+    for (const handler of this.handlers) {
+      handler(event);
+    }
   }
   on<T extends DomainEvent["type"]>(
     type: T,
     handler: (event: Extract<DomainEvent, { type: T }>) => void,
   ): () => void {
     return this.onAny((event) => {
-      if (event.type === type) handler(event as Extract<DomainEvent, { type: T }>);
+      if (event.type === type) {
+        handler(event as Extract<DomainEvent, { type: T }>);
+      }
     });
   }
   onAny(handler: (event: DomainEvent) => void): () => void {
@@ -95,7 +99,9 @@ export class FakePolicy implements PolicyEngine {
 }
 
 function params<T extends ActionType>(request: ActionRequest, type: T): ActionParams[T] {
-  if (request.type !== type) throw new AgentError("Fake action type mismatch", "FAKE_ACTION");
+  if (request.type !== type) {
+    throw new AgentError("Fake action type mismatch", "FAKE_ACTION");
+  }
   return request.params as ActionParams[T];
 }
 
@@ -113,18 +119,23 @@ export class FakeExecutor implements ActionExecutor {
   async submit(request: ActionRequest): Promise<ActionRecord> {
     this.requests.push(structuredClone(request));
     const decision = await this.policy.evaluate(request);
+    function actionStatus() {
+      if (decision.outcome === "allow") {
+        return "executed";
+      }
+      if (decision.outcome === "hold") {
+        return "held";
+      }
+      if (decision.outcome === "ask") {
+        return "proposed";
+      }
+      return "rejected";
+    }
     const record: ActionRecord = {
       id: newAgentId(),
       request,
       decision,
-      status:
-        decision.outcome === "allow"
-          ? "executed"
-          : decision.outcome === "hold"
-            ? "held"
-            : decision.outcome === "ask"
-              ? "proposed"
-              : "rejected",
+      status: actionStatus(),
       createdAt: this.now(),
       holdUntil: decision.holdUntil,
     };
@@ -152,8 +163,9 @@ export class FakeExecutor implements ActionExecutor {
             !patch.verification ||
             !patch.updatedAt ||
             !patch.displayName)
-        )
+        ) {
           throw new AgentError("New fake person requires a complete patch", "FAKE_PERSON");
+        }
         await this.store.people.upsert({
           ...old,
           ...patch,
@@ -179,7 +191,9 @@ export class FakeExecutor implements ActionExecutor {
       case "matter_attach": {
         const input = params(request, "matter_attach");
         const matter = await this.store.matters.get(input.matterId);
-        if (!matter) throw new AgentError("Missing fake matter", "FAKE_MATTER");
+        if (!matter) {
+          throw new AgentError("Missing fake matter", "FAKE_MATTER");
+        }
         await this.store.matters.upsert({
           ...matter,
           emailIds: [...new Set([...matter.emailIds, ...(input.emailIds ?? [])])],
@@ -196,7 +210,9 @@ export class FakeExecutor implements ActionExecutor {
       case "matter_update": {
         const { matterId, patch } = params(request, "matter_update");
         const matter = await this.store.matters.get(matterId);
-        if (!matter) throw new AgentError("Missing fake matter", "FAKE_MATTER");
+        if (!matter) {
+          throw new AgentError("Missing fake matter", "FAKE_MATTER");
+        }
         await this.store.matters.upsert({
           ...matter,
           ...patch,
@@ -234,18 +250,21 @@ export class FakeExecutor implements ActionExecutor {
         const input = request.params as { emailIds: string[]; label?: string };
         for (const id of input.emailIds) {
           const email = await this.store.emails.get(id);
-          if (!email) throw new AgentError("Missing fake email", "FAKE_EMAIL");
-          if (request.type === "archive")
+          if (!email) {
+            throw new AgentError("Missing fake email", "FAKE_EMAIL");
+          }
+          if (request.type === "archive") {
             await this.store.emails.patchMany([id], {
               mailboxIds: email.mailboxIds.filter((mailbox) => mailbox !== "inbox"),
             });
-          else
+          } else {
             await this.store.emails.patchMany([id], {
               keywords: {
                 ...email.keywords,
                 [request.type === "label" ? `label:${input.label}` : "$seen"]: true,
               },
             });
+          }
         }
         return {};
       }

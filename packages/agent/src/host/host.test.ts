@@ -739,8 +739,9 @@ describe("runHostAgentSession", () => {
       (event) => events.push(event),
       { binaryPath: fake.path, env: { HOME: dir, PATH: "/usr/bin:/bin" } },
     );
-    for (let i = 0; i < 100 && !(await fake.log()).length; i++)
+    for (let i = 0; i < 100 && !(await fake.log()).length; i++) {
       await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     session.cancel();
     const result = await session.done;
     expect(result).toMatchObject({ ok: false, error: { code: "HOST_AGENT_CANCELLED" } });

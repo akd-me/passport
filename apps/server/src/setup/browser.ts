@@ -21,7 +21,7 @@ function installs(
   env: NodeJS.ProcessEnv,
 ): Record<Exclude<SetupBrowser, "chromium">, string[]> {
   const home = env.HOME || homedir();
-  if (platform === "darwin")
+  if (platform === "darwin") {
     return {
       chrome: [
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -32,6 +32,7 @@ function installs(
         join(home, "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
       ],
     };
+  }
   if (platform === "win32") {
     const roots = [env.PROGRAMFILES, env["PROGRAMFILES(X86)"], env.LOCALAPPDATA].filter(
       (root): root is string => !!root,
@@ -57,12 +58,16 @@ function installs(
 
 /** Where Playwright installs its own browsers. */
 function playwrightCache(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string {
-  if (env.PLAYWRIGHT_BROWSERS_PATH && env.PLAYWRIGHT_BROWSERS_PATH !== "0")
+  if (env.PLAYWRIGHT_BROWSERS_PATH && env.PLAYWRIGHT_BROWSERS_PATH !== "0") {
     return env.PLAYWRIGHT_BROWSERS_PATH;
+  }
   const home = env.HOME || homedir();
-  if (platform === "darwin") return join(home, "Library", "Caches", "ms-playwright");
-  if (platform === "win32")
+  if (platform === "darwin") {
+    return join(home, "Library", "Caches", "ms-playwright");
+  }
+  if (platform === "win32") {
     return join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "ms-playwright");
+  }
   return join(env.XDG_CACHE_HOME || join(home, ".cache"), "ms-playwright");
 }
 
@@ -84,8 +89,11 @@ export function detectSetupBrowser(options: BrowserDetectOptions = {}): SetupBro
       }
     });
   const known = installs(platform, env);
-  for (const browser of ["chrome", "msedge"] as const)
-    if (known[browser].some(exists)) return browser;
+  for (const browser of ["chrome", "msedge"] as const) {
+    if (known[browser].some(exists)) {
+      return browser;
+    }
+  }
   return list(playwrightCache(platform, env)).some((name) => /^chromium-\d+$/.test(name))
     ? "chromium"
     : null;
@@ -170,7 +178,9 @@ const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$
  * otherwise keep the profile locked for the next task.
  */
 export function closeSetupBrowser(profileDir: string): Promise<void> {
-  if (process.platform === "win32") return Promise.resolve();
+  if (process.platform === "win32") {
+    return Promise.resolve();
+  }
   return new Promise((resolve) => {
     execFile(
       "pkill",

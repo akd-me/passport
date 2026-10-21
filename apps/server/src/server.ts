@@ -32,11 +32,15 @@ export function startServer(backend: Backend, options: { allowRemote?: boolean }
   });
   const unsubscribe = backend.bus.onAny((event) => {
     const message = JSON.stringify(event);
-    for (const client of wss.clients)
+    for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) {
-        if (client.bufferedAmount > 1024 * 1024) client.terminate();
-        else client.send(message);
+        if (client.bufferedAmount > 1024 * 1024) {
+          client.terminate();
+        } else {
+          client.send(message);
+        }
       }
+    }
   });
   const schedulers = startSchedulers(backend);
   const mcp = backend.createMcpServer
@@ -65,7 +69,9 @@ export function startServer(backend: Backend, options: { allowRemote?: boolean }
           (handle) => handle.close(),
           () => undefined,
         );
-        for (const client of wss.clients) client.terminate();
+        for (const client of wss.clients) {
+          client.terminate();
+        }
         await new Promise<void>((resolve) => wss.close(() => resolve()));
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve())),

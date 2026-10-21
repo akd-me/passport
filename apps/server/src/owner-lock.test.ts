@@ -7,7 +7,9 @@ import { acquireOwner, activeOwner } from "./owner-lock.js";
 const directories: string[] = [];
 const owners: ReturnType<typeof acquireOwner>[] = [];
 afterEach(async () => {
-  for (const owner of owners.splice(0)) owner.release();
+  for (const owner of owners.splice(0)) {
+    owner.release();
+  }
   vi.useRealTimers();
   await Promise.all(
     directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),

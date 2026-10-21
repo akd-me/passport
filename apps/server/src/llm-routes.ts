@@ -16,7 +16,9 @@ async function body(request: Request): Promise<Record<string, unknown>> {
   try {
     return object(JSON.parse(await request.text()));
   } catch (error) {
-    if (error instanceof ApiError) throw error;
+    if (error instanceof ApiError) {
+      throw error;
+    }
     throw new ApiError("INVALID_JSON", "Expected a JSON object");
   }
 }
@@ -31,12 +33,14 @@ export function installLlmRoutes(app: Hono, backend: Backend): void {
   );
   app.put("/api/settings/llm", async (c) => {
     const input = await body(c.req.raw);
-    for (const key of Object.keys(input))
-      if (!["provider", "model", "baseUrl", "fastModel"].includes(key))
+    for (const key of Object.keys(input)) {
+      if (!["provider", "model", "baseUrl", "fastModel"].includes(key)) {
         throw new ApiError(
           "INVALID_FIELD",
           `Unknown LLM setting ${key}; API keys use PASSPORT_LLM_API_KEY`,
         );
+      }
+    }
     const provider =
       input.provider === undefined
         ? undefined
@@ -80,19 +84,22 @@ export function installLlmRoutes(app: Hono, backend: Backend): void {
               : undefined);
         if (isHostAgentProvider(current.llm.provider)) {
           delete llm.fastModel;
-          if (text("model") === undefined)
+          if (text("model") === undefined) {
             llm.model = {
               anthropic: "claude-sonnet-5-5",
               openai: "gpt-4.1",
               "openai-compatible": "local-model",
               ollama: "llama3.2",
             }[provider as "anthropic"];
+          }
         }
       }
       llm.provider = next;
       for (const key of ["model", "baseUrl", "fastModel"] as const) {
         const value = text(key);
-        if (value !== undefined) llm[key] = value;
+        if (value !== undefined) {
+          llm[key] = value;
+        }
       }
     }
     // Any edit is the user's explicit choice and is persisted as such.

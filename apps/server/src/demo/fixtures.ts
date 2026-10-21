@@ -79,7 +79,9 @@ export async function seedDemo(store: Store): Promise<void> {
     createdAt: ago(1440),
     updatedAt: ago(i),
   }));
-  for (const person of people) await store.people.upsert(person);
+  for (const person of people) {
+    await store.people.upsert(person);
+  }
   const titles = [
     "Northstar · autumn launch",
     "A long weekend in Portland",
@@ -230,10 +232,14 @@ export async function seedDemo(store: Store): Promise<void> {
     location: i === 1 ? "Harbor House, Portland" : "Video call",
   }));
   await store.events.upsertMany(events);
-  for (const event of events) matters.find((m) => m.id === event.matterId)!.eventIds.push(event.id);
-  for (const matter of matters) await store.matters.upsert(matter);
+  for (const event of events) {
+    matters.find((m) => m.id === event.matterId)!.eventIds.push(event.id);
+  }
+  for (const matter of matters) {
+    await store.matters.upsert(matter);
+  }
   await store.trust.setConfig(structuredClone(DEFAULT_POLICY_CONFIG));
-  for (const [i, category] of CATEGORIES.entries())
+  for (const [i, category] of CATEGORIES.entries()) {
     await store.trust.upsert({
       category,
       level: i < 4 ? "auto" : "supervised",
@@ -245,6 +251,7 @@ export async function seedDemo(store: Store): Promise<void> {
       rejections: i > 6 ? 1 : 0,
       lastActivityAt: ago(i),
     });
+  }
   await store.kv.set(
     "user-profile",
     "# Alex Morgan\n\nKeep my replies warm, brief, and direct. Protect mornings for focused work.\n\nAlways ask before committing money or agreeing to legal terms. Maya and Oliver are my collaborators at Northstar.\n",

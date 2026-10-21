@@ -24,7 +24,9 @@ export function decryptCredentials(
 ): AccountCredentials {
   try {
     const encrypted = Buffer.from(blob);
-    if (encrypted[0] !== 1 || encrypted.length < 30) throw new Error();
+    if (encrypted[0] !== 1 || encrypted.length < 30) {
+      throw new Error();
+    }
     const decipher = createDecipheriv("aes-256-gcm", key, encrypted.subarray(1, 13));
     decipher.setAAD(Buffer.from(accountId));
     decipher.setAuthTag(encrypted.subarray(13, 29));

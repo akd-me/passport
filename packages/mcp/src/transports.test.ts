@@ -11,7 +11,9 @@ import { account, email } from "./testing/fixtures.js";
 const token = "test-bearer-credential";
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
-  for (const close of cleanup.reverse()) await close();
+  for (const close of cleanup.reverse()) {
+    await close();
+  }
   cleanup.length = 0;
 });
 async function host(options: { host?: string } = {}) {
@@ -58,11 +60,12 @@ describe("authenticated streamable HTTP", () => {
     const one = await connect(handle, "one"),
       two = await connect(handle, "two");
     expect((await one.client.listTools()).tools).toHaveLength(44);
-    for (const { client } of [one, two])
+    for (const { client } of [one, two]) {
       await client.callTool({
         name: "archive_emails",
         arguments: { emailIds: ["email-1"], reason: "Organize" },
       });
+    }
     expect(executor.submitted.map((request) => request.actor)).toEqual([
       { kind: "external-agent", id: one.transport.sessionId },
       { kind: "external-agent", id: two.transport.sessionId },
@@ -81,11 +84,12 @@ describe("authenticated streamable HTTP", () => {
     const { handle, executor, store } = await host();
     const one = await connect(handle, "same-name"),
       two = await connect(handle, "same-name");
-    for (const { client } of [one, two])
+    for (const { client } of [one, two]) {
       await client.callTool({
         name: "mark_read",
         arguments: { emailIds: ["email-1"], reason: "Read" },
       });
+    }
     expect(executor.submitted.map((request) => request.actor.id)).toEqual([
       one.transport.sessionId,
       two.transport.sessionId,

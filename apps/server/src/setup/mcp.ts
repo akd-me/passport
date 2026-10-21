@@ -53,7 +53,9 @@ export function createSetupMcpServer(host: SetupToolHost, signal: AbortSignal): 
       try {
         return await handler(args);
       } catch (error) {
-        if (error instanceof SetupTaskEnded) return text(error.message, true);
+        if (error instanceof SetupTaskEnded) {
+          return text(error.message, true);
+        }
         return text(
           error instanceof Error && "code" in error
             ? error.message
@@ -75,10 +77,11 @@ export function createSetupMcpServer(host: SetupToolHost, signal: AbortSignal): 
     },
     guard(async ({ kind, message }: { kind: SetupPromptKind; message: string }) => {
       const answer = await host.askUser(kind, message, signal);
-      if (answer === null)
+      if (answer === null) {
         return text(
           "The user has not answered yet; the message is still shown. Call ask_user again with the same kind and message to keep waiting.",
         );
+      }
       return text(
         kind === "question"
           ? `The user answered: ${answer}`
@@ -141,12 +144,14 @@ export function createSetupMcpServer(host: SetupToolHost, signal: AbortSignal): 
     },
     guard(async ({ state }: { state: string }) => {
       const result = await host.waitForConnection(state, signal);
-      if (result.status === "connected")
+      if (result.status === "connected") {
         return text(`Connected${result.address ? ` ${result.address}` : ""}. Call finish now.`);
-      if (result.status === "waiting")
+      }
+      if (result.status === "waiting") {
         return text(
           "Not connected yet. Check the browser (take a snapshot); if the user is still on the consent page, call wait_for_connection again.",
         );
+      }
       return text(`Authorization failed: ${result.error}`, true);
     }),
   );
@@ -196,19 +201,28 @@ export class SetupMcpListener {
       url: `http://127.0.0.1:${port}/mcp`,
       token,
       release: async () => {
-        if (!this.bindings.delete(token)) return;
+        if (!this.bindings.delete(token)) {
+          return;
+        }
         binding.controller.abort();
-        if (!this.bindings.size) await this.close();
+        if (!this.bindings.size) {
+          await this.close();
+        }
       },
     };
   }
 
   /** Bound token, or undefined. Exposed for tests. */
   resolve(authorization: string | undefined): Binding | undefined {
-    if (!authorization?.startsWith("Bearer ")) return;
+    if (!authorization?.startsWith("Bearer ")) {
+      return;
+    }
     const presented = fingerprint(authorization.slice(7));
-    for (const [token, binding] of this.bindings)
-      if (timingSafeEqual(presented, fingerprint(token))) return binding;
+    for (const [token, binding] of this.bindings) {
+      if (timingSafeEqual(presented, fingerprint(token))) {
+        return binding;
+      }
+    }
     return;
   }
 
@@ -233,25 +247,31 @@ export class SetupMcpListener {
 
   private async handle(req: IncomingMessage, res: ServerResponse, server: Server): Promise<void> {
     const fail = (status: number, message: string) => {
-      if (!res.headersSent)
+      if (!res.headersSent) {
         res
           .writeHead(status, { "Content-Type": "application/json" })
           .end(JSON.stringify({ error: message }));
-      else res.end();
+      } else {
+        res.end();
+      }
     };
     try {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : 0;
-      if (req.headers.host !== `127.0.0.1:${port}` && req.headers.host !== `localhost:${port}`)
+      if (req.headers.host !== `127.0.0.1:${port}` && req.headers.host !== `localhost:${port}`) {
         return fail(403, "Invalid Host.");
-      if (req.headers.origin) return fail(403, "Browsers may not call this endpoint.");
+      }
+      if (req.headers.origin) {
+        return fail(403, "Browsers may not call this endpoint.");
+      }
       const binding = this.resolve(req.headers.authorization);
       if (!binding) {
         res.setHeader("WWW-Authenticate", "Bearer");
         return fail(401, "Bearer token required.");
       }
-      if (new URL(req.url ?? "/", "http://127.0.0.1").pathname !== "/mcp")
+      if (new URL(req.url ?? "/", "http://127.0.0.1").pathname !== "/mcp") {
         return fail(404, "Not found.");
+      }
       if (req.method !== "POST") {
         res.setHeader("Allow", "POST");
         return fail(405, "Method not allowed.");
@@ -274,12 +294,16 @@ export class SetupMcpListener {
   }
 
   async close(): Promise<void> {
-    for (const binding of this.bindings.values()) binding.controller.abort();
+    for (const binding of this.bindings.values()) {
+      binding.controller.abort();
+    }
     this.bindings.clear();
     const server = this.server;
     this.server = undefined;
     this.listening = undefined;
-    if (!server) return;
+    if (!server) {
+      return;
+    }
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

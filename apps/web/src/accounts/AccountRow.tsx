@@ -19,9 +19,15 @@ export const providerName = (kind: string) => kindLabel[kind] ?? kind;
 export const needsReauthorization = (account: ConnectedAccount) =>
   !!account.settings.reauthorizationRequired || account.lastSyncError === "REAUTHORIZE_REQUIRED";
 export function syncSummary(account: ConnectedAccount) {
-  if (needsReauthorization(account)) return "Sign-in expired";
-  if (account.syncing) return "Syncing…";
-  if (account.lastSyncError) return "Sync failed";
+  if (needsReauthorization(account)) {
+    return "Sign-in expired";
+  }
+  if (account.syncing) {
+    return "Syncing…";
+  }
+  if (account.lastSyncError) {
+    return "Sync failed";
+  }
   return account.lastSyncAt
     ? `Synced ${relativeTime(account.lastSyncAt).toLowerCase()}`
     : "Not synced yet";
@@ -120,8 +126,9 @@ export function AccountRow({
               window.confirm(
                 `Remove ${account.emailAddress} from Passport? This removes its local account data and linked calendar.`,
               )
-            )
+            ) {
               void task.run(() => accountApi.remove(account.id), "Account removed.");
+            }
           }}
         >
           <Icon name="trash" size={15} />

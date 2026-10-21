@@ -12,8 +12,9 @@ describe("identifiers and timestamps", () => {
     expect(ids).toEqual([...ids].sort());
     const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     let time = 0n;
-    for (const character of ids[0]!.slice(0, 10))
+    for (const character of ids[0]!.slice(0, 10)) {
       time = (time << 5n) | BigInt(alphabet.indexOf(character));
+    }
     expect(time).toBe(2_000_000_000_000n);
   });
 

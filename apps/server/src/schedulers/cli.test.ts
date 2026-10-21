@@ -21,8 +21,9 @@ describe("jobs CLI", () => {
     );
     vi.stubGlobal("fetch", fetcher);
     vi.spyOn(console, "log").mockImplementation(() => {});
-    for (const command of ["list", "run", "pause", "resume"])
+    for (const command of ["list", "run", "pause", "resume"]) {
       await runJobsCommand([command, "routine:morning"]);
+    }
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
       "http://127.0.0.1:3000/api/health",
       "http://127.0.0.1:3000/api/jobs",
@@ -96,14 +97,17 @@ describe("jobs CLI", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     await runJobsCommand(["list"]);
     expect(fetcher).toHaveBeenCalledTimes(2);
-    for (const [, init] of fetcher.mock.calls)
+    for (const [, init] of fetcher.mock.calls) {
       expect(init?.headers).toHaveProperty("Authorization", "Bearer fixture-api-token");
+    }
   });
   it.each([0, 1])(
     "R3: fails loudly on a reachable server's 401 at request %s without local fallback",
     async (where) => {
       const fetcher = vi.fn();
-      if (where === 1) fetcher.mockResolvedValueOnce(Response.json({ ok: true, mode: "real" }));
+      if (where === 1) {
+        fetcher.mockResolvedValueOnce(Response.json({ ok: true, mode: "real" }));
+      }
       fetcher.mockResolvedValueOnce(
         Response.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 }),
       );

@@ -85,8 +85,11 @@ function AccountsGroup() {
               onClick={() => {
                 const base = scopedRoutes.includes(location.pathname) ? location.pathname : "/";
                 const next = new URLSearchParams(base === location.pathname ? params : undefined);
-                if (selected) next.delete("accountId");
-                else next.set("accountId", account.id);
+                if (selected) {
+                  next.delete("accountId");
+                } else {
+                  next.set("accountId", account.id);
+                }
                 navigate(`${base}${next.size ? `?${next}` : ""}`);
               }}
             >
@@ -196,9 +199,11 @@ export function Sidebar() {
   const decisions = useResource<Page<ActionRecord>>("/decisions");
   const proposed = decisions.data?.items.filter((a) => a.status === "proposed") ?? [];
   const pending = new Map<string, number>();
-  for (const a of proposed)
-    if (a.request.matterId)
+  for (const a of proposed) {
+    if (a.request.matterId) {
       pending.set(a.request.matterId, (pending.get(a.request.matterId) ?? 0) + 1);
+    }
+  }
   const scope = params.get("accountId");
   const withScope = (path: string) =>
     scope ? `${path}?accountId=${encodeURIComponent(scope)}` : path;
@@ -212,8 +217,9 @@ export function Sidebar() {
         if (
           window.matchMedia?.("(max-width: 860px)").matches &&
           target.closest("a, .side-row.account, .sidebar-foot .icon-btn")
-        )
+        ) {
           toggleSidebar();
+        }
       }}
     >
       <div className="sidebar-top">

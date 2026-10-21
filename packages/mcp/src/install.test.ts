@@ -27,13 +27,19 @@ async function install(dir: string, client: string, flags: string[] = [], token?
   });
 }
 function configPath(dir: string, client: string) {
-  return client === "claude-code"
-    ? join(dir, ".mcp.json")
-    : client === "codex"
-      ? join(dir, ".codex/config.toml")
-      : client === "cursor"
-        ? join(dir, ".cursor/mcp.json")
-        : join(dir, "Library/Application Support/Claude/claude_desktop_config.json");
+  if (client === "claude-code") {
+    return join(dir, ".mcp.json");
+  } else {
+    if (client === "codex") {
+      return join(dir, ".codex/config.toml");
+    } else {
+      if (client === "cursor") {
+        return join(dir, ".cursor/mcp.json");
+      } else {
+        return join(dir, "Library/Application Support/Claude/claude_desktop_config.json");
+      }
+    }
+  }
 }
 
 describe("mcp install client formats", () => {
@@ -68,13 +74,15 @@ describe("mcp install client formats", () => {
       expect(plan.content).toContain("http://127.0.0.1:4318/mcp");
       expect(plan.content).toContain("<redacted>");
       expect(stdout).not.toContain("fixture-token-for-install");
-      if (client === "claude-desktop")
+      if (client === "claude-desktop") {
         expect(JSON.parse(plan.content).mcpServers.passport.args).toContain("proxy");
-      else if (client === "codex") expect(plan.content).toContain("http_headers = { Authorization");
-      else
+      } else if (client === "codex") {
+        expect(plan.content).toContain("http_headers = { Authorization");
+      } else {
         expect(JSON.parse(plan.content).mcpServers.passport.headers.Authorization).toBe(
           "Bearer <redacted>",
         );
+      }
       expect(await readdir(dir)).toEqual([]);
     },
   );
@@ -122,8 +130,9 @@ describe("mcp install client formats", () => {
       '[mcp_servers.other]\ncommand = "other"',
       '[mcp_servers.passport.tools.search_emails]\napproval_mode = "prompt"',
       "[features]\nexample = true",
-    ])
+    ]) {
       expect(result).toContain(expected);
+    }
     expect(result).not.toContain('command = "old"');
     expect(result).not.toContain("Bearer old");
     expect(await readFile(JSON.parse(stdout).backup, "utf8")).toBe(before);

@@ -369,7 +369,7 @@ describe("schedules and run lifecycle", () => {
 
   it("paginates the action log in digests", async () => {
     const env = await setup([]);
-    for (let i = 0; i < 205; i++)
+    for (let i = 0; i < 205; i++) {
       await env.executor.submit({
         type: "archive",
         accountId: "account-1",
@@ -378,6 +378,7 @@ describe("schedules and run lifecycle", () => {
         category: "triage",
         reason: `Action ${i}`,
       });
+    }
     await env.runtime.run({ kind: "schedule", name: "daily_digest" });
     expect(await env.store.kv.get("digest:2026-10-20")).toContain("Action 204");
   });

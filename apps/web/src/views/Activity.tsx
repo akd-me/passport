@@ -28,7 +28,9 @@ export function Activity() {
     [cursor, setCursor] = useState("");
   const after = date ? new Date(`${date}T00:00:00`).toISOString() : undefined,
     end = date ? new Date(`${date}T00:00:00`) : undefined;
-  if (end) end.setDate(end.getDate() + 1);
+  if (end) {
+    end.setDate(end.getDate() + 1);
+  }
   const before = end ? new Date(end.getTime() - 1).toISOString() : undefined;
   const { data, error } = useResource<Page<ActionRecord>>(
       `/actions${queryString({ accountId, status, category, actorKind, after, before, limit: 30, cursor })}`,
@@ -116,63 +118,68 @@ export function Activity() {
         </Empty>
       ) : (
         <ul className="rows log">
-          {data.items.map((a) => (
-            <li key={a.id} className="row log-row">
-              <span
-                className="actor"
-                title={
-                  a.request.actor.kind === "human"
-                    ? "You"
-                    : a.request.actor.kind === "agent"
-                      ? "Passport"
-                      : a.request.actor.id
-                }
-              >
-                <Icon
-                  name={
-                    a.status === "undone"
-                      ? "undo"
-                      : a.request.actor.kind === "human"
-                        ? "check"
-                        : a.request.actor.kind === "agent"
-                          ? "sparkle"
-                          : "agent"
+          {data.items.map((a) => {
+            function actionIcon() {
+              if (a.status === "undone") {
+                return "undo";
+              }
+              if (a.request.actor.kind === "human") {
+                return "check";
+              }
+              if (a.request.actor.kind === "agent") {
+                return "sparkle";
+              }
+              return "agent";
+            }
+            return (
+              <li key={a.id} className="row log-row">
+                <span
+                  className="actor"
+                  title={
+                    a.request.actor.kind === "human"
+                      ? "You"
+                      : a.request.actor.kind === "agent"
+                        ? "Passport"
+                        : a.request.actor.id
                   }
-                  size={13}
-                />
-              </span>
-              <span className="row-main">
-                <strong>
-                  <AccountDot id={a.request.accountId} />
-                  {a.request.reason}
-                </strong>
-                <span className="muted">
-                  {actionLabel(a.request.type)}, {categoryLabel(a.request.category).toLowerCase()},{" "}
-                  by{" "}
-                  {a.request.actor.kind === "human"
-                    ? "you"
-                    : a.request.actor.kind === "agent"
-                      ? "Passport"
-                      : a.request.actor.id}
+                >
+                  <Icon name={actionIcon()} size={13} />
                 </span>
-                {a.error && <span className="error-text">{a.error}</span>}
-              </span>
-              <span className="row-meta">
-                <span className={`badge ${statusTone[a.status] ?? ""}`}>{humanize(a.status)}</span>
-                <time className="muted num" dateTime={a.createdAt}>
-                  {new Date(a.createdAt).toLocaleTimeString(undefined, {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </time>
-                {a.status === "executed" && a.inverse ? (
-                  <UndoButton action={a} />
-                ) : (
-                  <span className="undo-gap" />
-                )}
-              </span>
-            </li>
-          ))}
+                <span className="row-main">
+                  <strong>
+                    <AccountDot id={a.request.accountId} />
+                    {a.request.reason}
+                  </strong>
+                  <span className="muted">
+                    {actionLabel(a.request.type)}, {categoryLabel(a.request.category).toLowerCase()}
+                    , by{" "}
+                    {a.request.actor.kind === "human"
+                      ? "you"
+                      : a.request.actor.kind === "agent"
+                        ? "Passport"
+                        : a.request.actor.id}
+                  </span>
+                  {a.error && <span className="error-text">{a.error}</span>}
+                </span>
+                <span className="row-meta">
+                  <span className={`badge ${statusTone[a.status] ?? ""}`}>
+                    {humanize(a.status)}
+                  </span>
+                  <time className="muted num" dateTime={a.createdAt}>
+                    {new Date(a.createdAt).toLocaleTimeString(undefined, {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </time>
+                  {a.status === "executed" && a.inverse ? (
+                    <UndoButton action={a} />
+                  ) : (
+                    <span className="undo-gap" />
+                  )}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
       {(cursor || data?.nextCursor) && (

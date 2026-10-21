@@ -23,23 +23,27 @@ export async function serveHttp(
   server: McpServer,
   options: { port: number; path?: string; token: string; host?: string },
 ): Promise<MailboxHttpHandle> {
-  if (!options.token || /\s/.test(options.token))
+  if (!options.token || /\s/.test(options.token)) {
     throw new MailboxMcpError(
       "TOKEN_REQUIRED",
       "A nonempty bearer token without whitespace is required for HTTP.",
     );
+  }
   const host = options.host ?? "127.0.0.1";
   const urlHost = host.includes(":") ? `[${host}]` : host;
   const path = options.path ?? "/mcp";
-  if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535)
+  if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535) {
     throw new MailboxMcpError("INVALID_PORT", "port must be an integer from 0 to 65535.");
-  if (!/^\/(?:[A-Za-z0-9._~-]+\/?)*$/.test(path))
+  }
+  if (!/^\/(?:[A-Za-z0-9._~-]+\/?)*$/.test(path)) {
     throw new MailboxMcpError(
       "INVALID_PATH",
       "path must be an absolute URL path without a query or fragment.",
     );
-  if (server.isConnected())
+  }
+  if (server.isConnected()) {
     throw new MailboxMcpError("ALREADY_CONNECTED", "Use a fresh MCP server for HTTP.");
+  }
   // Validate cloneability before opening a listener; each client requires its own SDK protocol state.
   await cloneMailboxServer(server).close();
   const sessions = new Map<
@@ -54,7 +58,9 @@ export async function serveHttp(
     if (!res.headersSent) {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: message }));
-    } else res.end();
+    } else {
+      res.end();
+    }
   };
   const httpServer = createServer(async (req, res) => {
     try {
@@ -123,14 +129,18 @@ export async function serveHttp(
       await sessionServer.connect(transport);
       const previousClose = sessionServer.server.onclose;
       sessionServer.server.onclose = () => {
-        if (transport.sessionId) sessions.delete(transport.sessionId);
+        if (transport.sessionId) {
+          sessions.delete(transport.sessionId);
+        }
         active.delete(sessionServer);
         previousClose?.();
       };
       try {
         await transport.handleRequest(req, res);
       } finally {
-        if (!transport.sessionId) await sessionServer.close();
+        if (!transport.sessionId) {
+          await sessionServer.close();
+        }
       }
     } catch {
       fail(res, 500, "MCP transport failed.");
@@ -144,8 +154,9 @@ export async function serveHttp(
     });
   });
   const address = httpServer.address();
-  if (!address || typeof address === "string")
+  if (!address || typeof address === "string") {
     throw new MailboxMcpError("LISTEN_FAILED", "HTTP listener did not provide a port.");
+  }
   port = address.port;
   let shutdown: Promise<void> | undefined;
   return {

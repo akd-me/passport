@@ -33,9 +33,11 @@ export function Matters() {
   const decisions = useResource<Page<ActionRecord>>("/decisions");
   const pending = useMemo(() => {
     const map = new Map<string, number>();
-    for (const a of decisions.data?.items ?? [])
-      if (a.status === "proposed" && a.request.matterId)
+    for (const a of decisions.data?.items ?? []) {
+      if (a.status === "proposed" && a.request.matterId) {
         map.set(a.request.matterId, (map.get(a.request.matterId) ?? 0) + 1);
+      }
+    }
     return map;
   }, [decisions.data]);
   return (
@@ -246,13 +248,14 @@ export function MatterPage() {
         : [],
     [data],
   );
-  if (!data)
+  if (!data) {
     return (
       <Surface title="Matter" crumbs={[{ label: "Matters", to: "/matters" }, { label: "…" }]}>
         <Feedback error={error} />
         {!error && <Loading />}
       </Surface>
     );
+  }
   const pending = (decisions.data?.items ?? []).filter(
     (a) => a.request.matterId === data.matter.id && a.status === "proposed",
   );
