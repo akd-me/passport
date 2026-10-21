@@ -26,6 +26,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const [command = "serve", subcommand, kind] = args;
   if (command === "mcp" && (subcommand === "install" || subcommand === "proxy")) return (await import("./cli/mcp-install.js")).handleMcpCommand(args);
   if (command === "jobs") return runJobsCommand(args.slice(1));
+  if (command === "accounts" && subcommand === "connect") return (await import("./setup/cli.js")).connectCommand(args.slice(2));
   if (command === "init") return initializePassport(undefined, args.slice(1));
   if (command === "mcp" && ["--help", "-h", "help"].includes(subcommand ?? "")) {
     console.log("passport mcp — mailbox tools over stdio (no background jobs)\npassport mcp install --client claude-code|codex|cursor|claude-desktop [--http] [--dry-run] [--user]");
@@ -34,7 +35,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (command === "doctor") return doctorCommand(args.includes("--demo"));
   if (command === "--help" || command === "-h" || command === "help") {
     console.log(
-      "passport init | doctor | serve [--allow-remote] | demo [--allow-remote] | token [--rotate] | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo]",
+      "passport init | doctor | serve [--allow-remote] | demo [--allow-remote] | token [--rotate] | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | accounts connect --provider gmail|microsoft [--no-calendar] [--agent codex|claude-code] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo]",
     );
     return;
   }
@@ -266,7 +267,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       } else
         throw new ApiError(
           "INVALID_COMMAND",
-          "Use accounts list or accounts add <kind>.",
+          "Use accounts list, accounts add <kind> or accounts connect --provider gmail|microsoft.",
         );
     }
   } finally {
