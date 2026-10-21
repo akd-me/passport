@@ -152,6 +152,61 @@ export function browserMcpServer(options: BrowserMcpOptions): HostAgentMcpServer
   };
 }
 
+/**
+ * What npx and Node need to download a package: a home and temp dir, locale, npm settings,
+ * proxies and certificates. `PASSPORT_*` and provider API keys stay with Passport, as in
+ * the host-agent CLIs' environment.
+ */
+const HELPER_ENV = [
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "TMPDIR",
+  "TEMP",
+  "TMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "XDG_CONFIG_HOME",
+  "XDG_CACHE_HOME",
+  "HTTPS_PROXY",
+  "HTTP_PROXY",
+  "NO_PROXY",
+  "ALL_PROXY",
+  "https_proxy",
+  "http_proxy",
+  "no_proxy",
+  "all_proxy",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+  // Windows equivalents of HOME/TMPDIR and the executable search order.
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "SystemRoot",
+  "SYSTEMROOT",
+  "ComSpec",
+  "PATHEXT",
+  "HOMEDRIVE",
+  "HOMEPATH",
+];
+
+/** The browser helper's download environment; see {@link HELPER_ENV}. */
+export function browserHelperEnv(
+  source: NodeJS.ProcessEnv = process.env,
+  execPath = process.execPath,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value !== undefined && (HELPER_ENV.includes(key) || /^npm_config_/i.test(key))) {
+      env[key] = value;
+    }
+  }
+  env.PATH = [dirname(execPath), source.PATH ?? source.Path ?? ""].join(delimiter);
+  return env;
+}
+
 /** Download (or verify) the pinned Playwright MCP before the agent's CLI starts it. */
 export function prepareBrowserMcp(
   options: { timeoutMs?: number; signal?: AbortSignal } = {},
@@ -164,10 +219,7 @@ export function prepareBrowserMcp(
         timeout: options.timeoutMs ?? 180_000,
         signal: options.signal,
         windowsHide: true,
-        env: {
-          ...process.env,
-          PATH: [dirname(process.execPath), process.env.PATH ?? ""].join(delimiter),
-        },
+        env: browserHelperEnv(),
       },
       (error) => (error ? reject(new Error("BROWSER_HELPER_UNAVAILABLE")) : resolve()),
     );
