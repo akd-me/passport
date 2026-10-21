@@ -66,6 +66,8 @@ function LlmSettings({
             <option value="openai">OpenAI</option>
             <option value="openai-compatible">OpenAI-compatible</option>
             <option value="ollama">Ollama · local</option>
+            <option value="codex">Codex · subscription</option>
+            <option value="claude-code">Claude Code · subscription</option>
           </select>
         </label>
         <label>

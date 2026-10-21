@@ -378,6 +378,12 @@ describe("detectHostAgents", () => {
     expect(statuses[1]).toMatchObject({ kind: "claude-code", installed: false, binaryPath: null, ready: false, fix: expect.stringContaining("Install Claude Code") });
     expect(preferredHostAgent(statuses)).toBeUndefined();
   });
+  it("never reports a masked API key as the Codex account", async () => {
+    const dir = await temp();
+    await fakeBinary(dir, "codex", { auth: { code: 0, stderr: "Logged in using an API key - sk-proj-***ABCDE\n" } });
+    const [codex] = await detectHostAgents({ env: { HOME: dir, PATH: dir, PASSPORT_CLAUDE_PATH: join(dir, "missing") } });
+    expect(codex).toMatchObject({ loggedIn: true, account: "API key" });
+  });
   it("treats unparseable auth output as signed out", async () => {
     const dir = await temp();
     await fakeBinary(dir, "claude", { auth: { code: 0, stdout: "something odd" } });

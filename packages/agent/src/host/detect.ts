@@ -2,7 +2,7 @@ import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { HostAgentKind, HostAgentStatus } from "@passport/types";
-import { extraBinDirs, hostAgentEnv } from "./env.js";
+import { extraBinDirs, hostAgentEnv, redact } from "./env.js";
 import { runCli } from "./process.js";
 
 export const HOST_AGENT_KINDS: readonly HostAgentKind[] = ["codex", "claude-code"];
@@ -84,7 +84,8 @@ async function probe(kind: HostAgentKind, env: NodeJS.ProcessEnv, exec: ProbeExe
     const text = `${auth.stdout}\n${auth.stderr}`;
     const match = /Logged in using (?:an? )?([^\n.]+)/i.exec(text);
     loggedIn = auth.code === 0 && !!match && !/not logged in/i.test(text);
-    if (loggedIn) account = match![1]!.trim();
+    // API-key logins append a masked key ("API key - sk-proj-***"); keep only the method.
+    if (loggedIn) account = redact(match![1]!.split(/\s+-\s+/)[0]!.trim(), 40);
   }
   const versionText = ver && ver.code === 0 ? version(ver.stdout) : null;
   return {
