@@ -9,3 +9,7 @@ dist/
 data/
 .DS_Store
 coverage/
+# Agent-driven setup keeps a signed-in browser profile in the data dir; never commit it.
+setup-browser-profile/
+setup-agent/
+.playwright-mcp/

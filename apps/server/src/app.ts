@@ -28,6 +28,7 @@ import { logger } from "./logger.js";
 import { installJobRoutes } from "./schedulers/routes.js";
 import { getAuth, installAuth, type PassportAuth } from "./auth.js";
 import { registerOnboarding } from "./onboarding/routes.js";
+import { registerSetup } from "./setup/routes.js";
 import { installLlmRoutes } from "./llm-routes.js";
 import { publicLlm } from "./llm-selection.js";
 
@@ -135,6 +136,7 @@ export function createApp(
   installAuth(app, options.auth ?? getAuth(backend));
   installJobRoutes(app, backend);
   registerOnboarding(app, backend);
+  registerSetup(app, backend);
   installLlmRoutes(app, backend);
   app.get("/api/health", (c) => c.json({ ok: true, mode: backend.mode }));
   app.get("/api/decisions", async (c) =>

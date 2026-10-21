@@ -6,7 +6,7 @@ import { ApiError, required } from "../errors.js";
 import { object } from "../validation.js";
 import { publicLlm } from "../llm-selection.js";
 import { probeAccount, runDoctor } from "../doctor.js";
-import { BrowserOAuth, oauthCookie } from "./oauth.js";
+import { BrowserOAuth, browserOAuth, oauthCookie } from "./oauth.js";
 import { accountSync } from "./sync.js";
 import { registerAccountFilters } from "./filters.js";
 
@@ -23,7 +23,7 @@ export function registerOnboarding(
   backend: Backend,
   options: { oauth?: BrowserOAuth } = {},
 ): void {
-  const oauth = options.oauth ?? new BrowserOAuth(backend);
+  const oauth = options.oauth ?? browserOAuth(backend);
   registerAccountFilters(app, backend);
   app.post("/api/accounts/oauth/start", async (c) => {
     const result = await oauth.start(
