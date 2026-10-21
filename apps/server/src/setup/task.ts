@@ -144,7 +144,8 @@ export class SetupTaskState {
   cancel(): void {
     this.change(() => {
       delete this.task.prompt;
-      this.failRunningSteps();
+      // Cancelling is the user's choice, not a failure of the step in progress.
+      for (const step of this.task.steps) if (step.status === "running") step.status = "pending";
       this.task.log.push({ at: this.now().toISOString(), level: "warn", text: "Cancelled." });
       this.task.status = "cancelled";
     });

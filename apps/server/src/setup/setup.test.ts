@@ -207,6 +207,7 @@ describe("agent-driven account setup", () => {
   it("cancels: stops the session and browser, ends pending tool calls, refuses late answers", async () => {
     let pending: Promise<{ text: string; isError: boolean }> | undefined;
     sessions.script(async tools => {
+      await tools.call("report_progress", { step: "sign_in", status: "running" });
       pending = tools.call("ask_user", { kind: "sign_in", message: "Sign in, then click Continue." });
       await pending;
       await new Promise((_, reject) => tools.signal.addEventListener("abort", () => reject(new Error("aborted"))));
@@ -217,7 +218,7 @@ describe("agent-driven account setup", () => {
     const cancelled = await (await json(`/api/setup/tasks/${id}/cancel`, {})).json() as SetupTask;
     expect(cancelled.status).toBe("cancelled");
     expect(cancelled.prompt).toBeUndefined();
-    expect(cancelled.steps.some(step => step.status === "failed")).toBe(false);
+    expect(cancelled.steps.map(step => step.status)).toEqual(["done", "pending", "pending", "pending", "pending", "pending", "pending"]);
     expect(sessions.cancels).toHaveBeenCalled();
     expect((await json(`/api/setup/tasks/${id}/respond`, { promptId: waiting.prompt!.id, answer: "done" })).status).toBe(409);
     await until(() => browser.close.mock.calls.length, calls => calls >= 2);
