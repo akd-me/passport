@@ -29,8 +29,10 @@ fallback; see [Start a workspace](#start-a-workspace)), Google Chrome or Microso
    which is expected for your own client (**Advanced → Go to Passport**). The mailbox connects and the
    first sync starts.
 
-Cancel at any time; the agent and the browser stop. Things already created in the console stay and are
-reused next time. Run the task again for each account; the browser remembers your console sign-in.
+When the agent asks you to confirm something, **No** tells it to stop that step and ask you how to
+proceed. Cancel at any time; the agent and the browser stop, and a consent page still open in the
+browser can no longer connect the account. A new task can start once the old browser has closed.
+Things already created in the console stay and are reused next time. Run the task again for each account; the browser remembers your console sign-in.
 
 How it works: Passport starts a host-agent session (Codex with `gpt-6.1-sol` at high reasoning, else
 Claude Code with `claude-opus-5-5`) with two MCP servers. The browser is

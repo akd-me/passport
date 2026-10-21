@@ -23,3 +23,25 @@ use the running server's bearer-authenticated API; authentication failures never
 to a separate local execution. MCP installer previews recursively redact values under
 authorization/token/secret/key/password keys, including existing unrelated client entries.
 Actual configs and backups can contain credentials and must remain private.
+
+## Agent-driven account setup
+
+Setup tasks (`/api/setup/tasks`, `passport accounts connect`) run a host-agent CLI with a visible
+browser. The setup tools listen on `127.0.0.1` behind a random per-task bearer token that is revoked
+when the task ends. The CLI and the Playwright MCP download (`npx`) get an allowlisted environment
+(home and temp directories, locale, `PATH`, `npm_config_*`, proxy and certificate variables);
+`PASSPORT_*` values and provider API keys are withheld. `npm_config_*` is forwarded so a private
+registry keeps working; it can include npm's own registry token.
+
+OAuth attempts a task starts belong to that task. Cancelling or ending the task deletes its unused
+setup links and revokes its attempts (dropping the client secret held in memory); a callback already
+in flight re-checks the task immediately before storing credentials and stops with a "setup task
+has ended" page. Only one task runs at a time, and a new one cannot start until the previous task's
+agent and browser have shut down, because they share the browser profile and output directory.
+
+Task snapshots (HTTP and the `setup.task.updated` WebSocket event) are scrubbed of registered
+secrets and secret-shaped strings, and agent narration additionally drops token-like runs of 16 or
+more characters that mix letters and digits. When a secret becomes known (`register_oauth_client`),
+text already retained in the task is scrubbed again and a corrected snapshot is published. Frames
+published before that cannot be retracted: a client that received them keeps them, so treat the
+setup log like terminal output.

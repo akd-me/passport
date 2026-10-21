@@ -44,11 +44,15 @@ export const AGENT_LABELS: Record<HostAgentKind, string> = {
 };
 export const MAX_TASKS = 20;
 interface SetupOAuth {
+  /** `owner.active()` is checked before the callback persists anything. */
   start(
     input: Record<string, unknown>,
     origin: string,
+    owner?: { active(): boolean },
   ): Promise<{ authUrl: string; attemptId: string; nonce: string; redirectUri: string }>;
   peek(state: string): { status: string; accountId?: string; error?: string } | undefined;
+  /** End an attempt whose callback has not arrived yet. */
+  revoke(state: string): void;
 }
 export interface SetupBrowserControl {
   detect(): SetupBrowser | null;
@@ -101,8 +105,13 @@ export interface Run {
   origin: string;
   controller: AbortController;
   answers: Map<string, Deferred<string>>;
+  /** In-flight ask_user calls per prompt id. */
+  asking: Map<string, number>;
   attempts: Set<string>;
   session?: { cancel(): void };
+  /** The session and its cleanup; the status can be terminal before this settles. */
+  execution?: Promise<void>;
+  settled: boolean;
 }
 export interface Ticket {
   run: Run;

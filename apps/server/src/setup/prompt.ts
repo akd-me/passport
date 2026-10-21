@@ -54,6 +54,8 @@ Tools:
   kind "sign_in": they must sign in in the browser window. kind "confirm": they must do or approve something
   in the browser. kind "question": you need information; the answer is returned as text.
   If the result says the user has not answered yet, call ask_user again with the same kind and message.
+  A confirm can come back declined (the user said no): stop that step, then ask how to proceed or
+  finish with success false. Ask one message at a time; wait for each ask_user call to return.
 - passport.report_progress({ step, status, detail? }): keep the user's checklist current. Mark a step
   "running" when you start it and "done" (or "skipped" when it was already set up) when it is complete.
 - passport.register_oauth_client({ provider, clientId, clientSecret? }): give Passport the client you created.

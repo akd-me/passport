@@ -7,6 +7,10 @@ import { accountSync } from "./sync.js";
 
 export type OAuthKind = "gmail" | "graph";
 
+/** The callback for an attempt owned by a setup task that has since ended. */
+export const SETUP_ENDED_MESSAGE =
+  "This setup task has ended, so Passport did not connect the account. Return to Passport and start setup again.";
+
 export const scopesFor = (kind: OAuthKind, calendar: boolean): string[] =>
   kind === "gmail"
     ? [
@@ -89,6 +93,8 @@ export async function connectOAuthAccount(
     clientId: string;
     calendar: boolean;
     accountId?: string;
+    /** False once the setup task that started this attempt has ended. */
+    active?: () => boolean;
   },
   credentials: AccountCredentials,
   fetcher = globalThis.fetch,
@@ -154,6 +160,10 @@ export async function connectOAuthAccount(
     lastSyncError: null,
   };
   const created: string[] = [];
+  // Checked last: the token exchange and identity lookup can outlast a cancelled setup task.
+  if (input.active && !input.active()) {
+    throw new ApiError("OAUTH_SETUP_ENDED", SETUP_ENDED_MESSAGE, 409);
+  }
   try {
     await backend.store.accounts.upsert(mail);
     if (!existing) {

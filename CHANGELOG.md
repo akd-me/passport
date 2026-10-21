@@ -27,6 +27,26 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   bearer token. The setup browser profile lives in `<data dir>/setup-browser-profile`; keep it out of
   backups. Host-agent MCP servers accept startup/tool-call timeouts.
 
+### Fixed
+
+- Account setup: answering **No** to an agent's confirmation now reaches the agent as declined
+  (it used to read as "Continue"); `/api/setup/tasks/:id/respond` accepts `yes`/`done` or `no` for
+  confirm prompts and `done` for sign-in prompts, and rejects anything else with 400 without
+  clearing the prompt. A blank answer to a question also leaves the question answerable.
+- Account setup: cancelling (or ending) a task revokes the OAuth attempts it started; a consent
+  that lands afterwards, including one already exchanging its code, connects nothing and shows
+  "This setup task has ended". The manual Accounts flow is unchanged.
+- Account setup: the agent asks one message at a time; a second, different `ask_user` while one
+  is unanswered returns an error telling it to wait, instead of hiding the first.
+- Account setup: a cancelled or finished task keeps the single setup slot until its agent and
+  browser have shut down (`409 SETUP_BUSY`, "finishing up"), so the next task's browser and
+  output are not cleaned up by the old one; server shutdown stops and waits for every task.
+- Account setup: registering a client secret rescrubs text already in the task (log, steps,
+  prompt, error), and agent narration drops token-like strings (16+ characters mixing letters
+  and digits) before it is logged.
+- The Playwright MCP download (`npx`) runs with an allowlisted environment instead of the
+  server's full environment, so `PASSPORT_*` values and provider API keys are not passed to it.
+
 ### Changed
 
 - API keys are optional. Existing configurations that only held the old

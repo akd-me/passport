@@ -2,7 +2,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { detectHostAgents, runHostAgentSession } from "@passport/agent";
 import { newId } from "@passport/store";
-import type { HostAgentEvent, HostAgentKind, SetupTask } from "@passport/types";
+import type { HostAgentEvent, HostAgentKind, SetupPromptKind, SetupTask } from "@passport/types";
 import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
 import {
@@ -12,7 +12,7 @@ import {
   NO_BROWSER_MESSAGE,
   prepareBrowserMcp,
 } from "./browser.js";
-import { SetupMcpListener, type SetupToolHost } from "./mcp.js";
+import { DECLINED, SetupMcpListener, type SetupToolHost } from "./mcp.js";
 import { setupPrompt, setupSteps } from "./prompt.js";
 import { describeBrowserCall } from "./runner-events.js";
 import {
@@ -29,7 +29,7 @@ import {
   type Ticket,
 } from "./runner-state.js";
 import { createSetupToolHost } from "./runner-tools.js";
-import { SetupTaskState } from "./task.js";
+import { SetupTaskState, scrubAgentText } from "./task.js";
 
 export { describeBrowserCall } from "./runner-events.js";
 export type {
@@ -39,6 +39,26 @@ export type {
   StartSetupInput,
 } from "./runner-state.js";
 export { parseSetupInput, SETUP_AGENT_MODELS } from "./runner-state.js";
+
+/** Confirmations accept yes (or done) and no; sign-ins accept done; questions need text. */
+function parseAnswer(kind: SetupPromptKind, answer: string): { value: string; log: string } {
+  if (kind === "question") {
+    if (!answer.trim()) {
+      throw new ApiError("INVALID_FIELD", "Type an answer");
+    }
+    return { value: answer.trim(), log: "You answered the agent's question." };
+  }
+  if (answer === "done" || (kind === "confirm" && answer === "yes")) {
+    return { value: "done", log: "You clicked Continue." };
+  }
+  if (kind === "confirm" && answer === "no") {
+    return { value: DECLINED, log: "You declined." };
+  }
+  throw new ApiError(
+    "INVALID_FIELD",
+    kind === "confirm" ? 'answer must be "yes" or "no"' : 'answer must be "done"',
+  );
+}
 
 /**
  * Runs agent-driven account setup: a host-agent session with a visible browser and the
@@ -93,10 +113,19 @@ export class SetupTaskRunner {
         "Run Passport on an HTTP loopback address to connect accounts",
       );
     }
-    if ([...this.runs.values()].some((run) => !run.state.terminal)) {
+    const runs = [...this.runs.values()];
+    if (runs.some((run) => !run.state.terminal)) {
       throw new ApiError(
         "SETUP_BUSY",
         "A setup task is already running; finish or cancel it first",
+        409,
+      );
+    }
+    // The next task reuses the browser profile and output directory.
+    if (runs.some((run) => !run.settled)) {
+      throw new ApiError(
+        "SETUP_BUSY",
+        "The previous setup task is finishing up (closing its agent and browser); try again in a moment",
         409,
       );
     }
@@ -113,14 +142,16 @@ export class SetupTaskRunner {
       origin,
       controller: new AbortController(),
       answers: new Map(),
+      asking: new Map(),
       attempts: new Set(),
+      settled: false,
     };
     this.runs.set(id, run);
     for (const [key, old] of this.runs) {
       if (this.runs.size <= MAX_TASKS) {
         break;
       }
-      if (old.state.terminal) {
+      if (old.state.terminal && old.settled) {
         this.runs.delete(key);
       }
     }
@@ -128,12 +159,16 @@ export class SetupTaskRunner {
       "info",
       `Setting up ${input.provider === "gmail" ? "Gmail" : "Microsoft"}${input.calendar ? " with calendar" : ""}.`,
     );
-    void this.execute(run).catch(() => {
-      // Keep the existing operational log and fallback; never include the caught payload.
+    run.execution = this.execute(run)
+      .catch(() => {
+        // Keep the existing operational log and fallback; never include the caught payload.
 
-      run.state.fail("Setup stopped unexpectedly. Try again, or set up manually.");
-      logger.error("Setup task failed unexpectedly");
-    });
+        run.state.fail("Setup stopped unexpectedly. Try again, or set up manually.");
+        logger.error("Setup task failed unexpectedly");
+      })
+      .finally(() => {
+        run.settled = true;
+      });
     return state.snapshot();
   }
 
@@ -148,17 +183,13 @@ export class SetupTaskRunner {
     if (typeof answer !== "string" || answer.length > 2000) {
       throw new ApiError("INVALID_FIELD", "answer must be text up to 2000 characters");
     }
-    const prompt = run.state.answer(promptId);
-    if (prompt.kind === "question" && !answer.trim()) {
-      throw new ApiError("INVALID_FIELD", "Type an answer");
-    }
-    run.state.log(
-      "info",
-      prompt.kind === "question" ? "You answered the agent's question." : "You clicked Continue.",
-    );
+    // Validate before clearing the prompt, so a rejected answer leaves it answerable.
+    const reply = parseAnswer(run.state.pending(promptId).kind, answer);
+    run.state.answer(promptId);
+    run.state.log("info", reply.log);
     const waiting = run.answers.get(promptId) ?? deferred<string>();
     run.answers.set(promptId, waiting);
-    waiting.resolve(prompt.kind === "question" ? answer.trim() : "done");
+    waiting.resolve(reply.value);
     return run.state.snapshot();
   }
 
@@ -187,23 +218,40 @@ export class SetupTaskRunner {
     return { state: entry.state, nonce: entry.nonce, authUrl: entry.authUrl };
   }
 
+  /** Resolves once every task's session and cleanup have ended. */
+  async idle(): Promise<void> {
+    await Promise.all([...this.runs.values()].map((run) => run.execution));
+  }
+
+  /** Stops every task, including finished ones whose session is still winding down. */
   async close(): Promise<void> {
     for (const run of this.runs.values()) {
       if (!run.state.terminal) {
         run.state.cancel();
+      }
+      if (!run.settled) {
         this.stop(run);
       }
     }
+    await this.idle();
     await this.listener.close();
   }
 
   private stop(run: Run): void {
     run.controller.abort();
     run.session?.cancel();
+    this.revoke(run);
+  }
+
+  /** Unused setup links and unanswered OAuth attempts die with their task. */
+  private revoke(run: Run): void {
     for (const [ticket, entry] of this.tickets) {
       if (entry.run === run) {
         this.tickets.delete(ticket);
       }
+    }
+    for (const attempt of run.attempts) {
+      this.options.oauth.revoke(attempt);
     }
   }
 
@@ -333,11 +381,7 @@ export class SetupTaskRunner {
       }
     } finally {
       run.controller.abort();
-      for (const [ticket, entry] of this.tickets) {
-        if (entry.run === run) {
-          this.tickets.delete(ticket);
-        }
-      }
+      this.revoke(run);
       await release?.().catch(() => {
         // Browser helper release failed during cleanup.
         logger.warn("Browser helper release failed during cleanup");
@@ -366,7 +410,7 @@ export class SetupTaskRunner {
     if (event.type === "started") {
       state.log("info", "Agent started.");
     } else if (event.type === "text") {
-      state.log("info", `Agent: ${event.text}`);
+      state.log("info", `Agent: ${scrubAgentText(event.text)}`);
     } else if (event.type === "tool_call") {
       const line = describeBrowserCall(event.name, event.input);
       if (line) {

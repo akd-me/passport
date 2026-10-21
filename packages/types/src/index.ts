@@ -1196,7 +1196,10 @@ export interface SetupStep {
   detail?: string;
 }
 
-/** A question the agent is waiting on. Answer `"done"` for sign_in/confirm, free text for question. */
+/**
+ * A question the agent is waiting on. Answer `"done"` for sign_in, `"yes"` (or `"done"`) or `"no"`
+ * for confirm, free text for question.
+ */
 export interface SetupPrompt {
   id: string;
   kind: SetupPromptKind;

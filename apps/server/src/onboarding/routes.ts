@@ -1,3 +1,4 @@
+import type { Account } from "@passport/types";
 import type { Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { addAccount } from "../accounts.js";
@@ -45,7 +46,16 @@ export function registerOnboarding(
     c.header("Cache-Control", "no-store");
     c.header("Referrer-Policy", "no-referrer");
     const state = c.req.query("state") ?? "";
-    const account = await oauth.callback(new URL(c.req.url), getCookie(c, oauthCookie(state)));
+    let account: Account;
+    try {
+      account = await oauth.callback(new URL(c.req.url), getCookie(c, oauthCookie(state)));
+    } catch (error) {
+      // The setup agent's browser lands here; show a page, not a JSON error.
+      if (error instanceof ApiError && error.code === "OAUTH_SETUP_ENDED") {
+        return c.text(error.message, 409);
+      }
+      throw error;
+    }
     return c.redirect(`/accounts?connected=${encodeURIComponent(account.id)}`, 303);
   });
   app.get("/api/accounts", async (c) => {
