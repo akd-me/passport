@@ -38,11 +38,13 @@ async function login(token: string): Promise<boolean> {
 function loginPage(tokenPath: string): void {
   const root = document.getElementById("root")!;
   const main = document.createElement("main");
-  main.style.cssText =
-    "max-width:460px;margin:12vh auto;padding:24px;font-family:system-ui";
+  main.className = "login";
+  const card = document.createElement("div");
+  card.className = "login-card";
   const title = document.createElement("h1");
   title.textContent = "Sign in to Passport";
   const hint = document.createElement("p");
+  hint.className = "login-hint";
   hint.textContent = `Paste the API token printed in your terminal. For a durable workspace it is stored at ${tokenPath}. Demo tokens last until the server stops.`;
   const form = document.createElement("form");
   const label = document.createElement("label");
@@ -53,13 +55,12 @@ function loginPage(tokenPath: string): void {
   input.type = "password";
   input.required = true;
   input.autocomplete = "off";
-  input.style.cssText =
-    "display:block;width:100%;box-sizing:border-box;margin:12px 0;padding:10px";
   const button = document.createElement("button");
   button.type = "submit";
+  button.className = "btn btn-primary";
   button.textContent = "Sign in";
-  button.style.cssText = "padding:10px 18px;cursor:pointer";
   const error = document.createElement("p");
+  error.className = "error-text";
   error.setAttribute("role", "alert");
   form.append(label, input, button, error);
   form.addEventListener("submit", async (event) => {
@@ -77,7 +78,9 @@ function loginPage(tokenPath: string): void {
       button.disabled = false;
     }
   });
-  main.append(title, hint, form);
+  form.className = "login-form";
+  card.append(title, hint, form);
+  main.append(card);
   root.replaceChildren(main);
   input.focus();
 }
