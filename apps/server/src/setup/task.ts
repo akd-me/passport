@@ -62,7 +62,14 @@ export class SetupTaskState {
       status: "running",
       steps: steps.map((step) => ({ ...step, status: "pending" })),
       log: [],
+      revision: 0,
     };
+  }
+
+  /** Every published snapshot carries a higher revision than the one before it. */
+  private emit(): void {
+    this.task.revision = (this.task.revision ?? 0) + 1;
+    this.publish(this.snapshot());
   }
 
   get id(): Id {
@@ -122,7 +129,7 @@ export class SetupTaskState {
       this.task.error = rescrub(this.task.error);
     }
     if (changed) {
-      this.publish(this.snapshot());
+      this.emit();
     }
   }
 
@@ -142,7 +149,7 @@ export class SetupTaskState {
       return;
     }
     mutate();
-    this.publish(this.snapshot());
+    this.emit();
   }
 
   log(level: SetupLogEntry["level"], text: string): void {

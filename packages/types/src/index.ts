@@ -1222,4 +1222,6 @@ export interface SetupTask {
   result?: { accountIds: Id[] };
   error?: string;
   log: SetupLogEntry[];
+  /** Monotonic per-task counter, incremented on every published change (added in 0.2.0). */
+  revision?: number;
 }

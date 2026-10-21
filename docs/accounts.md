@@ -13,8 +13,8 @@ Requirements: `passport serve` (not the demo), a signed-in host agent (Codex, or
 fallback; see [Start a workspace](#start-a-workspace)), Google Chrome or Microsoft Edge, and Node's
 `npx` with network access the first time.
 
-1. Open **Accounts → Add account**, choose **Gmail** or **Microsoft Outlook**, leave **Connect calendar
-   too** as you want it, and click **Set up with my agent**. From a terminal:
+1. Click **Connect another** in the sidebar (or **Settings → Accounts → Connect an account**), choose
+   **Gmail** or **Microsoft**, leave **Connect calendar too** as you want it, and start the setup. From a terminal:
    `passport accounts connect --provider gmail|microsoft [--no-calendar] [--agent codex|claude-code]`.
 2. A browser window opens. The agent opens the Google Cloud console (or Microsoft Entra app
    registrations). When it asks, **sign in in that window** and click **Continue** in Passport (press
@@ -102,7 +102,7 @@ The same OAuth clients the agent creates, step by step, plus IMAP.
    → **Create**. Copy the client ID. Download the client JSON if needed; its `installed` object
    contains `client_id` and `client_secret`. A desktop client uses a loopback redirect; do not create
    a Web application client for this flow.
-7. In Passport **Accounts → Add account → Gmail**, enter the client ID and optionally the client
+7. In Passport, open the connect dialog, choose **Gmail → Set up manually**, enter the client ID and optionally the client
    secret. Leave **Connect calendar too** checked for your primary calendar, or clear it for mail only.
    Click **Connect**. If the browser blocked the tab, use **Open authorization tab**.
 8. Select the intended Google account and grant the requested mail permissions. Calendar consent
@@ -160,7 +160,7 @@ in the authorization URL. See [Google's desktop flow](https://developers.google.
    `User.Read`, `Mail.ReadWrite`, `Mail.Send`, `offline_access`, `openid`, `email` and optionally
    `Calendars.ReadWrite` → **Add permissions**. Tenant policy can require an administrator's consent;
    **Grant admin consent** is available to the administrator when appropriate.
-6. In Passport **Accounts → Add account → Microsoft Outlook**, paste the client ID. Leave the secret
+6. In Passport, open the connect dialog, choose **Microsoft → Set up manually**, paste the client ID. Leave the secret
    empty for a public desktop client. Passport uses the `common` tenant and PKCE. An existing
    confidential-client registration may supply its own secret; it must permit the chosen redirect
    and client flow.
@@ -175,7 +175,7 @@ need separate live verification; the wizard targets each signed-in user's own ma
 
 ### Other IMAP providers
 
-Choose **Accounts → Add account → IMAP / SMTP**. Enter the account address, IMAP host, numeric port,
+Open the connect dialog and choose **Set up manually → IMAP / SMTP**. Enter the account address, IMAP host, numeric port,
 TLS mode, username and app password supplied by your service. Enter an SMTP host for sending.
 Typical settings are IMAP `993` / TLS and SMTP `465` / TLS, or IMAP `143` / STARTTLS and SMTP `587`
 / STARTTLS. STARTTLS is required when implicit TLS is disabled; certificate checking stays enabled.

@@ -167,8 +167,8 @@ machine**. Install and sign in to either CLI once:
 With `llmSelection: "auto"`, each `serve` (and `doctor`, `sync`, `triage`) start
 detects the CLIs on `PATH` plus `~/.local/bin`, `/opt/homebrew/bin` and
 `/usr/local/bin`, and uses Codex if it is signed in, else Claude Code, else the
-configured API provider, else no agent. `passport init`, **Accounts → Your
-agent** and `PUT /api/settings/llm` record an explicit choice; `GET
+configured API provider, else no agent. `passport init`, **Settings →
+Model** and `PUT /api/settings/llm` record an explicit choice; `GET
 /api/host-agents` returns what was detected. `passport doctor` lists both CLIs
 with the fix for each and sends a one-word test request through the selected one.
 
@@ -185,7 +185,7 @@ API provider there, or run Passport natively.
 ### API providers (advanced)
 
 Anthropic, OpenAI, OpenAI-compatible endpoints and Ollama remain available:
-choose **advanced** in `passport init`, the advanced form in Accounts, or set
+choose **advanced** in `passport init`, **Settings → Advanced**, or set
 `PASSPORT_LLM_PROVIDER`. Keys come from the environment variables above.
 
 For Ollama, set `PASSPORT_LLM_PROVIDER=ollama`, select an installed model and use
@@ -194,7 +194,7 @@ from the container instead. See [deployment](deploy.md).
 
 ## Accounts and agents
 
-Run `passport serve` and use **Accounts → Add account** in the browser. Gmail uses a
+Run `passport serve` and use **Connect another** in the sidebar (or **Settings → Accounts**). Gmail uses a
 Google Desktop app OAuth client; see [accounts](accounts.md) for scopes and setup.
 `passport init --llm auto --skip-account` initializes a workspace unattended
 (`--llm codex|claude-code|none` also work); `printf 'none\nskip\n' | passport init`

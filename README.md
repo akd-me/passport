@@ -74,7 +74,7 @@ pnpm demo
 
 ## Connect Gmail or Outlook
 
-Open **Accounts → Add account**, pick **Gmail** or **Microsoft Outlook** and click **Set up with my agent**
+Click **Connect another** in the sidebar (or **Settings → Accounts → Connect an account**), pick **Gmail** or **Microsoft**, and let the agent set it up
 (or run `passport accounts connect --provider gmail|microsoft`). Your signed-in Codex (or Claude Code)
 opens a browser, creates your own OAuth client in the Google Cloud console or Microsoft Entra, and asks
 you only to sign in and approve access. **Connect calendar too** adds your primary calendar. The manual
@@ -95,7 +95,7 @@ The default is your **Claude Code or Codex subscription**: no API key. Passport 
 3. an API provider you configured (Anthropic, OpenAI, OpenAI-compatible or Ollama),
 4. otherwise no agent: mail, decisions and MCP still work.
 
-`passport init` shows what it found ("Codex (ChatGPT login) ✓, Claude Code ✓") and lets you pick; **Accounts → Your agent** does the same in the browser, and `passport doctor` explains how to fix a missing or signed-out CLI. Choosing an agent pins it; "Choose automatically" returns to the order above. Pin from the environment with `PASSPORT_LLM_PROVIDER=codex` or `claude-code` and `PASSPORT_LLM_MODEL`.
+`passport init` shows what it found ("Codex (ChatGPT login) ✓, Claude Code ✓") and lets you pick; **Settings → Model** does the same in the browser, and `passport doctor` explains how to fix a missing or signed-out CLI. Choosing an agent pins it; "Choose automatically" returns to the order above. Pin from the environment with `PASSPORT_LLM_PROVIDER=codex` or `claude-code` and `PASSPORT_LLM_MODEL`.
 
 Each agent call is a fresh, non-persisted CLI run in a scratch directory under the data directory, with tools, shell and user plugins disabled; Passport executes every action itself, under policy. The CLIs receive a minimal environment (no `PASSPORT_*` secrets or provider API keys). Usage counts against your subscription's limits; there is no per-call cost. Defaults are `gpt-6.1-sol` / `gpt-5.6-luna` (Codex) and `claude-sonnet-5-5` / `claude-haiku-5-5` (Claude Code) for main and fast work. API keys are optional and only needed for the API providers under **advanced**; see [install](docs/install.md#models).
 

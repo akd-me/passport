@@ -16,7 +16,7 @@ const statusRank: Record<SetupTask["status"], number> = {
   cancelled: 2,
 };
 
-/** A server-side revision, should the task ever carry one; the contract does not define it yet. */
+/** The server's per-task revision (0.2.0+); older servers omit it and fall back to the heuristics below. */
 function revision(task: SetupTask): number | string | undefined {
   const extra = task as SetupTask & { revision?: unknown; updatedAt?: unknown };
   if (typeof extra.revision === "number") {

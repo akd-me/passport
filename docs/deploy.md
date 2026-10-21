@@ -63,7 +63,7 @@ On Linux, configure an appropriate host gateway or an internal container service
 address. `localhost` inside the container points to the container itself.
 Limit model endpoint access to trusted clients too.
 
-Run `passport serve` and use **Accounts → Add account** in the browser. Gmail
+Run `passport serve` and use **Connect another** in the sidebar (or **Settings → Accounts**). Gmail
 uses your own Google **Desktop app** OAuth client; Outlook uses a native/public
 Microsoft registration. The browser callback uses the server's HTTP port at
 `http://127.0.0.1:3000/oauth/callback` (substitute your configured port).

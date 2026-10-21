@@ -3,7 +3,7 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
-## Unreleased
+## [0.2.0] — 2026-10-21
 
 ### Added
 
@@ -76,7 +76,7 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   `--muted` and reach WCAG AA contrast (4.5:1) in light and dark; `--faint` is kept for
   decorative strokes.
 
-## [0.1.0] — Unreleased
+## [0.1.0] — 2026-10-20
 
 ### Added
 
