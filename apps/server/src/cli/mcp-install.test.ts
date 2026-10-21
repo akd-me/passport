@@ -47,6 +47,14 @@ it("B3: redacts opaque credentials in printed config and backup paths", async ()
   expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
   expect(await readFile(result.backup!, "utf8")).toBe("{}");
 });
+it("B3: keeps hyphenated install paths intact in previews", async () => {
+  const options = await fixture();
+  options.entryPath = "/Users/me/my-projects/passport/apps/server/dist/cli.js";
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  const result = await installMcp(["--client", "claude-code", "--dry-run"], options);
+  expect(JSON.parse(result.content).mcpServers.passport.args).toEqual([options.entryPath, "mcp"]);
+  expect(JSON.stringify(log.mock.calls)).not.toContain("<redacted>");
+});
 it("R15: redacts nested existing JSON secrets while preserving them on disk and in the backup", async () => {
   const options = await fixture();
   const before = JSON.stringify({ mcpServers: { other: { env: { apiKey: "old-key", PASSWORD: "old-password", nested: [{ Authorization: "old-bearer", refresh_token: "old-token", clientSecret: "old-secret" }] } }, passport: { env: { keep: "yes" } } } });

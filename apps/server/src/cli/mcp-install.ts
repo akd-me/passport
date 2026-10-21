@@ -31,7 +31,9 @@ function redactString(source: string): string {
     .replace(/((?:--)?(?:api[-_]?key|token|key|secret)\s*=\s*|Bearer\s+)[^\s"'<>\\,;&]+/gi, "$1<redacted>")
     // Treat path separators as boundaries; a complete slash-prefixed base64
     // value is still redacted. UUID backup names are not contiguous hex/base64.
-    .replace(/[A-Za-z0-9+_]{32,}={0,2}|(?<![\w/])[A-Za-z0-9+][A-Za-z0-9+/]{31,}={0,2}|(?<![\w/])\/[A-Za-z0-9+/]{31,}={0,2}(?=$|[\s"'\\])/g, "<redacted>");
+    // Slash-bearing candidates must start a token: a run beginning mid-component
+    // (after "-", ".", "~" or "@", e.g. "/my-projects/app/dist") is a path.
+    .replace(/[A-Za-z0-9+_]{32,}={0,2}|(?<![\w/.~@-])[A-Za-z0-9+][A-Za-z0-9+/]{31,}={0,2}|(?<![\w/.~@-])\/[A-Za-z0-9+/]{31,}={0,2}(?=$|[\s"'\\])/g, "<redacted>");
 }
 function redactJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactJson);
