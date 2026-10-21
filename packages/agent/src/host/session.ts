@@ -104,7 +104,8 @@ export function runHostAgent(
     await mkdir(spec.cwd, { recursive: true, mode: 0o700 });
     const invocation =
       spec.kind === "claude-code" ? await claudeInvocation(spec) : await codexInvocation(spec);
-    const parser = spec.kind === "claude-code" ? createClaudeParser() : createCodexParser();
+    const parser =
+      spec.kind === "claude-code" ? createClaudeParser() : createCodexParser(spec.maxTurns);
     try {
       const child = runCli({
         binary,
@@ -116,7 +117,11 @@ export function runHostAgent(
         signal,
         log: runtime.log,
         onLine: (line) => {
-          for (const event of parser.push(line)) {
+          const events = parser.push(line);
+          if (parser.outcome().error?.code === "HOST_AGENT_MAX_TURNS") {
+            controller.abort();
+          }
+          for (const event of events) {
             emit(event);
           }
         },
@@ -136,6 +141,10 @@ export function runHostAgent(
         };
       }
       const outcome = parser.outcome();
+      // Preserve the budget error instead of reporting our internal abort as user cancellation.
+      if (outcome.error?.code === "HOST_AGENT_MAX_TURNS") {
+        return { ...outcome, schemaEnforced: invocation.schemaEnforced };
+      }
       if (result.aborted || result.timedOut) {
         return {
           ...outcome,
@@ -182,6 +191,8 @@ export function runHostAgent(
 /**
  * Run an agentic host-agent session: the CLI plans, calls tools on the supplied MCP servers
  * and finishes with a message. Events stream to `onEvent`; `done` always resolves.
+ * Codex `maxTurns` counts each turn start and tool-call start; exceeding it cancels with
+ * `HOST_AGENT_MAX_TURNS`. Streamed cancellation can arrive after a tool has started.
  */
 export function runHostAgentSession(
   request: HostAgentSessionRequest,

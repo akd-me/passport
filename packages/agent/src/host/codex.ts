@@ -56,25 +56,33 @@ const SESSION_FEATURES_OFF = [
   "hooks",
 ];
 
-/** OpenAI strict structured outputs need closed objects with every property required. */
-export function strictCompatible(schema: JsonSchema): boolean {
+/** Recursive property compatibility; scalar and array properties are allowed. */
+function strictProperties(schema: JsonSchema): boolean {
   const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
   if (types.includes("object") || schema.properties) {
     const keys = Object.keys(schema.properties ?? {});
     if (schema.additionalProperties !== false) {
       return false;
     }
-    if (keys.some((key) => !(schema.required ?? []).includes(key))) {
+    if (
+      keys.length !== (schema.required ?? []).length ||
+      keys.some((key) => !(schema.required ?? []).includes(key))
+    ) {
       return false;
     }
-    if (Object.values(schema.properties ?? {}).some((child) => !strictCompatible(child))) {
+    if (Object.values(schema.properties ?? {}).some((child) => !strictProperties(child))) {
       return false;
     }
   }
-  if (schema.items && !strictCompatible(schema.items)) {
+  if (schema.items && !strictProperties(schema.items)) {
     return false;
   }
   return true;
+}
+
+/** Codex strict output requires an object root, closed objects and all properties required. */
+export function strictCompatible(schema: JsonSchema): boolean {
+  return schema.type === "object" && strictProperties(schema);
 }
 
 /**
@@ -83,6 +91,9 @@ export function strictCompatible(schema: JsonSchema): boolean {
  * shell and every other tool so untrusted mail cannot drive local commands.
  */
 export async function codexInvocation(spec: HostRunSpec): Promise<HostInvocation> {
+  if (spec.maxTurns !== undefined && (!Number.isSafeInteger(spec.maxTurns) || spec.maxTurns <= 0)) {
+    throw new LlmError("Codex maxTurns must be a positive safe integer", "HOST_AGENT_CONFIG");
+  }
   const args = [
     "exec",
     "--json",
@@ -274,12 +285,17 @@ function mcpResultText(result: unknown): string {
 }
 
 /** Parse `codex exec --json` lines into host-agent events. */
-export function createCodexParser(): HostStreamParser {
+export function createCodexParser(maxTurns?: number): HostStreamParser {
   const state: HostRunOutcome = { text: "", finished: false };
   let lastError: { message: string; code: string } | undefined;
   let failed = false;
+  let turns = 0;
   return {
     push(line) {
+      // Cancellation is asynchronous: ignore any further buffered output after the limit.
+      if (state.error?.code === "HOST_AGENT_MAX_TURNS") {
+        return [];
+      }
       let message: Record<string, unknown> | undefined;
       try {
         message = record(JSON.parse(line));
@@ -297,6 +313,9 @@ export function createCodexParser(): HostStreamParser {
       const events: HostAgentEvent[] = [];
       const item = record(message.item);
       switch (message.type) {
+        case "turn.started":
+          turns++;
+          break;
         case "thread.started":
           if (typeof message.thread_id === "string") {
             state.sessionId = message.thread_id;
@@ -379,11 +398,19 @@ export function createCodexParser(): HostStreamParser {
           lastError = failure(message.message);
           break;
       }
+      turns += events.filter((event) => event.type === "tool_call").length;
+      if (maxTurns !== undefined && turns > maxTurns) {
+        state.finished = false;
+        state.error = {
+          code: "HOST_AGENT_MAX_TURNS",
+          message: `Codex exceeded maxTurns (${maxTurns}); the initial turn and each tool call count toward the limit`,
+        };
+      }
       return events;
     },
     outcome() {
       const outcome = { ...state };
-      if (failed || (!state.finished && lastError)) {
+      if (!outcome.error && (failed || (!state.finished && lastError))) {
         outcome.error = lastError;
       }
       return outcome;

@@ -77,6 +77,59 @@ afterAll(async () => {
   }
 });
 
+describe.skipIf(!ready("codex"))("live Codex review regressions", () => {
+  it("V2-8: ROOT_ARRAY uses prompt and local validation with the signed-in Codex CLI", async () => {
+    const result = await new HostAgentLlmClient({
+      kind: "codex",
+      cwd: join(dir, "root-array"),
+      timeoutMs: 30_000,
+    }).complete({
+      system: "Return JSON only.",
+      messages: [{ role: "user", content: "Return an array of two strings: alpha, beta." }],
+      model: "fast",
+      json: { type: "array", items: { type: "string" } },
+    });
+    expect(result.json).toEqual(["alpha", "beta"]);
+  }, 40_000);
+
+  it("V2-9: MAX_TURNS cancels sequential live Codex MCP calls at the configured budget", async () => {
+    const log = join(dir, "max-turns.log");
+    const events: HostAgentEvent[] = [];
+    const result = await runHostAgentSession(
+      {
+        kind: "codex",
+        model: FAST.codex,
+        cwd: join(dir, "max-turns"),
+        systemPrompt: "Follow the user instruction exactly. Use tools only when asked.",
+        prompt:
+          "Call the get_code_word tool exactly THREE times sequentially. After each call wait for its result before the next call. Then give the three results.",
+        mcpServers: {
+          probe: { command: process.execPath, args: [probeServer], env: { PROBE_LOG: log } },
+        },
+        allowedTools: ["mcp__probe__get_code_word"],
+        maxTurns: 1,
+        timeoutMs: 30_000,
+      },
+      (event) => events.push(event),
+    ).done;
+    expect(result).toMatchObject({ ok: false, error: { code: "HOST_AGENT_MAX_TURNS" } });
+    expect(events.at(-1)).toMatchObject({ type: "error", code: "HOST_AGENT_MAX_TURNS" });
+    const calls = (
+      await readFile(log, "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") {
+          throw error;
+        }
+        // Cancellation may reach Codex before its first MCP request is dispatched.
+        return "";
+      })
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    expect(calls.length).toBeLessThanOrEqual(1);
+  }, 40_000);
+});
+
 for (const kind of ["claude-code", "codex"] as const) {
   describe.skipIf(!ready(kind))(`live ${kind}`, () => {
     it("completes a JSON-mode request with the fast model", async () => {

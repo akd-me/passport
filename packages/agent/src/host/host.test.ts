@@ -152,6 +152,23 @@ describe("Claude Code stream parser (recorded fixtures)", () => {
 });
 
 describe("Codex exec --json parser (recorded fixtures)", () => {
+  it("V2-9: counts turn and tool starts, preserves the limit over reconnect errors, and ignores buffered success", () => {
+    const parser = createCodexParser(2);
+    parse(parser, [
+      '{"type":"turn.started"}',
+      '{"type":"error","message":"Reconnecting... 1/5"}',
+      '{"type":"item.started","item":{"type":"command_execution","command":"echo one"}}',
+      '{"type":"item.completed","item":{"type":"command_execution","exit_code":0}}',
+    ]);
+    expect(parser.outcome().error?.code).not.toBe("HOST_AGENT_MAX_TURNS");
+    parse(parser, ['{"type":"turn.started"}', ...codexMessage("buffered success")]);
+    expect(parser.outcome()).toMatchObject({
+      finished: false,
+      text: "",
+      error: { code: "HOST_AGENT_MAX_TURNS" },
+    });
+  });
+
   it("maps an MCP tool session to events with namespaced tool names", () => {
     const parser = createCodexParser();
     const events = parse(parser, fixture("codex-mcp.jsonl"));
@@ -223,6 +240,30 @@ describe("Codex exec --json parser (recorded fixtures)", () => {
 });
 
 describe("host CLI invocations", () => {
+  it("V2-8: only object roots use Codex strict output; nested arrays remain supported", async () => {
+    for (const jsonSchema of [
+      { type: "array" as const, items: { type: "string" as const } },
+      { type: "string" as const },
+      { type: ["object", "null"] as Array<"object" | "null">, additionalProperties: false },
+    ]) {
+      const invocation = await codexInvocation(spec({ kind: "codex", jsonSchema }));
+      try {
+        expect(invocation.schemaEnforced).toBe(false);
+        expect(invocation.args).not.toContain("--output-schema");
+      } finally {
+        await invocation.cleanup();
+      }
+    }
+    expect(
+      strictCompatible({
+        type: "object",
+        properties: { values: { type: "array", items: { type: "string" } } },
+        required: ["values"],
+        additionalProperties: false,
+      }),
+    ).toBe(true);
+  });
+
   it("runs Claude completions in safe mode with tools disabled and the system prompt replaced", async () => {
     const invocation = await claudeInvocation(
       spec({ systemPrompt: "SYS", model: "claude-haiku-5-5", jsonSchema: { type: "object" } }),
@@ -696,6 +737,21 @@ describe("HostAgentLlmClient", () => {
 });
 
 describe("runHostAgentSession", () => {
+  it("V2-9: cancels Codex with HOST_AGENT_MAX_TURNS when its streamed tool budget is exceeded", async () => {
+    const dir = await temp();
+    const fake = await fakeBinary(dir, "codex", { run: { lines: fixture("codex-mcp.jsonl") } });
+    const events: HostAgentEvent[] = [];
+    const result = await runHostAgentSession(
+      { kind: "codex", prompt: "Call three tools", cwd: dir, maxTurns: 1 },
+      (event) => events.push(event),
+      { binaryPath: fake.path },
+    ).done;
+    expect(result).toMatchObject({ ok: false, error: { code: "HOST_AGENT_MAX_TURNS" } });
+    expect(result.error?.message).toContain("maxTurns");
+    expect(events.at(-1)).toMatchObject({ type: "error", code: "HOST_AGENT_MAX_TURNS" });
+    expect(events.some((event) => event.type === "completed")).toBe(false);
+  });
+
   it("streams parsed events and resolves with the final message", async () => {
     const dir = await temp();
     const fake = await fakeBinary(dir, "claude", { run: { lines: fixture("claude-mcp.jsonl") } });
