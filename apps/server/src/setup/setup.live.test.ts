@@ -68,6 +68,7 @@ describe.skipIf(!codexReady)("live setup task (codex)", () => {
           existsSync(consented) && readFileSync(calls, "utf8").includes("/oauth/setup/")
             ? { status: "connected", accountId: "acc-live" }
             : { status: "authorizing" },
+        revoke: () => {},
       },
       listAccounts: async () => [
         {

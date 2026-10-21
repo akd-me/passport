@@ -33,6 +33,9 @@ export interface SetupToolHost {
   finish(summary: string, success: boolean): void;
 }
 
+/** What askUser returns when the user answers no to a confirm prompt. */
+export const DECLINED = "declined";
+
 export class SetupTaskEnded extends Error {
   constructor() {
     super("The setup task has ended. Stop now; do not call any more tools.");
@@ -73,7 +76,7 @@ function createSetupMcpServer(host: SetupToolHost, signal: AbortSignal): McpServ
     "ask_user",
     {
       description:
-        "Show the user a message in Passport and wait for them. kind sign_in: they must sign in in the browser window. kind confirm: they must do or approve something in the browser. kind question: you need an answer (returned as text).",
+        "Show the user a message in Passport and wait for them. kind sign_in: they must sign in in the browser window. kind confirm: they must do or approve something in the browser; they can answer yes or no (declined). kind question: you need an answer (returned as text). Ask one message at a time.",
       inputSchema: {
         kind: z.enum(["sign_in", "confirm", "question"]),
         message: z.string().trim().min(1).max(500),
@@ -86,11 +89,15 @@ function createSetupMcpServer(host: SetupToolHost, signal: AbortSignal): McpServ
           "The user has not answered yet; the message is still shown. Call ask_user again with the same kind and message to keep waiting.",
         );
       }
-      return text(
-        kind === "question"
-          ? `The user answered: ${answer}`
-          : "The user clicked Continue. Take a browser_snapshot to see the current page.",
-      );
+      if (kind === "question") {
+        return text(`The user answered: ${answer}`);
+      }
+      if (kind === "confirm" && answer === DECLINED) {
+        return text(
+          `${JSON.stringify({ answer: DECLINED })}\nThe user said no. Stop this step and do not do it on their behalf. Ask the user (kind "question") how they want to proceed, or, if setup cannot continue without this step, call finish with success false and a one-sentence reason.`,
+        );
+      }
+      return text("The user clicked Continue. Take a browser_snapshot to see the current page.");
     }),
   );
   server.registerTool(

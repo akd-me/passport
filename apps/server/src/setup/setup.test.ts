@@ -486,7 +486,8 @@ describe("agent-driven account setup", () => {
     );
     expect(task(id).status).toBe("cancelled");
     expect((await json("/api/setup/tasks")).status).toBe(200);
-    // A new task can start once the previous one ended.
+    // A new task can start once the previous one ended and cleaned up.
+    await setupTasks(backend).idle();
     sessions.script(async () => {});
     expect((await json("/api/setup/tasks", { provider: "gmail" })).status).toBe(201);
   });
@@ -530,6 +531,8 @@ describe("agent-driven account setup", () => {
 
   it("chooses Codex, then Claude Code; fails clearly without a ready agent or browser", async () => {
     agents = [status("codex", false), status("claude-code", true)];
+    // Each task holds the slot until its cleanup ends.
+    const idle = () => setupTasks(backend).idle();
     const first = (await (await json("/api/setup/tasks", { provider: "gmail" })).json()) as {
       id: string;
     };
@@ -537,6 +540,7 @@ describe("agent-driven account setup", () => {
       () => task(first.id),
       (t) => t.status === "failed",
     );
+    await idle();
     expect(sessions.requests[0]).toMatchObject({
       kind: "claude-code",
       model: SETUP_AGENT_MODELS["claude-code"].model,
@@ -553,6 +557,7 @@ describe("agent-driven account setup", () => {
         )
       ).error,
     ).toBe("Codex is not ready. Install codex.");
+    await idle();
 
     agents = [status("codex", false), status("claude-code", false)];
     const none = (await (await json("/api/setup/tasks", { provider: "microsoft" })).json()) as {
@@ -564,6 +569,7 @@ describe("agent-driven account setup", () => {
     );
     expect(failed.error).toContain("No signed-in agent found");
     expect(failed.steps[0]).toMatchObject({ id: "prepare", status: "failed" });
+    await idle();
 
     agents = [status("codex", true)];
     browser.detect.mockReturnValueOnce(null as never);

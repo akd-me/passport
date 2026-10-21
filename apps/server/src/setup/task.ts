@@ -27,6 +27,18 @@ const CLIENT_SECRETS: Array<[RegExp, string]> = [
   ],
 ];
 const TERMINAL: readonly SetupTaskStatus[] = ["completed", "failed", "cancelled"];
+/** A run of 16+ token characters with both letters and digits: an id, key or secret. */
+const TOKEN_LIKE = /[A-Za-z0-9_~-]{16,}/g;
+
+/**
+ * Agent narration may quote a credential before Passport learns it is one (for example a
+ * client secret read off a console page), so token-like runs are dropped from it entirely.
+ */
+export function scrubAgentText(text: string): string {
+  return text.replace(TOKEN_LIKE, (run) =>
+    /[A-Za-z]/.test(run) && /[0-9]/.test(run) ? "[redacted]" : run,
+  );
+}
 
 /**
  * One setup task's observable state. Every mutation publishes a full snapshot; text that
@@ -79,10 +91,38 @@ export class SetupTaskState {
     return structuredClone(this.task);
   }
 
-  /** Values that must never appear in anything the task publishes. */
+  /**
+   * Values that must never appear in anything the task publishes. Text retained before the
+   * value was known is scrubbed again; frames already published cannot be retracted.
+   */
   addSecret(value: string | undefined): void {
-    if (value && value.length >= 4) {
-      this.secrets.add(value);
+    if (!value || value.length < 4 || this.secrets.has(value)) {
+      return;
+    }
+    this.secrets.add(value);
+    const hide = (text: string) => text.split(value).join("[redacted]");
+    let changed = false;
+    const rescrub = (text: string) => {
+      const clean = hide(text);
+      changed ||= clean !== text;
+      return clean;
+    };
+    for (const entry of this.task.log) {
+      entry.text = rescrub(entry.text);
+    }
+    for (const step of this.task.steps) {
+      if (step.detail) {
+        step.detail = rescrub(step.detail);
+      }
+    }
+    if (this.task.prompt) {
+      this.task.prompt.message = rescrub(this.task.prompt.message);
+    }
+    if (this.task.error) {
+      this.task.error = rescrub(this.task.error);
+    }
+    if (changed) {
+      this.publish(this.snapshot());
     }
   }
 
@@ -147,6 +187,12 @@ export class SetupTaskState {
     }
   }
 
+  /** True when `kind` and `message` are the prompt currently shown. */
+  showing(kind: SetupPromptKind, message: string): boolean {
+    const current = this.task.prompt;
+    return !!current && current.kind === kind && current.message === this.scrub(message, 500);
+  }
+
   /**
    * Show a prompt. Asking the same question again (after a bounded wait expired) keeps the
    * same prompt, so the user's view does not flicker.
@@ -165,8 +211,8 @@ export class SetupTaskState {
     return prompt;
   }
 
-  /** Accept the user's answer to the current prompt. */
-  answer(promptId: string): SetupPrompt {
+  /** The prompt `promptId` names, if it is still being asked. Changes nothing. */
+  pending(promptId: string): SetupPrompt {
     if (this.terminal) {
       throw new ApiError("TASK_FINISHED", "This setup task has already finished", 409);
     }
@@ -174,6 +220,12 @@ export class SetupTaskState {
     if (!prompt || prompt.id !== promptId) {
       throw new ApiError("PROMPT_STALE", "That question is no longer being asked", 409);
     }
+    return prompt;
+  }
+
+  /** Accept the user's answer to the current prompt. Validate the answer first. */
+  answer(promptId: string): SetupPrompt {
+    const prompt = this.pending(promptId);
     this.change(() => {
       delete this.task.prompt;
       this.task.status = "running";

@@ -3,6 +3,7 @@ import type { SetupPromptKind } from "@passport/types";
 import { ApiError } from "../errors.js";
 import { SetupTaskEnded, type SetupToolHost } from "./mcp.js";
 import { deferred, type Run, type SetupRunnerOptions, type Ticket } from "./runner-state.js";
+import { scrubAgentText } from "./task.js";
 
 export function createSetupToolHost(
   run: Run,
@@ -36,7 +37,16 @@ export function createSetupToolHost(
     stepIds: () => state.stepIds().filter((id) => id !== "prepare"),
     askUser: async (kind: SetupPromptKind, message: string, signal: AbortSignal) => {
       ended();
+      // One message at a time: a second, different one would hide a prompt still awaited.
+      const shown = state.prompt;
+      if (shown && (run.asking.get(shown.id) ?? 0) > 0 && !state.showing(kind, message)) {
+        throw new ApiError(
+          "PROMPT_BUSY",
+          "Another message is still waiting for the user. Wait for that ask_user call to return before asking something else.",
+        );
+      }
       const prompt = state.ask(kind, message);
+      run.asking.set(prompt.id, (run.asking.get(prompt.id) ?? 0) + 1);
       if (prompt.kind === "sign_in") {
         state.log("info", "Waiting for you to sign in in the browser window.");
       }
@@ -65,6 +75,12 @@ export function createSetupToolHost(
         return answer;
       } finally {
         clearTimeout(timer);
+        const callers = (run.asking.get(prompt.id) ?? 1) - 1;
+        if (callers > 0) {
+          run.asking.set(prompt.id, callers);
+        } else {
+          run.asking.delete(prompt.id);
+        }
       }
     },
     reportProgress: (step, status, detail) => {
@@ -85,7 +101,13 @@ export function createSetupToolHost(
           calendar: run.input.calendar,
         },
         run.origin,
+        // A consent that lands after the task ended must not connect an account.
+        { active: () => !state.terminal && !run.controller.signal.aborted },
       );
+      run.attempts.add(attempt.attemptId);
+      if (state.terminal || run.controller.signal.aborted) {
+        context.options.oauth.revoke(attempt.attemptId);
+      }
       ended();
       const ticket = randomBytes(24).toString("base64url");
       state.addSecret(ticket);
@@ -97,7 +119,6 @@ export function createSetupToolHost(
         authUrl: attempt.authUrl,
         expiresAt: Date.now() + 10 * 60_000,
       });
-      run.attempts.add(attempt.attemptId);
       state.step("authorize", "running", "Waiting for you to approve access");
       state.log(
         "info",
@@ -151,7 +172,7 @@ export function createSetupToolHost(
     },
     finish: (summary, success) => {
       ended();
-      state.log(success ? "info" : "warn", `Agent: ${summary}`);
+      state.log(success ? "info" : "warn", `Agent: ${scrubAgentText(summary)}`);
       if (success && state.connected) {
         state.complete();
       } else {
