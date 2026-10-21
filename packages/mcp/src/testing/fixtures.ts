@@ -9,7 +9,7 @@ import type {
   Person,
 } from "@passport/types";
 
-export const at = "2026-10-20T12:00:00.000Z";
+const at = "2026-10-20T12:00:00.000Z";
 export function account(patch: Partial<Account> = {}): Account {
   return {
     id: "account-1",

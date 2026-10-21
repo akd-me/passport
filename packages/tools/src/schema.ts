@@ -140,6 +140,7 @@ export class Schema<T> {
   }
 }
 
+/** @compatibility A named export is required to emit declarations with private class members. */
 export class ObjectSchema<S extends Shape> extends Schema<Output<S>> {
   constructor(readonly shape: S) {
     super(

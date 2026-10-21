@@ -25,7 +25,7 @@ export const scopesFor = (kind: OAuthKind, calendar: boolean): string[] =>
         ...(calendar ? ["Calendars.ReadWrite"] : []),
       ];
 
-export const calendarScope = (kind: OAuthKind) =>
+const calendarScope = (kind: OAuthKind) =>
   kind === "gmail" ? "https://www.googleapis.com/auth/calendar.events" : "Calendars.ReadWrite";
 
 /** Mail and calendar use one grant; persist rotations to both encrypted records. */
@@ -47,7 +47,7 @@ export async function persistOAuthCredentials(
   }
 }
 
-export async function accountIdentity(
+async function accountIdentity(
   kind: OAuthKind,
   credentials: AccountCredentials,
   fetcher = globalThis.fetch,

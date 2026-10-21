@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { ApiError } from "./errors.js";
 import { logger } from "./logger.js";
 
-export const OWNER_HEARTBEAT_MS = 10_000;
-export const OWNER_STALE_MS = 60_000;
+const OWNER_HEARTBEAT_MS = 10_000;
+const OWNER_STALE_MS = 60_000;
 export interface OwnerRecord {
   pid: number;
   startedAt: string;

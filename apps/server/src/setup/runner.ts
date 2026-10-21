@@ -35,11 +35,10 @@ export { describeBrowserCall } from "./runner-events.js";
 export type {
   RunSession,
   SetupBrowserControl,
-  SetupOAuth,
   SetupRunnerOptions,
   StartSetupInput,
 } from "./runner-state.js";
-export { parseSetupInput, SETUP_AGENT_MODELS, SETUP_BROWSER_TOOLS } from "./runner-state.js";
+export { parseSetupInput, SETUP_AGENT_MODELS } from "./runner-state.js";
 
 /**
  * Runs agent-driven account setup: a host-agent session with a visible browser and the

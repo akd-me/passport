@@ -1,4 +1,3 @@
-import type { ActionCategory } from "@passport/types";
 import { api, type TrustData } from "../api";
 import { Feedback, Loading } from "../components/ui";
 import { ProfileEditor } from "../settings/ProfileEditor";
@@ -51,5 +50,3 @@ export function TrustSettings() {
     </>
   );
 }
-
-export type { ActionCategory };

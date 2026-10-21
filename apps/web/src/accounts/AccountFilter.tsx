@@ -33,7 +33,7 @@ export function AccountScope({ children }: { children: ReactNode }) {
   );
 }
 export const useAccounts = () => useContext(Accounts);
-export function accountColour(id: string): string {
+function accountColour(id: string): string {
   let hash = 0;
   for (const c of id) {
     hash = (Math.imul(hash, 31) + c.charCodeAt(0)) | 0;

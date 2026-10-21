@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+  // pkill is the existing macOS/Linux process utility, not an npm binary.
+  "ignoreBinaries": ["pkill"],
+  // Preserve the documented aliases and the class required for declaration emission.
+  "tags": ["-compatibility"],
+  "ignoreIssues": {
+    // Both names refer to the same function intentionally; unused exports are still checked.
+    "apps/web/src/setup-api.ts": ["duplicates"],
+    "apps/web/src/views/Decisions.tsx": ["duplicates"]
+  }
+}

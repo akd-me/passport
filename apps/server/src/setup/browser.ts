@@ -106,7 +106,7 @@ export function detectSetupBrowser(options: BrowserDetectOptions = {}): SetupBro
 export const NO_BROWSER_MESSAGE = `No supported browser found. Install Google Chrome or Microsoft Edge, or run \`npx -y ${PLAYWRIGHT_MCP_PACKAGE} install-browser chrome-for-testing\` (Playwright's Chromium), then start setup again.`;
 
 /** `npx` next to the running Node, so the CLI's MCP launcher does not depend on its own PATH. */
-export function npxCommand(
+function npxCommand(
   platform: NodeJS.Platform = process.platform,
   execPath = process.execPath,
 ): string {

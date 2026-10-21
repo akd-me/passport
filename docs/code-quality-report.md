@@ -251,3 +251,36 @@ protocol or workflow, and splitting them further would introduce extra state plu
 clearer boundary. They remain candidates for focused follow-up work. Server setup files besides
 the runner already fit the target after formatting. Other existing web views/components fit the
 target or remain close to it with a single cohesive form/view.
+
+## Dead code and dependency audit
+
+Ran Knip 6.42.1 with its workspace discovery. No unused files were found. Biome 2.5.15
+has no unused-export rule; its required unused-import and unused-variable rules were checked
+alongside Knip's export/type graph.
+
+Removed:
+
+- Root `vitest`: every test workspace already declares its own runner; root scripts only recurse.
+- Provider `@types/mailparser`: installed `mailparser` supplies its own declarations; provider
+  typecheck passes without the separate typings. Reinstalled to update `pnpm-lock.yaml`.
+- The unused web `PageHeader` component and `setupTaskFromEvent` helper.
+- The unused agent `strings` schema constant and MCP `json` / `errorResult` presentation helpers.
+- The unused internal `Dispatch` type alias and mock-calendar `folderNames` field.
+- Unused internal exports/re-exports across server helpers, agent parsers/prompts/schema constants,
+  provider parsing/serialization helpers, tool schema builders, test fixture helpers, and UI
+  implementation helpers. Internally used implementations remain private.
+
+Retained deliberately:
+
+- Package-root APIs, including provider normalizers, mock factories, transport/tool adapters,
+  shared contracts, and runtime integration types. Repository usage alone cannot establish that
+  an intentionally published API is dead. `packages/types` was not pruned.
+- `Decisions` / `WorkQueue` and `isSetupTaskFinished` / `isFinished`: existing compatibility aliases.
+  They are tagged `@compatibility`; Knip suppresses only their two duplicate-export reports.
+- `ObjectSchema`: its exported name is required for TypeScript declaration emission when a
+  returned schema class contains private members. It is tagged with that reason.
+- The platform `pkill` executable used by setup cleanup; it is not an npm dependency.
+- No test, fixture file, CLI entry point, stylesheet rule, or intentionally public API was deleted.
+
+`knip.jsonc` contains only the platform-binary allowance, compatibility tag, and the two narrow
+intentional-duplicate allowances. No Biome suppression comments were added.

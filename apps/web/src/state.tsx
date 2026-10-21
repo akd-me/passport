@@ -10,8 +10,9 @@ import {
 import { type DomainEvent, request } from "./api";
 import { checkSession, websocketUrl } from "./auth";
 import { logger } from "./logger";
+
 /** Frames on /ws: domain events plus setup-task updates from the onboarding service. */
-export type WorkspaceEvent = DomainEvent | { type: "setup.task.updated"; task: unknown };
+type WorkspaceEvent = DomainEvent | { type: "setup.task.updated"; task: unknown };
 type Listener = (event: WorkspaceEvent) => void;
 interface WorkspaceState {
   version: number;

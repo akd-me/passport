@@ -9,7 +9,7 @@ import type {
 } from "@passport/types";
 import { DEFAULT_POLICY_CONFIG } from "@passport/types";
 
-export const CATEGORIES: ActionCategory[] = [
+const CATEGORIES: ActionCategory[] = [
   "triage",
   "newsletters",
   "receipts",

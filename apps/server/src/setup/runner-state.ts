@@ -43,7 +43,7 @@ export const AGENT_LABELS: Record<HostAgentKind, string> = {
   "claude-code": "Claude Code",
 };
 export const MAX_TASKS = 20;
-export interface SetupOAuth {
+interface SetupOAuth {
   start(
     input: Record<string, unknown>,
     origin: string,

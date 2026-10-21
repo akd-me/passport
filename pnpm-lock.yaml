@@ -20,9 +20,6 @@ importers:
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
-      vitest:
-        specifier: ^3.1.0
-        version: 3.2.7(@types/node@22.20.5)(jsdom@26.1.0)(tsx@4.23.15)
 
   apps/server:
     dependencies:
@@ -197,9 +194,6 @@ importers:
         specifier: ^10.1.7
         version: 10.1.7
     devDependencies:
-      '@types/mailparser':
-        specifier: ^3.9.0
-        version: 3.9.0
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
@@ -887,9 +881,6 @@ packages:
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
-
-  '@types/mailparser@3.9.0':
-    resolution: {integrity: sha512-YnhrRiRVDiEAphFvd72hKa1n8y2b9Q3rgSQiONZQyhQz67h5g4MZHNApET3XWXVEFdInWtHqDHKEwnyjxU3QVw==}
 
   '@types/node@22.20.5':
     resolution: {integrity: sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==}
@@ -2315,11 +2306,6 @@ snapshots:
   '@types/deep-eql@4.0.2': {}
 
   '@types/estree@1.0.9': {}
-
-  '@types/mailparser@3.9.0':
-    dependencies:
-      '@types/node': 22.20.5
-      iconv-lite: 0.6.3
 
   '@types/node@22.20.5':
     dependencies:

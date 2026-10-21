@@ -1,9 +1,4 @@
-import type {
-  ActionCategory,
-  ActionRequest,
-  GlobalPolicyConfig,
-  TrustLevel,
-} from "@passport/types";
+import type { ActionCategory, ActionRequest, GlobalPolicyConfig } from "@passport/types";
 import { TRUST_LEVELS } from "@passport/types";
 import { ApiError } from "./errors.js";
 export const categories: ActionCategory[] = [
@@ -124,4 +119,3 @@ export function editedRequest(value: unknown, original: ActionRequest): ActionRe
     } as ActionRequest["params"],
   };
 }
-export type { TrustLevel };

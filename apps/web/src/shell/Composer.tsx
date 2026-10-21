@@ -15,7 +15,7 @@ type RunState =
   | { state: "done"; instruction: string; run: AgentRun }
   | { state: "failed"; instruction: string; error: string };
 
-export const suggestions = [
+const suggestions = [
   "Draft replies to anything waiting on me",
   "Archive newsletters I haven’t opened this week",
   "What’s due in the next few days?",

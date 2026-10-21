@@ -1,7 +1,7 @@
 import type { ActionCategory } from "@passport/types";
 import type { JsonSchema } from "./llm/types.js";
 
-export const CATEGORIES: ActionCategory[] = [
+const CATEGORIES: ActionCategory[] = [
   "triage",
   "newsletters",
   "receipts",
@@ -15,10 +15,9 @@ export const CATEGORIES: ActionCategory[] = [
   "matters",
   "other",
 ];
-export const string: JsonSchema = { type: "string", minLength: 1 };
-export const strings: JsonSchema = { type: "array", items: string };
-export const categorySchema: JsonSchema = { type: "string", enum: CATEGORIES };
-export function objectSchema(
+const string: JsonSchema = { type: "string", minLength: 1 };
+const categorySchema: JsonSchema = { type: "string", enum: CATEGORIES };
+function objectSchema(
   properties: Record<string, JsonSchema>,
   required = Object.keys(properties),
 ): JsonSchema {
@@ -33,7 +32,7 @@ export const matterSchema = objectSchema({
   nextStep: { type: "string" },
 });
 export const replySchema = objectSchema({ textBody: string });
-export const slotSchema = objectSchema({ start: string, end: string });
+const slotSchema = objectSchema({ start: string, end: string });
 export const scheduleSchema = objectSchema({
   status: { type: "string", enum: ["accepted", "tentative", "declined"] },
   textBody: string,

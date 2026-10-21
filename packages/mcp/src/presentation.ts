@@ -1,15 +1,7 @@
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ActionRecord, CalendarEvent, Email, Matter, Person } from "@passport/types";
 
 const BODY_LIMIT = 2000;
 const clip = (text: string, max = BODY_LIMIT) => text.slice(0, max);
-
-export function json(value: unknown, isError = false): CallToolResult {
-  return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
-    ...(isError ? { isError: true } : {}),
-  };
-}
 
 export class MailboxMcpError extends Error {
   constructor(
@@ -26,23 +18,6 @@ export function required<T>(value: T | null | undefined, label: string): T {
     throw new MailboxMcpError("NOT_FOUND", `${label} not found.`);
   }
   return value;
-}
-
-export function errorResult(error: unknown, write: boolean): CallToolResult {
-  // Provider exceptions may contain tokens or connection URLs. The host owns private diagnostics.
-  return json(
-    {
-      error: error instanceof MailboxMcpError ? error.code : "DEPENDENCY_ERROR",
-      reason:
-        error instanceof MailboxMcpError
-          ? error.message
-          : "A Passport dependency failed; consult the server's private diagnostics.",
-      ...(write
-        ? { policy_note: "No successful policy result was returned; do not assume the action ran." }
-        : {}),
-    },
-    true,
-  );
 }
 
 const line = (value: string) => value.replace(/[\r\n]/g, " ");

@@ -9,7 +9,7 @@ import type {
 } from "@passport/types";
 import { validateEvent, validateRange } from "./calendar-common.js";
 import { decodeCursor, encodeCursor, localId, ProviderError } from "./errors.js";
-import { clone, fixtureEpoch, folderNames } from "./mock-fixtures.js";
+import { clone, fixtureEpoch } from "./mock-fixtures.js";
 import { toIso } from "./normalize/index.js";
 
 export type CalendarDelta =
@@ -27,7 +27,6 @@ export class MockCalendarProvider implements CalendarProvider {
   private events = new Map<string, CalendarEvent>();
   private changes: CalendarDelta[] = [];
   private sequence = 0;
-  private folderNames = [...folderNames];
   async connect(account: Account, _credentials: AccountCredentials = {}): Promise<void> {
     if (this.account && this.account.id !== account.id) {
       throw new ProviderError("ACCOUNT_MISMATCH", "Use a separate mock instance per account");

@@ -22,7 +22,7 @@ import { createPolicyEngine } from "../policy.js";
 import { createMemoryEventBus, createMemoryStore } from "./memory-store.js";
 
 export const at = "2026-10-20T12:00:00.000Z";
-export const capabilities: AccountCapabilities = {
+const capabilities: AccountCapabilities = {
   mail: true,
   calendar: true,
   contacts: false,
@@ -140,7 +140,7 @@ export const action = (id: string, category: ActionCategory = "other"): ActionRe
   createdAt: at,
 });
 
-export class FakeMailProvider implements MailProvider {
+class FakeMailProvider implements MailProvider {
   readonly kind = "mock" as const;
   readonly capabilities: AccountCapabilities;
   constructor(labels = true) {
@@ -196,7 +196,7 @@ export class FakeMailProvider implements MailProvider {
     return { providerId: `sent-${++this.count}`, messageId: "<sent@example.com>" };
   }
 }
-export class FakeCalendarProvider implements CalendarProvider {
+class FakeCalendarProvider implements CalendarProvider {
   readonly kind = "mock" as const;
   calls: Array<{ operation: string; providerId?: string; value?: unknown }> = [];
   async connect() {}

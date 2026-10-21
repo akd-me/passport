@@ -15,7 +15,7 @@ const kindLabel: Record<string, string> = {
   "graph-calendar": "Outlook Calendar",
   caldav: "CalDAV",
 };
-export const providerName = (kind: string) => kindLabel[kind] ?? kind;
+const providerName = (kind: string) => kindLabel[kind] ?? kind;
 export const needsReauthorization = (account: ConnectedAccount) =>
   !!account.settings.reauthorizationRequired || account.lastSyncError === "REAUTHORIZE_REQUIRED";
 export function syncSummary(account: ConnectedAccount) {

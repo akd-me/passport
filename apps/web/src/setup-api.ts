@@ -1,13 +1,4 @@
-import type {
-  DomainEvent,
-  HostAgentKind,
-  SetupLogEntry,
-  SetupPrompt,
-  SetupProvider,
-  SetupStep,
-  SetupTask,
-  SetupTaskStatus,
-} from "@passport/types";
+import type { HostAgentKind, SetupProvider, SetupStep, SetupTask } from "@passport/types";
 import { request } from "./api";
 
 /**
@@ -15,7 +6,7 @@ import { request } from "./api";
  * to create the user's own OAuth client, asking the user to sign in and approve.
  * Changes also arrive on the WebSocket as `setup.task.updated` with the full task.
  */
-export type { SetupLogEntry, SetupPrompt, SetupProvider, SetupStep, SetupTask, SetupTaskStatus };
+export type { SetupProvider, SetupStep, SetupTask };
 
 export interface StartSetupTask {
   provider: SetupProvider;
@@ -40,14 +31,7 @@ export const setupApi = {
   cancel: (id: string) => post<SetupTask>(`${path(id)}/cancel`, {}),
 };
 
+/** @compatibility Retain the descriptive alias for existing setup integrations. */
 export const isSetupTaskFinished = (task: Pick<SetupTask, "status">) =>
   task.status === "completed" || task.status === "failed" || task.status === "cancelled";
 export const isFinished = isSetupTaskFinished;
-
-/** The task carried by a WebSocket event, if it is a setup update for `id`. */
-export function setupTaskFromEvent(event: DomainEvent, id?: string): SetupTask | undefined {
-  if (event.type !== "setup.task.updated") {
-    return;
-  }
-  return !id || event.task.id === id ? event.task : undefined;
-}

@@ -4,7 +4,7 @@ import { localDate, validateEvent, zonedToUtc } from "./calendar-common.js";
 import { encodeCursor, localId, ProviderError } from "./errors.js";
 import { toIso } from "./normalize/index.js";
 
-export const participation: Record<string, ParticipationStatus> = {
+const participation: Record<string, ParticipationStatus> = {
   ACCEPTED: "accepted",
   DECLINED: "declined",
   TENTATIVE: "tentative",
@@ -36,11 +36,11 @@ export function key(component: ICAL.Component): [string, string] {
   ];
 }
 
-export function providerId(href: string, component: ICAL.Component): string {
+function providerId(href: string, component: ICAL.Component): string {
   return `caldav:${encodeCursor([href, ...key(component)])}`;
 }
 
-export function calendarTimestamp(
+function calendarTimestamp(
   root: ICAL.Component,
   component: ICAL.Component,
   value: ICAL.Time,

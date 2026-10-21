@@ -32,7 +32,7 @@ export const graphBase = "https://graph.microsoft.com/v1.0";
 export interface GraphAddress {
   emailAddress: { address: string; name?: string };
 }
-export interface GraphAttachment {
+interface GraphAttachment {
   id: string;
   name?: string;
   contentType?: string;

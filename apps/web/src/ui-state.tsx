@@ -62,7 +62,7 @@ const narrow = (width = 860) =>
   typeof window.matchMedia === "function" &&
   window.matchMedia(`(max-width: ${width}px)`).matches;
 
-export function applyTheme(theme: ThemePreference) {
+function applyTheme(theme: ThemePreference) {
   const root = document.documentElement;
   if (theme === "system") {
     delete root.dataset.theme;

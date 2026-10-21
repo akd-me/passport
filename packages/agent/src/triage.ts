@@ -51,7 +51,7 @@ export function heuristicCategory(email: Email): ActionCategory | undefined {
 }
 
 /** Sensitive evidence precedes bulk-mail signals. Routine receipts alone are not money requests. */
-export function sensitiveCategory(
+function sensitiveCategory(
   email: Email,
   people: readonly Person[] = [],
 ): ActionCategory | undefined {
@@ -93,11 +93,7 @@ export function sensitiveCategory(
   return undefined;
 }
 
-export function emailCounterparty(
-  email: Email,
-  people: Person[],
-  downgraded = false,
-): Counterparty {
+function emailCounterparty(email: Email, people: Person[], downgraded = false): Counterparty {
   const counterparty = categorize({ type: "archive", emails: [email], people }).counterparty ?? {
     emails: [],
     class: "stranger" as const,
@@ -248,7 +244,7 @@ async function attachMatter(
   return { id: persisted.id, summary };
 }
 
-export async function readThread(store: Store, email: Email): Promise<Email[]> {
+async function readThread(store: Store, email: Email): Promise<Email[]> {
   const thread = await store.threads.get(email.threadId);
   if (thread) {
     const items = await Promise.all(
@@ -266,7 +262,7 @@ export async function readThread(store: Store, email: Email): Promise<Email[]> {
   });
 }
 
-export function replyDraft(ctx: RunContext, email: Email, textBody: string): DraftInput {
+function replyDraft(ctx: RunContext, email: Email, textBody: string): DraftInput {
   return {
     accountId: email.accountId,
     inReplyToEmailId: email.id,

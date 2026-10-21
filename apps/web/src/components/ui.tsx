@@ -148,27 +148,6 @@ export function Avatar({ name, small = false }: { name: string; small?: boolean 
     </span>
   );
 }
-/** The title row of a work surface: small, left-aligned, with actions on the right. */
-export function PageHeader({
-  title,
-  description,
-  children,
-}: {
-  eyebrow?: string;
-  title: string;
-  description?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <header className="page-header">
-      <div>
-        <h1>{title}</h1>
-        {description && <p>{description}</p>}
-      </div>
-      {children && <div className="page-actions">{children}</div>}
-    </header>
-  );
-}
 export function Feedback({ error }: { error?: string }) {
   return error ? (
     <p className="error" role="alert">
@@ -207,7 +186,7 @@ export function Empty({
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="kbd">{children}</kbd>;
 }
-export const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator.platform);
+const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator.platform);
 export const mod = isMac ? "⌘" : "Ctrl+";
 export function relativeTime(at: string) {
   const delta = Math.floor((Date.now() - Date.parse(at)) / 60000);

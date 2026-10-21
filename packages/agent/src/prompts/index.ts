@@ -16,7 +16,7 @@ Available tools: ${toolNames.join(", ")}.
 USER.md (standing instructions):\n${profile}`;
 }
 
-export function emailContext(email: Email): string {
+function emailContext(email: Email): string {
   return JSON.stringify({
     id: email.id,
     accountId: email.accountId,

@@ -69,7 +69,7 @@ export function resolveHostAgentBinary(
   return null;
 }
 
-export type ProbeExec = (
+type ProbeExec = (
   binary: string,
   args: string[],
   env: Record<string, string>,

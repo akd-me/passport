@@ -15,7 +15,7 @@ import {
 import { Surface } from "../shell/Surface";
 import { useResource } from "../state";
 
-export function DowngradeWarning({ person }: { person: Person }) {
+function DowngradeWarning({ person }: { person: Person }) {
   return person.lastSeenBlueAt && person.verification === "green" ? (
     <div className="warning" role="alert">
       <Icon name="alert" size={16} />

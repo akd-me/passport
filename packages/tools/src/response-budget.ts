@@ -14,7 +14,7 @@ export function responseByteBudget(value = DEFAULT_RESPONSE_BYTE_BUDGET): number
 }
 
 /** Prefix offsets use UTF-16 code units, without splitting a surrogate pair. */
-export function bodyPrefix(text: string, length: number): string {
+function bodyPrefix(text: string, length: number): string {
   if (length > 0 && length < text.length && /[\uD800-\uDBFF]/.test(text[length - 1]!)) {
     length--;
   }

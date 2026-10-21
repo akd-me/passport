@@ -4,13 +4,7 @@ import type { Backend } from "../backend.js";
 import { ApiError, required } from "../errors.js";
 import { connectOAuthAccount, type OAuthKind, scopesFor } from "./oauth-account.js";
 
-export type { OAuthKind } from "./oauth-account.js";
-export {
-  accountIdentity,
-  connectOAuthAccount,
-  persistOAuthCredentials,
-  scopesFor,
-} from "./oauth-account.js";
+export { connectOAuthAccount, persistOAuthCredentials, scopesFor } from "./oauth-account.js";
 
 export const oauthCookie = (state: string) => `passport_oauth_${state.slice(0, 24)}`;
 

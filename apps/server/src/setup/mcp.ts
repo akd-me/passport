@@ -46,7 +46,7 @@ const text = (value: string, isError = false) => ({
 const fingerprint = (value: string) => createHash("sha256").update(value).digest();
 
 /** Tool handlers, separated from transport so tests can call them directly. */
-export function createSetupMcpServer(host: SetupToolHost, signal: AbortSignal): McpServer {
+function createSetupMcpServer(host: SetupToolHost, signal: AbortSignal): McpServer {
   const server = new McpServer({ name: "passport-setup", version: "1.0.0" });
   const guard =
     <A>(handler: (args: A) => Promise<ReturnType<typeof text>> | ReturnType<typeof text>) =>

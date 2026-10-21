@@ -8,11 +8,11 @@ import { useResource, useTask } from "../state";
 import { TrustLadder } from "./TrustControls";
 import { modeLabel } from "./trust-modes";
 
-export const DISMISSED = "passport.dismissedOffers";
+const DISMISSED = "passport.dismissedOffers";
 
-export const offerKey = (offer: PromotionOffer) => `${offer.category}:${offer.to}`;
+const offerKey = (offer: PromotionOffer) => `${offer.category}:${offer.to}`;
 
-export function readDismissed(): string[] {
+function readDismissed(): string[] {
   try {
     return JSON.parse(localStorage.getItem(DISMISSED) ?? "[]") as string[];
   } catch {

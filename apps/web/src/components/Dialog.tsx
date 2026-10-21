@@ -6,7 +6,7 @@ const focusable =
   'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 /** Keep Tab inside `container`; returns true when the key was handled. */
-export function trapTab(event: React.KeyboardEvent, container: HTMLElement | null) {
+function trapTab(event: React.KeyboardEvent, container: HTMLElement | null) {
   if (event.key !== "Tab" || !container) {
     return false;
   }

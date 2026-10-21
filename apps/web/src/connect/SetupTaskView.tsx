@@ -30,7 +30,7 @@ export function ProviderMark({ provider }: { provider: SetupProvider }) {
   );
 }
 
-export function StepIcon({ status }: { status: SetupStep["status"] }) {
+function StepIcon({ status }: { status: SetupStep["status"] }) {
   function stepIcon() {
     if (status === "done") {
       return "check";

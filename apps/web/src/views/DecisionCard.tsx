@@ -8,7 +8,7 @@ import { actionLabel } from "../labels";
 import { useResource, useTask } from "../state";
 import { draftOf, recipients } from "./decision-model";
 
-export function Countdown({ until }: { until: string }) {
+function Countdown({ until }: { until: string }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -196,7 +196,7 @@ export function DecisionCard({
   );
 }
 
-export function CancelButton({ action }: { action: ActionRecord }) {
+function CancelButton({ action }: { action: ActionRecord }) {
   const task = useTask();
   return (
     <>

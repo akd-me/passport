@@ -347,4 +347,3 @@ export function createDispatch(
   };
   return { dispatch };
 }
-export type Dispatch = ReturnType<typeof createDispatch>;

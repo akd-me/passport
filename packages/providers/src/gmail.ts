@@ -30,7 +30,7 @@ import {
 } from "./normalize/index.js";
 import { type PassportVerifier, verifyHeaders } from "./verification.js";
 
-export interface GmailPart {
+interface GmailPart {
   partId?: string;
   mimeType?: string;
   filename?: string;

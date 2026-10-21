@@ -4,7 +4,7 @@ import { type JobSchedule, jobsApi } from "../scheduler-api";
 import { useTask } from "../state";
 import { weekdays } from "./JobTable";
 
-export const examples = [
+const examples = [
   ["Morning triage", "Triage anything new, then prepare my day's digest."],
   [
     "Matter check-in",

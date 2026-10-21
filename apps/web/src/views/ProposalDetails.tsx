@@ -8,7 +8,7 @@ import { useUi } from "../ui-state";
 import { draftOf } from "./decision-model";
 import { modeLabel, TrustLadder } from "./Trust";
 
-export const reversibilityText: Record<string, string> = {
+const reversibilityText: Record<string, string> = {
   reversible: "Can be undone",
   delayed: "Held in the outbox before it sends; cannot be unsent after",
   irreversible: "Cannot be undone",

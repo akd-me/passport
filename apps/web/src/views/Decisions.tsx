@@ -12,9 +12,8 @@ import { draftOf, type Grouping, groupProposals, useQueueKeys } from "./decision
 import { ProposalDetails } from "./ProposalDetails";
 import { PromotionPrompts } from "./Trust";
 
-export { CancelButton, Countdown, DecisionCard, UndoButton } from "./DecisionCard";
+export { DecisionCard, UndoButton } from "./DecisionCard";
 export { groupProposals } from "./decision-model";
-export { ProposalDetails } from "./ProposalDetails";
 
 /** The home surface: everything the agent needs a decision on, plus the composer. */
 export function WorkQueue() {
@@ -152,4 +151,5 @@ export function WorkQueue() {
 }
 
 /** Kept for callers of the previous name. */
+/** @compatibility Retain the former view name for existing imports. */
 export const Decisions = WorkQueue;

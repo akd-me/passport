@@ -13,7 +13,7 @@ export interface ProviderOptions {
   resolveEmail?: (id: string) => Promise<Email | null>;
 }
 
-export async function request(
+async function request(
   fetcher: typeof fetch,
   url: string,
   init: RequestInit = {},
@@ -44,7 +44,7 @@ export async function request(
   return response;
 }
 
-export async function readJson<T>(response: Response): Promise<T> {
+async function readJson<T>(response: Response): Promise<T> {
   try {
     const value: unknown = await response.json();
     if (!value || typeof value !== "object" || Array.isArray(value)) {

@@ -25,7 +25,7 @@ export const full = z
   .describe(
     "Return complete message bodies. Otherwise bodies are clipped to 2000 characters and marked truncated.",
   );
-export const category = z.enum([
+const category = z.enum([
   "triage",
   "newsletters",
   "receipts",
@@ -39,7 +39,7 @@ export const category = z.enum([
   "matters",
   "other",
 ]);
-export const status = z.enum([
+const status = z.enum([
   "proposed",
   "approved",
   "rejected",
@@ -59,8 +59,8 @@ export const reason = z
   .max(1000)
   .regex(/^[^\r\n]+$/, "Reason must be one line")
   .describe("One-line explanation shown in the human decisions feed and action log.");
-export const address = z.strictObject({ email: z.email(), name: z.string().max(200).optional() });
-export const addresses = z.array(address).max(100);
+const address = z.strictObject({ email: z.email(), name: z.string().max(200).optional() });
+const addresses = z.array(address).max(100);
 export const range = z
   .strictObject({ start: timestamp, end: timestamp })
   .refine((value) => Date.parse(value.start) < Date.parse(value.end), "start must precede end");

@@ -24,9 +24,9 @@ export function describeSchedule(schedule: JobSchedule) {
   return `${days} at ${schedule.at}${schedule.timeZone ? ` · ${schedule.timeZone}` : ""}`;
 }
 
-export const duration = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
+const duration = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
 
-export function countdown(at: string, now: number) {
+function countdown(at: string, now: number) {
   const seconds = Math.max(0, Math.ceil((Date.parse(at) - now) / 1000));
   if (seconds === 0) {
     return "Due now";
@@ -43,15 +43,7 @@ export function countdown(at: string, now: number) {
   return `in ${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
 }
 
-export function JobRow({
-  job,
-  now,
-  onHistory,
-}: {
-  job: Job;
-  now: number;
-  onHistory(job: Job): void;
-}) {
+function JobRow({ job, now, onHistory }: { job: Job; now: number; onHistory(job: Job): void }) {
   const task = useTask();
   return (
     <tr>

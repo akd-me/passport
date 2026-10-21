@@ -257,7 +257,7 @@ export async function runDoctor(
   };
 }
 
-export function printDoctor(report: DoctorReport): void {
+function printDoctor(report: DoctorReport): void {
   console.table(
     report.checks.map(({ name, status, detail }) => ({
       Check: name,
