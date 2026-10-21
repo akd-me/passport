@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   jobsApi,
   type Job,
@@ -12,10 +12,8 @@ import {
   Feedback,
   Icon,
   Loading,
-  PageHeader,
   relativeTime,
 } from "../components/ui";
-import "./Scheduler.css";
 
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export function describeSchedule(schedule: JobSchedule) {
@@ -63,47 +61,40 @@ function JobRow({
   return (
     <tr>
       <th scope="row">
-        <strong>{job.name}</strong>
-        <small className="subtle">{job.id}</small>
-        {job.running && <Badge tone="blue">Running</Badge>}
+        <span className="job-name">
+          <strong>{job.name}</strong>
+          <Badge tone={job.kind === "user" ? "ink" : ""}>
+            {job.kind === "user" ? "Routine" : "System"}
+          </Badge>
+          {job.running && <Badge tone="ink">Running</Badge>}
+        </span>
+        <small className="muted">{describeSchedule(job.schedule)}</small>
       </th>
       <td>
-        <Badge tone={job.kind === "user" ? "blue" : "muted"}>
-          {job.kind === "user" ? "Routine" : "System"}
-        </Badge>
-      </td>
-      <td>{describeSchedule(job.schedule)}</td>
-      <td>
         {job.lastRunAt ? (
-          <>
+          <span className="job-last">
+            <span
+              className={`status-dot ${job.lastStatus === "error" ? "bad" : job.lastStatus === "ok" ? "good" : ""}`}
+              aria-hidden="true"
+            />
             <time
               dateTime={job.lastRunAt}
-              title={new Date(job.lastRunAt).toLocaleString()}
+              title={`${job.lastStatus ?? ""} ${new Date(job.lastRunAt).toLocaleString()}`}
             >
               {relativeTime(job.lastRunAt)}
             </time>
-            <small>
-              <Badge
-                tone={
-                  job.lastStatus === "error"
-                    ? "amber"
-                    : job.lastStatus === "ok"
-                      ? "green"
-                      : "muted"
-                }
-              >
-                {job.lastStatus}
-              </Badge>
-              {job.lastDurationMs !== null &&
-                ` · ${duration(job.lastDurationMs)}`}
-            </small>
-          </>
+            {job.lastDurationMs !== null && (
+              <small className="muted num">
+                {duration(job.lastDurationMs)}
+              </small>
+            )}
+          </span>
         ) : (
-          <span className="subtle">Never run</span>
+          <span className="muted">Never run</span>
         )}
         {!!job.consecutiveFailures && (
           <div className="job-failure">
-            <Badge tone="amber">
+            <Badge tone="danger">
               {job.consecutiveFailures}{" "}
               {job.consecutiveFailures === 1 ? "failure" : "failures"}
             </Badge>
@@ -111,9 +102,9 @@ function JobRow({
           </div>
         )}
       </td>
-      <td>
+      <td className="num">
         {!job.enabled ? (
-          <Badge tone="muted">Paused</Badge>
+          <Badge>Paused</Badge>
         ) : job.nextRunAt ? (
           <time
             dateTime={job.nextRunAt}
@@ -122,13 +113,13 @@ function JobRow({
             {countdown(job.nextRunAt, now)}
           </time>
         ) : (
-          "On demand"
+          <span className="muted">On demand</span>
         )}
       </td>
       <td>
-        <div className="job-actions">
+        <div className="row-actions">
           <button
-            className="button secondary compact"
+            className="btn btn-sm"
             disabled={task.busy || job.running}
             aria-label={`Run ${job.name} now`}
             onClick={() =>
@@ -142,7 +133,7 @@ function JobRow({
             Run now
           </button>
           <button
-            className="button secondary compact"
+            className="btn btn-sm btn-ghost"
             disabled={task.busy}
             aria-label={`${job.enabled ? "Pause" : "Resume"} ${job.name}`}
             onClick={() =>
@@ -156,7 +147,7 @@ function JobRow({
             {job.enabled ? "Pause" : "Resume"}
           </button>
           <button
-            className="button secondary compact"
+            className="btn btn-sm btn-ghost"
             aria-label={`History for ${job.name}`}
             onClick={() => onHistory(job)}
           >
@@ -186,15 +177,15 @@ export function JobsTable({
     return () => clearTimeout(timer);
   }, []);
   return (
-    <div className="panel table-scroll scheduler-table">
-      <table>
+    <div className="table-scroll">
+      <table className="data-table jobs-table">
         <caption className="sr-only">Scheduled jobs and agent routines</caption>
         <thead>
           <tr>
-            {["Job", "Kind", "Schedule", "Last run", "Next run", "Actions"].map(
+            {["Job", "Last run", "Next run", ""].map(
               (h) => (
-                <th scope="col" key={h}>
-                  {h}
+                <th scope="col" key={h || "actions"}>
+                  {h || <span className="sr-only">Actions</span>}
                 </th>
               ),
             )}
@@ -209,77 +200,20 @@ export function JobsTable({
     </div>
   );
 }
-function Drawer({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose(): void;
-  children: ReactNode;
-}) {
-  const ref = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    const input = ref.current?.querySelector<HTMLInputElement>("input");
-    (input ?? ref.current)?.focus();
-    return () => previous?.focus();
-  }, []);
-  return (
-    <div
-      className="scheduler-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-        if (e.key === "Tab") {
-          const elements = ref.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), input, select, textarea, [tabindex="0"]',
-          );
-          const first = elements?.[0],
-            last = elements?.[elements.length - 1];
-          if (
-            e.shiftKey &&
-            (document.activeElement === first ||
-              document.activeElement === ref.current)
-          ) {
-            e.preventDefault();
-            last?.focus();
-          } else if (!e.shiftKey && document.activeElement === last) {
-            e.preventDefault();
-            first?.focus();
-          }
-        }
-      }}
-    >
-      <section
-        className="scheduler-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        ref={ref}
-        tabIndex={-1}
-      >
-        <div className="section-heading">
-          <h2>{title}</h2>
-          <button className="button secondary compact" onClick={onClose}>
-            Close
-          </button>
-        </div>
-        {children}
-      </section>
-    </div>
-  );
-}
-function HistoryDrawer({ job, onClose }: { job: Job; onClose(): void }) {
+function JobHistory({ job, onClose }: { job: Job; onClose(): void }) {
   const history = useResource<JobRun[]>(
       `/jobs/${encodeURIComponent(job.id)}/history`,
     ),
     task = useTask();
   return (
-    <Drawer title={`${job.name} history`} onClose={onClose}>
-      <p className="subtle">
+    <section className="settings-block inset" aria-label={`${job.name} history`}>
+      <div className="block-heading">
+        <h3>{job.name}: recent runs</h3>
+        <button className="btn btn-sm btn-ghost" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <p className="hint">
         The most recent 20 runs. Overlapping ticks appear as skipped.
       </p>
       {job.routine && (
@@ -301,10 +235,10 @@ function HistoryDrawer({ job, onClose }: { job: Job; onClose(): void }) {
                 <Badge
                   tone={
                     run.status === "error"
-                      ? "amber"
+                      ? "danger"
                       : run.status === "ok"
-                        ? "green"
-                        : "muted"
+                        ? "good"
+                        : ""
                   }
                 >
                   {run.status}
@@ -321,7 +255,7 @@ function HistoryDrawer({ job, onClose }: { job: Job; onClose(): void }) {
       )}
       {job.kind === "user" && (
         <button
-          className="button secondary"
+          className="btn btn-danger"
           disabled={task.busy}
           onClick={async () => {
             if (
@@ -333,7 +267,7 @@ function HistoryDrawer({ job, onClose }: { job: Job; onClose(): void }) {
           Delete routine
         </button>
       )}
-    </Drawer>
+    </section>
   );
 }
 const examples = [
@@ -360,7 +294,7 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
   const task = useTask();
   return (
     <form
-      className="routine-form"
+      className="settings-block inset routine-form"
       onSubmit={async (e) => {
         e.preventDefault();
         const schedule: JobSchedule =
@@ -378,7 +312,7 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
           onCreated();
       }}
     >
-      <label>
+      <label className="field">
         Name
         <input
           autoFocus
@@ -389,7 +323,7 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
           placeholder="My morning routine"
         />
       </label>
-      <label>
+      <label className="field">
         Schedule
         <select
           value={type}
@@ -401,7 +335,7 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
         </select>
       </label>
       {type === "interval" ? (
-        <label>
+        <label className="field">
           Every (minutes)
           <input
             type="number"
@@ -414,7 +348,7 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
         </label>
       ) : (
         <>
-          <label>
+          <label className="field">
             Time
             <input
               type="time"
@@ -423,7 +357,7 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
               onChange={(e) => setAt(e.target.value)}
             />
           </label>
-          <label>
+          <label className="field">
             Time zone
             <input
               required
@@ -435,11 +369,11 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
         </>
       )}
       {type === "weekly" && (
-        <fieldset>
+        <fieldset className="field">
           <legend>Days</legend>
-          <div className="weekday-picker">
+          <div className="chip-set">
             {weekdays.map((day, i) => (
-              <label key={day}>
+              <label key={day} className="chip-toggle">
                 <input
                   type="checkbox"
                   checked={days.includes(i)}
@@ -457,7 +391,7 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
           </div>
         </fieldset>
       )}
-      <label>
+      <label className="field">
         Instruction
         <textarea
           required
@@ -471,7 +405,7 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
       <div className="routine-examples" aria-label="Example instructions">
         {examples.map(([title, example]) => (
           <button
-            className="button secondary compact"
+            className="chip"
             type="button"
             key={title}
             onClick={() => setInstruction(example!)}
@@ -480,13 +414,14 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
           </button>
         ))}
       </div>
-      <p className="subtle">
-        Routines follow your trust policy. Actions that need your approval
-        appear in Decisions.
+      <p className="hint">
+        Routines follow your permission mode. Anything that needs approval
+        lands in your queue.
       </p>
       <Feedback error={task.error} />
+      <div className="form-actions">
       <button
-        className="button primary"
+        className="btn btn-primary"
         disabled={
           task.busy ||
           !name.trim() ||
@@ -496,49 +431,69 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
       >
         {task.busy ? "Creating…" : "Create routine"}
       </button>
+      </div>
     </form>
   );
 }
-export function Scheduler() {
+/** Settings → Routines: background jobs and the routines you give Passport. */
+export function RoutinesSettings() {
   const jobs = useResource<Job[]>("/jobs"),
     [historyId, setHistoryId] = useState<string | null>(null),
     [creating, setCreating] = useState(false);
-  const selected = jobs.data?.find((j) => j.id === historyId);
+  const selected = jobs.data?.find((j) => j.id === historyId),
+    routines = jobs.data?.filter((j) => j.kind === "user") ?? [],
+    system = jobs.data?.filter((j) => j.kind !== "user") ?? [];
   return (
     <>
-      <PageHeader
-        eyebrow="A STEADY RHYTHM"
-        title="Scheduler"
-        description="Your mailbox’s background work and the routines you choose to make time for."
-      >
-        <button className="button primary" onClick={() => setCreating(true)}>
-          <Icon name="plus" size={16} />
-          New routine
-        </button>
-      </PageHeader>
-      <div className="section-heading">
-        <h2>Jobs & routines</h2>
-        <span className="subtle">
-          {jobs.data?.length ?? "—"} jobs · live updates
-        </span>
-      </div>
-      <Feedback error={jobs.error} />
-      {!jobs.data ? (
-        !jobs.error && <Loading />
-      ) : jobs.data.length ? (
-        <JobsTable jobs={jobs.data} onHistory={(job) => setHistoryId(job.id)} />
-      ) : (
-        <Empty title="A little room for routine">
-          Create a routine to give Passport a recurring task.
-        </Empty>
-      )}
-      {selected && (
-        <HistoryDrawer job={selected} onClose={() => setHistoryId(null)} />
-      )}
-      {creating && (
-        <Drawer title="New routine" onClose={() => setCreating(false)}>
+      <section className="settings-block">
+        <div className="block-heading">
+          <h3>Routines</h3>
+          {!creating && (
+            <button
+              className="btn btn-sm"
+              onClick={() => setCreating(true)}
+            >
+              <Icon name="plus" size={14} />
+              New routine
+            </button>
+          )}
+        </div>
+        <p className="hint">
+          Instructions Passport runs on a schedule, like a morning triage.
+        </p>
+        {creating && (
           <NewRoutineForm onCreated={() => setCreating(false)} />
-        </Drawer>
+        )}
+        {creating && (
+          <button className="btn btn-sm btn-ghost" onClick={() => setCreating(false)}>
+            Cancel
+          </button>
+        )}
+        <Feedback error={jobs.error} />
+        {!jobs.data ? (
+          !jobs.error && <Loading />
+        ) : routines.length ? (
+          <JobsTable jobs={routines} onHistory={(job) => setHistoryId(job.id)} />
+        ) : (
+          !creating && (
+            <Empty title="No routines yet" icon="routine">
+              Create one to give Passport a recurring task.
+            </Empty>
+          )
+        )}
+      </section>
+      {selected && (
+        <JobHistory job={selected} onClose={() => setHistoryId(null)} />
+      )}
+      {!!system.length && (
+        <section className="settings-block">
+          <h3>Background jobs</h3>
+          <p className="hint">
+            Sync, the outbox, digests and upkeep. They run while{" "}
+            <code>passport serve</code> is open.
+          </p>
+          <JobsTable jobs={system} onHistory={(job) => setHistoryId(job.id)} />
+        </section>
       )}
     </>
   );

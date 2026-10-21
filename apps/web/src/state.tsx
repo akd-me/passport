@@ -9,8 +9,14 @@ import {
 } from "react";
 import { request, type DomainEvent } from "./api";
 import { checkSession, websocketUrl } from "./auth";
+/** Frames on /ws: domain events plus setup-task updates from the onboarding service. */
+export type WorkspaceEvent =
+  | DomainEvent
+  | { type: "setup.task.updated"; task: unknown };
+type Listener = (event: WorkspaceEvent) => void;
 interface WorkspaceState {
   version: number;
+  subscribe: (listener: Listener) => () => void;
   refresh: () => void;
   connection: string;
   notice: string;
@@ -18,6 +24,7 @@ interface WorkspaceState {
 }
 const Workspace = createContext<WorkspaceState>({
   version: 0,
+  subscribe: () => () => {},
   refresh: () => {},
   connection: "Connecting",
   notice: "",
@@ -28,6 +35,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [connection, setConnection] = useState("Connecting"),
     [notice, notify] = useState("");
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
+  const listeners = useRef(new Set<Listener>());
+  const subscribe = useCallback((listener: Listener) => {
+    listeners.current.add(listener);
+    return () => void listeners.current.delete(listener);
+  }, []);
   useEffect(() => {
     let socket: WebSocket | undefined,
       reconnect: ReturnType<typeof setTimeout>,
@@ -44,8 +56,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       };
       socket.onmessage = (message) => {
         try {
-          const event = JSON.parse(message.data) as DomainEvent;
+          const event = JSON.parse(message.data) as WorkspaceEvent;
           if (!event.type) return;
+          for (const listener of listeners.current) listener(event);
           clearTimeout(debounce);
           debounce = setTimeout(refresh, 120);
         } catch {
@@ -82,13 +95,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [notice]);
   return (
     <Workspace.Provider
-      value={{ version, refresh, connection, notice, notify }}
+      value={{ version, subscribe, refresh, connection, notice, notify }}
     >
       {children}
     </Workspace.Provider>
   );
 }
 export const useWorkspace = () => useContext(Workspace);
+/** Run `handler` for every event frame; the latest handler is always used. */
+export function useWorkspaceEvents(handler: Listener) {
+  const { subscribe } = useWorkspace(),
+    latest = useRef(handler);
+  latest.current = handler;
+  useEffect(() => subscribe((event) => latest.current(event)), [subscribe]);
+}
 export function useResource<T>(path: string | null) {
   const { version, refresh } = useWorkspace();
   const [state, setState] = useState<{

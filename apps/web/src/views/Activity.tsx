@@ -1,39 +1,23 @@
 import { useState } from "react";
 import type { ActionRecord, Page } from "@passport/types";
-import { api, queryString } from "../api";
-import { useResource, useTask } from "../state";
-import {
-  Badge,
-  Empty,
-  Feedback,
-  humanize,
-  Icon,
-  Loading,
-  PageHeader,
-} from "../components/ui";
-import { DecisionCard } from "./Decisions";
+import { queryString } from "../api";
+import { useResource } from "../state";
+import { Empty, Feedback, humanize, Icon, Loading } from "../components/ui";
+import { DecisionCard, UndoButton } from "./Decisions";
 import { AccountDot, useAccountId } from "../accounts/AccountFilter";
-function UndoButton({ action }: { action: ActionRecord }) {
-  const task = useTask();
-  return (
-    <div>
-      <button
-        className="button secondary compact"
-        disabled={task.busy}
-        onClick={() =>
-          task.run(
-            () => api.undo(action.id),
-            "Action undone. The inverse is recorded in your activity.",
-          )
-        }
-      >
-        <Icon name="undo" size={14} />
-        {task.busy ? "Undoing…" : "Undo"}
-      </button>
-      <Feedback error={task.error} />
-    </div>
-  );
-}
+import { actionLabel, CATEGORIES, categoryLabel } from "../labels";
+import { Surface } from "../shell/Surface";
+
+const statusTone: Record<string, string> = {
+  executed: "good",
+  held: "warn",
+  failed: "danger",
+  rejected: "",
+  undone: "",
+  proposed: "ink",
+};
+
+/** The action log: every change, who made it, and a way back where one exists. */
 export function Activity() {
   const accountId = useAccountId();
   const today = new Date().toLocaleDateString("en-CA"),
@@ -57,82 +41,67 @@ export function Activity() {
     setCursor("");
   };
   return (
-    <>
-      <PageHeader
-        eyebrow="NOTHING HAPPENS OFF THE RECORD"
-        title="A clear trail. A calmer mind."
-        description="Every action, every decision, and a way back whenever it’s possible."
-      />
+    <Surface title="Activity" wide>
+      <div className="list-head">
+        <h1>Activity</h1>
+        <span className="muted num">{data?.total ?? ""}</span>
+      </div>
       {!!outbox.data?.items.length && (
-        <section className="outbox-section">
-          <div className="section-heading">
-            <h2>
-              <Icon name="clock" /> The outbox safety window
-            </h2>
-            <Badge tone="amber">{outbox.data.items.length} held</Badge>
+        <section className="group" aria-label="Outbox">
+          <div className="group-head">
+            <h2>In the outbox</h2>
+            <span className="count">{outbox.data.items.length}</span>
+            <span className="muted">You can still cancel these.</span>
           </div>
           {outbox.data.items.map((a) => (
             <DecisionCard key={a.id} action={a} />
           ))}
         </section>
       )}
-      <div className="section-heading">
-        <h2>Your daily activity</h2>
-        <span className="subtle">{data?.total ?? "—"} actions</span>
-      </div>
-      <div className="filter-bar activity-filters">
+      <div className="toolbar">
         <label className="sr-only" htmlFor="activity-date">
           Activity date
         </label>
         <input
           id="activity-date"
+          className="select-sm"
           type="date"
           value={date}
           onChange={(e) => reset(() => setDate(e.target.value))}
         />
         <select
+          className="select-sm"
           aria-label="Action status"
           value={status}
           onChange={(e) => reset(() => setStatus(e.target.value))}
         >
-          <option value="">All statuses</option>
-          {["proposed", "held", "executed", "rejected", "undone", "failed"].map(
-            (s) => (
-              <option key={s}>{s}</option>
-            ),
-          )}
-        </select>
-        <select
-          aria-label="Action category"
-          value={category}
-          onChange={(e) => reset(() => setCategory(e.target.value))}
-        >
-          <option value="">All categories</option>
-          {[
-            "triage",
-            "newsletters",
-            "receipts",
-            "notifications",
-            "scheduling",
-            "replies_known",
-            "replies_stranger",
-            "money",
-            "legal",
-            "unsubscribe",
-            "matters",
-            "other",
-          ].map((c) => (
-            <option value={c} key={c}>
-              {humanize(c)}
+          <option value="">Any status</option>
+          {["proposed", "held", "executed", "rejected", "undone", "failed"].map((s) => (
+            <option key={s} value={s}>
+              {humanize(s)}
             </option>
           ))}
         </select>
         <select
+          className="select-sm"
+          aria-label="Action category"
+          value={category}
+          onChange={(e) => reset(() => setCategory(e.target.value))}
+        >
+          <option value="">Any category</option>
+          {CATEGORIES.map((c) => (
+            <option value={c} key={c}>
+              {categoryLabel(c)}
+            </option>
+          ))}
+        </select>
+        <select
+          className="select-sm"
           aria-label="Actor"
           value={actorKind}
           onChange={(e) => reset(() => setActor(e.target.value))}
         >
-          <option value="">Everyone</option>
+          <option value="">Anyone</option>
           <option value="human">You</option>
           <option value="agent">Passport</option>
           <option value="external-agent">External agents</option>
@@ -142,79 +111,58 @@ export function Activity() {
       {!data ? (
         !error && <Loading />
       ) : !data.items.length ? (
-        <Empty title="A quiet day.">No actions match these filters.</Empty>
+        <Empty title="Nothing recorded for these filters." icon="activity">
+          Pick another day or clear a filter.
+        </Empty>
       ) : (
-        <div className="panel activity-list">
+        <ul className="rows log">
           {data.items.map((a) => (
-            <article className="activity-row" key={a.id}>
-              <span
-                className={`activity-icon ${a.status === "executed" ? "green" : ""}`}
-              >
+            <li key={a.id} className="row log-row">
+              <span className="actor" title={a.request.actor.kind === "human" ? "You" : a.request.actor.kind === "agent" ? "Passport" : a.request.actor.id}>
                 <Icon
-                  name={
-                    a.status === "undone"
-                      ? "undo"
-                      : a.request.actor.kind === "human"
-                        ? "people"
-                        : "sparkle"
-                  }
-                  size={19}
+                  name={a.status === "undone" ? "undo" : a.request.actor.kind === "human" ? "check" : a.request.actor.kind === "agent" ? "sparkle" : "agent"}
+                  size={13}
                 />
               </span>
-              <div className="activity-main">
+              <span className="row-main">
                 <strong>
-                  <AccountDot id={a.request.accountId} /> {a.request.reason}
+                  <AccountDot id={a.request.accountId} />
+                  {a.request.reason}
                 </strong>
-                <p>
-                  {humanize(a.request.type)} · {humanize(a.request.category)} ·{" "}
-                  {a.request.actor.kind === "human" ? "You" : "Passport"}
-                </p>
-                {a.error && <span className="subtle">{a.error}</span>}
-              </div>
-              <div className="activity-status">
-                <Badge
-                  tone={
-                    a.status === "executed"
-                      ? "green"
-                      : a.status === "held"
-                        ? "amber"
-                        : ""
-                  }
-                >
-                  {humanize(a.status)}
-                </Badge>
-                <time>
+                <span className="muted">
+                  {actionLabel(a.request.type)}, {categoryLabel(a.request.category).toLowerCase()},{" "}
+                  by {a.request.actor.kind === "human" ? "you" : a.request.actor.kind === "agent" ? "Passport" : a.request.actor.id}
+                </span>
+                {a.error && <span className="error-text">{a.error}</span>}
+              </span>
+              <span className="row-meta">
+                <span className={`badge ${statusTone[a.status] ?? ""}`}>{humanize(a.status)}</span>
+                <time className="muted num" dateTime={a.createdAt}>
                   {new Date(a.createdAt).toLocaleTimeString(undefined, {
                     hour: "numeric",
                     minute: "2-digit",
                   })}
                 </time>
-              </div>
-              {a.status === "executed" && a.inverse && (
-                <UndoButton action={a} />
-              )}
-            </article>
+                {a.status === "executed" && a.inverse ? <UndoButton action={a} /> : <span className="undo-gap" />}
+              </span>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
       {(cursor || data?.nextCursor) && (
         <div className="pagination">
-          <button
-            className="button secondary"
-            disabled={!cursor}
-            onClick={() => setCursor("")}
-          >
+          <button className="btn btn-sm" disabled={!cursor} onClick={() => setCursor("")}>
             First page
           </button>
           <button
-            className="button secondary"
+            className="btn btn-sm"
             disabled={!data?.nextCursor}
             onClick={() => setCursor(data?.nextCursor ?? "")}
           >
-            Next page <Icon name="arrow" size={16} />
+            Next page
           </button>
         </div>
       )}
-    </>
+    </Surface>
   );
 }

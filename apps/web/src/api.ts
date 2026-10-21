@@ -10,7 +10,9 @@ import type {
   Email,
   EmailQuery,
   GlobalPolicyConfig,
+  HostAgentStatus,
   LlmConfig,
+  LlmSelection,
   Matter,
   Page,
   Person,
@@ -40,11 +42,22 @@ export interface PersonDetail {
 }
 export interface AccountData {
   accounts: Account[];
-  llm: Omit<LlmConfig, "apiKey"> & {
+  llm: Omit<LlmConfig, "apiKey" | "provider"> & {
+    provider: ModelProvider;
     apiKeyConfigured: boolean;
     configured?: boolean;
+    /** `auto`: Passport re-detects host agents at startup; `explicit`: the user chose. */
+    selection?: LlmSelection;
   };
   mode: "demo" | "real";
+}
+/** A coding agent installed on this machine that Passport can drive (`GET /api/host-agents`). */
+export type HostAgent = HostAgentStatus;
+export type ModelProvider = LlmConfig["provider"] | HostAgent["kind"];
+export interface AgentInstruction {
+  instruction?: string;
+  emailIds?: string[];
+  matterId?: string;
 }
 export type ProviderDescriptor = Omit<ProviderSetupDescriptor, "oauth"> & {
   oauth?: { scopes: string[] };
@@ -69,7 +82,12 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   handleUnauthorized(response);
-  const body = await response.json();
+  // A proxy may answer an error with HTML; keep its status meaningful. Successful
+  // responses (and aborted reads) must still fail loudly.
+  const body = await response.json().catch((error: unknown) => {
+    if (response.ok) throw error;
+    return {};
+  });
   if (!response.ok)
     throw new ApiError(
       body.error?.message ?? "Something went wrong. Please try again.",
@@ -133,10 +151,15 @@ export const api = {
   }) => write<Account>("/accounts", "POST", body),
   sync: (id: string) =>
     write<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}/sync`, "POST"),
-  saveLlm: (config: Omit<LlmConfig, "apiKey">) =>
-    write<AccountData["llm"]>("/settings/llm", "PUT", config),
+  saveLlm: (
+    config: Partial<Omit<LlmConfig, "apiKey" | "provider">> & {
+      provider: ModelProvider | "auto";
+    },
+  ) => write<AccountData["llm"]>("/settings/llm", "PUT", config),
+  hostAgents: () => request<HostAgent[]>("/host-agents"),
   saveProfile: (markdown: string) =>
     write<{ markdown: string }>("/user-profile", "PUT", { markdown }),
-  runAgent: () => write<AgentRun>("/agent/run", "POST", {}),
+  runAgent: (body: AgentInstruction = {}) =>
+    write<AgentRun>("/agent/run", "POST", body),
 };
 export type { DomainEvent };

@@ -2,8 +2,12 @@
 
 Passport is an open-source, local-first email harness where AI agents handle mail and calendar through a trust policy you control. You see decisions, build context around people and matters, and bring your own mail providers, models and agents.
 
-![Passport Decisions feed](docs/screenshots/decisions.png)
-![Passport Trust controls](docs/screenshots/trust.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/queue-dark.png">
+  <img alt="Passport's queue: proposals grouped by matter with the draft, approve/edit/reject, the outbox, the composer and the proposal's context" src="docs/screenshots/queue-light.png">
+</picture>
+
+More screens: [permission mode](docs/screenshots/permission-mode.png), [a matter](docs/screenshots/matter.png), [connecting an account](docs/screenshots/connect.png), [settings](docs/screenshots/settings.png) and the [command palette](docs/screenshots/command-palette.png).
 
 ## Why
 

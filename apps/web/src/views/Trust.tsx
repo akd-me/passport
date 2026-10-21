@@ -1,20 +1,19 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type {
   ActionCategory,
   GlobalPolicyConfig,
+  PromotionOffer,
   TrustLevel,
 } from "@passport/types";
 import { TRUST_LEVELS } from "@passport/types";
 import { api, type TrustData } from "../api";
 import { useResource, useTask } from "../state";
-import {
-  Badge,
-  Feedback,
-  humanize,
-  Icon,
-  Loading,
-  PageHeader,
-} from "../components/ui";
+import { useUi } from "../ui-state";
+import { Feedback, Icon, Loading } from "../components/ui";
+import { Popover } from "../components/Popover";
+import { CATEGORIES, categoryLabel } from "../labels";
+import { ProfileEditor } from "../settings/ProfileEditor";
+
 export const modes: {
   id: TrustLevel;
   label: string;
@@ -31,8 +30,8 @@ export const modes: {
     id: "auto_accept_edits",
     label: "Auto-accept edits",
     description:
-      "Reversible changes run freely. Outward-facing actions ask first.",
-    icon: "pencil",
+      "Reversible changes run on their own. Anything that leaves your mailbox asks first.",
+    icon: "edits",
   },
   {
     id: "auto",
@@ -44,66 +43,240 @@ export const modes: {
   {
     id: "full_access",
     label: "Full access",
-    description: "Passport handles everything within your always-ask rules.",
+    description: "Passport handles everything outside your always-ask rules.",
     icon: "unlock",
   },
 ];
+export const modeLabel = (level: TrustLevel) =>
+  modes.find((m) => m.id === level)?.label ?? level;
+
+/** Four rungs filled up to the current level: the ladder at a glance. */
+export function TrustLadder({ level }: { level: TrustLevel }) {
+  const reached = TRUST_LEVELS.indexOf(level);
+  return (
+    <span className={`ladder ladder-${level}`} aria-hidden="true">
+      {TRUST_LEVELS.map((rung, i) => (
+        <span key={rung} className={i <= reached ? "on" : ""} />
+      ))}
+    </span>
+  );
+}
+
 export function TrustPicker({
   value,
   onChange,
   disabled = false,
+  compact = false,
 }: {
   value: TrustLevel;
   onChange: (value: TrustLevel) => void;
   disabled?: boolean;
+  compact?: boolean;
 }) {
+  const group = useRef<HTMLDivElement>(null);
   return (
-    <div className="mode-picker" role="radiogroup" aria-label="Permission mode">
+    <div
+      ref={group}
+      className={`mode-picker ${compact ? "compact" : ""}`}
+      role="radiogroup"
+      aria-label="Permission mode"
+      onKeyDown={(e) => {
+        if (!["ArrowDown", "ArrowUp"].includes(e.key)) return;
+        e.preventDefault();
+        const radios = [
+          ...(group.current?.querySelectorAll<HTMLElement>('[role="radio"]') ??
+            []),
+        ];
+        const index = radios.indexOf(document.activeElement as HTMLElement);
+        radios[
+          (index + (e.key === "ArrowDown" ? 1 : -1) + radios.length) %
+            radios.length
+        ]?.focus();
+      }}
+    >
       {modes.map((mode) => (
         <button
           type="button"
           role="radio"
           aria-checked={value === mode.id}
+          tabIndex={value === mode.id ? 0 : -1}
           disabled={disabled}
           key={mode.id}
-          className={`mode-option ${value === mode.id ? "active" : ""}`}
+          className={`mode-option ${value === mode.id ? "active" : ""} mode-${mode.id}`}
           onClick={() => onChange(mode.id)}
         >
-          <span className="mode-icon">
-            <Icon name={mode.icon} />
-          </span>
-          <span>
+          <TrustLadder level={mode.id} />
+          <span className="mode-text">
             <strong>{mode.label}</strong>
             <small>{mode.description}</small>
           </span>
-          <span className="radio-dot">{value === mode.id && <span />}</span>
+          {value === mode.id && <Icon name="check" size={15} />}
         </button>
       ))}
     </div>
   );
 }
-function TrustConfig({ config }: { config: GlobalPolicyConfig }) {
+
+/** The hero control: the global mode, one click away in the sidebar and composer. */
+export function ModeMenu({
+  placement = "below",
+  variant = "sidebar",
+}: {
+  placement?: "above" | "below";
+  variant?: "sidebar" | "composer";
+}) {
+  const trust = useResource<TrustData>("/trust"),
+    task = useTask(),
+    { openSettings } = useUi();
+  const level = trust.data?.config.globalMode;
+  if (!level)
+    return (
+      <span className={`mode-trigger in-${variant} placeholder`} aria-hidden="true">
+        <TrustLadder level="supervised" />
+      </span>
+    );
+  const current = modes.find((m) => m.id === level)!;
+  return (
+    <Popover
+      label={`Permission mode: ${current.label}`}
+      placement={placement}
+      className={`mode-menu in-${variant}`}
+      triggerClassName={`mode-trigger in-${variant} mode-${level}`}
+      trigger={
+        <>
+          <TrustLadder level={level} />
+          <span className="mode-trigger-label">{current.label}</span>
+          <Icon name="chevron" size={14} className="chevron" />
+        </>
+      }
+    >
+      {(close) => (
+        <>
+          <div className="popover-title">
+            How much Passport does without asking
+          </div>
+          <TrustPicker
+            compact
+            value={level}
+            disabled={task.busy}
+            onChange={(mode) => {
+              if (mode === level) return close();
+              void task
+                .run(
+                  () => api.setTrust({ globalMode: mode }),
+                  `Permission mode set to ${modeLabel(mode)}.`,
+                )
+                .then((ok) => ok && close());
+            }}
+          />
+          <Feedback error={task.error} />
+          <div className="popover-footer">
+            <span>
+              Always asks about{" "}
+              {trust.data!.config.alwaysAsk.length
+                ? trust.data!.config.alwaysAsk
+                    .map((c) => categoryLabel(c).toLowerCase())
+                    .join(", ")
+                : "nothing in particular"}
+              .
+            </span>
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() => {
+                close();
+                openSettings("trust");
+              }}
+            >
+              Trust & rules
+            </button>
+          </div>
+        </>
+      )}
+    </Popover>
+  );
+}
+
+const DISMISSED = "passport.dismissedOffers";
+const offerKey = (offer: PromotionOffer) => `${offer.category}:${offer.to}`;
+function readDismissed(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(DISMISSED) ?? "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+
+/** Promotion offers from the policy engine, raised where the work happens. */
+export function PromotionPrompts() {
+  const trust = useResource<TrustData>("/trust"),
+    task = useTask(),
+    [dismissed, setDismissed] = useState(readDismissed);
+  const offers =
+    trust.data?.promotionOffers.filter(
+      (offer) =>
+        !dismissed.includes(offerKey(offer)) &&
+        !trust.data!.categories.find((c) => c.category === offer.category)
+          ?.pinnedLevel,
+    ) ?? [];
+  if (!offers.length) return null;
+  const dismiss = (offer: PromotionOffer) => {
+    const next = [...dismissed, offerKey(offer)];
+    setDismissed(next);
+    try {
+      localStorage.setItem(DISMISSED, JSON.stringify(next));
+    } catch {
+      /* Session-only dismissal is acceptable. */
+    }
+  };
+  return (
+    <div className="offers">
+      {offers.map((offer) => (
+        <div className="offer" key={offerKey(offer)} role="status">
+          <TrustLadder level={offer.to} />
+          <p>
+            <strong>{categoryLabel(offer.category)}</strong>:{" "}
+            {offer.evidence.approvalsUnchanged} of {offer.evidence.approvals}{" "}
+            approved without changes in {offer.evidence.window}. Let Passport
+            handle these on {modeLabel(offer.to)}?
+          </p>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={task.busy}
+            onClick={() =>
+              task.run(
+                () => api.pin(offer.category, offer.to),
+                `${categoryLabel(offer.category)} now run on ${modeLabel(offer.to)}, within your global mode.`,
+              )
+            }
+          >
+            Allow {modeLabel(offer.to)}
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={`Dismiss the ${categoryLabel(offer.category)} suggestion`}
+            onClick={() => dismiss(offer)}
+          >
+            <Icon name="close" size={14} />
+          </button>
+          <Feedback error={task.error} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SafetyForm({ config }: { config: GlobalPolicyConfig }) {
   const [minutes, setMinutes] = useState(config.outboxHoldMinutes),
     [days, setDays] = useState(config.decayAfterDays),
-    [alwaysAsk, setAlwaysAsk] = useState(config.alwaysAsk);
+    [alwaysAsk, setAlwaysAsk] = useState(config.alwaysAsk),
+    [ceiling, setCeiling] = useState(config.externalAgentCeiling);
   const task = useTask();
-  const categories: ActionCategory[] = [
-    "triage",
-    "newsletters",
-    "receipts",
-    "notifications",
-    "scheduling",
-    "replies_known",
-    "replies_stranger",
-    "money",
-    "legal",
-    "unsubscribe",
-    "matters",
-    "other",
-  ];
   return (
     <form
-      className="panel config-form"
+      className="settings-block"
       onSubmit={(e) => {
         e.preventDefault();
         void task.run(
@@ -112,18 +285,16 @@ function TrustConfig({ config }: { config: GlobalPolicyConfig }) {
               outboxHoldMinutes: minutes,
               decayAfterDays: days,
               alwaysAsk,
+              externalAgentCeiling: ceiling,
             }),
-          "Safety settings saved.",
+          "Safety rules saved.",
         );
       }}
     >
-      <h2>Keep a little breathing room.</h2>
-      <p className="subtle">
-        Safety windows and standing rules, at every permission level.
-      </p>
-      <div className="form-columns">
-        <label>
-          Outbox hold{" "}
+      <h3>Safety rules</h3>
+      <div className="field-row">
+        <label className="field">
+          <span>Outbox hold</span>
           <span className="input-unit">
             <input
               type="number"
@@ -137,8 +308,8 @@ function TrustConfig({ config }: { config: GlobalPolicyConfig }) {
           </span>
           <small>Time to cancel a send before it leaves.</small>
         </label>
-        <label>
-          Trust decay{" "}
+        <label className="field">
+          <span>Trust decay</span>
           <span className="input-unit">
             <input
               type="number"
@@ -150,14 +321,28 @@ function TrustConfig({ config }: { config: GlobalPolicyConfig }) {
             />
             <span>days</span>
           </span>
-          <small>Inactivity before earned trust begins to soften.</small>
+          <small>Inactivity before earned trust starts to fade.</small>
+        </label>
+        <label className="field">
+          <span>External agent ceiling</span>
+          <select
+            value={ceiling}
+            onChange={(e) => setCeiling(e.target.value as TrustLevel)}
+          >
+            {modes.map((mode) => (
+              <option key={mode.id} value={mode.id}>
+                {mode.label}
+              </option>
+            ))}
+          </select>
+          <small>The most an MCP client such as Claude Code may do.</small>
         </label>
       </div>
-      <fieldset>
+      <fieldset className="field">
         <legend>Always ask me about</legend>
-        <div className="checkbox-grid">
-          {categories.map((category) => (
-            <label className="checkbox-label" key={category}>
+        <div className="chip-set">
+          {CATEGORIES.map((category) => (
+            <label className="chip-toggle" key={category}>
               <input
                 type="checkbox"
                 checked={alwaysAsk.includes(category)}
@@ -169,212 +354,147 @@ function TrustConfig({ config }: { config: GlobalPolicyConfig }) {
                   )
                 }
               />
-              {humanize(category)}
+              {categoryLabel(category)}
             </label>
           ))}
         </div>
       </fieldset>
-      <label>
-        External agent ceiling
-        <select
-          value={config.externalAgentCeiling}
-          disabled={task.busy}
-          onChange={(e) =>
-            task.run(
-              () =>
-                api.setTrust({
-                  externalAgentCeiling: e.target.value as TrustLevel,
-                }),
-              "External agent ceiling saved.",
-            )
-          }
-        >
-          {modes.map((mode) => (
-            <option key={mode.id} value={mode.id}>
-              {mode.label}
-            </option>
-          ))}
-        </select>
-      </label>
       <Feedback error={task.error} />
-      <button className="button primary" disabled={task.busy}>
-        {task.busy ? "Saving…" : "Save safety settings"}
-      </button>
+      <div className="form-actions">
+        <button className="btn btn-primary" disabled={task.busy}>
+          {task.busy ? "Saving…" : "Save safety rules"}
+        </button>
+      </div>
     </form>
   );
 }
-export function Trust() {
-  const { data, error } = useResource<TrustData>("/trust"),
-    task = useTask();
+
+function CategoryTable({ data }: { data: TrustData }) {
+  const task = useTask();
   return (
-    <>
-      <PageHeader
-        eyebrow="YOUR AGENT, YOUR CALL"
-        title="A little trust goes a long way."
-        description="Set the boundaries. Passport earns the room to work within them."
-      />
-      <Feedback error={error ?? task.error} />
-      {!data ? (
-        !error && <Loading />
-      ) : (
-        <>
-          <div className="trust-intro">
-            <section>
-              <div className="section-heading">
-                <h2>Permission mode</h2>
-                <Badge tone="green">You’re in control</Badge>
-              </div>
-              <TrustPicker
-                value={data.config.globalMode}
-                disabled={task.busy}
-                onChange={(mode) =>
-                  task.run(
-                    () => api.setTrust({ globalMode: mode }),
-                    "Permission mode updated.",
-                  )
-                }
-              />
-            </section>
-            <div className="trust-explainer">
-              <span className="orbit">
-                <Icon name="trust" size={38} />
-              </span>
-              <h2>
-                Confidence is earned,
-                <br />
-                one decision at a time.
-              </h2>
-              <p>
-                Approvals build trust. Edits teach nuance. Rejections draw a
-                clearer line.
-              </p>
-              <p>
-                Your mode sets the ceiling. Each category learns at its own
-                pace, and you can pin a level at any time.
-              </p>
-              <span className="subtle">
-                Always-ask rules apply in every mode.
-              </span>
-            </div>
-          </div>
-          {data.promotionOffers
-            .filter(
-              (offer) =>
-                !data.categories.find((c) => c.category === offer.category)
-                  ?.pinnedLevel,
-            )
-            .map((offer) => (
-              <div className="promotion-banner" key={offer.category}>
-                <Icon name="sparkle" size={25} />
-                <div>
-                  <strong>
-                    A little more room for{" "}
-                    {humanize(offer.category).toLowerCase()}?
-                  </strong>
-                  <p>
-                    {offer.message} {offer.evidence.approvalsUnchanged} of{" "}
-                    {offer.evidence.approvals} approvals unchanged.
-                  </p>
-                </div>
-                <button
-                  className="button secondary"
+    <section className="settings-block">
+      <h3>Trust by category</h3>
+      <p className="hint">
+        Each category earns trust from your decisions. The global mode is
+        always the ceiling; pin a level to override what was earned.
+      </p>
+      <Feedback error={task.error} />
+      <table className="data-table trust-table">
+        <thead>
+          <tr>
+            <th scope="col">Category</th>
+            <th scope="col">Earned</th>
+            <th scope="col" className="num">
+              Approved
+            </th>
+            <th scope="col" className="num">
+              Edited
+            </th>
+            <th scope="col" className="num">
+              Rejected
+            </th>
+            <th scope="col">Runs as</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.categories.map((state) => (
+            <tr key={state.category}>
+              <th scope="row">
+                {categoryLabel(state.category)}
+                {data.config.alwaysAsk.includes(state.category) && (
+                  <span className="muted"> · always asks</span>
+                )}
+              </th>
+              <td>
+                <span className="meter-cell">
+                  <span
+                    className="meter"
+                    role="meter"
+                    aria-label={`${categoryLabel(state.category)} confidence`}
+                    aria-valuenow={Math.round(state.score * 100)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <span style={{ width: `${state.score * 100}%` }} />
+                  </span>
+                  <span className="num muted">
+                    {Math.round(state.score * 100)}%
+                  </span>
+                </span>
+              </td>
+              <td className="num">{state.approvals}</td>
+              <td className="num">{state.edits}</td>
+              <td className="num">{state.rejections}</td>
+              <td>
+                <select
+                  className="select-sm"
+                  aria-label={`Pin ${categoryLabel(state.category)}`}
                   disabled={task.busy}
-                  onClick={() =>
+                  value={state.pinnedLevel ?? ""}
+                  onChange={(e) =>
                     task.run(
-                      () => api.pin(offer.category, offer.to),
-                      "Category pinned. Your global mode still sets the ceiling.",
+                      () =>
+                        api.pin(
+                          state.category,
+                          e.target.value
+                            ? (e.target.value as TrustLevel)
+                            : null,
+                        ),
+                      "Category level updated.",
                     )
                   }
                 >
-                  Pin to {modes.find((m) => m.id === offer.to)?.label}
-                </button>
-              </div>
-            ))}
-          <section className="panel trust-table-panel">
-            <div className="panel-heading">
-              <h2>Trust, by category</h2>
-              <span className="subtle">Learned from your decisions</span>
-            </div>
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th>Stage</th>
-                    <th>Earned confidence</th>
-                    <th>Approvals / edits / rejections</th>
-                    <th>Permission pin</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.categories.map((state) => (
-                    <tr key={state.category}>
-                      <td className="table-title">
-                        {humanize(state.category)}
-                      </td>
-                      <td>
-                        <Badge tone={state.stage === "learning" ? "" : "green"}>
-                          {humanize(state.stage)}
-                        </Badge>
-                      </td>
-                      <td>
-                        <div className="score-cell">
-                          <span
-                            className="score-track"
-                            role="meter"
-                            aria-label={`${humanize(state.category)} confidence`}
-                            aria-valuenow={Math.round(state.score * 100)}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                          >
-                            <span style={{ width: `${state.score * 100}%` }} />
-                          </span>
-                          <span>{Math.round(state.score * 100)}%</span>
-                        </div>
-                      </td>
-                      <td className="trust-counts">
-                        <span>{state.approvals}</span>
-                        <span>{state.edits}</span>
-                        <span>{state.rejections}</span>
-                      </td>
-                      <td>
-                        <select
-                          aria-label={`Pin ${humanize(state.category)}`}
-                          disabled={task.busy}
-                          value={state.pinnedLevel ?? ""}
-                          onChange={(e) =>
-                            task.run(
-                              () =>
-                                api.pin(
-                                  state.category,
-                                  e.target.value
-                                    ? (e.target.value as TrustLevel)
-                                    : null,
-                                ),
-                              "Category pin updated.",
-                            )
-                          }
-                        >
-                          <option value="">
-                            Earned ·{" "}
-                            {modes.find((m) => m.id === state.level)?.label}
-                          </option>
-                          {TRUST_LEVELS.map((level) => (
-                            <option value={level} key={level}>
-                              {modes.find((m) => m.id === level)?.label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                    </tr>
+                  <option value="">Earned: {modeLabel(state.level)}</option>
+                  {TRUST_LEVELS.map((level) => (
+                    <option value={level} key={level}>
+                      Pinned: {modeLabel(level)}
+                    </option>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-          <TrustConfig key={JSON.stringify(data.config)} config={data.config} />
-        </>
+                </select>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+/** Settings → Trust & rules. */
+export function TrustSettings() {
+  const { data, error } = useResource<TrustData>("/trust"),
+    profile = useResource<{ markdown: string }>("/user-profile"),
+    task = useTask();
+  if (!data) return error ? <Feedback error={error} /> : <Loading />;
+  return (
+    <>
+      <section className="settings-block">
+        <h3>Permission mode</h3>
+        <p className="hint">
+          The same ladder as a coding agent’s permission picker. It is also in
+          the sidebar and under the composer.
+        </p>
+        <TrustPicker
+          value={data.config.globalMode}
+          disabled={task.busy}
+          onChange={(mode) =>
+            task.run(
+              () => api.setTrust({ globalMode: mode }),
+              `Permission mode set to ${modeLabel(mode)}.`,
+            )
+          }
+        />
+        <Feedback error={task.error} />
+      </section>
+      <PromotionPrompts />
+      <CategoryTable data={data} />
+      <SafetyForm key={JSON.stringify(data.config)} config={data.config} />
+      {profile.data ? (
+        <ProfileEditor markdown={profile.data.markdown} />
+      ) : (
+        <Feedback error={profile.error} />
       )}
     </>
   );
 }
+export type { ActionCategory };

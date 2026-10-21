@@ -1,0 +1,62 @@
+import type { ActionCategory, ActionType } from "@passport/types";
+
+export const CATEGORIES: ActionCategory[] = [
+  "triage",
+  "newsletters",
+  "receipts",
+  "notifications",
+  "scheduling",
+  "replies_known",
+  "replies_stranger",
+  "money",
+  "legal",
+  "unsubscribe",
+  "matters",
+  "other",
+];
+const categoryLabels: Record<ActionCategory, string> = {
+  triage: "Triage",
+  newsletters: "Newsletters",
+  receipts: "Receipts",
+  notifications: "Notifications",
+  scheduling: "Scheduling",
+  replies_known: "Replies to people you know",
+  replies_stranger: "Replies to new people",
+  money: "Money",
+  legal: "Legal",
+  unsubscribe: "Unsubscribing",
+  matters: "Matters and people",
+  other: "Everything else",
+};
+export const categoryLabel = (category: ActionCategory) =>
+  categoryLabels[category] ?? category;
+
+const actionLabels: Partial<Record<ActionType, string>> = {
+  send: "Send reply",
+  draft_create: "Save draft",
+  draft_update: "Update draft",
+  archive: "Archive",
+  unarchive: "Move back to inbox",
+  label: "Label",
+  unlabel: "Remove label",
+  mark_read: "Mark read",
+  mark_unread: "Mark unread",
+  flag: "Flag",
+  unflag: "Unflag",
+  move: "Move",
+  delete: "Delete",
+  unsubscribe: "Unsubscribe",
+  calendar_propose: "Propose times",
+  calendar_create: "Add to calendar",
+  calendar_update: "Update event",
+  calendar_respond: "Respond to invite",
+  calendar_delete: "Remove event",
+  matter_create: "Start matter",
+  matter_update: "Update matter",
+  matter_attach: "File into matter",
+  person_update: "Update person",
+  snooze: "Snooze",
+  profile_update: "Update standing instructions",
+};
+export const actionLabel = (type: ActionType) =>
+  actionLabels[type] ?? type.replaceAll("_", " ");

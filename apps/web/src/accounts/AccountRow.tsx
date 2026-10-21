@@ -1,9 +1,32 @@
 import { useState } from "react";
 import { api } from "../api";
 import { useTask } from "../state";
-import { Avatar, Badge, Feedback, relativeTime } from "../components/ui";
+import { Feedback, Icon, relativeTime } from "../components/ui";
 import { accountApi, type ConnectedAccount } from "./api";
 import { AccountDot } from "./AccountFilter";
+
+const kindLabel: Record<string, string> = {
+  gmail: "Gmail",
+  graph: "Outlook",
+  imap: "IMAP",
+  jmap: "JMAP",
+  mock: "Demo",
+  "google-calendar": "Google Calendar",
+  "graph-calendar": "Outlook Calendar",
+  caldav: "CalDAV",
+};
+export const providerName = (kind: string) => kindLabel[kind] ?? kind;
+export const needsReauthorization = (account: ConnectedAccount) =>
+  !!account.settings.reauthorizationRequired ||
+  account.lastSyncError === "REAUTHORIZE_REQUIRED";
+export function syncSummary(account: ConnectedAccount) {
+  if (needsReauthorization(account)) return "Sign-in expired";
+  if (account.syncing) return "Syncing…";
+  if (account.lastSyncError) return "Sync failed";
+  return account.lastSyncAt
+    ? `Synced ${relativeTime(account.lastSyncAt).toLowerCase()}`
+    : "Not synced yet";
+}
 
 export function AccountRow({
   account,
@@ -14,9 +37,7 @@ export function AccountRow({
 }) {
   const task = useTask(),
     [days, setDays] = useState(365);
-  const needsAuth =
-    account.settings.reauthorizationRequired ||
-    account.lastSyncError === "REAUTHORIZE_REQUIRED";
+  const needsAuth = needsReauthorization(account);
   const oauth = [
     "gmail",
     "graph",
@@ -25,20 +46,19 @@ export function AccountRow({
   ].includes(account.kind);
   return (
     <div className="account-row">
-      <Avatar name={account.displayName} />
+      <AccountDot id={account.id} />
       <div className="account-main">
-        <strong>
-          <AccountDot id={account.id} /> {account.displayName}
-        </strong>
-        <p>{account.emailAddress}</p>
-        <small>
-          {account.syncing
-            ? "Syncing…"
-            : account.lastSyncAt
-              ? `Synced ${relativeTime(account.lastSyncAt)}`
-              : "Not synced yet"}{" "}
-          · {account.messageCount ?? 0} messages
-        </small>
+        <strong>{account.displayName}</strong>
+        <div className="meta">
+          <span>{account.emailAddress}</span>
+          <span>{providerName(account.kind)}</span>
+          <span className={needsAuth || account.lastSyncError ? "warn" : ""}>
+            {syncSummary(account)}
+          </span>
+          {account.capabilities.mail && (
+            <span className="num">{account.messageCount ?? 0} messages</span>
+          )}
+        </div>
         <Feedback
           error={
             needsAuth
@@ -48,23 +68,47 @@ export function AccountRow({
                 : task.error
           }
         />
+        {account.capabilities.mail && account.kind !== "mock" && (
+          <details className="backfill">
+            <summary>Load older mail</summary>
+            <div className="backfill-row">
+              <label className="input-unit">
+                <input
+                  aria-label={`Days of history for ${account.emailAddress}`}
+                  type="number"
+                  min={1}
+                  max={36500}
+                  value={days}
+                  onChange={(e) => setDays(Number(e.target.value))}
+                />
+                <span>days</span>
+              </label>
+              <button
+                className="btn btn-sm"
+                disabled={
+                  task.busy ||
+                  account.syncing ||
+                  needsAuth ||
+                  !Number.isInteger(days) ||
+                  days < 1
+                }
+                onClick={() =>
+                  task.run(
+                    () => accountApi.backfill(account.id, days),
+                    "Older mail synced.",
+                  )
+                }
+              >
+                Backfill
+              </button>
+            </div>
+          </details>
+        )}
       </div>
-      <Badge tone={needsAuth ? "amber" : "green"}>
-        {account.kind === "mock" ? "Demo" : account.kind}
-      </Badge>
-      <div className="account-actions">
-        <button
-          className="button secondary"
-          disabled={task.busy || account.syncing || !!needsAuth}
-          onClick={() =>
-            task.run(() => api.sync(account.id), "Account sync complete.")
-          }
-        >
-          Sync now
-        </button>
-        {oauth && (
+      <div className="row-actions">
+        {oauth && (needsAuth || account.kind !== "mock") && (
           <button
-            className="button secondary"
+            className={`btn btn-sm ${needsAuth ? "btn-primary" : "btn-ghost"}`}
             disabled={task.busy}
             onClick={reauthorize}
           >
@@ -72,7 +116,19 @@ export function AccountRow({
           </button>
         )}
         <button
-          className="button text"
+          className="btn btn-sm"
+          disabled={task.busy || account.syncing || needsAuth}
+          onClick={() =>
+            task.run(() => api.sync(account.id), "Account synced.")
+          }
+        >
+          <Icon name="sync" size={14} />
+          Sync now
+        </button>
+        <button
+          className="icon-btn danger"
+          aria-label={`Remove ${account.emailAddress}`}
+          title="Remove account"
           disabled={task.busy}
           onClick={() => {
             if (
@@ -86,42 +142,8 @@ export function AccountRow({
               );
           }}
         >
-          Remove
+          <Icon name="trash" size={15} />
         </button>
-        {account.capabilities.mail && account.kind !== "mock" && (
-          <details className="backfill-control">
-            <summary>Load older mail</summary>
-            <label>
-              Days of history
-              <input
-                aria-label={`Days of history for ${account.emailAddress}`}
-                type="number"
-                min={1}
-                max={36500}
-                value={days}
-                onChange={(e) => setDays(Number(e.target.value))}
-              />
-            </label>
-            <button
-              className="button secondary"
-              disabled={
-                task.busy ||
-                account.syncing ||
-                !!needsAuth ||
-                !Number.isInteger(days) ||
-                days < 1
-              }
-              onClick={() =>
-                task.run(
-                  () => accountApi.backfill(account.id, days),
-                  "Older mail synced.",
-                )
-              }
-            >
-              Backfill
-            </button>
-          </details>
-        )}
       </div>
     </div>
   );
