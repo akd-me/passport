@@ -25,36 +25,62 @@ export interface CliRunResult {
 }
 
 const MAX_CAPTURE = 64 * 1024;
-const live = new Set<number>();
+const KILL_GRACE_MS = 2000;
+const STDIO_GRACE_MS = 250;
+interface ProcessGroup {
+  pid: number;
+  log?: (message: string) => void;
+  escalation?: NodeJS.Timeout;
+  poll?: NodeJS.Timeout;
+}
+const live = new Map<number, ProcessGroup>();
 let exitHook = false;
 
+function forget(group: ProcessGroup): void {
+  clearTimeout(group.escalation);
+  clearInterval(group.poll);
+  live.delete(group.pid);
+}
+
+/** Only ESRCH confirms the group is gone; the leader's exit/close is insufficient. */
+function signalGroup(group: ProcessGroup, signal: NodeJS.Signals | 0): boolean {
+  try {
+    process.kill(-group.pid, signal);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+      forget(group);
+      return false;
+    }
+    // Retain the group for exit cleanup if signalling or checking it failed.
+    group.log?.("Host-agent process group signal failed");
+    return true;
+  }
+}
+
 /** Detached groups do not receive the parent's Ctrl-C; stop them when Passport exits. */
-function track(pid: number | undefined, log?: (message: string) => void): void {
+function track(pid: number | undefined, log?: (message: string) => void): ProcessGroup | undefined {
   if (!pid || process.platform === "win32") {
     return;
   }
-  live.add(pid);
-  if (exitHook) {
-    return;
-  }
-  exitHook = true;
-  process.once("exit", () => {
-    for (const group of live) {
-      try {
-        process.kill(-group, "SIGTERM");
-      } catch {
-        // Host-agent process group cleanup failed.
-        log?.("Host-agent process group cleanup failed");
-
-        /* already gone */
+  const group = { pid, log };
+  live.set(pid, group);
+  if (!exitHook) {
+    exitHook = true;
+    process.once("exit", () => {
+      for (const group of live.values()) {
+        // Exit hooks cannot wait for a grace period: kill even SIGTERM-resistant helpers.
+        signalGroup(group, "SIGKILL");
       }
-    }
-  });
+    });
+  }
+  return group;
 }
 
 /**
  * Run a CLI to completion. The child gets its own process group on POSIX so a timeout or
- * abort also stops grandchildren (MCP servers the CLI launched).
+ * abort also stops grandchildren (MCP servers the CLI launched). A descendant that creates
+ * its own group/session escapes this cleanup. Windows retains direct-child termination.
  */
 export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; kill: () => void } {
   let killed = false,
@@ -67,32 +93,29 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
     detached: process.platform !== "win32",
     windowsHide: true,
   });
-  track(child.pid, options.log);
+  const group = track(child.pid, options.log);
   const kill = () => {
-    if (killed || child.exitCode !== null || child.signalCode !== null) {
+    if (killed) {
       return;
     }
     killed = true;
-    const signal = (sig: NodeJS.Signals) => {
-      try {
-        if (process.platform !== "win32" && child.pid) {
-          process.kill(-child.pid, sig);
-        } else {
-          child.kill(sig);
-        }
-      } catch {
-        // Host-agent process signal failed.
-        options.log?.("Host-agent process signal failed");
-
-        /* already gone */
+    if (group) {
+      if (!signalGroup(group, "SIGTERM")) {
+        return;
       }
-    };
-    signal("SIGTERM");
+      // The leader may exit before its helpers; escalation belongs to the group.
+      group.escalation = setTimeout(() => signalGroup(group, "SIGKILL"), KILL_GRACE_MS);
+      group.escalation.unref();
+      group.poll = setInterval(() => signalGroup(group, 0), 100);
+      group.poll.unref();
+      return;
+    }
+    child.kill("SIGTERM");
     setTimeout(() => {
       if (child.exitCode === null && child.signalCode === null) {
-        signal("SIGKILL");
+        child.kill("SIGKILL");
       }
-    }, 2000).unref();
+    }, KILL_GRACE_MS).unref();
   };
   const timer = setTimeout(() => {
     timedOut = true;
@@ -138,23 +161,50 @@ export function runCli(options: CliRunOptions): { done: Promise<CliRunResult>; k
   child.stdin.end(options.input ?? "");
 
   const done = new Promise<CliRunResult>((resolve, reject) => {
-    child.once("error", (error) => {
+    let settled = false;
+    let drainTimer: NodeJS.Timeout | undefined;
+    const cleanup = () => {
       clearTimeout(timer);
+      clearTimeout(drainTimer);
       options.signal?.removeEventListener("abort", onAbort);
-      reject(error);
-    });
-    child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      if (child.pid) {
-        live.delete(child.pid);
+    };
+    const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) {
+        return;
       }
-      options.signal?.removeEventListener("abort", onAbort);
+      settled = true;
+      cleanup();
+      // Descendants holding inherited pipes must not keep `done` pending indefinitely.
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
       const rest = pending.trim();
       pending = "";
       if (rest) {
         options.onLine?.(rest);
       }
       resolve({ code, signal, stdout, stderr, timedOut, aborted });
+    };
+    child.once("error", (error) => {
+      settled = true;
+      cleanup();
+      if (group) {
+        kill();
+      }
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      // Normal leader exit also ends the invocation and any helpers left in its group.
+      kill();
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+      drainTimer = setTimeout(() => finish(code, signal), STDIO_GRACE_MS);
+    });
+    child.once("close", (code, signal) => {
+      if (group) {
+        signalGroup(group, 0);
+      }
+      finish(code, signal);
     });
   });
   return {
