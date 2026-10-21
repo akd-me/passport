@@ -833,6 +833,58 @@ describe("runHostAgentSession", () => {
 });
 
 describe("detectHostAgents", () => {
+  it("V2-14: an unexpected Claude probe failure is isolated from Codex", async () => {
+    const statuses = await detectHostAgents({
+      env: { PASSPORT_CLAUDE_PATH: process.execPath, PASSPORT_CODEX_PATH: process.execPath },
+      exec: async (_binary, args) => {
+        if (args[0] === "auth") {
+          return {
+            code: 0,
+            get stdout(): string {
+              throw new Error("broken CLI output");
+            },
+            stderr: "",
+          };
+        }
+        return {
+          code: 0,
+          stdout: args[0] === "login" ? "Logged in using ChatGPT" : "1.2.3",
+          stderr: "",
+        };
+      },
+    });
+    expect(statuses[0]).toMatchObject({ kind: "codex", ready: true });
+    expect(statuses[1]).toMatchObject({
+      kind: "claude-code",
+      ready: false,
+      fix: expect.any(String),
+    });
+  });
+
+  it.each(["null", "[]", "true", '"logged in"', "{broken"])(
+    "V2-14: malformed Claude auth status %s never hides healthy Codex",
+    async (stdout) => {
+      const statuses = await detectHostAgents({
+        env: { PASSPORT_CLAUDE_PATH: process.execPath, PASSPORT_CODEX_PATH: process.execPath },
+        exec: async (_binary, args) => ({
+          code: 0,
+          stdout:
+            args[0] === "auth" ? stdout : args[0] === "login" ? "Logged in using ChatGPT" : "1.2.3",
+          stderr: "",
+        }),
+      });
+      expect(statuses[0]).toMatchObject({ kind: "codex", ready: true });
+      expect(statuses[1]).toMatchObject({
+        kind: "claude-code",
+        ready: false,
+        loggedIn: false,
+        account: null,
+        fix: expect.stringContaining("claude auth login"),
+      });
+      expect(preferredHostAgent(statuses)?.kind).toBe("codex");
+    },
+  );
+
   it("reports version, login and account for installed CLIs", async () => {
     const dir = await temp();
     await fakeBinary(dir, "claude", {

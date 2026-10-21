@@ -4,6 +4,7 @@ import { delimiter, join } from "node:path";
 import type { HostAgentKind, HostAgentStatus } from "@passport/types";
 import { extraBinDirs, hostAgentEnv, redact } from "./env.js";
 import { runCli } from "./process.js";
+import { record } from "./types.js";
 
 export const HOST_AGENT_KINDS: readonly HostAgentKind[] = ["codex", "claude-code"];
 
@@ -131,9 +132,9 @@ async function probe(
     account: string | null = null;
   if (auth && kind === "claude-code") {
     try {
-      const status = JSON.parse(auth.stdout) as Record<string, unknown>;
-      loggedIn = status.loggedIn === true;
-      if (loggedIn) {
+      const status = record(JSON.parse(auth.stdout));
+      loggedIn = status?.loggedIn === true;
+      if (loggedIn && status) {
         const method = typeof status.authMethod === "string" ? status.authMethod : "signed in";
         const plan =
           typeof status.subscriptionType === "string" ? ` (${status.subscriptionType})` : "";
@@ -194,10 +195,31 @@ export function detectHostAgents(
   if (!custom && !options.refresh && cache && now() - cache.at < CACHE_MS) {
     return cache.result;
   }
-  const result = Promise.all(
-    HOST_AGENT_KINDS.map((kind) =>
-      probe(kind, options.env ?? process.env, options.exec ?? defaultExec, now, options.log),
-    ),
+  const env = options.env ?? process.env;
+  const result = Promise.allSettled(
+    HOST_AGENT_KINDS.map((kind) => probe(kind, env, options.exec ?? defaultExec, now, options.log)),
+  ).then((results) =>
+    results.map((result, index): HostAgentStatus => {
+      if (result.status === "fulfilled") {
+        return result.value;
+      }
+      // One broken CLI must not hide another ready agent; never log the raw probe error.
+      options.log?.("Host-agent probe failed; treating that agent as unavailable");
+      const kind = HOST_AGENT_KINDS[index]!;
+      const binaryPath = resolveHostAgentBinary(kind, env, options.log);
+      return {
+        kind,
+        label: LABEL[kind],
+        installed: !!binaryPath,
+        binaryPath,
+        version: null,
+        loggedIn: false,
+        account: null,
+        ready: false,
+        checkedAt: new Date(now()).toISOString(),
+        fix: binaryPath ? HOST_AGENT_FIXES[kind].login : HOST_AGENT_FIXES[kind].install,
+      };
+    }),
   );
   if (!custom) {
     const entry = { at: now(), result };
