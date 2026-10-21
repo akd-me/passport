@@ -53,6 +53,9 @@ export function installLlmRoutes(app: Hono, backend: Backend): void {
     if (provider === "auto") {
       // Re-detect now; the configured HTTP settings stay as the fallback.
       const probe = { ...current, llmSelection: "auto" } as ConfigWithFallback;
+      if (!isHostAgentProvider(current.llm.provider)) {
+        probe[AUTO_FALLBACK] = current.llm;
+      }
       await resolveLlmSelection(probe, {
         refresh: true,
         env: { ...process.env, PASSPORT_LLM_PROVIDER: "" },
@@ -105,7 +108,11 @@ export function installLlmRoutes(app: Hono, backend: Backend): void {
       }
     }
     // Any edit is the user's explicit choice and is persisted as such.
-    await backend.updateConfig({ llm, llmSelection: "explicit" });
+    await backend.updateConfig({
+      llm,
+      llmSelection: "explicit",
+      ...(!isHostAgentProvider(llm.provider) ? { [AUTO_FALLBACK]: llm } : {}),
+    });
     return c.json(publicLlm(backend.config));
   });
 }

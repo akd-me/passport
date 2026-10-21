@@ -174,6 +174,41 @@ describe("LLM selection", () => {
 });
 
 describe("host agent routes", () => {
+  it("V2-7: auto startup -> explicit Ollama -> auto retains and persists the latest API fallback", async () => {
+    const dir = await dataDir();
+    vi.stubEnv("PASSPORT_LLM_PROVIDER", "");
+    const config = defaultConfig(dir);
+    await resolveLlmSelection(config, { env: {} });
+    const backend = await createRealBackend(config);
+    try {
+      const app = createApp(backend);
+      const llm = {
+        provider: "ollama",
+        model: "test-local",
+        baseUrl: "http://127.0.0.1:11434/v1",
+      };
+      const chosen = await app.request("/api/settings/llm", body(llm));
+      expect(chosen.status).toBe(200);
+      expect(await chosen.json()).toMatchObject({ ...llm, selection: "explicit" });
+      const auto = await app.request("/api/settings/llm", body({ provider: "auto" }));
+      expect(auto.status).toBe(200);
+      expect(await auto.json()).toMatchObject({ ...llm, selection: "auto", configured: true });
+      expect((await loadConfig({ PASSPORT_DATA_DIR: dir })).llm).toMatchObject(llm);
+
+      // Selecting a host agent must retain the last API fallback for subsequent auto use.
+      await app.request("/api/settings/llm", body({ provider: "codex" }));
+      detected = [status("codex", true)];
+      await app.request("/api/settings/llm", body({ provider: "auto" }));
+      expect(backend.config.llm.provider).toBe("codex");
+      expect((await loadConfig({ PASSPORT_DATA_DIR: dir })).llm).toMatchObject(llm);
+      detected = [];
+      const fallback = await app.request("/api/settings/llm", body({ provider: "auto" }));
+      expect(await fallback.json()).toMatchObject({ ...llm, configured: true });
+    } finally {
+      await backend.close();
+    }
+  });
+
   it("lists detected host agents and switches providers without an API key", async () => {
     const dir = await dataDir();
     vi.stubEnv("PASSPORT_LLM_API_KEY", "");
