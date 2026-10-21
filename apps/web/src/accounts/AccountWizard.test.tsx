@@ -1,13 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Routes, Route } from "react-router";
+import { Route, Routes, useLocation } from "react-router";
 import { AccountWizard } from "./AccountWizard";
-import { Accounts } from "../views/Accounts";
-import { AccountFilter, AccountScope } from "./AccountFilter";
-import { StartPage } from "./StartPage";
+import { AccountScope } from "./AccountFilter";
 import type { Account } from "@passport/types";
 import { accountApi } from "./api";
 import { api, type ProviderDescriptor } from "../api";
+import { App } from "../App";
+import { Sidebar } from "../shell/Sidebar";
+import { Harness, stubApi } from "../test-utils";
 
 const providers: ProviderDescriptor[] = [
   { kind: "gmail", label: "Gmail", fields: [], oauth: { scopes: [] } },
@@ -50,21 +51,6 @@ describe("account wizard", () => {
     );
     expect(sync).toHaveBeenCalledWith("new-mock");
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-  });
-  it("routes an empty workspace to Accounts so initial sync can finish on that page", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ accounts: [] })),
-    );
-    render(
-      <MemoryRouter>
-        <Routes>
-          <Route path="/" element={<StartPage />} />
-          <Route path="/accounts" element={<p>Account onboarding</p>} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    expect(await screen.findByText("Account onboarding")).toBeInTheDocument();
   });
   it("shows the desktop guide, enables PKCE browser setup and honors optional calendar access", async () => {
     vi.spyOn(window, "open").mockReturnValue(null);
@@ -141,61 +127,94 @@ describe("account wizard", () => {
       fields: { host: "imap.example.com", password: "app-secret" },
     });
   });
-  it("shows the wizard automatically for an empty workspace", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) =>
-        Response.json(
-          url.endsWith("/providers")
-            ? providers
-            : url.endsWith("/user-profile")
-              ? { markdown: "" }
-              : {
-                  accounts: [],
-                  mode: "real",
-                  llm: {
-                    provider: "anthropic",
-                    model: "test",
-                    apiKeyConfigured: false,
-                  },
-                },
-        ),
-      ),
-    );
-    render(<Accounts />);
-    expect(
-      await screen.findByRole("heading", { name: "Connect a mailbox" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect" })).toBeEnabled();
-  });
-  it("updates accountId in the URL while preserving other filters", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        Response.json({
-          accounts: [
-            {
-              id: "work",
-              kind: "gmail",
-              emailAddress: "work@example.com",
-              capabilities: { mail: true },
-            },
-          ],
-        }),
-      ),
-    );
+  it("preselects the provider chosen before falling back to manual setup", () => {
     render(
-      <MemoryRouter initialEntries={["/matters?accountId=work&status=active"]}>
-        <AccountScope>
-          <AccountFilter />
-        </AccountScope>
-      </MemoryRouter>,
+      <AccountWizard providers={providers} initialKind="graph" onClose={() => {}} />,
     );
-    await screen.findByRole("option", { name: "work@example.com · gmail" });
+    expect(screen.getByLabelText("Provider")).toHaveValue("graph");
+    expect(screen.getByText(/Allow public client flows/)).toBeInTheDocument();
+  });
+});
+
+const workAccount = {
+  id: "work",
+  kind: "gmail",
+  displayName: "Work",
+  emailAddress: "work@example.com",
+  capabilities: { mail: true },
+  settings: {},
+  lastSyncAt: new Date().toISOString(),
+};
+function LocationProbe() {
+  const location = useLocation();
+  return <output aria-label="location">{location.pathname + location.search}</output>;
+}
+
+describe("account onboarding in the shell", () => {
+  it("shows the connect flow in place of the queue for an empty workspace", async () => {
+    stubApi({
+      "/accounts": { accounts: [], mode: "real", llm: { provider: "anthropic", model: "m", apiKeyConfigured: false } },
+      "/decisions": { items: [] },
+      "/matters": [],
+      "/people": [],
+      "/trust": { config: { globalMode: "supervised", alwaysAsk: [] }, categories: [], promotionOffers: [] },
+    });
+    render(
+      <Harness>
+        <App />
+      </Harness>,
+    );
     expect(
-      screen.getByRole("combobox", { name: "Filter by account" }),
-    ).toHaveValue("work");
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "" } });
-    expect(screen.getByRole("combobox")).toHaveValue("");
+      await screen.findByRole("heading", { name: "Connect the mailbox Passport should work on" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect Gmail" })).toBeEnabled();
+    expect(screen.queryByRole("heading", { name: /proposals? need/ })).not.toBeInTheDocument();
+  });
+  it("opens Settings → Accounts for the legacy /accounts URL the OAuth callback returns to", async () => {
+    stubApi({
+      "/accounts": { accounts: [workAccount], mode: "real", llm: { provider: "anthropic", model: "m", apiKeyConfigured: true } },
+      "/providers": providers,
+      "/decisions": { items: [] },
+      "/actions": { items: [] },
+      "/matters": [],
+      "/people": [],
+      "/trust": { config: { globalMode: "supervised", alwaysAsk: [] }, categories: [], promotionOffers: [] },
+    });
+    render(
+      <Harness path="/accounts?connected=work">
+        <App />
+      </Harness>,
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    expect(dialog).toHaveTextContent("Connected accounts");
+    expect(await screen.findAllByText("work@example.com")).not.toHaveLength(0);
+  });
+  it("scopes to one account from the sidebar while preserving other filters", async () => {
+    stubApi({
+      "/accounts": { accounts: [workAccount], mode: "real" },
+      "/decisions": { items: [] },
+      "/matters": [],
+      "/people": [],
+      "/trust": { config: { globalMode: "supervised", alwaysAsk: [] }, categories: [], promotionOffers: [] },
+    });
+    render(
+      <Harness path="/matters?status=active">
+        <AccountScope>
+          <Sidebar />
+          <Routes>
+            <Route path="*" element={<LocationProbe />} />
+          </Routes>
+        </AccountScope>
+      </Harness>,
+    );
+    const account = await screen.findByRole("button", { name: /work@example\.com/ });
+    expect(account).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(account);
+    expect(screen.getByLabelText("location")).toHaveTextContent(
+      "/matters?status=active&accountId=work",
+    );
+    expect(account).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(account);
+    expect(screen.getByLabelText("location")).toHaveTextContent("/matters?status=active");
   });
 });
