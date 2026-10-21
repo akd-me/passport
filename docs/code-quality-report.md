@@ -18,7 +18,6 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | File:line | Choice | Why |
 | --- | --- | --- |
 | `apps/server/src/accounts.ts:103` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `apps/server/src/app.ts:88` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/arrivals.ts:31` | b | Arrival queue operation failed; later work may continue. |
 | `apps/server/src/arrivals.ts:173` | b | Keep the existing operational log and fallback; never include the caught payload. |
 | `apps/server/src/arrivals.ts:250` | b | Keep the existing operational log and fallback; never include the caught payload. |
@@ -47,8 +46,8 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `apps/server/src/compose.ts:424` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/config.ts:126` | a | An absent configuration uses defaults; other filesystem errors propagate. |
 | `apps/server/src/config.ts:236` | a | An absent configuration has no prior values to merge. |
-| `apps/server/src/demo/executor.ts:292` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `apps/server/src/demo/executor.ts:433` | b | Demo outbox action failed; continuing other due actions. |
+| `apps/server/src/demo/executor.ts:51` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `apps/server/src/demo/executor.ts:192` | b | Demo outbox action failed; continuing other due actions. |
 | `apps/server/src/doctor-host-agents.ts:20` | b | Host-agent discovery failed during diagnostics. |
 | `apps/server/src/doctor-host-agents.ts:77` | b | Host-agent diagnostic request failed. |
 | `apps/server/src/doctor.ts:55` | b | Provider diagnostic cleanup failed. |
@@ -61,9 +60,9 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `apps/server/src/llm-selection.ts:22` | b | Host-agent discovery failed; retaining the configured fallback. |
 | `apps/server/src/mcp-token.ts:22` | a | An absent MCP token is initialized below; other filesystem errors propagate. |
 | `apps/server/src/mcp-token.ts:36` | a | A concurrent token creator won; read its existing token. |
-| `apps/server/src/onboarding/oauth.ts:206` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `apps/server/src/onboarding/oauth.ts:220` | b | Initial account sync failed; retaining its recorded failure. |
-| `apps/server/src/onboarding/oauth.ts:404` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `apps/server/src/onboarding/oauth-account.ts:206` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `apps/server/src/onboarding/oauth-account.ts:220` | b | Initial account sync failed; retaining its recorded failure. |
+| `apps/server/src/onboarding/oauth.ts:192` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/onboarding/routes.ts:16` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/onboarding/routes.ts:96` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/onboarding/sync.ts:84` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
@@ -77,14 +76,15 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `apps/server/src/owner-lock.ts:41` | b | Owner process probe failed; retaining the conservative owner state. |
 | `apps/server/src/owner-lock.ts:57` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/owner-lock.ts:115` | b | Owner heartbeat failed; checking the existing ownership fallback. |
+| `apps/server/src/route-input.ts:66` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/schedulers/routes.ts:11` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `apps/server/src/schedulers/service.ts:77` | b | Keep the existing operational log and fallback; never include the caught payload. |
-| `apps/server/src/schedulers/service.ts:83` | b | Keep the existing operational log and fallback; never include the caught payload. |
-| `apps/server/src/schedulers/service.ts:90` | b | Scheduler update failed; later updates may continue. |
-| `apps/server/src/schedulers/service.ts:101` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `apps/server/src/schedulers/service.ts:325` | b | Keep the existing operational log and fallback; never include the caught payload. |
-| `apps/server/src/schedulers/service.ts:387` | b | Scheduler initialization failed before shutdown. |
-| `apps/server/src/schedulers/service.ts:424` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `apps/server/src/schedulers/service.ts:78` | b | Keep the existing operational log and fallback; never include the caught payload. |
+| `apps/server/src/schedulers/service.ts:84` | b | Keep the existing operational log and fallback; never include the caught payload. |
+| `apps/server/src/schedulers/service.ts:91` | b | Scheduler update failed; later updates may continue. |
+| `apps/server/src/schedulers/service.ts:102` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `apps/server/src/schedulers/service.ts:234` | b | Keep the existing operational log and fallback; never include the caught payload. |
+| `apps/server/src/schedulers/service.ts:296` | b | Scheduler initialization failed before shutdown. |
+| `apps/server/src/schedulers/service.ts:333` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/server.ts:59` | b | Keep the existing operational log and fallback; never include the caught payload. |
 | `apps/server/src/setup/browser.ts:88` | b | Browser process discovery failed; using an empty process list. |
 | `apps/server/src/setup/cli.ts:82` | a | Stale prompts and finished tasks need no reply; all other failures propagate. |
@@ -96,54 +96,54 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `apps/server/src/setup/mcp.ts:247` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/setup/mcp.ts:299` | b | Setup MCP transport failed. |
 | `apps/server/src/setup/routes.ts:62` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `apps/server/src/setup/runner.ts:176` | b | Setup owner process probe failed. |
-| `apps/server/src/setup/runner.ts:272` | b | Keep the existing operational log and fallback; never include the caught payload. |
-| `apps/server/src/setup/runner.ts:391` | b | Browser helper preparation failed. |
-| `apps/server/src/setup/runner.ts:482` | b | Browser helper release failed during cleanup. |
-| `apps/server/src/setup/runner.ts:488` | b | Setup browser close failed during cleanup. |
-| `apps/server/src/setup/runner.ts:494` | b | Setup browser output cleanup failed. |
-| `apps/server/src/setup/runner.ts:694` | b | Browser URL could not be summarized safely. |
-| `apps/server/src/sync/connections.ts:47` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `apps/server/src/setup/runner-events.ts:17` | b | Browser URL could not be summarized safely. |
+| `apps/server/src/setup/runner-state.ts:138` | b | Setup owner process probe failed. |
+| `apps/server/src/setup/runner.ts:132` | b | Keep the existing operational log and fallback; never include the caught payload. |
+| `apps/server/src/setup/runner.ts:251` | b | Browser helper preparation failed. |
+| `apps/server/src/setup/runner.ts:342` | b | Browser helper release failed during cleanup. |
+| `apps/server/src/setup/runner.ts:348` | b | Setup browser close failed during cleanup. |
+| `apps/server/src/setup/runner.ts:354` | b | Setup browser output cleanup failed. |
+| `apps/server/src/sync/connections.ts:50` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/sync/connections.ts:54` | b | Provider disconnect failed after connection failure. |
 | `apps/server/src/sync/connections.ts:65` | b | Provider disconnect failed while invalidating a connection. |
 | `apps/server/src/sync/connections.ts:82` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/sync/connections.ts:98` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/server/src/sync/connections.ts:118` | b | Provider connection failed before shutdown. |
-| `apps/server/src/sync/index.ts:286` | a | An expired calendar cursor requires full reconciliation; other provider errors propagate. |
-| `apps/server/src/sync/index.ts:424` | a | An expired mail cursor requires full reconciliation; other provider errors propagate. |
-| `apps/server/src/sync/index.ts:452` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `apps/server/src/sync/index.ts:151` | a | An expired calendar cursor requires full reconciliation; other provider errors propagate. |
+| `apps/server/src/sync/index.ts:291` | a | An expired mail cursor requires full reconciliation; other provider errors propagate. |
+| `apps/server/src/sync/index.ts:319` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `apps/web/src/accounts/AccountWizard.tsx:76` | b | Authorization status refresh failed. |
 | `apps/web/src/api.ts:88` | b | API error response did not contain a JSON envelope. |
 | `apps/web/src/auth.ts:23` | b | Session refresh failed; retaining normal reconnect behavior. |
 | `apps/web/src/auth.ts:80` | b | Login request failed. |
 | `apps/web/src/auth.ts:124` | b | Authentication status unavailable; showing login. |
-| `apps/web/src/connect/SetupFlow.tsx:91` | b | Setup response failed. |
-| `apps/web/src/connect/SetupFlow.tsx:340` | b | Setup status refresh failed; retaining the last state. |
-| `apps/web/src/connect/SetupFlow.tsx:363` | b | Automatic setup could not start. |
-| `apps/web/src/settings/AdvancedSettings.tsx:134` | b | Authentication status unavailable in settings. |
-| `apps/web/src/settings/ModelSettings.tsx:53` | b | Host-agent discovery failed in settings. |
-| `apps/web/src/shell/CommandPalette.tsx:91` | b | Agent review command failed. |
-| `apps/web/src/shell/CommandPalette.tsx:115` | b | Permission mode command failed. |
+| `apps/web/src/connect/SetupFlow.tsx:87` | b | Setup status refresh failed; retaining the last state. |
+| `apps/web/src/connect/SetupFlow.tsx:110` | b | Automatic setup could not start. |
+| `apps/web/src/connect/SetupTaskView.tsx:80` | b | Setup response failed. |
+| `apps/web/src/settings/AdvancedSettings.tsx:137` | b | Authentication status unavailable in settings. |
+| `apps/web/src/settings/ModelSettings.tsx:56` | b | Host-agent discovery failed in settings. |
+| `apps/web/src/shell/CommandPalette.tsx:100` | b | Agent review command failed. |
+| `apps/web/src/shell/CommandPalette.tsx:118` | b | Permission mode command failed. |
 | `apps/web/src/shell/Composer.tsx:82` | b | Agent composition failed; restoring the instruction. |
 | `apps/web/src/state.tsx:69` | b | Workspace event frame could not be processed. |
-| `apps/web/src/state.tsx:131` | b | Resource request failed or was cancelled. |
+| `apps/web/src/state.tsx:133` | b | Resource request failed or was cancelled. |
 | `apps/web/src/state.tsx:162` | b | Workspace action failed. |
 | `apps/web/src/ui-state.tsx:41` | b | Stored preference could not be read; using the default. |
 | `apps/web/src/ui-state.tsx:51` | b | Preference storage unavailable; retaining session state. |
-| `apps/web/src/views/Trust.tsx:199` | b | Promotion dismissal storage could not be read. |
-| `apps/web/src/views/Trust.tsx:226` | b | Promotion dismissal could not be persisted; retaining session state. |
+| `apps/web/src/views/PromotionPrompts.tsx:18` | b | Promotion dismissal storage could not be read. |
+| `apps/web/src/views/PromotionPrompts.tsx:45` | b | Promotion dismissal could not be persisted; retaining session state. |
 | `packages/agent/src/host/claude.ts:167` | a | Malformed JSON is expected here; retain the existing text or stream fallback. |
 | `packages/agent/src/host/codex.ts:227` | a | Malformed JSON is expected here; retain the existing text or stream fallback. |
 | `packages/agent/src/host/codex.ts:286` | a | Malformed JSON is expected here; retain the existing text or stream fallback. |
 | `packages/agent/src/host/detect.ts:35` | b | Host-agent executable probe failed. |
 | `packages/agent/src/host/detect.ts:115` | b | Host-agent version probe failed. |
-| `packages/agent/src/host/detect.ts:120` | b | Host-agent login probe failed. |
+| `packages/agent/src/host/detect.ts:124` | b | Host-agent login probe failed. |
 | `packages/agent/src/host/detect.ts:142` | a | Malformed JSON is expected here; retain the existing text or stream fallback. |
 | `packages/agent/src/host/detect.ts:205` | b | Host-agent discovery failed; clearing the cached probe. |
 | `packages/agent/src/host/process.ts:45` | b | Host-agent process group cleanup failed. |
 | `packages/agent/src/host/process.ts:83` | b | Host-agent process signal failed. |
 | `packages/agent/src/host/session.ts:75` | b | Host-agent event listener failed; continuing the run. |
-| `packages/agent/src/host/session.ts:82` | b | Host-agent preparation failed; returning the bounded error. |
+| `packages/agent/src/host/session.ts:157` | b | Host-agent preparation failed; returning the bounded error. |
 | `packages/agent/src/host/session.ts:127` | b | Host-agent process could not be started. |
 | `packages/agent/src/host/session.ts:151` | b | Host-agent private file cleanup failed. |
 | `packages/agent/src/host/session.ts:194` | b | Host-agent session listener failed; continuing the session. |
@@ -160,22 +160,22 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `packages/mcp/src/resources.ts:129` | b | MCP resource notification failed; keeping domain event delivery active. |
 | `packages/mcp/src/server.ts:75` | b | MCP response exceeds the configured budget; returning the bounded error. |
 | `packages/mcp/src/transports.ts:151` | b | MCP HTTP request failed; returning the existing transport error. |
-| `packages/policy/src/executor.ts:814` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/policy/src/executor.ts:820` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/policy/src/executor.ts:949` | b | Message submitted; sent-copy or draft cleanup failed. |
-| `packages/policy/src/executor.ts:1184` | a | Missing or changed draft references trigger reapproval; unrelated errors propagate. |
-| `packages/policy/src/executor.ts:1258` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/policy/src/executor.ts:1308` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/policy/src/executor.ts:1326` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/policy/src/executor.ts:1587` | b | Outbox release failed; retaining the first error while continuing due actions. |
+| `packages/policy/src/executor-dispatch.ts:121` | b | Message submitted; sent-copy or draft cleanup failed. |
+| `packages/policy/src/executor-restoration.ts:192` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/policy/src/executor-restoration.ts:198` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/policy/src/executor.ts:108` | a | Missing or changed draft references trigger reapproval; unrelated errors propagate. |
+| `packages/policy/src/executor.ts:182` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/policy/src/executor.ts:232` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/policy/src/executor.ts:250` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/policy/src/executor.ts:334` | b | Outbox release failed; retaining the first error while continuing due actions. |
 | `packages/policy/src/unsubscribe.ts:83` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/policy/src/unsubscribe.ts:124` | a | Malformed URL targets provide no capability; keep trying valid input. |
 | `packages/policy/src/unsubscribe.ts:221` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/policy/src/unsubscribe.ts:244` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/providers/src/caldav.ts:54` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/providers/src/caldav.ts:299` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/providers/src/caldav.ts:442` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/providers/src/caldav.ts:561` | a | Unsupported free-busy REPORT uses bounded event fallback; other provider errors propagate. |
+| `packages/providers/src/caldav-ical.ts:21` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/providers/src/caldav-ical.ts:203` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/providers/src/caldav.ts:175` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/providers/src/caldav.ts:370` | a | Unsupported free-busy REPORT uses bounded event fallback; other provider errors propagate. |
 | `packages/providers/src/calendar-common.ts:48` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/providers/src/calendar-common.ts:69` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/providers/src/errors.ts:48` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
@@ -200,18 +200,18 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `packages/providers/src/imap.ts:595` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/providers/src/jmap.ts:187` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/providers/src/normalize/index.ts:218` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/scheduler/src/index.ts:119` | b | Job state persistence failed; keeping the write queue available. |
-| `packages/scheduler/src/index.ts:158` | b | Keep the existing operational log and fallback; never include the caught payload. |
-| `packages/scheduler/src/index.ts:249` | b | Keep the existing operational log and fallback; never include the caught payload. |
-| `packages/scheduler/src/index.ts:291` | b | Keep the existing operational log and fallback; never include the caught payload. |
-| `packages/scheduler/src/index.ts:444` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/scheduler/src/index.ts:46` | b | Job state persistence failed; keeping the write queue available. |
+| `packages/scheduler/src/index.ts:85` | b | Keep the existing operational log and fallback; never include the caught payload. |
+| `packages/scheduler/src/index.ts:208` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/scheduler/src/schedule.ts:74` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/scheduler/src/scheduler-execution.ts:68` | b | Keep the existing operational log and fallback; never include the caught payload. |
+| `packages/scheduler/src/scheduler-execution.ts:110` | b | Keep the existing operational log and fallback; never include the caught payload. |
 | `packages/store/src/credentials.ts:36` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/store/src/event-bus.ts:47` | b | Keep the existing operational log and fallback; never include the caught payload. |
 | `packages/store/src/event-bus.ts:52` | b | Keep the existing operational log and fallback; never include the caught payload. |
-| `packages/store/src/store.ts:48` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/store/src/store.ts:111` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
-| `packages/store/src/store.ts:915` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/store/src/store-database.ts:40` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/store/src/store-query.ts:31` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
+| `packages/store/src/store.ts:80` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/tools/src/availability.ts:23` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/tools/src/extra.ts:123` | c | Preserve the existing error code and propagation after cleanup; do not expose raw payloads. |
 | `packages/tools/src/extra.ts:459` | a | Malformed URL targets provide no capability; keep trying valid input. |
@@ -220,3 +220,34 @@ Optional package diagnostics default to no-op; server composition supplies its l
 | `packages/tools/src/schema.ts:215` | a | Malformed URL targets provide no capability; keep trying valid input. |
 | `apps/server/src/cli/mcp-install.ts:594` | b | Both bridge directions share the logged failure and shutdown handler. |
 | `apps/server/src/cli/mcp-install.ts:600` | b | Both bridge directions share the logged failure and shutdown handler. |
+
+## Module splits
+
+The original entry points and package-root exports remain available. Moved code keeps its
+existing route registration order, query text, action ordering, and React markup.
+
+| Original module | Extracted concerns | Result |
+| --- | --- | --- |
+| `packages/policy/src/executor.ts` | Shared snapshots; validation and capture; mail mutations; restoration; dispatch; approval and undo commands | Seven modules, each below 400 lines |
+| `packages/store/src/store.ts` | SQL and query helpers; mail, calendar, people/matter, and action/trust/KV repositories | Seven modules, each below 400 lines |
+| `packages/providers/src/mock.ts` | Fixture construction; mail mock; calendar mock | Existing mock entry point re-exports the same API |
+| `packages/providers/src/caldav.ts` | iCalendar parsing, normalization, and serialization | CalDAV transport remains cohesive at about 400 lines |
+| `packages/scheduler/src/index.ts` | State/contracts and job execution | Three modules, each below 400 lines |
+| `apps/server/src/app.ts` | Input parsing and action, mail, matter/people/calendar, settings/account, and agent routes | Route groups preserve registration order |
+| `apps/server/src/demo/executor.ts` | Demo action application and shared request helpers | Lifecycle remains in the original entry point |
+| `apps/server/src/sync/index.ts` | Provider identity mapping and cursor/key conventions | Sync coordination remains in the service |
+| `apps/server/src/schedulers/service.ts` | Built-in system job definitions | Routine/account lifecycle remains in the service |
+| `apps/server/src/onboarding/oauth.ts` | OAuth account enrollment and credential persistence | Browser authorization state remains in the original module |
+| `apps/server/src/setup/runner.ts` | State/contracts; setup tool host; browser event summaries | Runner lifecycle remains in the original module |
+| `apps/web/src/views/Decisions.tsx` | Decision cards/outbox; proposal details; grouping and keyboard helpers | View entry point and existing exports remain |
+| `apps/web/src/views/Trust.tsx` | Modes; controls; promotion prompts; safety forms | Settings view and existing exports remain |
+| `apps/web/src/views/Scheduler.tsx` | Job table/history and routine form | Settings view and existing exports remain |
+| `apps/web/src/connect/SetupFlow.tsx` | Task display/actions and shared task interpretation | Polling/setup navigation stays in the entry point |
+
+Kept intact: the append-only shared type contract; existing test suites and fixture files;
+CSS beyond formatting; the remaining single-protocol provider adapters; the agent triage pipeline; tool registration
+catalogues; policy evaluation; and CLI configuration merging. Their remaining larger functions encode one ordered
+protocol or workflow, and splitting them further would introduce extra state plumbing without a
+clearer boundary. They remain candidates for focused follow-up work. Server setup files besides
+the runner already fit the target after formatting. Other existing web views/components fit the
+target or remain close to it with a single cohesive form/view.

@@ -1,145 +1,37 @@
-import { newId } from "@passport/store";
 import type {
-  Calendar,
   CalendarEvent,
   CalendarProvider,
   Email,
   EventBus,
-  Mailbox,
   MailProvider,
   Store,
 } from "@passport/types";
 import { persistArrival } from "../arrivals.js";
 import { ApiError, required } from "../errors.js";
-
-interface Cursors {
-  mail: string | null;
-  calendar: string | null;
-}
-const prefix = "passport-sync-v1:";
-const key = (...parts: string[]) => parts.map(encodeURIComponent).join(":");
+import { createSyncIdentity } from "./identity.js";
+import { type Cursors, key, prefix } from "./state.js";
 
 /** Owns provider-to-local identity mapping and durable, restartable ingestion. */
 export class SyncService {
+  private readonly identities: ReturnType<typeof createSyncIdentity>;
   private active = new Map<string, Promise<void>>();
   constructor(
     private readonly store: Store,
     private readonly bus: EventBus,
     private readonly mailFor: (id: string) => Promise<MailProvider>,
     private readonly calendarFor: (id: string) => Promise<CalendarProvider>,
-  ) {}
+  ) {
+    this.identities = createSyncIdentity(store);
+  }
 
-  private async reference(accountId: string, kind: string, nativeId: string): Promise<string> {
-    const alias = key("sync-id", accountId, kind, nativeId);
-    let id = await this.store.kv.get(alias);
-    if (!id) {
-      id = newId();
-      await this.store.kv.set(alias, id);
-    }
-    return id;
-  }
-  private async identity(
-    accountId: string,
-    kind: string,
-    providerId: string,
-    nativeId: string,
-    existingId?: string,
-  ): Promise<string> {
-    const canonical = key("sync-provider", accountId, kind, providerId);
-    const id =
-      existingId ??
-      (await this.store.kv.get(canonical)) ??
-      (await this.reference(accountId, kind, nativeId));
-    await this.store.kv.set(canonical, id);
-    await this.store.kv.set(key("sync-id", accountId, kind, nativeId), id);
-    return id;
-  }
-  private async mailbox(accountId: string, box: Mailbox): Promise<Mailbox> {
-    const existing = (await this.store.mailboxes.list(accountId)).find(
-      (item) => item.providerId === box.providerId,
-    );
-    return {
-      ...box,
-      accountId,
-      id: await this.identity(accountId, "mailbox", box.providerId, box.id, existing?.id),
-      parentId: box.parentId ? await this.reference(accountId, "mailbox", box.parentId) : null,
-    };
-  }
   /** Also normalizes executor provider results before they are mirrored to Store. */
-  async email(accountId: string, email: Email): Promise<Email> {
-    const existing = await this.store.emails.getByProviderId(accountId, email.providerId);
-    const boxes = await this.store.mailboxes.list(accountId);
-    return {
-      // Only provider-owned fields may replace an existing record. In particular,
-      // providers cannot reset annotations made by local agents or humans.
-      ...(existing ?? { personIds: [], category: null, matterId: null }),
-      accountId,
-      id: await this.identity(accountId, "email", email.providerId, email.id, existing?.id),
-      providerId: email.providerId,
-      threadId: await this.reference(accountId, "thread", email.threadId),
-      mailboxIds: await Promise.all(
-        email.mailboxIds.map((id) =>
-          boxes.some((box) => box.id === id) ? id : this.reference(accountId, "mailbox", id),
-        ),
-      ),
-      keywords: email.keywords,
-      from: email.from,
-      to: email.to,
-      cc: email.cc,
-      bcc: email.bcc,
-      replyTo: email.replyTo,
-      subject: email.subject,
-      sentAt: email.sentAt,
-      receivedAt: email.receivedAt,
-      preview: email.preview,
-      textBody: email.textBody === undefined ? existing?.textBody : email.textBody,
-      htmlBody: email.htmlBody === undefined ? existing?.htmlBody : email.htmlBody,
-      attachments: email.attachments,
-      headers: email.headers,
-      size: email.size,
-      verification: email.verification,
-      provenance: email.provenance,
-    };
+  email(accountId: string, email: Email): Promise<Email> {
+    return this.identities.email(accountId, email);
   }
-  async event(accountId: string, event: CalendarEvent): Promise<CalendarEvent> {
-    const calendars = await this.store.calendars.list(accountId);
-    // Server-local lookup until Store has getByProviderId for calendar events.
-    const byProvider = (await this.store.events.query({ accountId, limit: 2147483647 })).find(
-      (item) => item.providerId === event.providerId,
-    );
-    const id = await this.identity(accountId, "event", event.providerId, event.id, byProvider?.id);
-    const existing = await this.store.events.get(id);
-    return {
-      ...event,
-      accountId,
-      id,
-      calendarId: calendars.some((item) => item.id === event.calendarId)
-        ? event.calendarId
-        : await this.reference(accountId, "calendar", event.calendarId),
-      sourceEmailId:
-        existing?.sourceEmailId ??
-        (event.sourceEmailId
-          ? await this.reference(accountId, "email", event.sourceEmailId)
-          : null),
-      matterId: existing?.matterId ?? null,
-    };
+  event(accountId: string, event: CalendarEvent): Promise<CalendarEvent> {
+    return this.identities.event(accountId, event);
   }
-  private async calendar(accountId: string, calendar: Calendar): Promise<Calendar> {
-    const existing = (await this.store.calendars.list(accountId)).find(
-      (item) => item.providerId === calendar.providerId,
-    );
-    return {
-      ...calendar,
-      accountId,
-      id: await this.identity(
-        accountId,
-        "calendar",
-        calendar.providerId,
-        calendar.id,
-        existing?.id,
-      ),
-    };
-  }
+
   syncAccount(accountId: string): Promise<void> {
     const current = this.active.get(accountId);
     if (current) {
@@ -190,36 +82,7 @@ export class SyncService {
       events.filter((event) => !seen.has(event.providerId)).map((event) => event.id),
     );
   }
-  private async isArrival(email: Email): Promise<boolean> {
-    if (email.keywords.$draft) {
-      return false;
-    }
-    const roles = (await this.store.mailboxes.list(email.accountId))
-      .filter((box) => email.mailboxIds.includes(box.id))
-      .map((box) => box.role);
-    if (roles.includes("drafts") || roles.includes("sent")) {
-      return false;
-    }
-    const self = new Set(
-      (await this.store.accounts.list()).map((account) =>
-        account.emailAddress.trim().toLowerCase(),
-      ),
-    );
-    for (const person of await this.store.people.list({
-      relationship: "self",
-      limit: 2147483647,
-    })) {
-      if (person.verifiedSelf) {
-        for (const address of person.emails) {
-          self.add(address.trim().toLowerCase());
-        }
-      }
-    }
-    return (
-      roles.includes("inbox") ||
-      !email.from.some((address) => self.has(address.email.trim().toLowerCase()))
-    );
-  }
+
   private async sync(accountId: string) {
     const account = required(await this.store.accounts.get(accountId), "Account");
     const stored = (await this.store.syncState.get(accountId))?.cursor;
@@ -254,7 +117,9 @@ export class SyncService {
           const seen = new Set<string>(),
             deleted = new Set<string>();
           for (const calendar of await provider.listCalendars()) {
-            await this.store.calendars.upsertMany([await this.calendar(accountId, calendar)]);
+            await this.store.calendars.upsertMany([
+              await this.identities.calendar(accountId, calendar),
+            ]);
           }
           let final: string | null = null;
           for await (const delta of provider.sync(cursors.calendar)) {
@@ -327,11 +192,11 @@ export class SyncService {
             if (delta.kind === "mailbox") {
               if (delta.op === "upsert") {
                 await this.store.mailboxes.upsertMany([
-                  await this.mailbox(accountId, delta.mailbox),
+                  await this.identities.mailbox(accountId, delta.mailbox),
                 ]);
               } else {
                 await this.store.mailboxes.deleteMany([
-                  await this.reference(accountId, "mailbox", delta.id),
+                  await this.identities.reference(accountId, "mailbox", delta.id),
                 ]);
               }
             }
@@ -349,7 +214,7 @@ export class SyncService {
                 const email = await this.email(accountId, delta.email);
                 const seenKey = key("sync-seen", accountId, email.providerId);
                 const isNew = !existing && !(await this.store.kv.get(seenKey));
-                const arrival = isNew && (await this.isArrival(email));
+                const arrival = isNew && (await this.identities.isArrival(email));
                 if (arrival) {
                   await persistArrival(this.store, email);
                 }
@@ -383,10 +248,12 @@ export class SyncService {
               }
             }
             if (delta.kind === "thread") {
-              const id = await this.reference(accountId, "thread", delta.thread.id);
+              const id = await this.identities.reference(accountId, "thread", delta.thread.id);
               const existing = await this.store.threads.get(id);
               const emailIds = await Promise.all(
-                delta.thread.emailIds.map((id) => this.reference(accountId, "email", id)),
+                delta.thread.emailIds.map((id) =>
+                  this.identities.reference(accountId, "email", id),
+                ),
               );
               const present = await Promise.all(
                 [...new Set([...emailIds, ...(existing?.emailIds ?? [])])].map((id) =>
