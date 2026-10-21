@@ -52,7 +52,8 @@ subscription; no API key. `HostAgentLlmClient` implements `LlmClient`: every cal
 non-persisted run (`claude -p --safe-mode --tools "" --system-prompt …` or `codex exec --json -s
 read-only --ignore-user-config` with the shell and other tools disabled) in a scratch `cwd`
 (`createLlmClient(config, { hostAgentCwd })`). JSON mode uses `--json-schema` / `--output-schema`
-(strict-compatible schemas only; others are described in the prompt) and is validated locally.
+(Codex requires an object root with `additionalProperties: false` and every property required;
+other roots, including arrays, are described in the prompt) and is validated locally.
 Interactive tools are emulated as structured output, so Passport executes them under policy. `model:
 "fast"` uses `fastModel`, defaulting to `claude-haiku-5-5` / `gpt-5.6-luna`. Usage maps to `LlmUsage`
 with `costUsd: null`.
@@ -66,7 +67,21 @@ and plan without reading tokens; results are cached for 60 seconds.
 Code) or `-c mcp_servers.*` with secrets in the child environment (Codex). `allowedTools` defaults to
 every tool of the supplied servers; built-in shell/file tools stay off unless named. Events are
 `started`, `text`, `tool_call`, `tool_result`, `completed` and `error`; `cancel()` or an aborted
-`signal` kills the CLI's process group. Children receive an allowlisted environment (no `PASSPORT_*`
+`signal` terminates the CLI's POSIX process group, escalating SIGTERM to SIGKILL after two seconds
+even if the CLI itself exits first. Groups remain registered for synchronous exit cleanup until
+confirmed gone; that hook uses SIGKILL because it cannot wait. After leader exit, `done` waits at
+most 250 ms for inherited stdio to close. Descendants that create a separate group/session escape
+group cleanup; Windows retains direct-child termination, and host termination that bypasses Node's
+exit hooks (such as SIGKILL) cannot run cleanup.
+
+`maxTurns` is optional. Claude Code enforces it with `--max-turns`. Codex requires a positive safe
+integer and counts JSON-stream turn starts plus tool-call starts (MCP, shell and web search); the
+initial turn consumes one unit, so `maxTurns: 1` allows a final reply but cancels on the first tool
+start. Exceeding the budget cancels the process group and resolves with `HOST_AGENT_MAX_TURNS`.
+This bounds streamed activity; a tool may already have started by the time cancellation arrives,
+so it cannot undo that tool's effects. Omit the option for no turn budget; `timeoutMs` still applies.
+
+Children receive an allowlisted environment (no `PASSPORT_*`
 or provider API keys), stderr is classified but never surfaced, and CLI-derived error text is
 redacted. Live tests in `src/host/host.live.test.ts` skip when a CLI is absent or signed out (set
 `PASSPORT_SKIP_LIVE_HOST_AGENTS=1` to skip them anyway).

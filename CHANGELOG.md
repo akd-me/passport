@@ -32,6 +32,19 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 - API keys are optional. Existing configurations that only held the old
   placeholder default switch to `auto`; any other saved model choice is kept.
 
+### Fixed
+
+- Host-agent POSIX process groups now escalate to SIGKILL even after the CLI leader exits,
+  retain exit cleanup until the group is gone, and settle runs after a bounded stdio drain (V2-3).
+- Returning to automatic model selection retains and persists the latest configured API
+  provider rather than an earlier placeholder (V2-7).
+- Codex JSON output with array or scalar roots uses prompt instructions and local validation
+  instead of an incompatible strict output schema (V2-8).
+- Codex sessions enforce `maxTurns` using streamed turn/tool starts and report
+  `HOST_AGENT_MAX_TURNS` when the budget is exceeded (V2-9).
+- Malformed Claude authentication status and individual CLI probe failures no longer hide
+  a healthy Codex installation during host-agent detection (V2-14).
+
 ## [0.1.0] — Unreleased
 
 ### Added
