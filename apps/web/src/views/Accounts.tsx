@@ -5,6 +5,7 @@ import { api, type AccountData, type ProviderDescriptor } from "../api";
 import { AccountWizard } from "../accounts/AccountWizard";
 import { AccountRow } from "../accounts/AccountRow";
 import { DoctorCard } from "../accounts/DoctorCard";
+import { ModelCard } from "../accounts/ModelCard";
 import type { ConnectedAccount } from "../accounts/api";
 import { useResource, useTask } from "../state";
 import { Badge, Feedback, Icon, Loading, PageHeader } from "../components/ui";
@@ -230,6 +231,7 @@ export function Accounts() {
             />
           )}
           <DoctorCard />
+          <ModelCard llm={accounts.data.llm} demo={accounts.data.mode === "demo"} />
           <LlmSettings
             key={JSON.stringify(accounts.data.llm)}
             llm={accounts.data.llm}
