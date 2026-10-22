@@ -1,5 +1,5 @@
-import type { Task, TaskItem, TaskRun } from "@passport/types";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { Task, TaskRun } from "@passport/types";
+import { useEffect, useState } from "react";
 import { logger } from "../logger";
 import { useWorkspace, useWorkspaceEvents } from "../state";
 import { useActions } from "./actions-store";
