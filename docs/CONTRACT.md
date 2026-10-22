@@ -78,18 +78,16 @@ The mechanical formatting commit is recorded in `.git-blame-ignore-revs`; use
 ## Things that must be true of the whole system
 
 - Every change to mail, calendar, people or matters originated locally by a human, agent, or
-  external agent requires an `ActionRecord` with an inverse unless the action is irreversible.
-  Inverse capture reads a fresh provider pre-image. Following provider-side changes (the new-mail
-  watcher patching or dropping cached envelopes, the bounded calendar sync) is system ingestion and
-  is exempt from this rule.
+  external agent requires an `ActionRecord` with an inverse unless irreversible. Inverse capture
+  reads a fresh provider pre-image. Following provider-side changes (the new-mail watcher patching
+  or dropping cached rows, the bounded calendar sync) is system ingestion and is exempt.
 - An `ActionRecord` with `status: "executed"` and `inverse: null` is only allowed for `irreversible` actions.
 - `send` is never executed synchronously when `outboxHoldMinutes > 0`; it is `held` first.
 - External agents (MCP clients) are capped by `externalAgentCeiling`.
 - Verification state (blue/green) is derived from headers/signatures, never from message content,
   and is computed once per envelope.
-- Passport never backfills. The watcher cursor starts at connect time; mail received earlier is
-  never an arrival. A cursor the provider expired is replaced by a fresh one plus one bounded inbox
-  sweep deduplicated against arrivals and the action log, never by a resync.
+- Passport never backfills. The watcher cursor starts at connect time; an expired cursor causes one
+  bounded sweep of recent Inbox mail, deduplicated against arrivals already handled.
 - Every provider read declares its quota cost and goes through the per-account governor.
 - Provider-derived strings in tool results and prompts are wrapped as untrusted data.
 - A task's permission mode cannot exceed the account's trust ladder, and a child task cannot exceed

@@ -14,7 +14,9 @@ export function calendarSyncJob(backend: Backend, account: Account): JobDefiniti
     kind: "system",
     schedule: { type: "interval", everyMs: backend.config.syncIntervalSeconds * 1000 },
     run: async () => {
-      await backend.syncAccount(account.id);
+      await (backend.syncCalendar
+        ? backend.syncCalendar(account.id)
+        : backend.syncAccount(account.id));
       return { summary: "Calendar synchronized" };
     },
     timeoutMs: 300000,

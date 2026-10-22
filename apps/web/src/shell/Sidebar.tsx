@@ -2,7 +2,7 @@ import type { ActionRecord, Matter, Page, Person } from "@passport/types";
 import type { ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router";
 import { AccountDot, useAccounts } from "../accounts/AccountFilter";
-import { needsReauthorization, syncSummary } from "../accounts/AccountRow";
+import { watchLabel } from "../accounts/AccountRow";
 import { Icon, Kbd, mod } from "../components/ui";
 import { providerNames } from "../connect/setup-task-model";
 import { useResource, useWorkspace } from "../state";
@@ -95,7 +95,8 @@ function AccountsGroup() {
     >
       {mail.map((account) => {
         const selected = active === account.id,
-          attention = needsReauthorization(account) || !!account.lastSyncError;
+          state = watchLabel(account),
+          attention = state !== "Watching" || !!account.lastSyncError;
         return (
           <li key={account.id}>
             <button
@@ -117,7 +118,7 @@ function AccountsGroup() {
               <AccountDot id={account.id} />
               <span className="side-label">
                 {account.emailAddress}
-                <small className={attention ? "warn" : ""}>{syncSummary(account)}</small>
+                <small className={attention ? "warn" : ""}>{state}</small>
               </span>
               {attention && <Icon name="alert" size={13} className="warn" />}
             </button>

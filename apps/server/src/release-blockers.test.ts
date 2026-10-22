@@ -49,7 +49,7 @@ async function fixture(llm?: { complete: (options: CompleteOptions) => Promise<L
   await mail.connect(account, {});
   await backend.policy.setConfig({ globalMode: "full_access" });
   await backend.policy.pinLevel("scheduling", "full_access");
-  // First watcher tick: the cursor starts at "now", so only later mail is an arrival.
+  // The watcher's first tick takes its cursor at "now"; later injected mail arrives.
   await backend.syncAccount(account.id);
   return { backend, mail, calendar };
 }
@@ -389,8 +389,8 @@ it.each([false, true])(
   },
 );
 
-it("B2: a combined account's mail watcher tick never holds calendar releases", async () => {
-  const { backend, mail } = await fixture();
+it("B2: holds a proposal until a combined account's calendar sync pass finishes", async () => {
+  const { backend, mail, calendar } = await fixture();
   await backend.syncAccount(account.id);
   const held = await backend.executor.submit({
     type: "calendar_propose",
@@ -415,24 +415,24 @@ it("B2: a combined account's mail watcher tick never holds calendar releases", a
   const started = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  const reader = mail.reader();
-  const changes = reader.changes.bind(reader);
-  vi.spyOn(reader, "changes").mockImplementationOnce(async (...args) => {
+  vi.spyOn(calendar, "sync").mockImplementationOnce(async function* () {
     entered();
     await paused;
-    return changes(...args);
+    yield { kind: "cursor", cursor: "complete" };
   });
-  const watching = backend.watchAccount!(account.id);
+  const syncing = backend.syncAccount(account.id);
   await started;
   try {
-    expect(await backend.store.kv.get(`sync-in-progress:${account.id}`)).toBeNull();
+    expect(await backend.store.kv.get(`sync-in-progress:${account.id}`)).toBe("1");
     vi.setSystemTime(new Date(held.holdUntil!));
-    expect(await backend.executor.releaseDue()).toHaveLength(1);
-    expect(mail.sentMail).toHaveLength(1);
+    expect(await backend.executor.releaseDue()).toEqual([]);
+    expect((await backend.store.actions.get(held.id))!.status).toBe("held");
+    expect(mail.sentMail).toHaveLength(0);
   } finally {
     finish();
-    await watching;
+    await syncing;
   }
+  expect(await backend.store.kv.get(`sync-in-progress:${account.id}`)).toBeNull();
 });
 
 it.each(["stale", "missing", "reconcile", "failed-pass"])(

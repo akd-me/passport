@@ -15,7 +15,7 @@ import { persistArrival } from "../arrivals.js";
 import { cachedEmail, refreshLabelCache } from "../ondemand-wiring.js";
 import { readCursors, updateCursors } from "../sync/state.js";
 import { type ArrivalContext, alreadyHandled, arrivalContext, isInboxArrival } from "./arrival.js";
-import { backoffMs, needsReauthorization, rateLimited, safeCode } from "./errors.js";
+import { backoffDelayMs, INVALID_CURSOR, REAUTHORIZE, rateLimited, safeCode } from "./failure.js";
 import { labelsKey, stateKey, summarizeLabels, type WatchState, watcherTickKey } from "./status.js";
 
 export interface MailWatcherOptions {
@@ -147,7 +147,7 @@ export class MailWatcher {
       let arrivals = 0;
       let expired = false;
       for (let page = 0; page < (this.options.maxPages ?? 10); page++) {
-        const { value } = await reader.changes(cursor, this.options.pageSize ?? 100, this.lane());
+        const value = await this.changes(reader, cursor);
         if (value.expired) {
           expired = true;
           const result = await this.recover(account, reader, since);
@@ -183,6 +183,19 @@ export class MailWatcher {
       };
     } catch (error) {
       return this.fail(account, error);
+    }
+  }
+
+  /** A cursor the provider rejects outright is handled like an expired one: start again at now. */
+  private async changes(reader: MailReader, cursor: string): Promise<MailChanges> {
+    try {
+      return (await reader.changes(cursor, this.options.pageSize ?? 100, this.lane())).value;
+    } catch (error) {
+      if (!INVALID_CURSOR.includes((error as { code?: string })?.code ?? "")) {
+        throw error;
+      }
+      const fresh = (await reader.changes(null, 1, this.lane())).value;
+      return { ...fresh, added: [], labelChanged: [], deleted: [], expired: true };
     }
   }
 
@@ -335,7 +348,7 @@ export class MailWatcher {
       // Back off the tick and never fail the account; the governor's hint wins when larger.
       const previous = this.backoff.get(account.id);
       const attempt = (previous?.attempt ?? 0) + 1;
-      const delayMs = backoffMs(error, attempt);
+      const delayMs = backoffDelayMs(attempt, error);
       const until = this.now() + delayMs;
       this.backoff.set(account.id, { until, attempt });
       await this.setState(account.id, {
@@ -354,7 +367,7 @@ export class MailWatcher {
     }
     const code = safeCode(error);
     const fresh = (await store.accounts.get(account.id)) ?? account;
-    if (needsReauthorization(code)) {
+    if (REAUTHORIZE.includes(code)) {
       // Revoked tokens need human consent, not another scheduled attempt.
       await store.accounts.upsert({
         ...fresh,

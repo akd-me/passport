@@ -9,7 +9,6 @@ import {
   type Email,
   type Mailbox,
   type MailLabel,
-  type MailReader,
   type MailReaderResolver,
   parseMailHandle,
   type Store,
@@ -19,32 +18,22 @@ import {
 /** MCP output budget (~16k tokens); research 03 §5.5. The built-in agent keeps its default. */
 export const MCP_RESPONSE_BYTE_BUDGET = 64 * 1024;
 
-interface OnDemandStore {
-  setMailReaderResolver?(resolver: MailReaderResolver): void;
-}
-interface OnDemandMailboxes {
-  refreshFromLabels?(accountId: string, labels: MailLabel[]): Promise<void>;
-}
-type ReadOptions = { includeBodies?: boolean; fresh?: boolean };
-type ReadThroughGet = (id: string, opts?: ReadOptions) => Promise<Email | null>;
-
-/** Store agent: `Store.setMailReaderResolver?(resolver)` enables read-through `emails.get`. */
+/** `Store.setMailReaderResolver?(resolver)` enables read-through `emails.get`. */
 export function installReaderResolver(store: Store, readers: MailReaderResolver): void {
-  (store as Store & OnDemandStore).setMailReaderResolver?.(readers);
+  store.setMailReaderResolver?.(readers);
 }
 
 /**
- * Store agent: `Store.mailboxes.refreshFromLabels?(accountId, labels)`. Until it exists, upsert
- * mailbox rows keyed like adapter mailbox ids so policy destination checks keep working.
+ * `Store.mailboxes.refreshFromLabels?(accountId, labels)`. Stores without it get mailbox rows
+ * keyed like adapter mailbox ids so policy destination checks keep working.
  */
 export async function refreshLabelCache(
   store: Store,
   accountId: string,
   labels: MailLabel[],
 ): Promise<void> {
-  const mailboxes = store.mailboxes as Store["mailboxes"] & OnDemandMailboxes;
-  if (mailboxes.refreshFromLabels) {
-    await mailboxes.refreshFromLabels(accountId, labels);
+  if (store.mailboxes.refreshFromLabels) {
+    await store.mailboxes.refreshFromLabels(accountId, labels);
     return;
   }
   const id = (providerId: string) => `${accountId}:mailbox:${encodeURIComponent(providerId)}`;
@@ -68,14 +57,9 @@ export async function refreshLabelCache(
   );
 }
 
-/** Read-through `emails.get(handle | ulid, { includeBodies?, fresh? })` (store agent). */
-export function readThroughGet(store: Store, id: string, opts: ReadOptions = {}) {
-  return (store.emails.get as ReadThroughGet)(id, opts);
-}
-
-/** A cached row by provider id, without a provider round trip. */
+/** A cached row by provider id, never a provider round trip. */
 export function cachedEmail(store: Store, accountId: string, providerId: string) {
-  return store.emails.getByProviderId(accountId, providerId);
+  return store.emails.getByProviderId(accountId, providerId, { cacheOnly: true });
 }
 
 /**
@@ -87,7 +71,7 @@ export async function readEmail(
   readers: MailReaderResolver | undefined,
   id: string,
 ): Promise<Email | null> {
-  const cached = await readThroughGet(store, id, { includeBodies: true });
+  const cached = await store.emails.get(id, { includeBodies: true, lane: "interactive" });
   const handle = parseMailHandle(id);
   if (cached || !readers || handle?.type !== "email") {
     return cached;
@@ -104,33 +88,32 @@ export async function readEmail(
   return { ...envelope, ...body };
 }
 
-/** Options the tools agent adds to `createToolRegistry` / `createMailboxMcpServer`. */
-export function toolReaderOptions(readers: MailReaderResolver, dataDir: string) {
+/** Options the tools agent adds to `createToolRegistry` (not yet in `ToolRegistryOptions`). */
+export interface ToolReaderOptions {
+  readers?: MailReaderResolver;
+  scratchDir?: string;
+}
+/** `createMailboxMcpServer({ readers, scratchDir, responseByteBudget })`. */
+export interface McpReaderOptions extends ToolReaderOptions {
+  responseByteBudget?: number;
+}
+
+export function toolReaderOptions(readers: MailReaderResolver, dataDir: string): ToolReaderOptions {
   return { readers, scratchDir: join(dataDir, "scratch") };
 }
 
-/** `createMailboxMcpServer({ readers, responseByteBudget })` (tools agent). */
-export function mcpReaderOptions(readers: MailReaderResolver, dataDir: string) {
-  return { ...toolReaderOptions(readers, dataDir), responseByteBudget: MCP_RESPONSE_BYTE_BUDGET };
-}
-
-/** `createAgentRuntime({ readers })` (agent-package agent). */
-export function agentReaderOptions(readers: MailReaderResolver, dataDir: string) {
-  return toolReaderOptions(readers, dataDir);
+/** MCP dependencies plus the on-demand options; extra keys are ignored until the tools agent lands. */
+export function withMcpReaders<T extends object>(
+  deps: T,
+  readers: MailReaderResolver,
+  dataDir: string,
+): T & McpReaderOptions {
+  return {
+    ...deps,
+    ...toolReaderOptions(readers, dataDir),
+    responseByteBudget: MCP_RESPONSE_BYTE_BUDGET,
+  };
 }
 
 /** `FreeBusyResolver` from `@passport/tools`: null means no connected calendar for the account. */
 export type FreeBusy = (accountId: string, range: TimeRange) => Promise<TimeRange[] | null>;
-
-/** Reader accessor for a handle's account, or null for ULIDs and unsupported providers. */
-export async function readerForHandle(
-  readers: MailReaderResolver,
-  id: string,
-): Promise<{ reader: MailReader; accountId: string; providerId: string; type: string } | null> {
-  const handle = parseMailHandle(id);
-  if (!handle) {
-    return null;
-  }
-  const reader = await readers(handle.accountId);
-  return reader ? { reader, ...handle } : null;
-}

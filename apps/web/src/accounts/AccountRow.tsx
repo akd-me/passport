@@ -16,52 +16,58 @@ const kindLabel: Record<string, string> = {
 };
 const providerName = (kind: string) => kindLabel[kind] ?? kind;
 export const needsReauthorization = (account: ConnectedAccount) =>
-  !!account.settings.reauthorizationRequired || account.lastSyncError === "REAUTHORIZE_REQUIRED";
-/** Short sidebar state: "Watching", "Paused" or "Needs sign-in" (no sync progress). */
-export function syncSummary(account: ConnectedAccount) {
-  if (needsReauthorization(account) || account.watch?.status === "needs-sign-in") {
+  !!account.settings.reauthorizationRequired ||
+  account.lastSyncError === "REAUTHORIZE_REQUIRED" ||
+  account.watch?.status === "needs-sign-in";
+
+/** Short state for the sidebar: mail is watched, not synced. */
+export function watchLabel(account: ConnectedAccount): "Watching" | "Paused" | "Needs sign-in" {
+  if (needsReauthorization(account)) {
     return "Needs sign-in";
   }
-  if (!account.capabilities.mail) {
-    if (account.lastSyncError) {
-      return "Calendar sync failed";
-    }
-    return account.lastSyncAt
-      ? `Calendar synced ${relativeTime(account.lastSyncAt).toLowerCase()}`
-      : "Calendar not synced yet";
-  }
   const status = account.watch?.status;
-  return !status || status === "watching" || status === "starting" ? "Watching" : "Paused";
+  return status && ["backoff", "stale", "error", "unsupported"].includes(status)
+    ? "Paused"
+    : "Watching";
 }
-/** "Watching since 9:41 AM · last check 1m ago", or why the watcher is paused. */
-export function watchDetail(account: ConnectedAccount) {
-  const watch = account.watch;
-  if (!account.capabilities.mail || !watch) {
-    return null;
-  }
-  const reasons: Record<string, string> = {
-    backoff: "Paused: provider rate limit, retrying shortly",
-    stale: "Paused: no recent check",
-    error: `Paused: ${watch.error ?? "check failed"}`,
-    unsupported: "This provider cannot be watched yet",
-    "needs-sign-in": "Paused until you sign in again",
-  };
-  if (reasons[watch.status]) {
-    return reasons[watch.status];
-  }
-  if (!watch.since) {
-    return "Starting to watch for new mail…";
-  }
-  const since = new Date(watch.since).toLocaleString(undefined, {
+
+const clockTime = (at: string) =>
+  new Date(at).toLocaleString(undefined, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
-  const check = watch.lastTickAt
+
+/** Account settings line: "Watching since <time> · last check <ago>", or why watching paused. */
+export function watchSummary(account: ConnectedAccount): string {
+  if (needsReauthorization(account)) {
+    return "Sign-in expired";
+  }
+  if (!account.capabilities.mail) {
+    return account.lastSyncAt
+      ? `Calendar synced ${relativeTime(account.lastSyncAt).toLowerCase()}`
+      : "Calendar not synced yet";
+  }
+  const watch = account.watch;
+  if (watch?.status === "backoff") {
+    return watch.retryAt
+      ? `Paused by the provider's rate limit · next check ${relativeTime(watch.retryAt).toLowerCase()}`
+      : "Paused by the provider's rate limit";
+  }
+  if (watch?.status === "unsupported") {
+    return "This provider cannot be watched yet";
+  }
+  if (watch?.status === "error") {
+    return `Paused: ${watch.error ?? "last check failed"}`;
+  }
+  if (!watch?.since) {
+    return "Starting to watch for new mail…";
+  }
+  const lastCheck = watch.lastTickAt
     ? ` · last check ${relativeTime(watch.lastTickAt).toLowerCase()}`
     : "";
-  return `Watching since ${since}${check}`;
+  return `Watching since ${clockTime(watch.since)}${lastCheck}`;
 }
 
 export function AccountRow({
@@ -73,6 +79,7 @@ export function AccountRow({
 }) {
   const task = useTask();
   const needsAuth = needsReauthorization(account);
+  const paused = watchLabel(account) !== "Watching";
   const oauth = ["gmail", "graph", "google-calendar", "graph-calendar"].includes(account.kind);
   return (
     <div className="account-row">
@@ -82,11 +89,11 @@ export function AccountRow({
         <div className="meta">
           <span>{account.emailAddress}</span>
           <span>{providerName(account.kind)}</span>
-          <span className={needsAuth || account.lastSyncError ? "warn" : ""}>
-            {syncSummary(account)}
+          <span className={paused || account.lastSyncError ? "warn" : ""}>
+            {watchSummary(account)}
           </span>
           {account.capabilities.mail && typeof account.messageCount === "number" && (
-            <span className="num">{account.messageCount} in Inbox</span>
+            <span className="num">{account.messageCount.toLocaleString()} in Inbox</span>
           )}
         </div>
         <Feedback
@@ -94,11 +101,10 @@ export function AccountRow({
             needsAuth
               ? "Access expired or was revoked. Re-authorize to resume watching."
               : account.lastSyncError
-                ? `Last error: ${account.lastSyncError}`
+                ? `Last check failed: ${account.lastSyncError}`
                 : task.error
           }
         />
-        {watchDetail(account) && <div className="meta">{watchDetail(account)}</div>}
       </div>
       <div className="row-actions">
         {oauth && (needsAuth || account.kind !== "mock") && (

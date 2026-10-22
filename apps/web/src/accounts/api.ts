@@ -1,8 +1,12 @@
 import type { Account } from "@passport/types";
 import { request } from "../api";
 
-/** `GET /api/accounts` → `watch`: the new-mail watcher. Times are ISO UTC. */
-export interface AccountWatch {
+/** First-run copy shown once an account is connected (wizard and OAuth return). */
+export const FIRST_RUN_CONNECTED =
+  "Connected. Passport reads your mail on demand and watches for new mail.";
+
+/** `GET /api/accounts` → `watch`: new-mail watcher health. Times are ISO UTC. */
+export interface WatchStatus {
   since: string | null;
   lastTickAt: string | null;
   cursorAgeSeconds: number | null;
@@ -11,11 +15,10 @@ export interface AccountWatch {
   retryAt?: string;
 }
 export type ConnectedAccount = Account & {
-  /** Provider inbox total from the last label refresh; null until known. */
+  /** Provider Inbox total from the last label refresh; null until known. */
   messageCount?: number | null;
-  watch?: AccountWatch | null;
-  /** @deprecated v0.2 mirror progress; no longer sent. */
-  syncing?: boolean;
+  /** Null for calendar-only accounts. */
+  watch?: WatchStatus | null;
 };
 export interface ConnectionAttempt {
   authUrl: string;

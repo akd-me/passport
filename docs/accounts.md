@@ -26,8 +26,8 @@ fallback; see [Start a workspace](#start-a-workspace)), Google Chrome or Microso
    instead of guessing. A checklist and a log in Passport show what it is doing.
 4. Passport stores the client encrypted and the agent opens Google's (or Microsoft's) consent page in
    the same window. **You** choose the account and approve; Google will say the app is unverified,
-   which is expected for your own client (**Advanced → Go to Passport**). The mailbox connects and
-   Passport starts watching for new mail at once (there is no initial sync).
+   which is expected for your own client (**Advanced → Go to Passport**). The mailbox connects and the
+   first sync starts.
 
 When the agent asks you to confirm something, **No** tells it to stop that step and ask you how to
 proceed. Cancel at any time; the agent and the browser stop, and a consent page still open in the
@@ -107,7 +107,7 @@ The same OAuth clients the agent creates, step by step, plus IMAP.
    Click **Connect**. If the browser blocked the tab, use **Open authorization tab**.
 8. Select the intended Google account and grant the requested mail permissions. Calendar consent
    is optional; Passport creates the calendar account only when that scope was granted. Return to
-   Passport; the account is usable immediately. The account address comes from Google's userinfo endpoint.
+   Passport and wait for the initial sync. The account address comes from Google's userinfo endpoint.
 
 Google may show **Google hasn't verified this app**. For a client you created for your own use,
 choose **Advanced → Go to <your app name> (unsafe)** and review the permissions. If Google blocks
@@ -165,7 +165,7 @@ in the authorization URL. See [Google's desktop flow](https://developers.google.
    confidential-client registration may supply its own secret; it must permit the chosen redirect
    and client flow.
 7. Select calendar access if wanted, click **Connect**, sign in with the intended account, grant
-   permissions; the account is usable immediately. Passport reads `/me` and uses `mail`, falling back to
+   permissions, then wait for sync. Passport reads `/me` and uses `mail`, falling back to
    `userPrincipalName`, for the address. Repeat for other accounts.
 
 The Graph adapter uses immutable message IDs and a folder hierarchy delta plus one message delta per
@@ -184,66 +184,68 @@ and NOOP; SMTP submission is not tested and no message is sent by the test.
 
 If special folders are not advertised, set the optional Drafts, Sent and Trash folder paths to the
 exact paths your server uses. **Test connection** is non-persisting; **Add account** saves encrypted
-credentials and starts watching for new mail. OAuth-only IMAP services need their own OAuth setup; use Gmail or Graph
+credentials and starts sync. OAuth-only IMAP services need their own OAuth setup; use Gmail or Graph
 above where possible. Microsoft deployments that disable password authentication cannot be connected
 by entering an app password here.
 
 ## Watching for new mail, account controls and diagnostics
 
-Passport does not copy your mailbox. Agents, tools and the HTTP API read mail on demand through the
-provider's own search and fetch calls, and a per-account **watcher** looks for new mail.
+Passport keeps no copy of your mailbox. Connecting an account takes a change cursor at "now" and
+fetches the label tree with counts; nothing older is downloaded. Searching, listing and reading go
+to the provider on demand (`GET /api/emails` is provider search; `GET /api/emails/<id>` and
+`GET /api/threads/<id>` read through a small local cache). There is no backfill and no initial
+sync window: `sync.initialDays` is ignored, and Passport logs a one-time deprecation warning if your
+`passport.config.json` still has it.
 
-- **No backfill.** On connect the watcher takes a change cursor at "now" (Gmail history id, Graph
-  delta link, IMAP UIDNEXT/MODSEQ). Mail already in the mailbox is never triaged; you can still ask
-  an agent to search or act on it. There is no "Load older mail", no `POST /api/accounts/:id/backfill`
-  and no `sync.initialDays` (an existing `sync.initialDays` key is accepted with a one-time
-  deprecation warning and ignored).
-- **Every 30 seconds** (`watch.intervalSeconds`; IMAP IDLE triggers an immediate check) the watcher
-  asks the provider what changed since its cursor, in the `arrivals` quota lane. New messages in the
-  Inbox (or, for providers without one, outside Sent/Drafts/Spam/Trash) that are not from you and not
-  already queued or acted on become **arrivals** for triage. Label changes update the small local
-  envelope cache; deletions drop cached rows. The cursor is stored in the account's `sync_state` row
-  (`passport-watch-v1:`) and only advances after a page of changes was handled.
-- **Cursor expiry is cheap.** If the provider has forgotten the cursor (Gmail history older than about
-  a week, Graph delta 410), the watcher marks cached labels stale, takes a fresh cursor and runs one
-  bounded sweep of `in:inbox newer_than:2d` (100 messages at most), skipping anything already triaged.
-  It never resyncs the mailbox.
-- **Labels and counts** are refreshed on connect and every 10 minutes (`labels` with counts). The
-  account's inbox total shown in Settings comes from that refresh.
-- **Quota.** Each check costs about 2 Gmail units (`history.list`), plus 20 per new message envelope;
-  that is roughly 240 units an hour per idle Gmail account, well under 1% of the per-user quota. When
-  the provider or Passport's governor rate-limits, the watcher backs off (30 s doubling, at least the
-  provider's retry hint, at most 15 minutes) and shows **Paused**; the account is not marked failed.
+The watcher checks each mail account every 30 seconds (`watch.intervalSeconds`,
+`PASSPORT_WATCH_INTERVAL_SECONDS`, 5–86400) with one provider change query in the `arrivals`
+quota lane. IMAP accounts with IDLE also check immediately when the server signals a change.
+Mail that is new since the last check and sits in the Inbox (or, for providers without an inbox
+concept, outside Sent, Drafts, Spam and Trash), is not from one of your own addresses and has not
+been triaged before becomes a durable arrival and is triaged. Label changes and deletions only
+update or drop rows already in the local cache. The label tree and its counts refresh on connect
+and at most every 10 minutes; the account's **in Inbox** count comes from that refresh.
 
-`GET /api/accounts` returns `messageCount` (provider inbox total, or `null` before the first label
-refresh) and `watch: { since, lastTickAt, cursorAgeSeconds, status }`, where `status` is `starting`,
-`watching`, `backoff`, `stale`, `error`, `unsupported` or `needs-sign-in`. The sidebar shows
-**Watching**, **Paused** or **Needs sign-in**; Settings › Accounts shows "Watching since … · last
-check …" and **Check now** (`POST /api/accounts/:id/sync`, which also syncs a calendar).
+Providers keep change history for a limited time (Gmail about a week). If Passport was off longer,
+or the provider rejects the cursor, the watcher marks cached labels stale, runs one bounded sweep of
+recent Inbox mail (`in:inbox newer_than:2d`, at most 100 messages, deduplicated against arrivals
+already handled) and continues from a fresh cursor. Older unseen mail is not triaged; you can still
+search and read it.
 
-Calendars keep a small, bounded sync (Graph: 30 days back / 365 forward; Google: the primary
-calendar's events) every `syncIntervalSeconds`, and live free/busy from the provider is used for
-availability. Calendar cursor-expiry recovery upserts existing events by provider identity, preserving
-local links, and removes unseen events only after a successful full pass. New mail waits at most one
-minute for a companion calendar that is still syncing; after that, scheduling proposal reasons include
-"calendar not synced, availability unverified". At delayed-outbox release a new event conflict returns
-a calendar proposal to Decisions with `AVAILABILITY_CHANGED`, requiring review. Recurring events use
-the same supported rule expansion as scheduling; unsupported rules return to review as
-`AVAILABILITY_UNVERIFIED`.
+Every provider read declares its cost and goes through a per-account governor. When a provider rate
+limits Passport (HTTP 429/503), the watcher backs off (30 seconds, doubling, at most 15 minutes, or
+the provider's retry hint) and shows **Paused**; the account is never marked failed for it. Interactive
+reads answer `429` with `Retry-After` instead of waiting. Invalid or revoked grants produce
+**Re-authorize** and pause watching until you sign in again.
 
-Calendar sync retries HTTP 429 and 503 with exponential delay and jitter, at most five times.
-Invalid or revoked refresh grants produce **Re-authorize** and pause the watcher and calendar sync.
-Re-authorize the same address to keep local IDs and history. Removing calendar permission pauses an
-existing companion calendar. Removing a mail account removes its cached messages, watcher state,
-encrypted credentials and linked calendar; provider mail is untouched. The audit log, people and
-matters remain.
+Calendars keep a bounded sync (`sync:<accountId>`, every `syncIntervalSeconds`). Arrivals wait at
+most one minute for a related calendar to finish its first sync; after that, scheduling proposal
+reasons include “calendar not synced, availability unverified”. At delayed-outbox release a new
+event conflict returns a calendar proposal to Decisions with `AVAILABILITY_CHANGED`, requiring
+review. Recurring events use the same supported rule expansion as scheduling; unsupported rules
+return to review as `AVAILABILITY_UNVERIFIED`. Calendar cursor-expiry recovery upserts existing
+events by provider identity, preserving local links, and removes unseen events only after a
+successful full pass.
+
+Settings → Accounts shows "Watching since <time> · last check <ago>" and the Inbox count; the
+sidebar shows **Watching**, **Paused** or **Needs sign-in**. **Check now** (`POST
+/api/accounts/<id>/sync`) runs the calendar sync and an immediate new-mail check. `GET
+/api/accounts` returns `messageCount` (provider Inbox total) and `watch: { since, lastTickAt,
+cursorAgeSeconds, status }`. Re-authorize the same address to keep local IDs and history. Removing
+calendar permission pauses an existing companion calendar. Removing a mail account removes its
+cached messages, watcher state, encrypted credentials and linked calendar; provider mail is
+untouched. The audit log, people and matters remain.
+
+The cache is bounded: the weekly `store.maintenance` job drops bodies older than 7 days (then least
+recently used beyond 200 MB) and envelopes beyond the 100,000 most recently used. Drafts and mail
+linked to a matter are kept; evicted mail is fetched again on the next read.
 
 Use **Connection health → Run checks**, `GET /api/doctor`, or `passport doctor`. Checks cover private
-storage/key permissions, config, a one-token model request when configured, token refresh, provider
-reachability, **watcher health** (last check and cursor age; a warning when no check ran for three
-intervals or five minutes), calendar sync age, outbox hold and the built MCP stdio command. The model
+storage/key permissions, config, a one-token model request when configured, token refresh, Gmail
+profile / Graph `/me` / IMAP NOOP (or one cheap label read), watcher health (last check and cursor
+age), calendar sync age, outbox hold and the built MCP stdio command. The model
 check can incur the provider's minimum request charge. Missing model credentials are a warning and
-do not stop the watcher. CLI doctor exits nonzero for failed checks. Run after `pnpm build` so the
+do not prevent watching. CLI doctor exits nonzero for failed checks. Run after `pnpm build` so the
 stdio entry point exists.
 
 Use the **All accounts** filter on Decisions, Matters and Activity. It uses `accountId` in the URL;

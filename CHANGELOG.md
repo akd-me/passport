@@ -7,38 +7,32 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 
 ### Changed
 
-- Mail is no longer mirrored. A per-account new-mail watcher (`watch:<accountId>`, every 30 s,
-  `watch.intervalSeconds`; IMAP IDLE checks immediately) follows `MailReader.changes` from a cursor
-  taken at connect time. Accounts are usable as soon as they connect: there is no initial sync and no
-  backfill, and only mail that arrives afterwards is triaged (Inbox, not from you, not already
-  handled). Label changes and deletions patch the small envelope cache; there are no tombstones.
-- An expired provider cursor (Gmail history 404, Graph delta 410) now marks cached labels stale and
-  runs one bounded `in:inbox newer_than:2d` sweep instead of a full resync and reconciliation.
-- Rate limits back the watcher off (30 s doubling, governor retry hint, at most 15 minutes) without
-  failing the account.
-- `GET /api/emails` searches the provider (`q`, `account`, `limit`, `pageToken`; 429 with
-  `retryAfterSeconds` when rate limited), falling back to cached mail without an on-demand reader.
-  `GET /api/emails/:id` and `POST /api/agent/triage/:id` accept mail handles and read through to the
-  provider; `GET /api/threads/:id` fetches handle threads from the provider.
-- `GET /api/accounts`: `messageCount` is the provider inbox total from label counts (refreshed on
-  connect and every 10 minutes); new `watch: { since, lastTickAt, cursorAgeSeconds, status }`;
-  `syncing` is gone. The sidebar shows Watching / Paused / Needs sign-in, Settings › Accounts shows
-  "Watching since … · last check …", and live updates refetch only the resources an event touches.
-- Calendars keep a bounded sync on `sync:<accountId>` (calendar accounts only); provider free/busy
-  is passed to the agent runtime and MCP tools. New mail waits at most one minute for a companion
-  calendar that is still syncing.
-- `passport doctor` checks watcher health (last check, cursor age) instead of sync age.
-- MCP tool responses are capped at 64 KiB.
+- Mail is no longer mirrored. Connecting an account takes a change cursor at "now"; Passport never
+  backfills. A new-mail watcher (`watch:<accountId>`, every 30 seconds, `watch.intervalSeconds`;
+  IMAP IDLE checks at once) follows `MailReader.changes` in the `arrivals` quota lane, caches new
+  envelopes under mail-handle ids and triages new Inbox mail that is not from you. Label changes
+  and deletions only patch the local cache. An expired cursor marks labels stale and runs one
+  bounded sweep (`in:inbox newer_than:2d`, 100 messages, deduplicated). Rate limits back off the
+  watcher and never fail the account. New `account.watch.*` events.
+- `GET /api/emails` is provider search (`q`, `account`, `limit`, `pageToken`; cache-only without a
+  reader); `GET /api/emails/:id` and `POST /api/agent/triage/:id` accept mail handles and read
+  through the cache; `GET /api/threads/:id` reads a thread handle from the provider. Rate-limited
+  reads answer `429` with `Retry-After`.
+- `GET /api/accounts`: `messageCount` is the provider Inbox total from label counts, plus `watch: {
+  since, lastTickAt, cursorAgeSeconds, status }`; `syncing` is gone. The label tree refreshes on
+  connect and every 10 minutes. Doctor reports watcher health (last check, cursor age) and calendar
+  sync age separately.
+- Calendars keep the bounded sync; arrivals wait at most one minute (was ten) for a related
+  calendar. Composer runs start before queued background arrival and schedule runs.
+- Settings → Accounts shows "Watching since … · last check …" and the Inbox count; the sidebar
+  shows Watching, Paused or Needs sign-in. Workspace refetches are throttled per event type.
+- `store.maintenance` also evicts cached bodies and envelopes.
 
 ### Removed
 
-- "Load older mail", `POST /api/accounts/:id/backfill`, mail cursor-expiry reconciliation and
-  windowed snapshots. `sync.initialDays` is accepted with a one-time deprecation warning and ignored.
-
-### Added
-
-- `account.watch.started`, `account.watch.tick`, `account.watch.expired`, `account.watch.backoff`
-  and `account.watch.failed` events (`WatchEvent` in `@passport/types`).
+- Backfill (`POST /api/accounts/:id/backfill`, **Load older mail**), the windowed mail snapshot,
+  mail reconciliation and tombstoning by the sync service, and per-poll Gmail label refresh.
+  `sync.initialDays` is accepted with a one-time deprecation warning and ignored.
 
 ## [0.2.0] — 2026-10-21
 

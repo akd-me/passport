@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useSearchParams } from "react-router";
 import { AccountScope, useAccounts } from "./accounts/AccountFilter";
+import { FIRST_RUN_CONNECTED } from "./accounts/api";
 import { Icon, Loading } from "./components/ui";
 import { ConnectDialog } from "./connect/ConnectDialog";
 import { SetupFlow } from "./connect/SetupFlow";
@@ -32,7 +33,7 @@ function OpenSettings({ section }: { section: SettingsSection }) {
   useEffect(() => {
     openSettings(section);
     if (connected) {
-      notify("Connected. Passport reads your mail on demand and watches for new mail.");
+      notify(FIRST_RUN_CONNECTED);
     }
   }, [section, connected, openSettings, notify]);
   return <Navigate to="/" replace />;

@@ -8,11 +8,11 @@ import type {
   CalendarEvent,
   DomainEvent,
   Email,
-  EmailQuery,
   GlobalPolicyConfig,
   HostAgentStatus,
   LlmConfig,
   LlmSelection,
+  MailRow,
   Matter,
   Page,
   Person,
@@ -40,6 +40,20 @@ export interface PersonDetail {
   person: Person;
   emails: Page<Email>;
   matters: Matter[];
+}
+/** `GET /api/emails`: `q` is the portable query (`from:`, `is:unread`, `newer_than:7d`, …). */
+export interface MailSearchQuery {
+  q?: string;
+  account?: string;
+  limit?: number;
+  pageToken?: string;
+}
+export interface MailSearchPage {
+  /** Provider rows; cached `Email`s when `source` is `"cache"`. */
+  items: Array<MailRow | Email>;
+  nextPageToken?: string;
+  approxTotal?: number;
+  source?: string;
 }
 export interface AccountData {
   accounts: Account[];
@@ -136,10 +150,10 @@ export const api = {
     write<ActionRecord>(`/actions/${encodeURIComponent(id)}/cancel-hold`, "POST"),
   undo: (id: string) => write<ActionRecord>(`/actions/${encodeURIComponent(id)}/undo`, "POST"),
   actions: (query?: ActionQuery) => request<Page<ActionRecord>>(`/actions${queryString(query)}`),
-  emails: (query?: EmailQuery) =>
-    request<Page<Email>>(
-      `/emails${queryString(query ? { ...query, keywords: undefined, has: query.keywords?.has, not: query.keywords?.not } : {})}`,
-    ),
+  /** Provider search; `source: "cache"` when no account has an on-demand reader (demo). */
+  searchMail: (query: MailSearchQuery = {}) =>
+    request<MailSearchPage>(`/emails${queryString(query)}`),
+  /** Read-through: a mail handle or a cached ULID. */
   email: (id: string) => request<Email>(`/emails/${encodeURIComponent(id)}`),
   thread: (id: string) =>
     request<{ thread: Thread; emails: Page<Email> }>(`/threads/${encodeURIComponent(id)}`),

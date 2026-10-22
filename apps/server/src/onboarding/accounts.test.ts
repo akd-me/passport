@@ -1,4 +1,4 @@
-import type { ActionRecord, Matter, Page } from "@passport/types";
+import { type ActionRecord, type Matter, type Page, watcherTickKey } from "@passport/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { addAccount } from "../accounts.js";
 import { createApp } from "../auth.test-client.js";
@@ -6,6 +6,7 @@ import type { Backend } from "../backend.js";
 import { createRealBackend } from "../compose.js";
 import { defaultConfig, validateConfig } from "../config.js";
 import { createDemoBackend } from "../demo/index.js";
+import type { WatchStatus } from "../watch/status.js";
 import { resetDeprecationWarnings } from "./config.js";
 
 describe("account onboarding API", () => {
@@ -58,7 +59,7 @@ describe("account onboarding API", () => {
     expect(await response.text()).not.toContain("private");
     expect(await backend.store.accounts.list()).toHaveLength(0);
   });
-  it("shows inbox counts and watcher state, has no backfill, and removes local data durably", async () => {
+  it("shows inbox counts and watcher health, and removes local mail and credentials durably", async () => {
     backend = await createRealBackend(defaultConfig(), {
       storePath: ":memory:",
     });
@@ -70,17 +71,18 @@ describe("account onboarding API", () => {
     await backend.syncAccount(account.id);
     const app = createApp(backend),
       data = (await (await app.request("/api/accounts")).json()) as {
-        accounts: Array<Record<string, unknown>>;
+        accounts: Array<{ messageCount: number | null; watch: WatchStatus | null }>;
       };
-    // The provider's inbox total from label counts, not a local row count.
+    // Inbox total from the provider's label counts (22 of the 40 fixtures are in the Inbox).
     expect(data.accounts[0]!.messageCount).toBe(22);
     expect(data.accounts[0]).not.toHaveProperty("syncing");
-    expect(data.accounts[0]!.watch).toEqual({
+    expect(data.accounts[0]!.watch).toMatchObject({
+      status: "watching",
       since: expect.any(String),
       lastTickAt: expect.any(String),
       cursorAgeSeconds: expect.any(Number),
-      status: "watching",
     });
+    // Backfill is gone: there is no local mirror to extend.
     expect(
       (await app.request(`/api/accounts/${account.id}/backfill?days=90`, { method: "POST" }))
         .status,
@@ -92,8 +94,7 @@ describe("account onboarding API", () => {
     expect(await backend.store.accounts.getCredentials(account.id)).toBeNull();
     expect((await backend.store.emails.query({ accountId: account.id })).items).toHaveLength(0);
     expect(backend.config.accounts).toHaveLength(0);
-    expect(await backend.store.kv.get(`watcher-tick:${account.id}`)).toBeNull();
-    expect(await backend.store.syncState.get(account.id)).toBeNull();
+    expect(await backend.store.kv.get(watcherTickKey(account.id))).toBeNull();
   });
   it("filters actions before pagination and adds account IDs to matters", async () => {
     backend = await createDemoBackend();
@@ -122,13 +123,10 @@ describe("account onboarding API", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(defaultConfig().sync).toBeUndefined();
     expect(defaultConfig().watch?.intervalSeconds).toBe(30);
-    // Any value is ignored, even one v0.2 rejected.
-    expect(() => validateConfig({ ...defaultConfig(), sync: { initialDays: 0 } })).not.toThrow();
-    validateConfig({ ...defaultConfig(), sync: { initialDays: 365 } });
-    const warnings = warn.mock.calls.filter((call) =>
-      String(call.join(" ")).includes("initialDays"),
-    );
-    expect(warnings).toHaveLength(1);
+    validateConfig({ ...defaultConfig(), sync: { initialDays: 0 } });
+    validateConfig({ ...defaultConfig(), sync: { initialDays: 90 } });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toContain("sync.initialDays is deprecated");
     expect(() => validateConfig({ ...defaultConfig(), watch: { intervalSeconds: 1 } })).toThrow(
       "watch.intervalSeconds",
     );

@@ -1,8 +1,8 @@
-import type { Account, MailLabel, Store } from "@passport/types";
+import { type Account, type MailLabel, type Store, watcherTickKey } from "@passport/types";
 import { readCursors } from "../sync/state.js";
 
 /** ISO time of the last successful tick. The store reads it to decide cached-label staleness. */
-export const watcherTickKey = (accountId: string) => `watcher-tick:${accountId}`;
+export { watcherTickKey };
 /** `LabelSummary` from the last `labels(counts)` refresh. */
 export const labelsKey = (accountId: string) => `watch-labels:${accountId}`;
 /** `WatchState` while the watcher is backing off, failing, or unsupported. Absent when healthy. */

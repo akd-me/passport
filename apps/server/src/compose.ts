@@ -12,22 +12,17 @@ import { createMailboxMcpServer } from "@passport/mcp";
 import { createActionExecutor, createPolicyEngine } from "@passport/policy";
 import { createProviderRegistry, type PassportVerifier } from "@passport/providers";
 import { InMemoryEventBus, openStore } from "@passport/store";
-import type {
-  ActionExecutor,
-  AgentRuntime,
-  CalendarEvent,
-  Email,
-  ProviderRegistry,
-} from "@passport/types";
+import type { ActionExecutor, CalendarEvent, Email, ProviderRegistry } from "@passport/types";
+import { PriorityRunQueue } from "./agent-queue.js";
 import { type Arrival, ArrivalQueue, type ArrivalTrigger } from "./arrivals.js";
-import type { Backend } from "./backend.js";
+import type { Backend, PassportAgent } from "./backend.js";
 import { calendarSafeStore } from "./calendar-safety.js";
 import { llmConfigured, type PassportConfig, saveConfig, validateConfig } from "./config.js";
 import { ApiError } from "./errors.js";
 import { logger } from "./logger.js";
 import { persistOAuthCredentials } from "./onboarding/oauth.js";
 import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
-import { agentReaderOptions, mcpReaderOptions } from "./ondemand-wiring.js";
+import { withMcpReaders } from "./ondemand-wiring.js";
 import { attachSetupTasks } from "./setup/routes.js";
 import { ProviderConnections } from "./sync/connections.js";
 import { backendWatchHooks } from "./watch/backend.js";
@@ -180,8 +175,8 @@ export async function createRealBackend(
     const agentJobs = new Set<Promise<unknown>>();
     let closing: Promise<void> | undefined;
     let stopped = false;
-    let runtime: AgentRuntime;
-    let runQueue: Promise<unknown> = Promise.resolve();
+    let runtime: ReturnType<typeof createAgentRuntime>;
+    const runQueue = new PriorityRunQueue();
     let enabled = false;
     let currentTrigger: ArrivalTrigger | undefined;
     let currentStep: string | undefined;
@@ -245,7 +240,7 @@ export async function createRealBackend(
               }),
         selfAddresses: config.accounts.map((account) => account.emailAddress),
         freeBusy,
-        ...agentReaderOptions(readers, config.dataDir),
+        readers,
         runId: () => currentTrigger?.runId,
         triageStep: async <T>(step: string, task: () => Promise<T>): Promise<T> => {
           if (currentTrigger?.kind !== "email.received" || !currentTrigger.runId) {
@@ -311,10 +306,10 @@ export async function createRealBackend(
       }
     };
     configureAgent();
-    const agent: AgentRuntime = {
+    const agent: PassportAgent = {
       getUserProfile: () => runtime.getUserProfile(),
       setUserProfile: (markdown) => runtime.setUserProfile(markdown),
-      run: (trigger) => {
+      run: (trigger, runOptions = {}) => {
         if (stopped) {
           return Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"));
         }
@@ -323,18 +318,15 @@ export async function createRealBackend(
           return Promise.reject(new ApiError("LLM_NOT_CONFIGURED", "LLM not configured"));
         }
         // Keep one serialization boundary even when account/model settings replace the runtime.
-        const job = runQueue.then(async () => {
+        const priority =
+          runOptions.priority ?? (trigger.kind === "manual" ? "interactive" : "background");
+        const job = runQueue.enqueue(priority, async () => {
           currentTrigger = trigger as ArrivalTrigger;
           try {
-            return await runtime.run(trigger);
+            return await runtime.run(trigger, { priority });
           } finally {
             currentTrigger = undefined;
           }
-        });
-        runQueue = job.catch(() => {
-          // Account sync failed; retaining its recorded failure.
-          logger.warn("Account sync failed; retaining its recorded failure");
-          return undefined;
         });
         agentJobs.add(job);
         void job.then(
@@ -362,11 +354,7 @@ export async function createRealBackend(
       }
     };
     const dependencies = { store, executor, policy, bus, log: logger.warn };
-    const mcpDependencies = {
-      ...dependencies,
-      freeBusy,
-      ...mcpReaderOptions(readers, config.dataDir),
-    };
+    const mcpDependencies = withMcpReaders({ ...dependencies, freeBusy }, readers, config.dataDir);
     const mcp = createMailboxMcpServer(mcpDependencies);
     const servers = new Set([mcp]);
     return attachSetupTasks(

@@ -10,32 +10,13 @@ import {
 import { type DomainEvent, request } from "./api";
 import { checkSession, websocketUrl } from "./auth";
 import { logger } from "./logger";
+import { createRefreshThrottle } from "./refresh-throttle";
 
 /** Frames on /ws: domain events plus setup-task updates from the onboarding service. */
 type WorkspaceEvent = DomainEvent | { type: "setup.task.updated"; task: unknown };
 type Listener = (event: WorkspaceEvent) => void;
-/**
- * Resource groups (first `/api` path segment) an event can change. Unlisted events refetch
- * everything. The watcher ticks every 30 s per account, so its events and job runs only touch
- * the accounts / jobs views instead of every mounted resource.
- */
-const EVENT_SCOPES: Array<[prefix: string, scopes: string[]]> = [
-  ["account.watch.", ["accounts", "doctor"]],
-  ["account.sync", ["accounts", "doctor"]],
-  ["account.changed", ["accounts", "doctor", "providers"]],
-  ["email.", ["emails", "threads"]],
-  ["job.", ["jobs"]],
-];
-export function eventScopes(type: string): string[] | null {
-  return EVENT_SCOPES.find(([prefix]) => type.startsWith(prefix))?.[1] ?? null;
-}
-/** `/accounts?x=1` → `accounts`. */
-export const resourceScope = (path: string) => path.replace(/^\//, "").split(/[/?]/)[0] ?? "";
-
 interface WorkspaceState {
   version: number;
-  /** Per-scope versions bumped by scoped events; `version` bumps everything. */
-  scoped: Record<string, number>;
   subscribe: (listener: Listener) => () => void;
   refresh: () => void;
   connection: string;
@@ -44,7 +25,6 @@ interface WorkspaceState {
 }
 const Workspace = createContext<WorkspaceState>({
   version: 0,
-  scoped: {},
   subscribe: () => () => {},
   refresh: () => {},
   connection: "Connecting",
@@ -53,7 +33,6 @@ const Workspace = createContext<WorkspaceState>({
 });
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [version, setVersion] = useState(0),
-    [scoped, setScoped] = useState<Record<string, number>>({}),
     [connection, setConnection] = useState("Connecting"),
     [notice, notify] = useState("");
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
@@ -65,10 +44,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let socket: WebSocket | undefined,
       reconnect: ReturnType<typeof setTimeout>,
-      debounce: ReturnType<typeof setTimeout>,
-      pending: Set<string> | "all" | null = null,
       stopped = false,
       attempts = 0;
+    const throttle = createRefreshThrottle(refresh);
     const connect = () => {
       if (stopped) {
         return;
@@ -88,24 +66,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           for (const listener of listeners.current) {
             listener(event);
           }
-          const scopes = eventScopes(event.type);
-          pending = pending === "all" || !scopes ? "all" : new Set([...(pending ?? []), ...scopes]);
-          clearTimeout(debounce);
-          debounce = setTimeout(() => {
-            const due = pending;
-            pending = null;
-            if (due === "all") {
-              refresh();
-            } else if (due) {
-              setScoped((current) => {
-                const next = { ...current };
-                for (const scope of due) {
-                  next[scope] = (next[scope] ?? 0) + 1;
-                }
-                return next;
-              });
-            }
-          }, 120);
+          throttle.push(event as { type: string });
         } catch {
           // Workspace event frame could not be processed.
           logger.warn("Workspace event frame could not be processed");
@@ -128,7 +89,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => {
       stopped = true;
       clearTimeout(reconnect);
-      clearTimeout(debounce);
+      throttle.cancel();
       socket?.close();
       window.removeEventListener("focus", onFocus);
     };
@@ -141,7 +102,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [notice]);
   return (
-    <Workspace.Provider value={{ version, scoped, subscribe, refresh, connection, notice, notify }}>
+    <Workspace.Provider value={{ version, subscribe, refresh, connection, notice, notify }}>
       {children}
     </Workspace.Provider>
   );
@@ -155,8 +116,7 @@ export function useWorkspaceEvents(handler: Listener) {
   useEffect(() => subscribe((event) => latest.current(event)), [subscribe]);
 }
 export function useResource<T>(path: string | null) {
-  const { version, scoped, refresh } = useWorkspace();
-  const scopeVersion = path ? (scoped[resourceScope(path)] ?? 0) : 0;
+  const { version, refresh } = useWorkspace();
   const [state, setState] = useState<{
     data?: T;
     error?: string;
@@ -180,7 +140,7 @@ export function useResource<T>(path: string | null) {
         }
       });
     return () => controller.abort();
-  }, [path, version, scopeVersion]);
+  }, [path, version]);
   return { ...state, refresh };
 }
 export function useTask() {

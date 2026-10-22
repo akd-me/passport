@@ -48,8 +48,7 @@ describe("durable email arrivals", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
-  /** `baseline` runs the first watcher tick, which takes the cursor at "now" (no backfill). */
-  async function fixture(dataDir?: string, enabled = true, baseline = true) {
+  async function fixture(dataDir?: string, enabled = true) {
     const providers = createProviderRegistry();
     const mail = new MockMailProvider({
       fixtures: false,
@@ -77,9 +76,8 @@ describe("durable email arrivals", () => {
     const run = vi.spyOn(backend.agent, "run").mockResolvedValue(successfulRun);
     const scheduler = getSchedulerService(backend);
     await scheduler.ready;
-    if (baseline) {
-      await backend.syncAccount(account.id);
-    }
+    // The watcher's first tick takes its cursor at "now"; later injected mail arrives.
+    await backend.syncAccount(account.id);
     return { backend, mail, run, scheduler };
   }
   async function arrival(backend: RealBackend, providerId = "new"): Promise<Email> {
@@ -214,7 +212,7 @@ describe("durable email arrivals", () => {
     const first = await fixture(directory, false);
     first.mail.injectEmail({ providerId: "new" });
     await first.backend.syncAccount(account.id);
-    const second = await fixture(directory, false, false);
+    const second = await fixture(directory, false);
     let finish!: (run: AgentRun) => void;
     first.run.mockImplementationOnce(
       () =>
@@ -264,12 +262,15 @@ describe("durable email arrivals", () => {
     expect(run).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await backend.processArrivals!();
-    expect(run).toHaveBeenCalledExactlyOnceWith({
-      kind: "email.received",
-      emailId: email.id,
-      runId: `arrival:${email.id}`,
-      availabilityUnverified: true,
-    });
+    expect(run).toHaveBeenCalledExactlyOnceWith(
+      {
+        kind: "email.received",
+        emailId: email.id,
+        runId: `arrival:${email.id}`,
+        availabilityUnverified: true,
+      },
+      { priority: "background" },
+    );
   });
 
   it("R5: resumes deferred arrivals once the companion calendar has a completed sync", async () => {
@@ -374,14 +375,19 @@ describe("durable email arrivals", () => {
     await first.backend.close();
     backends.splice(backends.indexOf(first.backend), 1);
     await vi.advanceTimersByTimeAsync(60000);
-    const second = await fixture(directory, undefined, false);
+    const second = await fixture(directory);
+    // The provider still holds the message; read-through revalidation would tombstone it otherwise.
+    second.mail.injectEmail({ providerId: "new" });
     expect(await entry(second.backend, email)).toMatchObject({ attempts: 1 });
     await second.scheduler.scheduler.runNow("agent.arrivals");
-    expect(second.run).toHaveBeenCalledExactlyOnceWith({
-      kind: "email.received",
-      emailId: email.id,
-      runId: `arrival:${email.id}`,
-    });
+    expect(second.run).toHaveBeenCalledExactlyOnceWith(
+      {
+        kind: "email.received",
+        emailId: email.id,
+        runId: `arrival:${email.id}`,
+      },
+      { priority: "background" },
+    );
     expect(await entry(second.backend, email)).toBeNull();
   });
 

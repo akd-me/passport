@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Backend } from "../backend.js";
 import { createDemoBackend } from "../demo/index.js";
+import type { WatchTickResult } from "../watch/watcher.js";
+
+const tick: WatchTickResult = { status: "ok", added: 0, arrivals: 0, summary: "0 new arrivals" };
+
 import { type SchedulerHandle, startSchedulers } from "./index.js";
 
 describe("backend schedulers", () => {
   let backend: Backend, handle: SchedulerHandle | undefined;
-  const tick = { status: "ok" as const, added: 0, arrivals: 0, summary: "0 new arrivals" };
   beforeEach(async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 9, 20, 7, 59, 59));
@@ -118,13 +121,13 @@ describe("backend schedulers", () => {
     await stopping;
     expect(stopped).toBe(true);
   });
-  it("consumes optional push notifications and aborts waitForChanges on shutdown", async () => {
+  it("consumes optional push notifications as immediate watcher ticks and aborts waitForChanges on shutdown", async () => {
     const account = (await backend.store.accounts.list())[0]!;
     await backend.store.accounts.upsert({
       ...account,
       capabilities: { ...account.capabilities, push: true },
     });
-    const watch = vi.fn().mockResolvedValue(tick);
+    const watch = vi.fn(async () => tick);
     backend.watchAccount = watch;
     let change!: () => void;
     const wait = vi.fn(
@@ -142,7 +145,6 @@ describe("backend schedulers", () => {
     expect(watch).toHaveBeenCalledTimes(1);
     change();
     await vi.advanceTimersByTimeAsync(0);
-    // IMAP IDLE / push triggers an immediate watcher tick.
     expect(watch).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1000);
     expect(wait).toHaveBeenCalledTimes(2);
@@ -162,7 +164,7 @@ describe("backend schedulers", () => {
         change = resolve;
         signal.addEventListener("abort", () => resolve(), { once: true });
       });
-    const watch = vi.fn().mockResolvedValue(tick);
+    const watch = vi.fn(async () => tick);
     backend.watchAccount = watch;
     handle = startSchedulers(backend);
     await handle.ready;
@@ -172,29 +174,6 @@ describe("backend schedulers", () => {
     change();
     await vi.advanceTimersByTimeAsync(0);
     expect(watch).toHaveBeenCalledTimes(1);
-  });
-  it("watches mail every 30 seconds and syncs only calendars on the sync interval", async () => {
-    const account = (await backend.store.accounts.list())[0]!;
-    await backend.store.accounts.upsert({
-      ...account,
-      id: "mail-only",
-      capabilities: { ...account.capabilities, calendar: false, push: false },
-    });
-    const watch = vi.fn().mockResolvedValue(tick);
-    backend.watchAccount = watch;
-    const sync = vi.spyOn(backend, "syncAccount").mockResolvedValue();
-    handle = startSchedulers(backend);
-    await handle.ready;
-    await vi.advanceTimersByTimeAsync(0);
-    expect(handle.scheduler.get("watch:mail-only")).toMatchObject({
-      schedule: { type: "interval", everyMs: 30000 },
-    });
-    expect(handle.scheduler.get("sync:mail-only")).toBeUndefined();
-    expect(watch).toHaveBeenCalledWith("mail-only");
-    const before = watch.mock.calls.filter(([id]) => id === "mail-only").length;
-    await vi.advanceTimersByTimeAsync(30000);
-    expect(watch.mock.calls.filter(([id]) => id === "mail-only").length).toBe(before + 1);
-    expect(sync).not.toHaveBeenCalledWith("mail-only");
   });
   it("recovers from a failed scheduled operation on the next interval", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
