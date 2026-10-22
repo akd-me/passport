@@ -183,20 +183,21 @@ export function createMockEmails(accountId: string, owner = "alex@example.com"):
       size: Buffer.byteLength(text) + 500,
       personIds: [],
       verification: parseAuthenticationResults(headers),
-      attachments: index === 10
-        ? receiptAttachments(accountId, providerId)
-        : invite
-        ? [
-            {
-              id: localId(accountId, "attachment", providerId),
-              name: "invite.ics",
-              type: "text/calendar",
-              size: Buffer.byteLength(mockInvite(providerId)),
-              blobId: `mock-invite:${providerId}`,
-              disposition: "attachment",
-            },
-          ]
-        : [],
+      attachments:
+        index === 10
+          ? receiptAttachments(accountId, providerId)
+          : invite
+            ? [
+                {
+                  id: localId(accountId, "attachment", providerId),
+                  name: "invite.ics",
+                  type: "text/calendar",
+                  size: Buffer.byteLength(mockInvite(providerId)),
+                  blobId: `mock-invite:${providerId}`,
+                  disposition: "attachment",
+                },
+              ]
+            : [],
     };
   });
 }
@@ -229,7 +230,7 @@ function receiptAttachments(accountId: string, providerId: string): Email["attac
       id: localId(accountId, "attachment", `${providerId}:0`),
       name: "receipt-2400.pdf",
       type: "application/pdf",
-      size: mockFile(file("receipt-2400.pdf"))!.data.byteLength,
+      size: Buffer.byteLength(PLACEHOLDER_PDF),
       blobId: file("receipt-2400.pdf"),
       disposition: "attachment",
     },
@@ -237,7 +238,7 @@ function receiptAttachments(accountId: string, providerId: string): Email["attac
       id: localId(accountId, "attachment", `${providerId}:1`),
       name: "logo.png",
       type: "image/png",
-      size: mockFile(file("logo.png"))!.data.byteLength,
+      size: Buffer.from(PLACEHOLDER_PNG, "base64").byteLength,
       blobId: file("logo.png"),
       disposition: "inline",
       cid: "<logo@shop.example>",

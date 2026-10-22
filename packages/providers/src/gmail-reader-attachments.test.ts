@@ -71,10 +71,7 @@ describe("GmailMailReader.attachment", () => {
     expect(Buffer.from(first.value.data).toString()).toBe(PDF);
     expect(first.value.size).toBe(PDF.length);
     expect(first.cost.gmailUnits).toBe(60 + 20);
-    expect(calls).toEqual([
-      "GET messages/m1?format=full",
-      "GET messages/m1/attachments/ANG-pdf",
-    ]);
+    expect(calls).toEqual(["GET messages/m1?format=full", "GET messages/m1/attachments/ANG-pdf"]);
     const second = await reader.attachment("m1", { name: "PLAN.PDF" });
     expect(second.value.name).toBe("plan.pdf");
     expect(second.cost.gmailUnits).toBe(20);

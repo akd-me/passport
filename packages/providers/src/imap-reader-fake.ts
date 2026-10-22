@@ -18,6 +18,10 @@ export interface FakeMessageInput {
   references?: string;
   listId?: string;
   attachment?: string;
+  /** BODYSTRUCTURE size reported for the attachment part (default 5). */
+  attachmentSize?: number;
+  /** An inline image part with a Content-ID. */
+  inline?: { name: string; cid: string };
   flags?: string[];
   threadId?: string;
 }
@@ -58,30 +62,73 @@ function mime(m: FakeMessageInput): Buffer {
     "MIME-Version: 1.0",
   ];
   const text = m.body ?? "Hello";
-  if (!m.attachment) {
+  if (!m.attachment && !m.inline) {
     return Buffer.from(
       [...head, "Content-Type: text/plain; charset=utf-8", "", text, ""].join("\r\n"),
     );
   }
-  return Buffer.from(
-    [
-      ...head,
-      'Content-Type: multipart/mixed; boundary="b1"',
-      "",
-      "--b1",
-      "Content-Type: text/plain; charset=utf-8",
-      "",
-      text,
+  const parts = ["--b1", "Content-Type: text/plain; charset=utf-8", "", text];
+  if (m.attachment) {
+    parts.push(
       "--b1",
       `Content-Type: application/pdf; name="${m.attachment}"`,
       `Content-Disposition: attachment; filename="${m.attachment}"`,
       "Content-Transfer-Encoding: base64",
       "",
-      "JVBERi0=",
-      "--b1--",
+      PDF_BASE64,
+    );
+  }
+  if (m.inline) {
+    parts.push(
+      "--b1",
+      `Content-Type: image/png; name="${m.inline.name}"`,
+      `Content-Disposition: inline; filename="${m.inline.name}"`,
+      `Content-ID: <${m.inline.cid}>`,
+      "Content-Transfer-Encoding: base64",
       "",
-    ].join("\r\n"),
+      PNG_BASE64,
+    );
+  }
+  return Buffer.from(
+    [...head, 'Content-Type: multipart/mixed; boundary="b1"', "", ...parts, "--b1--", ""].join(
+      "\r\n",
+    ),
   );
+}
+
+/** `%PDF-` and a PNG signature, base64 as they appear in the fake MIME. */
+const PDF_BASE64 = "JVBERi0=";
+const PNG_BASE64 = "iVBORw==";
+
+/** BODYSTRUCTURE leaves of a fake message and the raw (encoded) bytes of each part. */
+function structure(m: Omit<FakeMessageInput, "flags">) {
+  const nodes: Array<Record<string, unknown> & { part: string; raw: string }> = [
+    { part: "1", type: "text/plain", size: 5, raw: m.body ?? "Hello" },
+  ];
+  if (m.attachment) {
+    nodes.push({
+      part: "2",
+      type: "application/pdf",
+      disposition: "attachment",
+      dispositionParameters: { filename: m.attachment },
+      encoding: "base64",
+      size: m.attachmentSize ?? 5,
+      raw: PDF_BASE64,
+    });
+  }
+  if (m.inline) {
+    nodes.push({
+      part: String(nodes.length + 1),
+      type: "image/png",
+      disposition: "inline",
+      dispositionParameters: { filename: m.inline.name },
+      id: `<${m.inline.cid}>`,
+      encoding: "base64",
+      size: PNG_BASE64.length,
+      raw: PNG_BASE64,
+    });
+  }
+  return nodes;
 }
 
 const includes = (haystack: string | undefined, needle: string) =>
@@ -297,21 +344,22 @@ export class FakeImapServer extends EventEmitter {
         from: [address(m.from)],
         to: [address(m.to ?? "Alex <alex@example.com>")],
       },
-      bodyStructure: m.attachment
+      bodyStructure:
+        m.attachment || m.inline
+          ? {
+              type: "multipart/mixed",
+              childNodes: structure(m).map(({ raw: _raw, ...node }) => node),
+            }
+          : { type: "text/plain", size: 5 },
+      ...(Array.isArray(query.bodyParts)
         ? {
-            type: "multipart/mixed",
-            childNodes: [
-              { part: "1", type: "text/plain", size: 5 },
-              {
-                part: "2",
-                type: "application/pdf",
-                disposition: "attachment",
-                dispositionParameters: { filename: m.attachment },
-                size: 5,
-              },
-            ],
+            bodyParts: new Map(
+              structure(m)
+                .filter((node) => (query.bodyParts as string[]).includes(node.part))
+                .map((node) => [node.part, Buffer.from(node.raw)]),
+            ),
           }
-        : { type: "text/plain", size: 5 },
+        : {}),
       headers: Buffer.from(`${(headerLines ?? []).join("\r\n")}\r\n`),
       ...(source
         ? {

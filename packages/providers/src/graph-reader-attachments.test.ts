@@ -19,10 +19,38 @@ function mailboxWithAttachments() {
           status: 200,
           body: {
             value: [
-              { "@odata.type": FILE, id: "a1", name: "plan.pdf", contentType: "application/pdf", size: 8, isInline: false },
-              { "@odata.type": FILE, id: "a2", name: "logo.png", contentType: "image/png", size: 4, isInline: true },
-              { "@odata.type": "#microsoft.graph.referenceAttachment", id: "a3", name: "Budget.xlsx", contentType: null, size: 0, isInline: false },
-              { "@odata.type": FILE, id: "a4", name: "huge.zip", contentType: "application/zip", size: MAIL_ATTACHMENT_MAX_BYTES + 1, isInline: false },
+              {
+                "@odata.type": FILE,
+                id: "a1",
+                name: "plan.pdf",
+                contentType: "application/pdf",
+                size: 8,
+                isInline: false,
+              },
+              {
+                "@odata.type": FILE,
+                id: "a2",
+                name: "logo.png",
+                contentType: "image/png",
+                size: 4,
+                isInline: true,
+              },
+              {
+                "@odata.type": "#microsoft.graph.referenceAttachment",
+                id: "a3",
+                name: "Budget.xlsx",
+                contentType: null,
+                size: 0,
+                isInline: false,
+              },
+              {
+                "@odata.type": FILE,
+                id: "a4",
+                name: "huge.zip",
+                contentType: "application/zip",
+                size: MAIL_ATTACHMENT_MAX_BYTES + 1,
+                isInline: false,
+              },
             ],
           },
         };
@@ -33,7 +61,10 @@ function mailboxWithAttachments() {
       case "/me/messages/g1/attachments/a3":
         return {
           status: 200,
-          body: { id: "a3", sourceUrl: "https://contoso.sharepoint.com/sites/x/Budget.xlsx?token=s3cret" },
+          body: {
+            id: "a3",
+            sourceUrl: "https://contoso.sharepoint.com/sites/x/Budget.xlsx?token=s3cret",
+          },
         };
       default:
         return undefined;
@@ -47,7 +78,12 @@ describe("GraphMailReader.attachment", () => {
     const graph = mailboxWithAttachments();
     const reader = await graph.connect();
     const first = await reader.attachment("g1", { index: 0 });
-    expect(first.value).toMatchObject({ name: "plan.pdf", type: "application/pdf", inline: false, size: 8 });
+    expect(first.value).toMatchObject({
+      name: "plan.pdf",
+      type: "application/pdf",
+      inline: false,
+      size: 8,
+    });
     expect(Buffer.from(first.value.data).toString()).toBe("%PDF-1.4");
     expect(first.cost.graphRequests).toBe(2);
     const manifest = graph.gets("/me/messages/g1/attachments")[0];

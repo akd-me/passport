@@ -167,11 +167,10 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
       },
       invoke: (calls, policy) => this.invoke(calls, policy),
       download: (blobId, meta, policy) =>
-        this.http(
-          this.downloadUrl(blobId, meta),
-          policy.signal ? { signal: policy.signal } : {},
-          { lane: policy.lane ?? "interactive", cost: 1 },
-        ),
+        this.http(this.downloadUrl(blobId, meta), policy.signal ? { signal: policy.signal } : {}, {
+          lane: policy.lane ?? "interactive",
+          cost: 1,
+        }),
       ...(this.options.governor ? { governor: this.options.governor } : {}),
       ...(this.options.verifier ? { verifier: this.options.verifier } : {}),
       now: () => this.options.now?.() ?? new Date(),
@@ -446,9 +445,8 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
       throw new ProviderError("NOT_CONNECTED", "JMAP session is unavailable");
     }
     const values: Record<string, string> = { accountId: this.remoteAccountId, blobId, ...meta };
-    return this.session.downloadUrl.replace(
-      /\{(accountId|blobId|name|type)\}/g,
-      (_, key: string) => encodeURIComponent(values[key]!),
+    return this.session.downloadUrl.replace(/\{(accountId|blobId|name|type)\}/g, (_, key: string) =>
+      encodeURIComponent(values[key]!),
     );
   }
   async applyChanges(changes: MailChange[]): Promise<void> {

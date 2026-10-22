@@ -80,7 +80,9 @@ export function imapManifest(
 
 /** Decodes quoted-printable bytes (RFC 2045 §6.7). */
 export function decodeQuotedPrintable(raw: Uint8Array): Uint8Array {
-  const text = Buffer.from(raw).toString("latin1").replace(/=\r?\n/g, "");
+  const text = Buffer.from(raw)
+    .toString("latin1")
+    .replace(/=\r?\n/g, "");
   const out = Buffer.alloc(text.length);
   let length = 0;
   for (let i = 0; i < text.length; i++) {
@@ -122,10 +124,14 @@ export async function fetchImapAttachment(
     if (!message?.bodyStructure) {
       throw new ProviderError("NOT_FOUND", "Message does not exist");
     }
-    const entry = pickAttachment(imapManifest(message.bodyStructure, ctx.accountId, providerId), ref);
+    const entry = pickAttachment(
+      imapManifest(message.bodyStructure, ctx.accountId, providerId),
+      ref,
+    );
     assertAttachmentSize(entry.size);
     const [fetched] = await session.fetch([uid], { bodyParts: [entry.part] });
-    const raw = fetched?.bodyParts?.get(entry.part) ?? fetched?.bodyParts?.get(entry.part.toLowerCase());
+    const raw =
+      fetched?.bodyParts?.get(entry.part) ?? fetched?.bodyParts?.get(entry.part.toLowerCase());
     if (!raw) {
       throw new ProviderError("NOT_FOUND", "Attachment does not exist");
     }
