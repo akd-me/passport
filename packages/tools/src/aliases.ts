@@ -7,7 +7,9 @@ import type { Email, EmailQuery, MailRow } from "@passport/types";
 import type { Context } from "./context.js";
 import {
   emailQueryToPortable,
+  MAIL_ID_KEYS,
   neutralize,
+  neutralizeDeep,
   onDemand,
   resolveContainer,
   resolveMailTarget,
@@ -180,13 +182,13 @@ export async function summarizeAlias(
     const { emails } = await loadMail(ctx, input.threadId, "thread");
     const page = emails.slice(-input.limit);
     return {
-      ...summarizeEmails(
-        input.threadId,
-        page,
-        emails.at(-1),
-        (email) => safeEmailView(email, input.full),
-        neutralize,
-      ),
+      // Every provider string (names, addresses, attachment names and types, headers, questions).
+      ...(neutralizeDeep(
+        summarizeEmails(input.threadId, page, emails.at(-1), (email) =>
+          safeEmailView(email, input.full),
+        ),
+        MAIL_ID_KEYS,
+      ) as Record<string, unknown>),
       nextCursor: null,
       total: emails.length,
       untrusted: UNTRUSTED_NOTICE,
