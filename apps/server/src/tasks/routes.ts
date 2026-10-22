@@ -9,6 +9,7 @@ import {
 import type { Hono } from "hono";
 import type { Backend } from "../backend.js";
 import { ApiError } from "../errors.js";
+import { readEmail } from "../ondemand-wiring.js";
 import { csv, jsonBody, limit } from "../route-input.js";
 import { integer, member, string } from "../validation.js";
 import type { TaskSystem } from "./wiring.js";
@@ -57,6 +58,43 @@ const ids = (value: unknown, name: string) => {
   return value as string[];
 };
 
+/**
+ * Composer context for `POST /api/tasks`: known accounts, an existing matter, and messages by
+ * ULID or mail handle (an uncached handle is fetched and cached, like explicit triage). Returns
+ * the email ULIDs the run receives.
+ */
+async function composerContext(backend: Backend, body: Record<string, unknown>) {
+  const accountIds = ids(body.accountIds, "accountIds");
+  for (const id of accountIds ?? []) {
+    if (!(await backend.store.accounts.get(id))) {
+      throw new ApiError("UNKNOWN_ACCOUNT", `Unknown account ${id}`);
+    }
+  }
+  const matterId = body.matterId === undefined ? undefined : text(body.matterId, "matterId", 200);
+  if (matterId && !(await backend.store.matters.get(matterId))) {
+    throw new ApiError("UNKNOWN_MATTER", "Unknown matterId");
+  }
+  const emailIds: string[] = [];
+  for (const id of ids(body.emailIds, "emailIds") ?? []) {
+    const email = id.trim() ? await readEmail(backend.store, backend.readers, id) : null;
+    if (!email) {
+      throw new ApiError("UNKNOWN_EMAIL", `Unknown email ${id}`);
+    }
+    if (accountIds?.length && !accountIds.includes(email.accountId)) {
+      throw new ApiError("ACCOUNT_MISMATCH", "An email belongs to an account outside accountIds");
+    }
+    if (!(await backend.store.emails.get(email.id, { cacheOnly: true }))) {
+      await backend.store.emails.upsertMany([email]);
+    }
+    emailIds.push(email.id);
+  }
+  return {
+    accountIds,
+    ...(matterId ? { matterId } : {}),
+    ...(emailIds.length ? { emailIds: [...new Set(emailIds)] } : {}),
+  };
+}
+
 /** Task API (docs/tasks.md). Approvals stay on `/api/actions/:id/{approve,reject}`. */
 export function installTaskRoutes(app: Hono, backend: Backend): void {
   app.get("/api/tasks", async (c) => {
@@ -80,11 +118,16 @@ export function installTaskRoutes(app: Hono, backend: Backend): void {
       "interactionMode",
       "message",
       "parentTaskId",
+      "matterId",
+      "emailIds",
     ]);
-    const { task, run } = await system(backend).service.create({
-      message: text(body.message, "message"),
-      title: body.title === undefined ? undefined : text(body.title, "title", 200),
-      accountIds: ids(body.accountIds, "accountIds"),
+    const tasks = system(backend);
+    const message = text(body.message, "message");
+    const title = body.title === undefined ? undefined : text(body.title, "title", 200);
+    const { task, run } = await tasks.service.create({
+      message,
+      title,
+      ...(await composerContext(backend, body)),
       permissionMode: mode(body.permissionMode),
       interactionMode: interaction(body.interactionMode),
       parentTaskId:
@@ -92,6 +135,9 @@ export function installTaskRoutes(app: Hono, backend: Backend): void {
     });
     return c.json({ task, run }, 201);
   });
+  app.get("/api/tasks/by-action/:actionId", async (c) =>
+    c.json(await system(backend).service.byAction(c.req.param("actionId"))),
+  );
   app.get("/api/tasks/:id", async (c) =>
     c.json(await system(backend).service.get(c.req.param("id"))),
   );

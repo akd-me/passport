@@ -1,8 +1,9 @@
+import { APPROVAL_SCOPES } from "@passport/types";
 import type { Hono } from "hono";
 import type { Backend } from "./backend.js";
-import { required } from "./errors.js";
+import { ApiError, required } from "./errors.js";
 import { actionQuery, jsonBody } from "./route-input.js";
-import { editedRequest, string } from "./validation.js";
+import { editedRequest, member, string } from "./validation.js";
 
 export function installActionsRoutes(app: Hono, backend: Backend): void {
   app.get("/api/decisions", async (c) =>
@@ -19,13 +20,20 @@ export function installActionsRoutes(app: Hono, backend: Backend): void {
   app.post("/api/actions/:id/approve", async (c) => {
     const body = await jsonBody(c.req.raw, true),
       original = required(await backend.store.actions.get(c.req.param("id")), "Action");
-    const edited = body.request ?? body.editedRequest;
-    return c.json(
-      await backend.executor.approve(
-        original.id,
-        edited === undefined ? undefined : editedRequest(edited, original.request),
-      ),
-    );
+    const raw = body.request ?? body.editedRequest;
+    const edited = raw === undefined ? undefined : editedRequest(raw, original.request);
+    // `task` and `always` (docs/tasks.md): later proposals of the same category stop asking.
+    const scope =
+      body.scope === undefined
+        ? "once"
+        : member(string(body.scope, "scope"), APPROVAL_SCOPES, "scope");
+    if (scope !== "once") {
+      if (!backend.tasks?.approvals) {
+        throw new ApiError("TASKS_UNAVAILABLE", "Approval scopes need the real backend", 501);
+      }
+      return c.json(await backend.tasks.approvals.approve(original, edited, scope));
+    }
+    return c.json(await backend.executor.approve(original.id, edited));
   });
   app.post("/api/actions/:id/reject", async (c) => {
     const body = await jsonBody(c.req.raw, true);

@@ -1,5 +1,13 @@
-import type { AgentRuntime, Email, EventBus, PolicyEngine, Store } from "@passport/types";
+import type {
+  ActionExecutor,
+  AgentRuntime,
+  Email,
+  EventBus,
+  PolicyEngine,
+  Store,
+} from "@passport/types";
 import { logger } from "../logger.js";
+import { TaskApprovals } from "./approvals.js";
 import type { RunCeilings } from "./runner.js";
 import { TaskService } from "./service.js";
 import { TaskTriggers } from "./triggers.js";
@@ -13,6 +21,8 @@ export interface TaskSystem {
   readonly service: TaskService;
   readonly triggers: TaskTriggers;
   readonly watches: TaskWatchMonitor;
+  /** Approval scopes; absent without an executor (tests that drive the service alone). */
+  readonly approvals?: TaskApprovals;
   /** `tasks.maintenance` job: snooze wake-ups, 3-day auto-settle, 14-day watch expiry. */
   maintain(): Promise<string>;
   close(): Promise<void>;
@@ -29,6 +39,8 @@ export function createTaskSystem(input: {
   policy: PolicyEngine;
   agent: AgentRuntime;
   ceilings: RunCeilings;
+  /** Enables approval scopes (`TaskApprovals`). */
+  executor?: ActionExecutor;
   watcher?: AddedMailSource;
   now?: () => string;
   coalesceMs?: number;
@@ -36,6 +48,10 @@ export function createTaskSystem(input: {
   const service = new TaskService(input);
   const triggers = new TaskTriggers(service);
   const watches = new TaskWatchMonitor(service, input.agent, input.coalesceMs);
+  const approvals = input.executor ? new TaskApprovals(service, input.executor) : undefined;
+  if (approvals) {
+    service.runner.autoApprove = (taskId, action) => approvals.autoApprove(taskId, action);
+  }
   const off = input.watcher?.onAdded((accountId, emails) =>
     watches.observeLater(accountId, emails),
   );
@@ -49,6 +65,7 @@ export function createTaskSystem(input: {
     service,
     triggers,
     watches,
+    approvals,
     async maintain() {
       await recovered;
       const { settled, woken } = await service.maintain();

@@ -319,7 +319,7 @@ export async function createRealBackend(
     };
     const tasks = options.clientMode
       ? undefined
-      : createTaskSystem({ store, bus, policy, agent, ceilings, watcher });
+      : createTaskSystem({ store, bus, policy, agent, ceilings, executor, watcher });
     const arrivals = options.clientMode
       ? undefined
       : new ArrivalQueue(

@@ -87,6 +87,8 @@ export class TaskRunner {
   private readonly active = new Map<string, ActiveRun>();
   private readonly byAgent = new Map<string, ActiveRun>();
   private readonly unsubscribe: Array<() => void> = [];
+  /** Task-scoped approval grants (`TaskApprovals.autoApprove`): the decided record, or null. */
+  autoApprove?: (taskId: string, action: ActionRecord) => Promise<ActionRecord | null>;
 
   constructor(
     private readonly store: Store,
@@ -284,7 +286,10 @@ export class TaskRunner {
   private onAction(action: ActionRecord) {
     const active = action.request.runId ? this.byAgent.get(action.request.runId) : undefined;
     if (active) {
-      this.queue(active, () => this.link(active.run.taskId, active.run.id, [action]));
+      this.queue(active, async () => {
+        const decided = await this.autoApprove?.(active.run.taskId, action);
+        await this.link(active.run.taskId, active.run.id, [decided ?? action]);
+      });
     }
   }
 
