@@ -29,6 +29,7 @@ import { checkMasterKey, resolveMasterKey } from "./master-key.js";
 import { persistOAuthCredentials } from "./onboarding/oauth.js";
 import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
 import { withMcpReaders } from "./ondemand-wiring.js";
+import { installReaderTokenSecret } from "./reader-tokens.js";
 import { attachSetupTasks } from "./setup/routes.js";
 import { ProviderConnections } from "./sync/connections.js";
 import { createTaskSystem, LaneQueue, RunCeilings, runPriority } from "./tasks/wiring.js";
@@ -74,6 +75,8 @@ export async function createRealBackend(
     await store.migrate();
     if (master) {
       await checkMasterKey(store, master);
+      // Sealed reader page tokens stay valid across restarts (R1-4 follow-up).
+      installReaderTokenSecret(master.key);
     }
     if ((await store.kv.get("user_profile")) === null) {
       await store.kv.set("user_profile", DEFAULT_USER_PROFILE);
