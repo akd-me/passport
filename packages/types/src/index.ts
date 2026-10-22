@@ -16,6 +16,7 @@ import type {
   StoreMailboxesOnDemand,
   StoreOnDemand,
 } from "./store-ondemand.js";
+import type { TaskEvent } from "./tasks.js";
 import type { WatchEvent } from "./watch.js";
 
 // ---------------------------------------------------------------------------
@@ -906,7 +907,8 @@ export type DomainEvent =
     }
   | { type: "job.updated"; jobId: Id }
   | { type: "setup.task.updated"; task: SetupTask }
-  | WatchEvent;
+  | WatchEvent
+  | TaskEvent;
 
 export interface EventBus {
   emit(event: DomainEvent): void;
@@ -1261,5 +1263,6 @@ export * from "./agent-ondemand.js";
 export * from "./mail-row.js";
 export * from "./ondemand.js";
 export * from "./store-ondemand.js";
+export * from "./tasks.js";
 export * from "./tools-ondemand.js";
 export * from "./watch.js";
