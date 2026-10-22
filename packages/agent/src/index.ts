@@ -10,18 +10,28 @@ export type {
 } from "@passport/types";
 export type { AgentRunResult, AgentRuntimeOptions, RegistryAgentRuntime } from "./context.js";
 export { AgentError, LlmError } from "./errors.js";
-export type { DetectHostAgentsOptions, HostAgentLlmClientOptions } from "./host/index.js";
+export type {
+  DetectHostAgentsOptions,
+  HostAgentLlmClientOptions,
+  ProbeShellEnvironmentOptions,
+  ShellEnvironment,
+  ShellEnvironmentSource,
+} from "./host/index.js";
 export {
+  applyShellEnvironment,
   detectHostAgents,
+  extraBinDirs,
   HOST_AGENT_DEFAULT_MODELS,
   HOST_AGENT_FIXES,
   HOST_AGENT_KINDS,
   HOST_AGENT_MODELS,
   HostAgentLlmClient,
   preferredHostAgent,
+  probeShellEnvironment,
   redact,
   resolveHostAgentBinary,
   runHostAgentSession,
+  SHELL_ENV_NAMES,
 } from "./host/index.js";
 export type {
   AgentDecision,

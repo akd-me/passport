@@ -58,9 +58,16 @@ Interactive tools are emulated as structured output, so Passport executes them u
 "fast"` uses `fastModel`, defaulting to `claude-haiku-5-5` / `gpt-5.6-luna`. Usage maps to `LlmUsage`
 with `costUsd: null`.
 
-`detectHostAgents()` resolves `claude` / `codex` on `PATH` plus `~/.local/bin`, `/opt/homebrew/bin`
-and `/usr/local/bin` (or `PASSPORT_CLAUDE_PATH` / `PASSPORT_CODEX_PATH`) and reports version, login
-and plan without reading tokens; results are cached for 60 seconds.
+`detectHostAgents()` resolves `claude` / `codex` on `PATH` plus `extraBinDirs()` (`~/.local/bin`,
+Homebrew, `/usr/local/bin`, volta, bun, pnpm, `~/.npm-global/bin`, mise/asdf shims, fnm's default
+alias), or `PASSPORT_CLAUDE_PATH` / `PASSPORT_CODEX_PATH`, and reports version, login and plan
+without reading tokens; results are cached for 60 seconds.
+
+`probeShellEnvironment()` reads `PATH` and allowlisted certificate, Homebrew, version-manager and
+locale variables from the login shell (`$SHELL -ilc`, detached, stdin ignored, 5-second timeout,
+SIGTERM then SIGKILL), falling back to `launchctl getenv PATH` on macOS and then the inherited
+`PATH`; `applyShellEnvironment(result)` writes it into `process.env`. Use it in processes started
+from Finder or launchd, where `PATH` lacks user-installed CLIs.
 
 `runHostAgentSession(request, onEvent)` is an agentic run: MCP servers (`{ command, args, env }` or
 `{ url, headers }`) are wired through a private `--mcp-config` file with `--strict-mcp-config` (Claude

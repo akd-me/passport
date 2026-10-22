@@ -9,5 +9,15 @@ export {
   preferredHostAgent,
   resolveHostAgentBinary,
 } from "./detect.js";
-export { redact } from "./env.js";
+export { extraBinDirs, redact } from "./env.js";
 export { runHostAgentSession } from "./session.js";
+export type {
+  ProbeShellEnvironmentOptions,
+  ShellEnvironment,
+  ShellEnvironmentSource,
+} from "./shell-env.js";
+export {
+  applyShellEnvironment,
+  probeShellEnvironment,
+  SHELL_ENV_NAMES,
+} from "./shell-env.js";

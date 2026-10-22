@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
@@ -39,6 +40,15 @@ const FORWARDED = [
   "SSL_CERT_DIR",
   "NODE_EXTRA_CA_CERTS",
   "__CF_USER_TEXT_ENCODING",
+  // Version-manager and Homebrew state, so shims and `mise x` wrappers resolve Node without looping.
+  "__MISE_DIFF",
+  "HOMEBREW_PREFIX",
+  "HOMEBREW_CELLAR",
+  "HOMEBREW_REPOSITORY",
+  "VOLTA_HOME",
+  "FNM_DIR",
+  "FNM_MULTISHELL_PATH",
+  "NVM_DIR",
   // Windows equivalents of HOME/TMPDIR and the executable search order.
   "USERPROFILE",
   "APPDATA",
@@ -56,10 +66,49 @@ export function isForwardedEnv(key: string): boolean {
   return key === "PATH" || key === "Path" || key === "NO_COLOR" || FORWARDED.includes(key);
 }
 
-/** Extra directories searched for host CLIs, after `PATH`. */
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    // Absent: this version manager is not installed.
+    return false;
+  }
+}
+
+/** fnm's default-alias `bin`, under `$FNM_DIR` or one of fnm's default homes, if present. */
+function fnmDefaultBin(env: NodeJS.ProcessEnv, home: string): string[] {
+  const roots = [
+    env.FNM_DIR,
+    join(home, ".local", "share", "fnm"),
+    join(home, ".fnm"),
+    join(home, "Library", "Application Support", "fnm"),
+  ];
+  const found = roots
+    .filter((root): root is string => !!root)
+    .map((root) => join(root, "aliases", "default", "bin"))
+    .find(isDirectory);
+  return found ? [found] : [];
+}
+
+/**
+ * Extra directories searched for host CLIs, after `PATH`: the native installer, Homebrew, and
+ * the usual global-install locations of volta, bun, pnpm, npm, mise, asdf and fnm. A last resort
+ * when the login-shell probe (see `probeShellEnvironment`) could not supply PATH.
+ */
 export function extraBinDirs(env: NodeJS.ProcessEnv = process.env): string[] {
   const home = env.HOME || homedir();
-  return [join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin"];
+  return [
+    join(home, ".local", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    join(env.VOLTA_HOME || join(home, ".volta"), "bin"),
+    join(home, ".bun", "bin"),
+    join(home, "Library", "pnpm"),
+    join(home, ".npm-global", "bin"),
+    join(home, ".local", "share", "mise", "shims"),
+    join(home, ".asdf", "shims"),
+    ...fnmDefaultBin(env, home),
+  ];
 }
 
 /** Minimal child environment. `binaryPath`'s directory is added so CLIs find their own helpers. */
