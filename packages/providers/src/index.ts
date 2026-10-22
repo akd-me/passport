@@ -11,6 +11,8 @@ export { GmailMailProvider, gmailCapabilities, normalizeGmail } from "./gmail.js
 export { GoogleCalendarProvider, normalizeGoogleEvent } from "./google-calendar.js";
 export { GraphMailProvider, graphCapabilities, normalizeGraph } from "./graph.js";
 export { GraphCalendarProvider, normalizeGraphEvent } from "./graph-calendar.js";
+export type { GraphCostEntry, GraphReaderOptions, GraphReadResult } from "./graph-reader.js";
+export { GraphMailReader } from "./graph-reader.js";
 export type { ProviderOptions, RequestPolicy } from "./http.js";
 export type { ImapProviderOptions, SmtpClient } from "./imap.js";
 export { ImapMailProvider, imapCapabilities, imapFlagsToKeywords } from "./imap.js";

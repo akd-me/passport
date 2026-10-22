@@ -18,6 +18,7 @@ import {
   ProviderError,
   required,
 } from "./errors.js";
+import { GraphMailReader, type GraphReaderOptions } from "./graph-reader.js";
 import { HttpConnection, type ProviderOptions } from "./http.js";
 import {
   generatePreview,
@@ -88,6 +89,8 @@ export const graphCapabilities: AccountCapabilities = {
   push: false,
   labels: false,
   submit: true,
+  search: true,
+  onDemand: true,
 };
 
 /** Graph IDs are requested as ImmutableId so moves keep provider identities stable. */
@@ -162,8 +165,31 @@ export async function normalizeGraph(
 export class GraphMailProvider extends HttpConnection implements MailProvider {
   readonly kind = "graph" as const;
   readonly capabilities = graphCapabilities;
-  constructor(options: ProviderOptions = {}) {
+  private mailReader?: GraphMailReader;
+  constructor(options: ProviderOptions & { reader?: GraphReaderOptions } = {}) {
     super(options, "microsoft");
+  }
+  /** On-demand reader bound to the connected account (one instance per provider). */
+  reader(): GraphMailReader {
+    const options = this.options as ProviderOptions & { reader?: GraphReaderOptions };
+    this.mailReader ??= new GraphMailReader(
+      {
+        accountId: () => {
+          this.check();
+          return this.account.id;
+        },
+        json: (url, init, policy) => this.json(url, init, policy),
+        safeLink: (link) => this.safeLink(link, `${graphBase}/`),
+        report: (signal) => options.governor?.report(this.account.id, signal),
+        snapshot: () => options.governor?.snapshot(this.account.id) ?? {},
+        governed: Boolean(options.governor),
+        sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+        now: () => this.now(),
+        verifier: options.verifier,
+      },
+      options.reader,
+    );
+    return this.mailReader;
   }
   private async api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
