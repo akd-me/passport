@@ -27,8 +27,12 @@ import { ApiError } from "./errors.js";
 import { logger } from "./logger.js";
 import { persistOAuthCredentials } from "./onboarding/oauth.js";
 import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
+import { agentReaderOptions, mcpReaderOptions } from "./ondemand-wiring.js";
 import { attachSetupTasks } from "./setup/routes.js";
 import { ProviderConnections } from "./sync/connections.js";
+import { backendWatchHooks } from "./watch/backend.js";
+import { attachMailWatcher } from "./watch/watcher.js";
+import { createOnDemandWiring } from "./watch/wiring.js";
 
 export interface RealBackendOptions {
   /** Client processes may submit Actions, but never run automatic arrivals/jobs. */
@@ -128,7 +132,14 @@ export async function createRealBackend(
       }
       return result;
     });
-    sync = new AccountSyncService(store, bus, connections.mail, connections.calendar, config);
+    sync = new AccountSyncService(store, bus, connections.mail, connections.calendar);
+    const { readers, watcher, freeBusy } = createOnDemandWiring({
+      store,
+      bus,
+      mailFor: connections.mail,
+      calendarFor: connections.calendar,
+      sync,
+    });
     const policy = createPolicyEngine({ store, bus });
     const evaluate = policy.evaluate.bind(policy);
     policy.evaluate = async (request) => {
@@ -233,6 +244,8 @@ export async function createRealBackend(
                 },
               }),
         selfAddresses: config.accounts.map((account) => account.emailAddress),
+        freeBusy,
+        ...agentReaderOptions(readers, config.dataDir),
         runId: () => currentTrigger?.runId,
         triageStep: async <T>(step: string, task: () => Promise<T>): Promise<T> => {
           if (currentTrigger?.kind !== "email.received" || !currentTrigger.runId) {
@@ -349,76 +362,82 @@ export async function createRealBackend(
       }
     };
     const dependencies = { store, executor, policy, bus, log: logger.warn };
-    const mcp = createMailboxMcpServer(dependencies);
+    const mcpDependencies = {
+      ...dependencies,
+      freeBusy,
+      ...mcpReaderOptions(readers, config.dataDir),
+    };
+    const mcp = createMailboxMcpServer(mcpDependencies);
     const servers = new Set([mcp]);
     return attachSetupTasks(
-      attachAccountSync<RealBackend>(
-        {
-          mode: "real",
-          ...dependencies,
-          providers,
-          config,
-          agent,
-          mcp,
-          providerKinds: [
-            "gmail",
-            "graph",
-            "imap",
-            "jmap",
-            "google-calendar",
-            "graph-calendar",
-            "caldav",
-            "mock",
-          ],
-          createMcpServer() {
-            const server = createMailboxMcpServer(dependencies);
-            servers.add(server);
-            return server;
-          },
-          async updateConfig(patch) {
-            await drainAgentQueue();
-            const next = validateConfig({ ...config, ...patch });
-            if (!memory) {
-              await saveConfig(next);
-            }
-            Object.assign(config, next);
-            configureAgent();
-          },
-          syncAccount: (id) =>
-            stopped
-              ? Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"))
-              : sync.syncAccount(id),
-          async waitForChanges(id, signal) {
-            if (signal.aborted) {
-              return;
-            }
-            const provider = await connections.mail(id);
-            if (provider.waitForChanges) {
-              await provider.waitForChanges(signal);
-            } else {
-              await new Promise<void>((resolve) => {
-                if (signal.aborted) {
-                  resolve();
-                } else {
-                  signal.addEventListener("abort", () => resolve(), { once: true });
-                }
-              });
-            }
-          },
-          drainAgentQueue,
-          processArrivals: (signal) => arrivals?.drainDue(signal) ?? Promise.resolve(),
-          close: () =>
-            (closing ??= (async () => {
-              await sync.drain();
-              unsubscribe();
+      attachMailWatcher(
+        attachAccountSync<RealBackend>(
+          {
+            mode: "real",
+            ...dependencies,
+            providers,
+            config,
+            agent,
+            mcp,
+            providerKinds: [
+              "gmail",
+              "graph",
+              "imap",
+              "jmap",
+              "google-calendar",
+              "graph-calendar",
+              "caldav",
+              "mock",
+            ],
+            createMcpServer() {
+              const server = createMailboxMcpServer(mcpDependencies);
+              servers.add(server);
+              return server;
+            },
+            async updateConfig(patch) {
               await drainAgentQueue();
-              stopped = true;
-              await Promise.allSettled([...servers].map((server) => server.close()));
-              await connections.close();
-              await store.close();
-            })()),
-        },
-        sync,
+              const next = validateConfig({ ...config, ...patch });
+              if (!memory) {
+                await saveConfig(next);
+              }
+              Object.assign(config, next);
+              configureAgent();
+            },
+            ...backendWatchHooks({ store, config, readers, sync, watcher, closed: () => stopped }),
+            async waitForChanges(id, signal) {
+              if (signal.aborted) {
+                return;
+              }
+              const provider = await connections.mail(id);
+              if (provider.waitForChanges) {
+                await provider.waitForChanges(signal);
+              } else {
+                await new Promise<void>((resolve) => {
+                  if (signal.aborted) {
+                    resolve();
+                  } else {
+                    signal.addEventListener("abort", () => resolve(), { once: true });
+                  }
+                });
+              }
+            },
+            drainAgentQueue,
+            processArrivals: (signal) => arrivals?.drainDue(signal) ?? Promise.resolve(),
+            close: () =>
+              (closing ??= (async () => {
+                await sync.drain();
+                await watcher.stop();
+                unsubscribe();
+                await drainAgentQueue();
+                stopped = true;
+                await Promise.allSettled([...servers].map((server) => server.close()));
+                await connections.close();
+                await store.close();
+              })()),
+          },
+          sync,
+        ),
+        watcher,
       ),
     );
   } catch (error) {

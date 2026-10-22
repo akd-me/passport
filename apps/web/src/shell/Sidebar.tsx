@@ -117,10 +117,7 @@ function AccountsGroup() {
               <AccountDot id={account.id} />
               <span className="side-label">
                 {account.emailAddress}
-                <small className={attention ? "warn" : ""}>
-                  {account.syncing && <Icon name="spinner" size={11} />}
-                  {syncSummary(account)}
-                </small>
+                <small className={attention ? "warn" : ""}>{syncSummary(account)}</small>
               </span>
               {attention && <Icon name="alert" size={13} className="warn" />}
             </button>

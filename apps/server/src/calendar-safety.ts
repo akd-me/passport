@@ -1,6 +1,7 @@
 import type { Account, ActionParams, EventBus, Store } from "@passport/types";
 import { expandRecurringEvents } from "./calendar-recurrence.js";
 import { ApiError } from "./errors.js";
+import { legacyPrefix, parseCursors, prefix } from "./sync/state.js";
 
 async function relevantCalendars(store: Store, accountId: string): Promise<Account[]> {
   const accounts = await store.accounts.list();
@@ -56,8 +57,8 @@ export async function calendarsReady(
       return false;
     }
     if (
-      state.cursor.startsWith("passport-sync-v1:") &&
-      !JSON.parse(state.cursor.slice("passport-sync-v1:".length)).calendar
+      (state.cursor.startsWith(prefix) || state.cursor.startsWith(legacyPrefix)) &&
+      !parseCursors(state.cursor).calendar
     ) {
       return false;
     }

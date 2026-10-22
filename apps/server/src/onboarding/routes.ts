@@ -7,6 +7,8 @@ import { probeAccount, runDoctor } from "../doctor.js";
 import { ApiError, required } from "../errors.js";
 import { publicLlm } from "../llm-selection.js";
 import { object } from "../validation.js";
+import { inboxCount } from "../watch/status.js";
+import { mailWatcher } from "../watch/watcher.js";
 import { registerAccountFilters } from "./filters.js";
 import { type BrowserOAuth, browserOAuth, oauthCookie } from "./oauth.js";
 import { accountSync } from "./sync.js";
@@ -62,14 +64,11 @@ export function registerOnboarding(
     const accounts = await Promise.all(
       (await backend.store.accounts.list()).map(async (account) => ({
         ...account,
-        messageCount:
-          (
-            await backend.store.emails.query({
-              accountId: account.id,
-              limit: 1,
-            })
-          ).total ?? 0,
-        syncing: accountSync(backend)?.isSyncing(account.id) ?? false,
+        // Provider inbox total from the last label refresh; Passport keeps no local mirror.
+        messageCount: account.capabilities.mail
+          ? await inboxCount(backend.store, account.id)
+          : null,
+        watch: (await backend.watchStatus?.(account)) ?? null,
       })),
     );
     return c.json({
@@ -120,6 +119,7 @@ export function registerOnboarding(
     const linked = all.filter((a) => a.id === id || a.settings.mailAccountId === id);
     for (const item of linked) {
       await accountSync(backend)?.remove(item.id);
+      await mailWatcher(backend)?.remove(item.id);
       await backend.store.accounts.delete(item.id);
       backend.bus.emit({ type: "account.changed", accountId: item.id });
     }
@@ -127,17 +127,6 @@ export function registerOnboarding(
       accounts: await backend.store.accounts.list(),
     });
     return c.json({ ok: true, removed: account.id });
-  });
-  app.post("/api/accounts/:id/backfill", async (c) => {
-    const id = c.req.param("id"),
-      days = Number(c.req.query("days"));
-    required(await backend.store.accounts.get(id), "Account");
-    const service = accountSync(backend);
-    if (!service) {
-      throw new ApiError("BACKFILL_UNAVAILABLE", "Backfill requires passport serve");
-    }
-    await service.backfill(id, days);
-    return c.json({ ok: true });
   });
   app.post("/api/accounts/:id/sync", async (c) => {
     const account = required(await backend.store.accounts.get(c.req.param("id")), "Account");

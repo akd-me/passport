@@ -117,9 +117,9 @@ export function AccountWizard({
         return `Connected. Sync needs attention: ${linked.lastSyncError}`;
       }
       if (linked?.lastSyncAt && !linked.syncing) {
-        return `Connected and synced ${linked.messageCount ?? 0} messages.`;
+        return "Connected. Passport reads your mail on demand and watches for new mail.";
       }
-      return "Connected. Initial sync is running…";
+      return "Connected. Passport reads your mail on demand and watches for new mail.";
     }
     if (status?.status === "failed") {
       return "Connection was not completed.";

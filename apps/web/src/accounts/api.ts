@@ -1,8 +1,20 @@
 import type { Account } from "@passport/types";
 import { request } from "../api";
 
+/** `GET /api/accounts` → `watch`: the new-mail watcher. Times are ISO UTC. */
+export interface AccountWatch {
+  since: string | null;
+  lastTickAt: string | null;
+  cursorAgeSeconds: number | null;
+  status: "starting" | "watching" | "backoff" | "stale" | "error" | "unsupported" | "needs-sign-in";
+  error?: string;
+  retryAt?: string;
+}
 export type ConnectedAccount = Account & {
-  messageCount?: number;
+  /** Provider inbox total from the last label refresh; null until known. */
+  messageCount?: number | null;
+  watch?: AccountWatch | null;
+  /** @deprecated v0.2 mirror progress; no longer sent. */
   syncing?: boolean;
 };
 export interface ConnectionAttempt {
@@ -45,7 +57,5 @@ export const accountApi = {
     request<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
-  backfill: (id: string, days: number) =>
-    post<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}/backfill?days=${days}`),
   doctor: () => request<DoctorReport>("/doctor"),
 };

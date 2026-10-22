@@ -3,6 +3,43 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
+## [Unreleased]
+
+### Changed
+
+- Mail is no longer mirrored. A per-account new-mail watcher (`watch:<accountId>`, every 30 s,
+  `watch.intervalSeconds`; IMAP IDLE checks immediately) follows `MailReader.changes` from a cursor
+  taken at connect time. Accounts are usable as soon as they connect: there is no initial sync and no
+  backfill, and only mail that arrives afterwards is triaged (Inbox, not from you, not already
+  handled). Label changes and deletions patch the small envelope cache; there are no tombstones.
+- An expired provider cursor (Gmail history 404, Graph delta 410) now marks cached labels stale and
+  runs one bounded `in:inbox newer_than:2d` sweep instead of a full resync and reconciliation.
+- Rate limits back the watcher off (30 s doubling, governor retry hint, at most 15 minutes) without
+  failing the account.
+- `GET /api/emails` searches the provider (`q`, `account`, `limit`, `pageToken`; 429 with
+  `retryAfterSeconds` when rate limited), falling back to cached mail without an on-demand reader.
+  `GET /api/emails/:id` and `POST /api/agent/triage/:id` accept mail handles and read through to the
+  provider; `GET /api/threads/:id` fetches handle threads from the provider.
+- `GET /api/accounts`: `messageCount` is the provider inbox total from label counts (refreshed on
+  connect and every 10 minutes); new `watch: { since, lastTickAt, cursorAgeSeconds, status }`;
+  `syncing` is gone. The sidebar shows Watching / Paused / Needs sign-in, Settings › Accounts shows
+  "Watching since … · last check …", and live updates refetch only the resources an event touches.
+- Calendars keep a bounded sync on `sync:<accountId>` (calendar accounts only); provider free/busy
+  is passed to the agent runtime and MCP tools. New mail waits at most one minute for a companion
+  calendar that is still syncing.
+- `passport doctor` checks watcher health (last check, cursor age) instead of sync age.
+- MCP tool responses are capped at 64 KiB.
+
+### Removed
+
+- "Load older mail", `POST /api/accounts/:id/backfill`, mail cursor-expiry reconciliation and
+  windowed snapshots. `sync.initialDays` is accepted with a one-time deprecation warning and ignored.
+
+### Added
+
+- `account.watch.started`, `account.watch.tick`, `account.watch.expired`, `account.watch.backoff`
+  and `account.watch.failed` events (`WatchEvent` in `@passport/types`).
+
 ## [0.2.0] — 2026-10-21
 
 ### Added

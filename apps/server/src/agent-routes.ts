@@ -1,12 +1,20 @@
 import type { Hono } from "hono";
 import type { Backend } from "./backend.js";
 import { ApiError, required } from "./errors.js";
+import { readEmail } from "./ondemand-wiring.js";
 import { jsonBody } from "./route-input.js";
 import { string } from "./validation.js";
 
 export function installAgentRoutes(app: Hono, backend: Backend): void {
   app.post("/api/agent/triage/:id", async (c) => {
-    const email = required(await backend.store.emails.get(c.req.param("id")), "Email");
+    // Accepts a ULID or a mail handle; an uncached handle is fetched and cached for triage.
+    const email = required(
+      await readEmail(backend.store, backend.readers, c.req.param("id")),
+      "Email",
+    );
+    if (!(await backend.store.emails.get(email.id))) {
+      await backend.store.emails.upsertMany([email]);
+    }
     return c.json(await backend.agent.run({ kind: "email.received", emailId: email.id }));
   });
   app.post("/api/agent/run", async (c) => {

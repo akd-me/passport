@@ -120,7 +120,7 @@ export function TaskView({
           <h3>{setupTitle()}</h3>
           <p className="hint">
             {task.status === "completed"
-              ? "The first sync is running. Proposals will appear in your queue."
+              ? "Connected. Passport reads your mail on demand and watches for new mail. Ask it to do something, or let it triage what arrives."
               : isFinished(task)
                 ? "Nothing was saved. You can try again or set it up by hand."
                 : "Your host agent is doing the setup. This takes a minute or two."}

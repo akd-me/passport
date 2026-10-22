@@ -7,6 +7,7 @@ import { createApp } from "./auth.test-client.js";
 import { createRealBackend } from "./compose.js";
 import { defaultConfig, loadConfig, saveConfig } from "./config.js";
 import { createDemoBackend } from "./demo/index.js";
+import { readCursors } from "./sync/state.js";
 
 describe("configuration and composition", () => {
   const paths: string[] = [];
@@ -110,7 +111,9 @@ describe("configuration and composition", () => {
       expect(await restarted.store.accounts.getCredentials(accountId!)).toEqual({
         token: "test-credential",
       });
-      expect((await restarted.store.emails.query({ limit: 100 })).items).toHaveLength(40);
+      // The watcher cursor survives a restart; no mail was mirrored.
+      expect((await readCursors(restarted.store, accountId!)).mail).toBeTruthy();
+      expect((await restarted.store.emails.query({ limit: 100 })).items).toHaveLength(0);
     } finally {
       await restarted.close();
     }
