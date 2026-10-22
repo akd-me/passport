@@ -1,4 +1,10 @@
-import type { CalendarProvider, MailProvider, ProviderRegistry, Store } from "@passport/types";
+import type {
+  CalendarProvider,
+  MailProvider,
+  MailReader,
+  ProviderRegistry,
+  Store,
+} from "@passport/types";
 import { ApiError, required } from "../errors.js";
 import { logger } from "../logger.js";
 
@@ -103,6 +109,31 @@ export class ProviderConnections {
           }
           if (property === "connect" || property === "disconnect") {
             return value.bind(target);
+          }
+          if (property === "reader") {
+            // The reader shares this adapter: its calls count as active operations, and a
+            // failed read (NOT_FOUND, RATE_LIMITED) never invalidates the connection.
+            return async () => {
+              await connect();
+              const reader = value.apply(target) as MailReader;
+              return new Proxy(reader, {
+                get: (inner, method) => {
+                  const fn = Reflect.get(inner, method, inner);
+                  if (typeof fn !== "function") {
+                    return fn;
+                  }
+                  return async (...args: unknown[]) => {
+                    await connect();
+                    active++;
+                    try {
+                      return await fn.apply(inner, args);
+                    } finally {
+                      active--;
+                    }
+                  };
+                },
+              });
+            };
           }
           return async (...args: unknown[]) => {
             await connect();

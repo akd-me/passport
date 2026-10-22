@@ -13,6 +13,7 @@ import {
 import { resolveLlmSelection } from "./llm-selection.js";
 import { logger } from "./logger.js";
 import { prepareHostEnvironment } from "./shell-env.js";
+import { watchChecks } from "./watch/doctor.js";
 
 export interface DoctorCheck {
   name: string;
@@ -42,6 +43,9 @@ export async function probeAccount(
     await provider.connect(account, credentials);
     if (provider.checkConnection) {
       await provider.checkConnection();
+    } else if ("reader" in provider && provider.reader) {
+      // One cheap on-demand read (Gmail: 1 unit) instead of opening a sync.
+      await provider.reader().labels(false);
     } else if ("listCalendars" in provider) {
       await provider.listCalendars();
     } else {
@@ -206,20 +210,7 @@ export async function runDoctor(
         account.id,
       );
     }
-    const age = account.lastSyncAt ? now - Date.parse(account.lastSyncAt) : Infinity;
-    checks.push({
-      name: `${account.emailAddress} sync`,
-      accountId: account.id,
-      status:
-        age <= Math.max(600000, backend.config.syncIntervalSeconds * 3000) && !account.lastSyncError
-          ? "ok"
-          : "warning",
-      detail:
-        account.lastSyncError ??
-        (Number.isFinite(age)
-          ? `Last success ${Math.max(0, Math.floor(age / 60000))} minutes ago`
-          : "Initial sync has not completed"),
-    });
+    checks.push(...(await watchChecks(backend, account, now)));
   }
   const policy = await backend.policy.getConfig();
   checks.push({

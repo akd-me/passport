@@ -11,6 +11,7 @@ import type { Backend } from "../backend.js";
 import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
 import { object, string } from "../validation.js";
+import { calendarSyncJob, pushJob, watchJob, watchJobId } from "./account-jobs.js";
 import { registerSystemJobs } from "./system-jobs.js";
 
 export interface RoutineDefinition {
@@ -73,14 +74,23 @@ export class SchedulerService {
     });
     this.ready = this.initialize();
     // Successful onboarding/sync outside the HTTP API also discovers new accounts.
-    this.unsubscribe = backend.bus.on("account.synced", () => {
+    const discover = () => {
       if (!this.stopped) {
         void this.reconcileAccounts().catch(() => {
           // Keep the existing operational log and fallback; never include the caught payload.
           return logger.warn("Scheduler account discovery failed");
         });
       }
-    });
+    };
+    const unsubscribers = [
+      backend.bus.on("account.synced", discover),
+      backend.bus.on("account.watch.started", discover),
+    ];
+    this.unsubscribe = () => {
+      for (const off of unsubscribers) {
+        off();
+      }
+    };
     void this.ready.catch(() => {
       // Keep the existing operational log and fallback; never include the caught payload.
       return logger.error("Scheduler initialization failed");
@@ -152,74 +162,35 @@ export class SchedulerService {
     return this.backend.store.kv.set(ROUTINES_KEY, JSON.stringify([...this.routines.values()]));
   }
   private async addAccount(account: Account) {
-    const id = `sync:${account.id}`;
-    const everyMs = this.backend.config.syncIntervalSeconds * 1000;
-    if (!this.scheduler.get(id)) {
-      await this.register({
-        id,
-        name: `Sync ${account.displayName}`,
-        kind: "system",
-        schedule: { type: "interval", everyMs },
-        run: async () => {
-          await this.backend.syncAccount(account.id);
-          return { summary: "Account synchronized" };
-        },
-        timeoutMs: 300000,
-      });
-      if (!this.scheduler.get(id)!.lastRunAt) {
-        this.bootRuns.add(id);
+    const syncId = `sync:${account.id}`;
+    // Calendars keep a bounded sync; mail is never mirrored, only watched.
+    if (account.capabilities.calendar && !this.scheduler.get(syncId)) {
+      await this.register(calendarSyncJob(this.backend, account));
+      if (!this.scheduler.get(syncId)!.lastRunAt) {
+        this.bootRuns.add(syncId);
       }
     }
-    const watchId = `${id}:watch`;
-    const push = !!account.capabilities.push && !!this.backend.waitForChanges;
-    if (push && !this.scheduler.get(watchId)) {
-      await this.register({
-        id: watchId,
-        name: `Watch ${account.displayName} for changes`,
-        kind: "system",
-        schedule: { type: "interval", everyMs },
-        run: async ({ signal }) => {
-          // Bound each long poll; all recurring scheduling belongs to the scheduler.
-          const controller = new AbortController();
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          let abort!: () => void;
-          const ended = new Promise<boolean>((resolve) => {
-            abort = () => {
-              controller.abort();
-              resolve(false);
-            };
-            signal.addEventListener("abort", abort, { once: true });
-            timer = setTimeout(abort, everyMs);
-            timer.unref?.();
-            if (signal.aborted) {
-              abort();
-            }
-          });
-          try {
-            const changed = await Promise.race([
-              this.backend.waitForChanges!(account.id, controller.signal).then(
-                () => !controller.signal.aborted,
-              ),
-              ended,
-            ]);
-            if (changed && !signal.aborted && this.scheduler.get(id)?.enabled) {
-              await this.scheduler.runNow(id);
-            }
-            return {
-              summary: changed ? "Provider signaled changes" : "Long poll ended",
-              nextRunInMs: 1000,
-            };
-          } finally {
-            clearTimeout(timer);
-            signal.removeEventListener("abort", abort);
-            controller.abort();
+    const id = watchJobId(account.id);
+    const watch = watchJob(this.backend, account);
+    if (watch && !this.scheduler.get(id)) {
+      await this.register(watch);
+      // Every start checks for new mail at once; the first tick ever only takes a cursor.
+      this.bootRuns.add(id);
+    }
+    const pushId = `${id}:push`;
+    const push = !!watch && !!account.capabilities.push && !!this.backend.waitForChanges;
+    if (push && !this.scheduler.get(pushId)) {
+      await this.register(
+        pushJob(this.backend, account, async () => {
+          if (this.scheduler.get(id)?.enabled) {
+            await this.scheduler.runNow(id);
           }
-        },
-      });
-      this.bootRuns.add(watchId);
-    } else if (!push && this.scheduler.get(watchId)) {
-      await this.scheduler.unregister(watchId);
-      this.definitions.delete(watchId);
+        }),
+      );
+      this.bootRuns.add(pushId);
+    } else if (!push && this.scheduler.get(pushId)) {
+      await this.scheduler.unregister(pushId);
+      this.definitions.delete(pushId);
     }
     this.accounts.set(account.id, push);
     this.launchBootRuns();
@@ -251,7 +222,8 @@ export class SchedulerService {
     }
   }
   private async dropAccount(accountId: string) {
-    for (const id of [`sync:${accountId}`, `sync:${accountId}:watch`]) {
+    const watch = watchJobId(accountId);
+    for (const id of [`sync:${accountId}`, watch, `${watch}:push`, `sync:${accountId}:watch`]) {
       if (this.scheduler.get(id)) {
         await this.scheduler.unregister(id);
         this.definitions.delete(id);

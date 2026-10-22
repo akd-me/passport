@@ -5,10 +5,18 @@ import {
   mockCapabilities,
 } from "@passport/providers";
 import { InMemoryEventBus, openStore } from "@passport/store";
-import type { Account, DomainEvent, Email, Store, SyncDelta } from "@passport/types";
+import {
+  type Account,
+  type DomainEvent,
+  type Email,
+  mailHandle,
+  type Store,
+  type SyncDelta,
+} from "@passport/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderConnections } from "./connections.js";
 import { SyncService } from "./index.js";
+import { legacyPrefix, parseCursors, prefix, readCursors, updateCursors } from "./state.js";
 
 const at = "2026-01-15T09:00:00Z";
 export const account: Account = {
@@ -39,12 +47,7 @@ describe("real provider ingestion", () => {
     const bus = new InMemoryEventBus();
     events = [];
     bus.onAny((event) => events.push(event));
-    service = new SyncService(
-      store,
-      bus,
-      async () => mail,
-      async () => calendar,
-    );
+    service = new SyncService(store, bus, async () => calendar);
   });
   afterEach(async () => {
     await mail.disconnect();
@@ -74,255 +77,68 @@ describe("real provider ingestion", () => {
       },
     );
   }
-  it("maps all references, keeps verification, and replays idempotently without retriggering arrivals", async () => {
+  it("syncs only the bounded calendar; mail is never mirrored", async () => {
     await service.syncAccount(account.id);
-    const first = await store.emails.query({
-      accountId: account.id,
-      limit: 100,
+    expect((await store.emails.query({ accountId: account.id, limit: 100 })).items).toHaveLength(0);
+    expect(await store.events.query({ accountId: account.id })).toHaveLength(6);
+    expect(events.filter((event) => event.type === "email.received")).toHaveLength(0);
+    expect(parseCursors((await store.syncState.get(account.id))?.cursor)).toMatchObject({
+      mail: null,
+      calendar: expect.any(String),
     });
-    expect(first.items).toHaveLength(40);
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(40);
-    expect(await store.mailboxes.list(account.id)).toHaveLength(8);
-    const calendars = await store.calendars.list(account.id);
-    const calendarEvents = await store.events.query({ accountId: account.id });
-    expect(calendarEvents).toHaveLength(6);
-    expect(calendarEvents.every((event) => event.calendarId === calendars[0]!.id)).toBe(true);
-    for (const email of first.items) {
-      expect(email.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
-      expect(email.personIds).toEqual([]);
-      expect((await store.threads.get(email.threadId))!.emailIds).toContain(email.id);
-      for (const id of email.mailboxIds) {
-        expect(await store.mailboxes.get(id)).not.toBeNull();
-      }
-    }
-    const raw = await mail.getEmail("fixture-40");
-    expect((await store.emails.getByProviderId(account.id, "fixture-40"))!.verification).toEqual(
-      raw!.verification,
-    );
-    const existing = first.items[0]!;
-    await store.emails.patchMany([existing.id], {
-      category: "triage",
-      personIds: ["person"],
-    });
-    mail.injectEmail({
-      ...(await mail.getEmail(existing.providerId))!,
-      subject: "Updated subject",
-    });
-    await service.syncAccount(account.id);
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(40);
-    expect(
-      events.some((event) => event.type === "email.updated" && event.emailId === existing.id),
-    ).toBe(true);
-    expect(await store.emails.get(existing.id)).toMatchObject({
-      subject: "Updated subject",
-      category: "triage",
-      personIds: ["person"],
-    });
-    expect((await store.emails.query({ limit: 100 })).items.map((item) => item.id).sort()).toEqual(
-      first.items.map((item) => item.id).sort(),
-    );
-    expect(await store.accounts.get(account.id)).toMatchObject({
-      lastSyncError: null,
-      lastSyncAt: expect.any(String),
-    });
+    const mailOnly = {
+      ...account,
+      id: "mail-only",
+      capabilities: { ...mockCapabilities, calendar: false },
+    };
+    await store.accounts.upsert(mailOnly);
+    await service.syncAccount(mailOnly.id);
+    expect(await store.syncState.get(mailOnly.id)).toBeNull();
   });
-  it("does not advance cursors on interruption, retries without duplicate arrivals, and redacts errors", async () => {
+  it("deletes calendar tombstones and resets an expired calendar cursor", async () => {
     await service.syncAccount(account.id);
-    const previous = await store.syncState.get(account.id);
-    mail.injectEmail({ providerId: "new-one" });
-    const original = mail.sync.bind(mail);
-    vi.spyOn(mail, "sync").mockImplementationOnce(async function* (cursor) {
-      for await (const delta of original(cursor)) {
-        if (delta.kind === "cursor") {
-          throw Object.assign(new Error("secret-token"), {
-            code: "NETWORK_ERROR",
-          });
-        }
-        yield delta;
-      }
-    });
-    await expect(service.syncAccount(account.id)).rejects.toThrow("secret-token");
-    expect(await store.syncState.get(account.id)).toEqual(previous);
-    expect((await store.accounts.get(account.id))!.lastSyncError).toBe("NETWORK_ERROR");
-    await service.syncAccount(account.id);
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(41);
-    expect((await store.syncState.get(account.id))!.cursor).not.toBe(previous!.cursor);
-  });
-  it("reconciles expired mail snapshots without losing annotations or matter history or retriggering arrivals", async () => {
-    await service.syncAccount(account.id);
-    const originalEmail = await store.emails.getByProviderId(account.id, "fixture-01");
-    const staleRaw = mail.injectEmail({ providerId: "stale" });
-    await service.syncAccount(account.id);
-    const stale = (await store.emails.getByProviderId(account.id, "stale"))!;
-    await annotate(originalEmail!, stale);
-    mail.injectEmail({
-      ...(await mail.getEmail("fixture-01"))!,
-      subject: "Provider updated this",
-      keywords: { $seen: true },
-      category: null,
-      personIds: [],
-      matterId: null,
-    });
-    const original = mail.sync.bind(mail);
-    vi.spyOn(mail, "sync")
-      .mockImplementationOnce(async function* () {
-        throw Object.assign(new Error("expired"), { code: "CURSOR_EXPIRED" });
-      })
-      .mockImplementationOnce(async function* (cursor) {
-        expect(cursor).toBeNull();
-        for await (const delta of original(cursor)) {
-          if (
-            !(
-              delta.kind === "email" &&
-              delta.op === "upsert" &&
-              delta.email.providerId === staleRaw.providerId
-            )
-          ) {
-            yield delta;
-          }
-        }
-      });
-    await service.syncAccount(account.id);
-    expect(await store.emails.getByProviderId(account.id, "stale")).toMatchObject({
-      id: stale.id,
-      keywords: { $deleted: true },
-      matterId: "matter",
-      category: "receipts",
-      personIds: ["person"],
-    });
-    expect(await store.emails.getByProviderId(account.id, "fixture-01")).toMatchObject({
-      id: originalEmail!.id,
-      subject: "Provider updated this",
-      keywords: { $seen: true },
-      category: "receipts",
-      personIds: ["person"],
-      matterId: "matter",
-    });
-    expect((await store.matters.get("matter"))!.emailIds).toEqual([originalEmail!.id, stale.id]);
-    expect((await store.threads.get(stale.threadId))!.emailIds).toContain(stale.id);
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(41);
-  });
-  it("keeps unseen emails after an interrupted reconciliation and restarts recovery from null", async () => {
-    await service.syncAccount(account.id);
-    const email = (await store.emails.getByProviderId(account.id, "fixture-01"))!;
-    const unseen = (await store.emails.getByProviderId(account.id, "fixture-02"))!;
-    await annotate(email, unseen);
-    const raw = (await mail.getEmail(email.providerId))!;
-    const sync = vi
-      .spyOn(mail, "sync")
-      .mockImplementationOnce(async function* () {
-        throw Object.assign(new Error("expired"), { code: "CURSOR_EXPIRED" });
-      })
-      .mockImplementationOnce(async function* (cursor) {
-        expect(cursor).toBeNull();
-        yield {
-          kind: "email",
-          op: "upsert",
-          email: { ...raw, subject: "Refreshed" },
-        };
-        yield { kind: "email", op: "delete", providerId: unseen.providerId };
-        throw new Error("Interrupted snapshot");
-      });
-    await expect(service.syncAccount(account.id)).rejects.toThrow("Interrupted snapshot");
-    expect((await store.emails.query({ accountId: account.id, limit: 100 })).items).toHaveLength(
-      40,
-    );
-    expect((await store.emails.get(unseen.id))!.keywords.$deleted).toBeUndefined();
-    expect(await store.emails.get(email.id)).toMatchObject({
-      category: "receipts",
-      personIds: ["person"],
-      matterId: "matter",
-    });
-    expect(
-      JSON.parse((await store.syncState.get(account.id))!.cursor!.slice("passport-sync-v1:".length))
-        .mail,
-    ).toBeNull();
-    const bus = new InMemoryEventBus();
-    bus.onAny((event) => events.push(event));
-    service = new SyncService(
-      store,
-      bus,
-      async () => mail,
-      async () => calendar,
-    );
-    sync.mockImplementationOnce(async function* (cursor) {
-      expect(cursor).toBeNull();
-      yield { kind: "email", op: "upsert", email: raw };
-      yield { kind: "cursor", cursor: "recovered" };
-    });
-    await service.syncAccount(account.id);
-    expect(await store.emails.get(unseen.id)).toMatchObject({
-      keywords: { $deleted: true },
-      matterId: "matter",
-    });
-    expect((await store.matters.get("matter"))!.emailIds).toEqual([email.id, unseen.id]);
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(40);
-  });
-  it("emits one arrival for duplicate provider identities within a pass and across replayed passes", async () => {
-    const raw = (await mail.getEmail("fixture-01"))!;
-    vi.spyOn(mail, "sync").mockImplementation(async function* () {
-      yield { kind: "email", op: "upsert", email: raw };
-      yield {
-        kind: "email",
-        op: "upsert",
-        email: { ...raw, id: "different-native-id", subject: "Latest" },
-      };
-      yield { kind: "cursor", cursor: "duplicated" };
-    });
-    await service.syncAccount(account.id);
-    await service.syncAccount(account.id);
-    const page = await store.emails.query({ accountId: account.id });
-    expect(page.items).toHaveLength(1);
-    expect(page.items[0]!.subject).toBe("Latest");
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(1);
-    expect(JSON.parse((await store.kv.get(`arrival:${page.items[0]!.id}`))!)).toMatchObject({
-      attempts: 0,
-    });
-    expect((await store.threads.get(page.items[0]!.threadId))!.emailIds).toEqual([
-      page.items[0]!.id,
-    ]);
-  });
-  it("ingests mail/calendar tombstones and resets an expired calendar cursor", async () => {
-    await service.syncAccount(account.id);
-    const email = (await store.emails.getByProviderId(account.id, "fixture-01"))!;
     const event = (await store.events.query({ accountId: account.id }))[0]!;
-    await annotate(email);
     await calendar.deleteEvent(event.providerId);
-    const original = mail.sync.bind(mail);
-    vi.spyOn(mail, "sync").mockImplementationOnce(async function* (cursor) {
-      yield {
-        kind: "email",
-        op: "delete",
-        providerId: email.providerId,
-      } satisfies SyncDelta;
-      yield* original(cursor);
-    });
     await service.syncAccount(account.id);
-    expect(await store.emails.get(email.id)).toMatchObject({
-      keywords: { $deleted: true },
-      matterId: "matter",
-      category: "receipts",
-      personIds: ["person"],
-    });
-    expect((await store.matters.get("matter"))!.emailIds).toContain(email.id);
-    expect((await store.threads.get(email.threadId))!.emailIds).toContain(email.id);
     expect(await store.events.get(event.id)).toBeNull();
     vi.spyOn(calendar, "sync").mockImplementationOnce(async function* () {
       throw Object.assign(new Error("expired"), { code: "CURSOR_EXPIRED" });
     });
     await service.syncAccount(account.id);
     expect(await store.events.query({ accountId: account.id })).toHaveLength(5);
-    mail.injectEmail((await mail.getEmail(email.providerId))!);
-    await service.syncAccount(account.id);
-    expect((await store.emails.get(email.id))!.keywords.$deleted).toBeUndefined();
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(40);
   });
-  it("requires a final cursor and shares overlapping passes", async () => {
-    vi.spyOn(mail, "sync").mockImplementationOnce(async function* () {});
+  it("requires a final calendar cursor and shares overlapping passes", async () => {
+    vi.spyOn(calendar, "sync").mockImplementationOnce(async function* () {});
     const first = service.syncAccount(account.id);
     expect(service.syncAccount(account.id)).toBe(first);
     await expect(first).rejects.toMatchObject({ code: "SYNC_INCOMPLETE" });
     expect(await store.syncState.get(account.id)).toBeNull();
+    expect((await store.accounts.get(account.id))!.lastSyncError).toBe("SYNC_INCOMPLETE");
+  });
+  it("keeps a v0.2 calendar cursor but never reuses the retired mail cursor", async () => {
+    await store.syncState.set({
+      accountId: account.id,
+      cursor: `${legacyPrefix}${JSON.stringify({ mail: "old-mail", calendar: "old-calendar" })}`,
+      updatedAt: at,
+    });
+    expect(await readCursors(store, account.id)).toEqual({ mail: null, calendar: "old-calendar" });
+    await updateCursors(store, account.id, { mail: "watch" });
+    expect((await store.syncState.get(account.id))!.cursor).toBe(
+      `${prefix}${JSON.stringify({ mail: "watch", calendar: "old-calendar" })}`,
+    );
+  });
+  it("gives new mail rows handle ids and keeps v0.2 ULID mappings and annotations", async () => {
+    const raw = (await mail.getEmail("fixture-01"))!;
+    const fresh = await service.email(account.id, { ...raw, providerId: "brand-new", id: "x" });
+    expect(fresh.id).toBe(mailHandle(account.id, "email", "brand-new"));
+    expect(fresh.threadId).toBe(raw.threadId);
+    expect(fresh.mailboxIds).toEqual(raw.mailboxIds);
+    await store.kv.set(`sync-provider:${account.id}:email:fixture-01`, "01LEGACYULID0000000000000");
+    const legacy = await service.email(account.id, raw);
+    expect(legacy.id).toBe("01LEGACYULID0000000000000");
+    await store.emails.upsertMany([{ ...legacy, matterId: null }]);
+    await store.emails.patchMany([legacy.id], { category: "receipts" });
+    expect((await service.email(account.id, raw)).category).toBe("receipts");
   });
   it("R7: failed calendar cursor recovery preserves unseen events and local links until a complete restart", async () => {
     await service.syncAccount(account.id);
@@ -367,12 +183,7 @@ describe("real provider ingestion", () => {
       matterId: "matter",
       sourceEmailId: "local-invite",
     });
-    service = new SyncService(
-      store,
-      new InMemoryEventBus(),
-      async () => mail,
-      async () => calendar,
-    );
+    service = new SyncService(store, new InMemoryEventBus(), async () => calendar);
     pass.mockImplementationOnce(async function* (cursor) {
       expect(cursor).toBeNull();
       yield { kind: "event", op: "upsert", event: { ...raw!, id: "another-native-id" } };
@@ -385,95 +196,6 @@ describe("real provider ingestion", () => {
       sourceEmailId: "local-invite",
     });
     expect((await store.matters.get("matter"))!.eventIds).toContain(kept!.id);
-  });
-  it("R16: ingests sent/draft/self mail but only queues genuine arrivals, including self inbox mail", async () => {
-    const raw = (await mail.getEmail("fixture-01"))!;
-    vi.spyOn(mail, "sync").mockImplementation(async function* () {
-      for (const [id, role] of [
-        ["in", "inbox"],
-        ["sent", "sent"],
-        ["drafts", "drafts"],
-        ["archive", "archive"],
-      ] as const) {
-        yield {
-          kind: "mailbox",
-          op: "upsert",
-          mailbox: {
-            id,
-            accountId: account.id,
-            providerId: id,
-            role,
-            name: role,
-            totalEmails: 0,
-            unreadEmails: 0,
-          },
-        };
-      }
-      for (const [id, box, draft, self] of [
-        ["incoming", "in", false, false],
-        ["outgoing", "sent", false, false],
-        ["draft-role", "drafts", false, false],
-        ["draft-keyword", "in", true, false],
-        ["self-archive", "archive", false, true],
-        ["self-inbox", "in", false, true],
-      ] as const) {
-        yield {
-          kind: "email",
-          op: "upsert",
-          email: {
-            ...raw,
-            id,
-            providerId: id,
-            mailboxIds: [box],
-            keywords: { $draft: draft },
-            from: [{ email: self ? account.emailAddress : "sender@example.com" }],
-            ...(id === "outgoing" ? { provenance: "sent" as const } : {}),
-          },
-        };
-      }
-      yield { kind: "cursor", cursor: "complete" };
-    });
-    await service.syncAccount(account.id);
-    expect((await store.emails.query({ accountId: account.id })).items).toHaveLength(6);
-    expect((await store.emails.getByProviderId(account.id, "outgoing"))!.provenance).toBe("sent");
-    expect(
-      events
-        .filter((event) => event.type === "email.received")
-        .map((event) => event.type === "email.received" && event.email.providerId)
-        .sort(),
-    ).toEqual(["incoming", "self-inbox"]);
-    expect(Object.keys(JSON.parse((await store.kv.get("arrival:pending"))!))).toHaveLength(2);
-    await service.syncAccount(account.id);
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(2);
-  });
-  it("keeps identical provider IDs isolated between accounts", async () => {
-    await service.syncAccount(account.id);
-    const second = { ...account, id: "another-account" };
-    await store.accounts.upsert(second);
-    const otherMail = new MockMailProvider(),
-      otherCalendar = new MockCalendarProvider();
-    await otherMail.connect(second, {});
-    await otherCalendar.connect(second, {});
-    try {
-      const other = new SyncService(
-        store,
-        new InMemoryEventBus(),
-        async () => otherMail,
-        async () => otherCalendar,
-      );
-      await other.syncAccount(second.id);
-      const first = (await store.emails.getByProviderId(account.id, "fixture-01"))!;
-      const next = (await store.emails.getByProviderId(second.id, "fixture-01"))!;
-      expect(first.id).not.toBe(next.id);
-      expect(first.threadId).not.toBe(next.threadId);
-      expect((await store.emails.query({ accountId: second.id, limit: 100 })).items).toHaveLength(
-        40,
-      );
-      expect((await store.mailboxes.get(next.mailboxIds[0]!))!.accountId).toBe(second.id);
-    } finally {
-      await otherMail.disconnect();
-      await otherCalendar.disconnect();
-    }
   });
   it("uses one lazy connection across push, sync and executor operations; reconnects after failure without replay", async () => {
     const registry = createProviderRegistry();
@@ -532,6 +254,18 @@ describe("real provider ingestion", () => {
     vi.spyOn(mail, "getEmail").mockRejectedValueOnce(new Error("broken"));
     await expect(provider.getEmail("fixture-01")).rejects.toThrow("broken");
     expect(disconnect).toHaveBeenCalledTimes(1);
+    await pool.close();
+  });
+  it("counts reader calls as active operations and never invalidates on a failed read", async () => {
+    const registry = createProviderRegistry();
+    vi.spyOn(registry, "mail").mockReturnValue(mail);
+    const disconnect = vi.spyOn(mail, "disconnect");
+    const pool = new ProviderConnections(store, registry, async (_id, _method, value) => value);
+    const provider = await pool.mail(account.id);
+    const reader = await provider.reader!();
+    await expect(reader.body("missing")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(disconnect).not.toHaveBeenCalled();
+    expect((await reader.labels(false)).items.length).toBeGreaterThan(0);
     await pool.close();
   });
 });
