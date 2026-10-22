@@ -29,7 +29,7 @@ import {
   type ImapScanResult,
   scan,
 } from "./imap-reader-scan.js";
-import { imapIdentity, imapRole, parseImapIdentity } from "./imap-reader-shared.js";
+import { imapRole, parseImapIdentity } from "./imap-reader-shared.js";
 import { type ImapCriteria, ImapSession } from "./imap-reader-support.js";
 import {
   fetchImapEmail,
