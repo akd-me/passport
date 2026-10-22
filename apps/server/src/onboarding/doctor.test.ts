@@ -83,6 +83,26 @@ describe("passport doctor", () => {
       );
       expect(fetcher).not.toHaveBeenCalled();
       expect(JSON.stringify(report)).not.toContain("secret");
+      // Mail health is the watcher's last check and cursor age, not a mirror's sync age.
+      expect(report.checks).toContainEqual(
+        expect.objectContaining({
+          name: "bad@example.com watcher",
+          status: "warning",
+          detail: "Watcher has not checked for new mail yet",
+        }),
+      );
+      await backend.syncAccount(good.id);
+      const watched = await runDoctor(backend, { fetch: fetcher, probe: async () => {} });
+      expect(watched.checks).toContainEqual(
+        expect.objectContaining({
+          name: "good@example.com watcher",
+          status: "ok",
+          detail: expect.stringMatching(/^Last check 0 minutes ago; cursor \d+s old$/),
+        }),
+      );
+      expect(watched.checks).toContainEqual(
+        expect.objectContaining({ name: "good@example.com calendar sync", status: "ok" }),
+      );
       await chmod(join(dataDir, "master.key"), 0o644);
       const insecure = await runDoctor(backend, { probe: async () => {} });
       expect(insecure.checks).toContainEqual(

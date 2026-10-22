@@ -14,7 +14,7 @@ import {
 } from "@passport/types";
 import { afterEach, describe, expect, it } from "vitest";
 import { createSyncIdentity } from "../sync/identity.js";
-import { readCursors } from "../sync/state.js";
+import { readCursors, updateCursors } from "../sync/state.js";
 import { inboxCount, readWatchStatus, stateKey, watcherTickKey } from "./status.js";
 import { MailWatcher } from "./watcher.js";
 
@@ -198,6 +198,17 @@ describe("MailWatcher", () => {
     const after = (await readCursors(store, account.id)).mail;
     expect(after).not.toBe(before);
     // Continues from the fresh cursor.
+    expect(await watcher.tick(account.id)).toMatchObject({ status: "ok", arrivals: 0 });
+  });
+
+  it("treats a cursor the provider rejects like an expired one", async () => {
+    const { store, watcher, inject, arrivals } = await fixture();
+    await watcher.tick(account.id);
+    // A cursor from another mailbox (e.g. the account was re-created at the provider).
+    await updateCursors(store, account.id, { mail: "not-a-cursor" });
+    inject("recent");
+    expect(await watcher.tick(account.id)).toMatchObject({ status: "expired", arrivals: 1 });
+    expect(arrivals()).toHaveLength(1);
     expect(await watcher.tick(account.id)).toMatchObject({ status: "ok", arrivals: 0 });
   });
 

@@ -147,9 +147,7 @@ describe("real backend end to end", () => {
     );
     await backend.syncAccount(account.id);
     await backend.drainAgentQueue();
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(
-      received.length,
-    );
+    expect(events.filter((event) => event.type === "email.received")).toHaveLength(received.length);
     await backend.agent.run({ kind: "schedule", name: "daily_digest" });
     const response = await app.request(`/api/digest/${new Date().toISOString().slice(0, 10)}`);
     expect(response.status).toBe(200);

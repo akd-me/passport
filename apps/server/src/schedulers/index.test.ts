@@ -4,6 +4,7 @@ import { createDemoBackend } from "../demo/index.js";
 import type { WatchTickResult } from "../watch/watcher.js";
 
 const tick: WatchTickResult = { status: "ok", added: 0, arrivals: 0, summary: "0 new arrivals" };
+
 import { type SchedulerHandle, startSchedulers } from "./index.js";
 
 describe("backend schedulers", () => {

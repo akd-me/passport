@@ -5,9 +5,9 @@ import { createApp } from "../auth.test-client.js";
 import type { Backend } from "../backend.js";
 import { createRealBackend } from "../compose.js";
 import { defaultConfig, validateConfig } from "../config.js";
+import { createDemoBackend } from "../demo/index.js";
 import type { WatchStatus } from "../watch/status.js";
 import { resetDeprecationWarnings } from "./config.js";
-import { createDemoBackend } from "../demo/index.js";
 
 describe("account onboarding API", () => {
   let backend: Backend | undefined;
