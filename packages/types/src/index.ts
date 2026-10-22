@@ -1256,6 +1256,7 @@ export interface SetupTask {
 // ---------------------------------------------------------------------------
 
 export * from "./agent-ondemand.js";
+export * from "./attachments-ondemand.js";
 export * from "./mail-row.js";
 export * from "./ondemand.js";
 export * from "./store-ondemand.js";
