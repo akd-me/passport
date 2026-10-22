@@ -65,6 +65,11 @@ const toolNames = [
   "mail_changes",
   "people_history",
   "provider_get",
+  // v0.3 notes tools (people and matters as agent-maintained notes).
+  "notes_read",
+  "notes_search",
+  "notes_write",
+  "people_lookup",
 ];
 
 describe("mailbox MCP over SDK InMemoryTransport", () => {
@@ -706,6 +711,38 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
       });
     }
     expect(executor.submitted).toHaveLength(0);
+  });
+  it("includes agent notes, the watch query and provider refs in people and matter resources", async () => {
+    await store.people.upsert(f.person({ notes: "Prefers email; replies within a day." }));
+    await store.matters.upsert(
+      f.matter({
+        notes: "## Where things stand\nWaiting on Ada's $signature.",
+        watch: "from:ada@example.com newer_than:30d",
+        refs: [
+          {
+            account: "account-1",
+            providerId: "message-1",
+            rfc822Id: "<message-1@example.com>",
+            date: "2026-10-20T12:00:00.000Z",
+            subject: "Project update",
+          },
+        ],
+      }),
+    );
+    const text = async (uri: string) =>
+      JSON.stringify((await client.readResource({ uri })).contents[0]);
+    expect(await text("passport://people/person-1")).toContain(
+      "Prefers email; replies within a day.",
+    );
+    const content = (await client.readResource({ uri: "passport://matters/matter-1" })).contents[0];
+    const matter = content && "text" in content ? content.text : "";
+    expect(matter).toContain(
+      "## Notes\n\n## Where things stand\nWaiting on Ada's $\u200Bsignature.",
+    );
+    expect(matter).toContain("Watch: `from:ada@example.com newer_than:30d`");
+    expect(matter).toContain(
+      `- account-1:email:message-1 · 2026-10-20T12:00:00.000Z · Project update`,
+    );
   });
   it("redacts dependency exceptions in both resource reads and discovery", async () => {
     vi.spyOn(store.matters, "get").mockRejectedValueOnce(new Error("fixture-secret-never-expose"));
