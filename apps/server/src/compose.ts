@@ -406,6 +406,8 @@ export async function createRealBackend(
                 await sync.drain();
                 await watcher.stop();
                 unsubscribe();
+                // Pending watch wakes stay persisted for the next start instead of firing now.
+                await tasks?.watches.close();
                 await drainAgentQueue();
                 await tasks?.close();
                 stopped = true;

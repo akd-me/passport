@@ -43,6 +43,8 @@ export function createTaskSystem(input: {
     // Stale runs stay visible as open; the next maintenance pass does not depend on them.
     logger.warn("Task run recovery failed");
   });
+  // Coalesced wakes a previous process persisted fire once recovery has settled their tasks.
+  void recovered.then(() => watches.resume());
   return {
     service,
     triggers,
@@ -55,7 +57,8 @@ export function createTaskSystem(input: {
     },
     async close() {
       off?.();
-      watches.close();
+      await watches.close();
+      await watches.idle();
       service.close();
       await recovered;
     },

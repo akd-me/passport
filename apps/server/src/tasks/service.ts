@@ -22,7 +22,7 @@ import {
 } from "@passport/types";
 import { ApiError } from "../errors.js";
 import { type RunCeilings, type RunDescription, TaskRunner } from "./runner.js";
-import { hidden, idleStatus } from "./status.js";
+import { idleStatus } from "./status.js";
 import { frameUntrusted } from "./untrusted.js";
 
 export interface TaskServiceOptions {
@@ -61,6 +61,8 @@ export class TaskService {
   readonly tasks: StoreTasks;
   readonly runner: TaskRunner;
   readonly now: () => string;
+  /** Request texts of active message runs, for a steer's restart (R4-19). */
+  private readonly requests = new Map<string, string[]>();
 
   constructor(readonly options: TaskServiceOptions) {
     const tasks = options.store.tasks;
@@ -184,7 +186,9 @@ export class TaskService {
       at: this.now(),
       payload: { text: message.text },
     });
-    const instruction = await this.instruction(task, [...steered, message.text], item.seq);
+    const texts = [...steered, message.text];
+    this.requests.set(runId, texts);
+    const instruction = await this.instruction(task, texts, item.seq);
     let created!: (run: TaskRun) => void;
     const persisted = new Promise<TaskRun>((resolve) => {
       created = resolve;
@@ -211,7 +215,7 @@ export class TaskService {
       describeAgentRun,
     );
     // Callers that do not await `done` still see the outcome on the run and the timeline.
-    done.catch(() => undefined);
+    done.catch(() => undefined).finally(() => this.requests.delete(runId));
     const run = await Promise.race([persisted, done.then(() => null)]);
     return { run: run ?? (await persisted), done };
   }
@@ -220,14 +224,10 @@ export class TaskService {
   private async cancelForSteer(taskId: string): Promise<string[]> {
     const texts: string[] = [];
     for (const run of this.runner.activeRuns(taskId)) {
-      if (run.trigger.kind !== "message" || !this.runner.cancel(run.id)) {
+      if (run.trigger.kind !== "message" || !this.runner.cancel(run.id, true)) {
         continue;
       }
-      const items = await this.tasks.items.list({ taskId, limit: 500 });
-      const item = items.find((i) => i.id === (run.trigger as { itemId: string }).itemId);
-      if (item?.kind === "user_message") {
-        texts.push(item.payload.text);
-      }
+      texts.push(...(this.requests.get(run.id) ?? []));
     }
     return texts;
   }
@@ -287,9 +287,12 @@ export class TaskService {
     });
   }
 
-  /** Settle and archive end conversation watches (T3: a settled thread stops monitoring). */
+  /**
+   * Settle and archive end conversation watches (T3: a settled thread stops monitoring) and stop
+   * the task's cancellable runs; the person's choice outlasts the runs that end (R4-9).
+   */
   async settle(id: string): Promise<Task> {
-    await this.task(id);
+    await this.interrupt(id);
     return this.runner.updateTask(id, {
       status: "settled",
       settledAt: this.now(),
@@ -299,7 +302,7 @@ export class TaskService {
   }
 
   async archive(id: string): Promise<Task> {
-    await this.task(id);
+    await this.interrupt(id);
     return this.runner.updateTask(id, { status: "archived", watches: [], snoozedUntil: null });
   }
 
@@ -338,23 +341,31 @@ export class TaskService {
     const now = this.now();
     let settled = 0;
     let woken = 0;
-    for (const task of (await this.tasks.list({ status: ["snoozed"], limit: 500 })).items) {
-      if (task.snoozedUntil && task.snoozedUntil <= now) {
-        await this.runner.updateTask(task.id, {
-          status: "inbox",
-          snoozedUntil: null,
-          lastActivityAt: now,
-        });
-        woken++;
+    let cursor: string | null | undefined;
+    const due: string[] = [];
+    do {
+      const page = await this.tasks.list({ status: ["snoozed"], limit: 200, cursor });
+      for (const task of page.items) {
+        if (task.snoozedUntil && task.snoozedUntil <= now) {
+          due.push(task.id);
+        }
       }
+      cursor = page.nextCursor;
+    } while (cursor);
+    for (const id of due) {
+      await this.runner.updateTask(id, {
+        status: "inbox",
+        snoozedUntil: null,
+        lastActivityAt: now,
+      });
+      woken++;
     }
     const cutoff = new Date(Date.parse(now) - 3 * 86_400_000).toISOString();
-    let cursor: string | null | undefined;
     do {
       const page = await this.tasks.list({ status: ["inbox"], limit: 200, cursor });
       for (const task of page.items) {
         const idle = task.lastActivityAt < cutoff && !task.pinned && !task.needsUser;
-        if (idle && !hidden(task.status) && !this.runner.activeRuns(task.id).length) {
+        if (idle && !this.runner.activeRuns(task.id).length) {
           await this.runner.updateTask(task.id, { status: "settled", settledAt: now });
           settled++;
         }
