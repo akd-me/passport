@@ -1,4 +1,5 @@
 import type {
+  EmailGetOptions,
   MailReader,
   MailReaderResolver,
   MailReadOptions,
@@ -8,6 +9,13 @@ import type {
 
 /** Provider reads one run may spend, matching the manual loop's twelve tool calls. */
 export const RUN_READ_BUDGET = 12;
+/**
+ * Provider reads relationship evidence may spend per run, on top of `RUN_READ_BUDGET`, so a wide
+ * recipient list cannot starve the body, thread and matter reads triage needs.
+ */
+export const PEOPLE_READ_BUDGET = 10;
+/** Which budget a reader draws from. */
+export type ReadPool = "run" | "people";
 
 /** Provider reads a run spent, reported in `AgentRunResult.toolBudget.reads`. */
 export interface ReadUsage {
@@ -33,8 +41,16 @@ export interface AgentReader {
 
 export interface RunReads {
   usage: ReadUsage;
-  /** The metered reader for an account, or null when none is injected or the provider has none. */
-  reader(accountId: string): Promise<AgentReader | null>;
+  /**
+   * The metered reader for an account, or null when none is injected or the provider has none.
+   * `pool` selects the budget (default `"run"`).
+   */
+  reader(accountId: string, pool?: ReadPool): Promise<AgentReader | null>;
+  /**
+   * Options for a read-through `Store.emails` read: the run's lane, charged as one run read; once
+   * the run budget is spent, cache only. Uncharged when no readers are injected.
+   */
+  storeRead(opts?: EmailGetOptions): EmailGetOptions;
 }
 
 export function emptyReadUsage(): ReadUsage {
@@ -46,18 +62,30 @@ export function createRunReads(opts: {
   readers?: MailReaderResolver;
   lane: QuotaLane;
   budget?: number;
+  peopleBudget?: number;
   log?: (message: string) => void;
 }): RunReads {
   const usage = emptyReadUsage();
-  const budget = opts.budget ?? RUN_READ_BUDGET;
-  const resolved = new Map<string, Promise<AgentReader | null>>();
-  const meter = (reader: MailReader): AgentReader => ({
+  const limits: Record<ReadPool, number> = {
+    run: opts.budget ?? RUN_READ_BUDGET,
+    people: opts.peopleBudget ?? PEOPLE_READ_BUDGET,
+  };
+  const spent: Record<ReadPool, number> = { run: 0, people: 0 };
+  const charge = (pool: ReadPool): boolean => {
+    if (spent[pool] >= limits[pool]) {
+      usage.skipped++;
+      return false;
+    }
+    spent[pool]++;
+    usage.calls++;
+    return true;
+  };
+  const resolved = new Map<string, Promise<MailReader | null>>();
+  const meter = (reader: MailReader, pool: ReadPool): AgentReader => ({
     async call(op) {
-      if (usage.calls >= budget) {
-        usage.skipped++;
+      if (!charge(pool)) {
         return null;
       }
-      usage.calls++;
       try {
         const result = await op(reader, { lane: opts.lane });
         usage.gmailUnits += result.cost.gmailUnits ?? 0;
@@ -74,23 +102,27 @@ export function createRunReads(opts: {
   });
   return {
     usage,
-    reader(accountId) {
+    async reader(accountId, pool = "run") {
       const readers = opts.readers;
       if (!readers) {
-        return Promise.resolve(null);
+        return null;
       }
       let found = resolved.get(accountId);
       if (!found) {
-        found = readers(accountId).then(
-          (reader) => (reader ? meter(reader) : null),
-          () => {
-            opts.log?.("Agent reader resolution failed; continuing with local data");
-            return null;
-          },
-        );
+        found = readers(accountId).catch(() => {
+          opts.log?.("Agent reader resolution failed; continuing with local data");
+          return null;
+        });
         resolved.set(accountId, found);
       }
-      return found;
+      const reader = await found;
+      return reader ? meter(reader, pool) : null;
+    },
+    storeRead(read = {}) {
+      if (!opts.readers) {
+        return { ...read, lane: opts.lane };
+      }
+      return charge("run") ? { ...read, lane: opts.lane } : { ...read, cacheOnly: true };
     },
   };
 }

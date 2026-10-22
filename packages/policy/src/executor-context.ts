@@ -13,7 +13,7 @@ import { assertKnowledge } from "./executor-notes.js";
 import {
   type ActionExecutorOptions,
   draftOf,
-  FRESH_PRE_IMAGE,
+  freshPreImage,
   isCompletePerson,
   marker,
   normalizedDraft,
@@ -94,6 +94,51 @@ export function createExecutorContext(options: ActionExecutorOptions) {
   };
   const allEmails = (ids: string[], accountId: string, opts?: EmailGetOptions) =>
     Promise.all([...new Set(ids)].map((id) => emailFor(id, accountId, opts)));
+  /**
+   * Provider-fresh emails in one batched read when the store supports it (`getMany`), else one
+   * `get` per id. Null for ids the store does not have; another account's email is refused.
+   */
+  const freshEmails = async (
+    ids: string[],
+    accountId: string,
+    opts: EmailGetOptions,
+  ): Promise<Map<string, Email | null>> => {
+    const wanted = [...new Set(ids)];
+    const found = store.emails.getMany
+      ? await store.emails.getMany(wanted, opts)
+      : new Map(
+          await Promise.all(
+            wanted.map(async (id) => [id, await store.emails.get(id, opts)] as const),
+          ),
+        );
+    for (const email of found.values()) {
+      if (email && email.accountId !== accountId) {
+        throw new PolicyError("ACCOUNT_MISMATCH", "Email belongs to another account");
+      }
+    }
+    return found;
+  };
+  /** Fresh pre-images: every id must exist and be confirmed by the provider (fail closed). */
+  const preImages = async (request: Request & { params: { emailIds: string[] } }) => {
+    const found = await freshEmails(
+      request.params.emailIds,
+      request.accountId,
+      freshPreImage(request),
+    );
+    return [...new Set(request.params.emailIds)].map((id) => {
+      const email = found.get(id);
+      if (!email) {
+        throw new PolicyError("EMAIL_NOT_FOUND", `Email ${id} does not exist`);
+      }
+      if (email.staleAsOf !== undefined) {
+        throw new PolicyError(
+          "PROVIDER_UNAVAILABLE",
+          "Current provider state is unavailable; retry when the account is reachable",
+        );
+      }
+      return email;
+    });
+  };
   const resolvedDraft = async (request: ActionRequest): Promise<DraftInput> => {
     const { draft, draftEmailId } = request.params as ActionParams["send"];
     if (!!draft === !!draftEmailId) {
@@ -212,12 +257,7 @@ export function createExecutorContext(options: ActionExecutorOptions) {
       case "unflag":
       case "move":
       case "delete":
-        return {
-          kind: "mail",
-          emails: (
-            await allEmails(request.params.emailIds, request.accountId, FRESH_PRE_IMAGE)
-          ).map(preImageOf),
-        };
+        return { kind: "mail", emails: (await preImages(request)).map(preImageOf) };
       case "draft_create":
         return { kind: "draft", email: null };
       case "draft_update":
@@ -318,6 +358,7 @@ export function createExecutorContext(options: ActionExecutorOptions) {
     eventFor,
     matterFor,
     allEmails,
+    freshEmails,
     resolvedDraft,
     assertPublic,
     capture,

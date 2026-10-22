@@ -74,7 +74,8 @@ describe("triage on on-demand readers", () => {
     expect(run.toolBudget.reads).toMatchObject({ failures: 0, skipped: 0 });
     expect(run.toolBudget.reads!.calls).toBeLessThanOrEqual(12);
     expect(env.readers).toHaveBeenCalledTimes(1);
-    expect(env.query).not.toHaveBeenCalled();
+    // Only the bounded page of this thread (R2-12: v0.2 matters list stored ids); no scans.
+    expect(env.query.mock.calls.every(([q]) => !!q.threadId && (q.limit ?? 50) <= 30)).toBe(true);
   });
 
   it("triages an envelope-only email without a reader from its subject and preview", async () => {
@@ -116,7 +117,8 @@ describe("triage on on-demand readers", () => {
       params: { matterId: "matter-1" },
     });
     expect(env.mock.reader().costLog.map((entry) => entry.method)).toContain("search");
-    expect(env.query).not.toHaveBeenCalled();
+    // Only the bounded page of this thread (R2-12: v0.2 matters list stored ids); no scans.
+    expect(env.query.mock.calls.every(([q]) => !!q.threadId && (q.limit ?? 50) <= 30)).toBe(true);
   });
 
   it("offers matters whose title shares a subject word", async () => {

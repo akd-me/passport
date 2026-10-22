@@ -100,6 +100,8 @@ export async function dailyDigest(ctx: RunContext, policy: PolicyEngine): Promis
 
 /** Referenced emails fetched per matter review: the newest refs (or v0.2 ids) the matter lists. */
 export const MATTER_REVIEW_EMAILS = 20;
+/** LLM reviews per run; the least recently updated matters go first. */
+export const MATTER_REVIEWS_PER_RUN = 10;
 
 /** Rows for the review prompt: refs read through the envelope cache (no bodies), else v0.2 ids. */
 async function reviewEmails(ctx: RunContext, matter: Matter): Promise<Email[]> {
@@ -107,7 +109,9 @@ async function reviewEmails(ctx: RunContext, matter: Matter): Promise<Email[]> {
     ? [...matter.refs]
         .sort((a, b) => a.date.localeCompare(b.date))
         .slice(-MATTER_REVIEW_EMAILS)
-        .map((ref) => ctx.store.emails.get(mailRefHandle(ref), { includeBodies: false }))
+        .map((ref) =>
+          ctx.store.emails.get(mailRefHandle(ref), { includeBodies: false, cacheOnly: true }),
+        )
     : [...new Set(matter.emailIds)]
         .slice(-MATTER_REVIEW_EMAILS)
         .map((id) => ctx.store.emails.get(id));
@@ -121,7 +125,15 @@ async function reviewEmails(ctx: RunContext, matter: Matter): Promise<Email[]> {
 export async function reviewMatters(ctx: RunContext, days: number): Promise<void> {
   const cutoff = Date.parse(ctx.now()) - days * 86_400_000;
   let reviewed = 0;
-  for (const matter of await ctx.store.matters.list({ status: ["active"] })) {
+  // Every active matter, oldest first: the stale ones are exactly those beyond a default page.
+  const active = (await ctx.store.matters.list({ status: ["active"], limit: 2_147_483_647 })).sort(
+    (a, b) => a.updatedAt.localeCompare(b.updatedAt),
+  );
+  for (const matter of active) {
+    if (reviewed >= MATTER_REVIEWS_PER_RUN || Date.parse(matter.updatedAt) > cutoff) {
+      // Sorted by updatedAt: every later matter moved recently too.
+      break;
+    }
     const events = await ctx.store.events.query({ matterId: matter.id });
     // Activity comes from the refs themselves (date), so idle matters cost no reads to skip.
     const refDates = matter.refs?.map((ref) => ref.date) ?? [];

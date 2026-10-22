@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Mailbox, Store } from "@passport/types";
+import { mailHandle } from "@passport/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { at, email, matter } from "./fixtures.js";
 import { openStore } from "./index.js";
@@ -10,6 +11,7 @@ import { migrations } from "./migrations.js";
 
 let store: Store;
 const DAY = 24 * 60 * 60 * 1000;
+const handle = (providerId: string) => mailHandle("account", "email", providerId);
 const setNow = (iso: string) => vi.setSystemTime(new Date(iso));
 
 beforeEach(async () => {
@@ -71,11 +73,11 @@ describe("envelope eviction", () => {
     await store.emails.upsertMany([
       email("linked", { providerId: "p1", matterId: "matter" }),
       email("draft", { providerId: "p2", keywords: { $draft: true } }),
-      email("stale", { providerId: "p3" }),
-      email("older", { providerId: "p4" }),
+      email(handle("p3"), { providerId: "p3" }),
+      email(handle("p4"), { providerId: "p4" }),
     ]);
     await store.threads.upsertMany([
-      { id: "thread", accountId: "account", emailIds: ["linked", "stale", "older"] },
+      { id: "thread", accountId: "account", emailIds: ["linked", handle("p3"), handle("p4")] },
     ]);
     setNow("2026-10-03T00:00:00.000Z");
     await store.emails.upsertMany([email("hot", { providerId: "p5" })]);
@@ -83,8 +85,8 @@ describe("envelope eviction", () => {
       evicted: 2,
       remainingBytes: 0,
     });
-    expect(await store.emails.get("stale")).toBeNull();
-    expect(await store.emails.get("older")).toBeNull();
+    expect(await store.emails.get(handle("p3"))).toBeNull();
+    expect(await store.emails.get(handle("p4"))).toBeNull();
     for (const id of ["linked", "draft", "hot"]) {
       expect(await store.emails.get(id)).not.toBeNull();
     }

@@ -179,7 +179,10 @@ describe("matter review over refs", () => {
     expect(get.mock.calls.map(([id, opts]) => [id, opts])).toEqual(
       refs
         .slice(-20)
-        .map((item) => [`account-1:email:${item.providerId}`, { includeBodies: false }]),
+        .map((item) => [
+          `account-1:email:${item.providerId}`,
+          { includeBodies: false, cacheOnly: true },
+        ]),
     );
     expect(await env.store.matters.get("matter-1")).toMatchObject({ status: "waiting" });
     expect(await env.store.matters.get("fresh")).toMatchObject({ status: "active" });

@@ -194,6 +194,11 @@ export interface Email {
   category?: ActionCategory | null;
   /** Provider-derived sent provenance, never inferred from RFC From/Date headers. */
   provenance?: "sent";
+  /**
+   * Set only on `Store.emails` reads (v0.3) served from the cache because the provider read failed
+   * or was unavailable: when the cached labels were last confirmed. Never persisted.
+   */
+  staleAsOf?: Timestamp | null;
 }
 
 export interface Thread {

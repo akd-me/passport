@@ -22,6 +22,7 @@ import {
   type TrustState,
 } from "@passport/types";
 import { PolicyError } from "./errors.js";
+import { readLaneOf } from "./executor-shared.js";
 
 /** Collaborators are injected; the clock returns an ISO timestamp. */
 export interface PolicyEngineOptions {
@@ -272,7 +273,9 @@ export function createPolicyEngine({
         }
         if (destructive) {
           const ids = (request.params as { emailIds: string[] }).emailIds;
-          const emails = await Promise.all(ids.map((id) => store.emails.get(id)));
+          const emails = await Promise.all(
+            ids.map((id) => store.emails.get(id, { lane: readLaneOf(request) })),
+          );
           if (emails.some((email) => email && (email.keywords.$flagged || !email.keywords.$seen))) {
             riskIndex++;
           }

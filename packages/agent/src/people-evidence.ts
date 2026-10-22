@@ -2,10 +2,13 @@ import {
   type ActionParams,
   type DraftInput,
   type Email,
+  type MailEnvelope,
+  type MailRow,
   PERSON_STATS_CAPS,
   PERSON_STATS_MAX_AGE_MS,
   type Person,
   type PersonWithStatsCache,
+  parseMailHandle,
   type Store,
 } from "@passport/types";
 import { normalizeAddress } from "./data.js";
@@ -41,12 +44,23 @@ export const PEOPLE_FALLBACK_SCAN = 200;
 const enough = (stats: { sent: number; received: number }) =>
   stats.sent > 0 || stats.received >= PERSON_STATS_CAPS.received;
 
+/** Rows fetched per evidence search: the cap plus slack for lookalikes the provider also matched. */
+const EVIDENCE_SLACK = 2;
+
+/** The address part of a `MailRow` `"Name <addr>"` / `"addr"` string, normalized. */
+function rowAddress(formatted: string): string {
+  return normalizeAddress(/<([^<>]+)>\s*$/.exec(formatted)?.[1] ?? formatted);
+}
+
 /**
- * Provider evidence (research report 03 §4.3): `countIds` over sent mail (cap 1, "have we ever
- * sent to them") and over their mail (cap 3, the received count class, including this message).
- * Counts are cached on the person row with `statsRefreshedAt` and reused for seven days once
- * they establish the relationship; weaker evidence is recounted on each arrival because one more
- * message can promote a stranger. A failed read keeps the cached counts and the old stamp.
+ * Provider evidence (research report 03 §4.3): one search over sent mail ("have we ever sent to
+ * them", cap 1) and one over their mail (the received count class, cap 3, including this
+ * message). Provider query matching is a substring match (IMAP SEARCH, display names), so the
+ * counts are never trusted: every returned row is checked against the person's addresses
+ * exactly, from the row when it shows enough and otherwise from one batched `envelopes` read.
+ * Received mail that fails DMARC never counts. Counts are cached on the person row with
+ * `statsRefreshedAt` and reused for seven days once they establish the relationship; weaker
+ * evidence is recounted on each arrival. A failed read keeps the cached counts and the old stamp.
  */
 export function readerEvidence(reader: AgentReader, now: string, refresh = false): Evidence {
   return async ({ existing, personAddresses, isSelf, isService }) => {
@@ -66,25 +80,75 @@ export function readerEvidence(reader: AgentReader, now: string, refresh = false
     if (!terms.length) {
       return { ...cached, established: enough(cached) };
     }
+    const exact = (address: { email: string }) =>
+      personAddresses.has(normalizeAddress(address.email));
     const recipients = terms.flatMap((term) => [`to:${term}`, `cc:${term}`, `bcc:${term}`]);
-    const sent = await reader.call((r, opts) =>
-      r.countIds(`in:sent (${recipients.join(" OR ")})`, PERSON_STATS_CAPS.sent, opts),
-    );
-    const received = await reader.call((r, opts) =>
-      r.countIds(
-        `(${terms.map((term) => `from:${term}`).join(" OR ")})`,
-        PERSON_STATS_CAPS.received,
+    const sentRows = await reader.call((r, opts) =>
+      r.search(
+        {
+          query: `in:sent (${recipients.join(" OR ")})`,
+          limit: PERSON_STATS_CAPS.sent + EVIDENCE_SLACK,
+        },
         opts,
       ),
     );
-    const counts = {
-      sent: sent ? sent.value.count : cached.sent,
-      received: received ? received.value.count : cached.received,
+    const receivedRows = await reader.call((r, opts) =>
+      r.search(
+        {
+          query: `(${terms.map((term) => `from:${term}`).join(" OR ")})`,
+          limit: PERSON_STATS_CAPS.received + EVIDENCE_SLACK,
+        },
+        opts,
+      ),
+    );
+    // Rows show the sender and at most three To/Cc recipients (never Bcc); anything they cannot
+    // settle is checked on the envelope.
+    const sentShown = (sentRows?.items ?? []).filter((row) =>
+      row.to.some((to) => personAddresses.has(rowAddress(to))),
+    );
+    const sentUnsure = sentShown.length ? [] : (sentRows?.items ?? []);
+    const received = (receivedRows?.items ?? []).filter((row) =>
+      personAddresses.has(rowAddress(row.from)),
+    );
+    const receivedShown = received.filter((row) => row.auth === "pass" || row.auth === "none");
+    const receivedUnsure = received.filter((row) => row.auth === undefined);
+    const providerIdOf = (row: MailRow) => parseMailHandle(row.id)?.providerId;
+    const unsure = [...new Set([...sentUnsure, ...receivedUnsure].map(providerIdOf))].filter(
+      (id): id is string => !!id,
+    );
+    const envelopes = unsure.length
+      ? await reader.call((r, opts) => r.envelopes(unsure, opts))
+      : null;
+    const envelope = (row: MailRow): MailEnvelope | null => {
+      const id = providerIdOf(row);
+      return (id && envelopes?.value.get(id)) || null;
     };
+    const sentCount =
+      sentShown.length ||
+      sentUnsure.filter((row) => {
+        const found = envelope(row);
+        return !!found && [...found.to, ...found.cc, ...found.bcc].some(exact);
+      }).length;
+    const receivedCount =
+      receivedShown.length +
+      receivedUnsure.filter((row) => {
+        const found = envelope(row);
+        return !!found && found.from.some(exact) && found.verification.dmarc !== "fail";
+      }).length;
+    // A kind whose rows (or the envelopes needed to check them) could not be read keeps its cache.
+    const sentKnown = !!sentRows && (!sentUnsure.length || !!envelopes);
+    const receivedKnown = !!receivedRows && (!receivedUnsure.length || !!envelopes);
+    const counts = {
+      sent: sentKnown ? Math.min(PERSON_STATS_CAPS.sent, sentCount) : cached.sent,
+      received: receivedKnown
+        ? Math.min(PERSON_STATS_CAPS.received, receivedCount)
+        : cached.received,
+    };
+    const complete = sentKnown && receivedKnown;
     return {
       ...counts,
       established: enough(counts),
-      ...(sent && received ? { statsRefreshedAt: now } : {}),
+      ...(complete ? { statsRefreshedAt: now } : {}),
     };
   };
 }
@@ -151,7 +215,12 @@ export async function storeEvidence(
       isSelf ? [] : sent.filter((item) => item.recipients.some(matches)).map((item) => item.id),
     );
     let receivedIds = new Set(
-      stored.filter((item) => !isSent(item) && item.from.some(matches)).map((item) => item.id),
+      stored
+        // Mail that fails DMARC is never evidence of a relationship.
+        .filter(
+          (item) => !isSent(item) && item.verification.dmarc !== "fail" && item.from.some(matches),
+        )
+        .map((item) => item.id),
     );
     const currentSentId = sentAliases.get(`email:${email.id}`) ?? `email:${email.id}`;
     sentIds = new Set([...sentIds].map((id) => sentAliases.get(id) ?? id));

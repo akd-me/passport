@@ -5,7 +5,9 @@ import type { Row } from "./store-query.js";
 
 /** Columns every email read selects; bodies are added only when requested. */
 export const EMAIL_COLUMNS =
-  "id, account_id, provider_id, data, matter_id, labels_fresh_at, body_fetched_at";
+  "id, account_id, provider_id, data, matter_id, labels_fresh_at, body_fetched_at, touched_at";
+/** `get` refreshes the LRU stamp at most this often per row, so a read is rarely a write. */
+const TOUCH_EVERY_MS = 60_000;
 
 export function createEmailRows(db: StoreDatabase) {
   function readEmail(row: Row, includeBodies = true): Email {
@@ -72,7 +74,8 @@ export function createEmailRows(db: StoreDatabase) {
   function saveEmail(input: Email, opts: { labelsFresh: boolean }): void {
     const previous = getEmail(input.id);
     const pending = db.one("SELECT matter_id FROM matter_emails WHERE email_id = ?", [input.id]);
-    const email = { ...input };
+    // `staleAsOf` describes one read; it is never persisted.
+    const { staleAsOf: _stale, ...email } = input;
     if (email.textBody === undefined && previous?.textBody !== undefined) {
       email.textBody = previous.textBody;
     }
@@ -111,20 +114,58 @@ export function createEmailRows(db: StoreDatabase) {
     db.setMatterLink("emails", email.id, matterId);
   }
   function deleteEmail(id: string): void {
+    // Membership lives in the row's own thread (indexed column), never a scan of every thread.
+    const threadId = db.one("SELECT thread_id FROM emails WHERE id = ?", [id])?.thread_id as
+      | string
+      | undefined;
     db.run("DELETE FROM matter_emails WHERE email_id = ?", [id]);
     db.run("DELETE FROM emails WHERE id = ?", [id]);
-    for (const row of db.all(
-      "SELECT id, data FROM threads WHERE EXISTS (SELECT 1 FROM json_each(data, '$.emailIds') WHERE value = ?)",
-      [id],
-    )) {
+    const row = threadId ? db.one("SELECT data FROM threads WHERE id = ?", [threadId]) : undefined;
+    if (row) {
       const thread = db.parse<{ id: string; accountId: string; emailIds: string[] }>(row);
-      thread.emailIds = thread.emailIds.filter((emailId) => emailId !== id);
-      db.put("threads", thread.id, thread, { account_id: thread.accountId });
+      if (thread.emailIds.includes(id)) {
+        thread.emailIds = thread.emailIds.filter((emailId) => emailId !== id);
+        db.put("threads", thread.id, thread, { account_id: thread.accountId });
+      }
     }
   }
-  function touch(id: string): void {
-    db.run("UPDATE emails SET touched_at = ? WHERE id = ?", [nowIso(), id]);
+  /** Bumps the LRU stamp; `throttled` skips rows touched within the last minute. */
+  function touch(id: string, throttled = false): void {
+    const at = nowIso();
+    if (throttled) {
+      const since = new Date(Date.parse(at) - TOUCH_EVERY_MS).toISOString();
+      db.run(
+        "UPDATE emails SET touched_at = ? WHERE id = ? AND (touched_at IS NULL OR touched_at < ?)",
+        [at, id, since],
+      );
+    } else {
+      db.run("UPDATE emails SET touched_at = ? WHERE id = ?", [at, id]);
+    }
   }
-  return { readEmail, rowById, rowByProvider, getEmail, saveEmail, deleteEmail, touch };
+  /**
+   * Compare-and-set token for a row's label state: a revalidation started before a newer local
+   * write (executor mirror, watcher patch) must not overwrite it with an older provider snapshot.
+   */
+  function labelToken(id: string): string | null {
+    const row = db.one(
+      "SELECT provider_id, labels_fresh_at, json_extract(data, '$.keywords') AS keywords FROM emails WHERE id = ?",
+      [id],
+    );
+    if (!row) {
+      return null;
+    }
+    const boxes = db.ids("email_mailboxes", "email_id", id, "mailbox_id");
+    return JSON.stringify([row.provider_id, row.labels_fresh_at, row.keywords, boxes]);
+  }
+  return {
+    readEmail,
+    rowById,
+    rowByProvider,
+    getEmail,
+    saveEmail,
+    deleteEmail,
+    touch,
+    labelToken,
+  };
 }
 export type EmailRows = ReturnType<typeof createEmailRows>;

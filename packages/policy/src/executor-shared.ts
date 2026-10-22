@@ -11,6 +11,7 @@ import type {
   Matter,
   Person,
   PolicyEngine,
+  QuotaLane,
   Store,
   Timestamp,
 } from "@passport/types";
@@ -50,6 +51,14 @@ export const preImageOf = (email: Email): MailPreImage => ({
 });
 /** Pre-image reads: provider-fresh labels and flags, no bodies. */
 export const FRESH_PRE_IMAGE = { fresh: true, includeBodies: false } as const;
+/** Quota lane for an action's provider reads: agent work stays off the user's interactive lane. */
+export const readLaneOf = (request: Pick<ActionRequest, "actor">): QuotaLane =>
+  request.actor?.kind === "agent" ? "arrivals" : "interactive";
+/** `FRESH_PRE_IMAGE` in the request's lane. */
+export const freshPreImage = (request: Pick<ActionRequest, "actor">) => ({
+  ...FRESH_PRE_IMAGE,
+  lane: readLaneOf(request),
+});
 export type Snapshot =
   | { kind: "mail"; emails: MailPreImage[]; createdMailboxIds?: string[] }
   | { kind: "draft"; email: Email | null; createdId?: string }

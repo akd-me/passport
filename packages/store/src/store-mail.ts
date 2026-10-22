@@ -92,6 +92,7 @@ export function createMailRepositories(
   const cache = createEmailCache(db, rows, resolver);
   const emails: Store["emails"] = {
     get: cache.get,
+    getMany: cache.getMany,
     getByProviderId: cache.getByProviderId,
     touch: cache.touch,
     freshness: cache.freshness,

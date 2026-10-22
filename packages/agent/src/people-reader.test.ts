@@ -30,7 +30,7 @@ async function setup(failCounts = false) {
     actor: { kind: "agent", id: "run-people" },
   });
   if (failCounts) {
-    vi.spyOn(mock.reader(), "countIds").mockRejectedValue(
+    vi.spyOn(mock.reader(), "search").mockRejectedValue(
       new Error("RATE_LIMITED with untrusted subject text"),
     );
   }
@@ -71,7 +71,7 @@ async function setup(failCounts = false) {
   };
   const alice = async () =>
     (await store.people.getByEmail("alice@example.com")) as PersonWithStatsCache | null;
-  const counts = () => mock.reader().costLog.filter((entry) => entry.method === "countIds");
+  const counts = () => mock.reader().costLog.filter((entry) => entry.method === "search");
   return { mock, store, executor, query, actions, resolve, alice, counts };
 }
 
@@ -89,7 +89,7 @@ function fromAlice(mock: MockMailProvider, providerId: string, receivedAt = TEST
 }
 
 describe("people evidence through the reader", () => {
-  it("classifies from capped countIds, caches stats, and never scans the store", async () => {
+  it("classifies from capped evidence searches, caches stats, and never scans the store", async () => {
     const env = await setup();
     fromAlice(env.mock, "a-1", "2026-10-01T00:00:00.000Z");
     const first = await env.resolve(fromAlice(env.mock, "a-2"));
@@ -98,7 +98,7 @@ describe("people evidence through the reader", () => {
       stats: { sent: 0, received: 2 },
       statsRefreshedAt: TEST_NOW,
     });
-    expect(first.usage).toMatchObject({ calls: 2, failures: 0, gmailUnits: 10 });
+    expect(first.usage).toMatchObject({ calls: 2, failures: 0 });
     expect(env.counts().every((entry) => entry.lane === "arrivals")).toBe(true);
     await env.resolve(fromAlice(env.mock, "a-3"));
     expect(await env.alice()).toMatchObject({

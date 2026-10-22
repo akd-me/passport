@@ -196,17 +196,35 @@ event activity and the newest 20 emails the matter references (fetched by id, ne
 Pass `readers: MailReaderResolver` to `createAgentRuntime` to read through the provider instead of a
 local mirror. Each run resolves an account's reader at most once and spends at most 12 reader calls
 (`RUN_READ_BUDGET`) in the run's quota lane (`interactive` for interactive runs, `arrivals` for
-triage, `background` otherwise). Reads that fail or exceed the budget degrade to cached or local data;
-`toolBudget.reads` reports calls, failures, skips and provider units.
+triage, `background` otherwise). Relationship evidence has its own `PEOPLE_READ_BUDGET` (10) so a
+wide recipient list cannot starve body, thread and matter reads. Read-through `Store.emails` reads
+made by the agent go through `reads.storeRead()`: the run's lane, one run-budget unit each, and
+`cacheOnly` once the budget is spent. Reads that fail or exceed the budget degrade to cached or local
+data; `toolBudget.reads` reports calls, failures, skips and provider units.
 
-- **People.** `known` evidence is `countIds("in:sent (to:x OR cc:x OR bcc:x)", 1)` and
-  `countIds("from:x", 3)` over all of the person's addresses, stored in `stats` with
-  `statsRefreshedAt` on the person row. Counts that establish the relationship are reused for seven
-  days (`PERSON_STATS_MAX_AGE_MS`); weaker counts are recounted on every arrival, since one more
-  message can promote a stranger. `resolvePeople({ refreshStats: true })` forces a recount. Nothing
-  scans the store. Unchanged person rows are not resubmitted as `person_update`.
+- **People.** At most `PEOPLE_PER_ARRIVAL` (8) non-owner addresses per message, From first, then To,
+  then Cc. `known` evidence is a sent search (`in:sent (to:x OR cc:x OR bcc:x)`, cap 1) and a
+  received search (`from:x`, cap 3), each fetching at most cap + 2 rows. Provider matching is a
+  substring match, so every row is checked against the person's addresses exactly (from the row, or
+  one batched `envelopes` read for Bcc, hidden recipients or unknown authentication); mail that fails
+  DMARC never counts. Counts are stored in `stats` with `statsRefreshedAt` on the person row. Counts
+  that establish the relationship are reused for seven days (`PERSON_STATS_MAX_AGE_MS`); weaker counts
+  are recounted on every arrival, since one more message can promote a stranger.
+  `resolvePeople({ refreshStats: true })` forces a recount. Unchanged person rows are not resubmitted.
+- **Matters.** Candidates come from the email's matter, the stored thread page, provider search with
+  the sender (handles mapped to cached v0.2 rows) and the In-Reply-To parent. `reviewMatters` lists
+  every active matter oldest first and reviews at most `MATTER_REVIEWS_PER_RUN` (10) per run.
 - **Replies.** Thread context is one `thread(threadProviderId, { format: "text" })` call, falling
-  back to stored thread rows.
+  back to the newest 10 stored thread members.
+
+### Known limitations
+
+- **R2-22** v0.2 people have no `statsRefreshedAt`, so their first v0.3 arrival recounts them with
+  the capped counts and writes one `person_update` per existing contact (action-log noise, capped
+  counts in the UI). A one-time backfill would avoid it.
+- **R2-24** `RunQueue` (and the server's `PriorityRunQueue`) are unbounded and have no per-run
+  timeout: a stuck LLM call stalls later runs. Arrival runs are durable, so a bound plus timeout can
+  be added without losing work; neither is implemented yet.
 
 ## Integrator requirements: frozen contract adaptations
 
