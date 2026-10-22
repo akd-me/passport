@@ -15,6 +15,7 @@ import { persistArrival } from "../arrivals.js";
 import { cachedEmail, refreshLabelCache } from "../ondemand-wiring.js";
 import { readCursors, updateCursors } from "../sync/state.js";
 import { type ArrivalContext, alreadyHandled, arrivalContext, isInboxArrival } from "./arrival.js";
+import { maintainEmailCache } from "./cache-maintenance.js";
 import { backoffDelayMs, INVALID_CURSOR, REAUTHORIZE, rateLimited, safeCode } from "./failure.js";
 import {
   labelsKey,
@@ -320,6 +321,7 @@ export class MailWatcher {
     this.labels.set(accountId, items);
     this.labelsAt.set(accountId, this.now());
     await refreshLabelCache(this.options.store, accountId, items);
+    await maintainEmailCache(this.options.store, this.now());
     await this.options.store.kv.set(
       labelsKey(accountId),
       JSON.stringify(summarizeLabels(items, this.iso())),
