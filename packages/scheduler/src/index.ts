@@ -171,6 +171,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
         history: [],
         running: false,
         activeRun: null,
+        ...(def.taskId ? { taskId: def.taskId } : {}),
       };
       const e: Entry = {
         def: {
@@ -193,6 +194,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
             kind: def.kind,
             schedule: validateSchedule(saved.schedule),
             running: false,
+            taskId: def.taskId,
           });
           e.recoverInterrupted = !!state.activeRun;
           if (!state.enabled) {

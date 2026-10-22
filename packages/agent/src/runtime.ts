@@ -55,7 +55,7 @@ class PersonalAgentRuntime implements AgentRuntime {
   run(trigger: AgentTrigger, options: AgentRunOptions = {}): Promise<AgentRunResult> {
     // Serialize per-runtime inference and KV journals without subscribing to the bus implicitly.
     const priority = options.priority ?? (trigger.kind === "manual" ? "interactive" : "background");
-    return this.queue.enqueue(priority, () => this.runInternal(trigger, priority));
+    return this.queue.enqueue(priority, () => this.runInternal(trigger, priority, options));
   }
 
   queued(): Record<AgentRunPriority, number> {
@@ -65,11 +65,12 @@ class PersonalAgentRuntime implements AgentRuntime {
   private async runInternal(
     trigger: AgentTrigger,
     priority: AgentRunPriority,
+    options: AgentRunOptions = {},
   ): Promise<AgentRunResult> {
     const { store, executor, policy, bus } = this.options;
     const run: AgentRunResult = {
       toolBudget: { callsMade: 0, llmCalls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      id: this.options.runId?.(trigger) ?? newAgentId(),
+      id: options.runId ?? this.options.runId?.(trigger) ?? newAgentId(),
       trigger,
       startedAt: this.now(),
       actionIds: [],
@@ -101,8 +102,12 @@ class PersonalAgentRuntime implements AgentRuntime {
       notes: [],
       usages: [],
       complete: async (opts) => {
+        cancelled(options.signal);
         const response = await this.llm.complete(opts);
         ctx.usages.push(response.usage);
+        if (!opts.json && response.text.trim()) {
+          options.observer?.assistantMessage?.(response.text);
+        }
         if (opts.json) {
           response.json ??= extractJson(response.text);
           validateJson(response.json, opts.json);
@@ -137,8 +142,13 @@ class PersonalAgentRuntime implements AgentRuntime {
         if (!tool) {
           throw new AgentError("Unknown registry tool", "INPUT_TOOL");
         }
+        cancelled(options.signal);
         ctx.toolCalls++;
-        const result = await tool.handler(input, { ...context, runId: run.id });
+        const result = await tool.handler(input, {
+          ...context,
+          runId: run.id,
+          ...(options.taskId ? { taskId: options.taskId } : {}),
+        });
         const data = result;
         if (data.error === "DEPENDENCY_ERROR" || data.status === "failed") {
           throw new AgentError("Tool dependency failed", "ACTION_FAILED");
@@ -161,6 +171,8 @@ class PersonalAgentRuntime implements AgentRuntime {
       now: this.now,
       freeBusy: this.options.freeBusy,
       actor: { kind: "agent", id: run.id },
+      observer: options.observer?.toolCall?.bind(options.observer),
+      readOnly: options.readOnly,
       executor: {
         ...executor,
         submit: async (request) => {
@@ -276,6 +288,13 @@ class PersonalAgentRuntime implements AgentRuntime {
       throw failure;
     }
     return run;
+  }
+}
+
+/** Cooperative cancellation for task runs: checked before each model call and tool call. */
+function cancelled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new AgentError("Run cancelled", "RUN_CANCELLED");
   }
 }
 

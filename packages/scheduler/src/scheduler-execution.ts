@@ -50,13 +50,18 @@ export function createJobExecutor(
           jobId: e.def.id,
           runId: run.runId,
         });
+        const jobContext = {
+          jobId: e.def.id,
+          runId: run.runId,
+          signal: controller.signal,
+          now: () => new Date(now()),
+          ...(e.def.taskId ? { taskId: e.def.taskId } : {}),
+        };
+        const taskId = e.def.taskId;
         const work = Promise.resolve().then(() =>
-          e.def.run({
-            jobId: e.def.id,
-            runId: run.runId,
-            signal: controller.signal,
-            now: () => new Date(now()),
-          }),
+          taskId && options.runOnTask
+            ? options.runOnTask(taskId, jobContext, (ctx) => e.def.run(ctx))
+            : e.def.run(jobContext),
         );
         e.work = work;
         const workSettled = () => {

@@ -8,6 +8,7 @@ import type {
   Person,
   PolicyEngine,
   Store,
+  ToolCallEvent,
 } from "@passport/types";
 import type { JsonSchema } from "./schema.js";
 
@@ -27,6 +28,8 @@ export interface ToolContext {
   matterId?: string;
   /** Per-call on-demand readers; overrides `ToolRegistryOptions.readers` for this call. */
   readers?: MailReaderResolver;
+  /** Task the call belongs to (`watch_conversation`). Set by the host, never by the model. */
+  taskId?: string;
 }
 /** MCP tool hints that differ from the defaults derived from `risk`. */
 export interface ToolAnnotations {
@@ -71,4 +74,8 @@ export interface ToolRegistryOptions {
   scratchDir?: string;
   /** Session directory name under `scratchDir`; default a random UUID per registry. */
   scratchSession?: string;
+  /** Called after every tool call (task timelines). Must not throw; failures are logged. */
+  observer?: (event: ToolCallEvent) => void;
+  /** Plan mode: write tools return `{ status: "planned" }` without executing. */
+  readOnly?: boolean;
 }
