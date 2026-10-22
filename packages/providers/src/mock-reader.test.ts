@@ -94,7 +94,8 @@ describe("MockMailReader.search", () => {
     const total = async (query: string) => (await reader.search({ query, limit: 1 })).approxTotal;
     expect(await total("in:inbox")).toBe(22);
     expect(await total("label:Receipts is:unread")).toBe(6);
-    expect(await total("has:attachment")).toBe(3);
+    // Three invites plus the fixture-11 receipt PDF.
+    expect(await total("has:attachment")).toBe(4);
     expect(await total("after:2026-01-16 before:2026-01-17")).toBe(24);
     expect(await total("newer_than:1d")).toBe(24);
     provider.setNow("2026-01-16T09:00:00Z");

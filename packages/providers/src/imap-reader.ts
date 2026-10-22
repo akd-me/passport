@@ -1,5 +1,7 @@
 import type {
   Email,
+  MailAttachmentData,
+  MailAttachmentRef,
   MailBody,
   MailChanges,
   MailCountOptions,
@@ -15,6 +17,7 @@ import type {
   ReadValue,
 } from "@passport/types";
 import { ProviderError } from "./errors.js";
+import { fetchImapAttachment } from "./imap-reader-attachments.js";
 import { imapChanges } from "./imap-reader-changes.js";
 import { withoutText } from "./imap-reader-rows.js";
 import {
@@ -204,6 +207,19 @@ export class ImapMailReader implements MailReader {
       };
     });
   }
+
+  /** `UID FETCH (BODYSTRUCTURE)` then `BODY.PEEK[<part>]` (2 commands plus SELECT). */
+  async attachment(
+    providerId: string,
+    attachmentRef: MailAttachmentRef,
+    opts: MailReadOptions = {},
+  ): Promise<ReadValue<MailAttachmentData>> {
+    return this.call(opts, async (session) => ({
+      value: await fetchImapAttachment(this.bodyContext(session), providerId, attachmentRef),
+    }));
+  }
+
+  // No `rawGet`: IMAP has no REST surface and raw commands cannot be confined to reads.
 
   async countIds(
     query: string,

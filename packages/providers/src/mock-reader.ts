@@ -1,6 +1,8 @@
 import type {
   Account,
   Email,
+  MailAttachmentData,
+  MailAttachmentRef,
   MailBody,
   MailChanges,
   MailCountOptions,
@@ -33,6 +35,7 @@ import { type MatchLabel, matchesQuery } from "./query-match.js";
 import { listFilterToAst } from "./query-render.js";
 import type { QuotaGovernor } from "./quota.js";
 import { GMAIL_UNIT_COSTS } from "./quota-presets.js";
+import { assertAttachmentSize, attachmentData, pickAttachment } from "./reader-attachments.js";
 
 /** Live view of `MockMailProvider` state that the reader reads from. */
 export interface MockReaderSource {
@@ -43,6 +46,8 @@ export interface MockReaderSource {
   folders(): readonly string[];
   /** Append-only change log; a change cursor is an index into it. */
   log(): ReadonlyArray<Extract<SyncDelta, { kind: "email" }>>;
+  /** Bytes of an attachment blob a message references; undefined when unknown. */
+  blob(blobId: string): { type: string; data: Uint8Array } | undefined;
   /** The mock's fixture clock. */
   now(): Date;
   /** Applies the configured verifier, if any. */
@@ -211,6 +216,38 @@ export class MockMailReader implements MailReader {
       attachments: email.attachments,
     });
     return { value, ...(await this.spend("body", GMAIL_UNIT_COSTS.messagesGetFull, opts)) };
+  }
+
+  /** Priced like Gmail's `messages.attachments.get` (20 units); the manifest is local. */
+  async attachment(
+    providerId: string,
+    attachmentRef: MailAttachmentRef,
+    opts: MailReadOptions = {},
+  ): Promise<ReadValue<MailAttachmentData>> {
+    this.source.account();
+    const email = this.source.get(providerId);
+    if (!email) {
+      throw new ProviderError("NOT_FOUND", "Message does not exist");
+    }
+    const entry = pickAttachment(
+      email.attachments.map((a) => ({
+        name: a.name,
+        type: a.type,
+        size: a.size,
+        inline: a.disposition === "inline",
+        contentId: a.cid ?? undefined,
+        keys: [a.id, a.blobId],
+        blobId: a.blobId,
+      })),
+      attachmentRef,
+    );
+    assertAttachmentSize(entry.size);
+    const blob = this.source.blob(entry.blobId);
+    if (!blob) {
+      throw new ProviderError("NOT_FOUND", "Attachment does not exist");
+    }
+    const value = attachmentData(entry, blob.data);
+    return { value, ...(await this.spend("attachment", GMAIL_UNIT_COSTS.attachmentsGet, opts)) };
   }
 
   async countIds(

@@ -74,6 +74,12 @@ export {
   QUOTA_PRESETS,
 } from "./quota-presets.js";
 export {
+  AttachmentTooLargeError,
+  cloudLinkHost,
+  NotDownloadableError,
+} from "./reader-attachments.js";
+export { clipJson, gmailRawGetUnits } from "./reader-raw-get.js";
+export {
   createProviderRegistry,
   GOOGLE_CALENDAR_SCOPES,
   GOOGLE_MAIL_SCOPES,
