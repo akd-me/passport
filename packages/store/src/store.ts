@@ -1,12 +1,13 @@
 import { randomBytes, scryptSync } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { MailReaderResolver, Store } from "@passport/types";
+import type { MailReaderResolver, Store, StoreTasks } from "@passport/types";
 import { StoreError } from "./errors.js";
 import { createActionsRepositories } from "./store-actions.js";
 import { createCalendarRepositories } from "./store-calendar.js";
 import { StoreDatabase } from "./store-database.js";
 import { createMailRepositories } from "./store-mail.js";
 import { createPeopleRepositories } from "./store-people.js";
+import { createTasksRepository } from "./store-tasks.js";
 
 class SQLiteStore extends StoreDatabase implements Store {
   accounts: Store["accounts"];
@@ -21,6 +22,7 @@ class SQLiteStore extends StoreDatabase implements Store {
   actions: Store["actions"];
   trust: Store["trust"];
   kv: Store["kv"];
+  tasks: StoreTasks;
   private resolver: MailReaderResolver | null = null;
   constructor(db: DatabaseSync, key: Buffer) {
     super(db, key);
@@ -40,6 +42,7 @@ class SQLiteStore extends StoreDatabase implements Store {
     this.actions = actions.actions;
     this.trust = actions.trust;
     this.kv = actions.kv;
+    this.tasks = createTasksRepository(this);
   }
   setMailReaderResolver(resolver: MailReaderResolver): void {
     this.resolver = resolver;
