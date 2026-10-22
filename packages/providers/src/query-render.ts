@@ -1,6 +1,7 @@
 import type { MailListFilter } from "@passport/types";
 import type { SearchObject } from "imapflow";
 import { NotImplementedError, ProviderError } from "./errors.js";
+import { planGraphQuery } from "./graph-reader-query.js";
 import type { QueryAst, QueryNode } from "./query.js";
 
 /** Gmail drops the quote character inside phrases, so it is removed rather than escaped. */
@@ -79,13 +80,12 @@ export interface GraphQueryPlan {
 }
 
 /**
- * Plans a portable query for Graph.
- * @throws NotImplementedError until the Graph reader lands (Wave 1, Graph agent).
+ * Plans a portable query for Graph: `$filter` when every predicate is structured, otherwise
+ * `$search` with structured predicates in `clientFilter` (see `graph-reader-query.ts`).
+ * `now` resolves `newer_than:` / `older_than:`.
  */
-export function renderGraphQuery(_ast: QueryAst): GraphQueryPlan {
-  throw new NotImplementedError(
-    "renderGraphQuery is a stub: the Graph reader implements the $search/$filter translator",
-  );
+export function renderGraphQuery(ast: QueryAst, now: Date = new Date()): GraphQueryPlan {
+  return planGraphQuery(ast, now);
 }
 
 /** How a portable query runs over IMAP SEARCH plus local post-filtering. */

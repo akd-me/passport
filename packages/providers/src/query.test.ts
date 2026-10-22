@@ -169,9 +169,7 @@ describe("renderGmailQuery", () => {
 
   it("leaves Graph and IMAP translation to their readers", () => {
     const ast = parsePortableQuery("x");
-    expect(() => renderGraphQuery(ast)).toThrow(
-      expect.objectContaining({ code: "NOT_IMPLEMENTED" }),
-    );
+    expect(renderGraphQuery(ast).strategy).toBe("search");
     expect(() => renderImapQuery(ast)).toThrow(
       expect.objectContaining({ code: "NOT_IMPLEMENTED" }),
     );
