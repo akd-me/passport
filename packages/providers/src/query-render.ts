@@ -1,6 +1,6 @@
 import type { MailListFilter } from "@passport/types";
 import type { SearchObject } from "imapflow";
-import { NotImplementedError, ProviderError } from "./errors.js";
+import { ProviderError } from "./errors.js";
 import { planGraphQuery } from "./graph-reader-query.js";
 import { type QueryAst, type QueryNode, relativeCutoff } from "./query.js";
 
