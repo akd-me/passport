@@ -172,6 +172,10 @@ await test("B4: packed CLI help, MCP dry-run and authenticated demo/persistent A
     assert.equal(manifest.name, "@akd-me/passport");
     assert.equal(manifest.bin.passport, "bin/passport.js");
     assert(!Object.keys(manifest.dependencies).some((name) => name.startsWith("@passport/")));
+    // mail_attachment_read's self-contained extraction worker ships next to cli.js.
+    await readFile(
+      join(directory, "node_modules/@akd-me/passport/dist/server/attachment-worker.js"),
+    );
     const cli = join(directory, "node_modules/.bin/passport");
     assert.match(command(cli, ["--help"], { timeout: 10_000 }), /\bserve\b/);
     assert.match(command(cli, ["mcp", "--help"], { timeout: 10_000 }), /stdio/);

@@ -61,6 +61,7 @@ const toolNames = [
   "mail_search",
   "mail_count",
   "mail_read",
+  "mail_attachment_read",
   "mail_grep",
   "mail_changes",
   "people_history",

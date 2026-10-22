@@ -111,6 +111,44 @@ describe("on-demand mail over MCP", () => {
     expect(value.files).toHaveLength(1);
   });
 
+  it("returns image attachments as MCP image blocks and extracts documents in the worker", async () => {
+    const { client, call, provider } = await connect();
+    const tool = (await client.listTools()).tools.find((t) => t.name === "mail_attachment_read");
+    expect(tool?.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: true });
+    const logo = await call("mail_attachment_read", {
+      id: "account-1:email:fixture-11",
+      attachment: { name: "logo.png" },
+    });
+    expect(logo.response.isError).toBeFalsy();
+    expect(logo.value).toMatchObject({ kind: "image", mimeType: "image/png" });
+    expect(logo.response.content).toEqual([
+      expect.objectContaining({ type: "text" }),
+      { type: "image", data: expect.stringMatching(/^iVBORw0KGgo/), mimeType: "image/png" },
+    ]);
+    const text = "column\n".repeat(20_000);
+    provider.injectEmail({
+      providerId: "att",
+      attachments: [
+        {
+          id: "a",
+          name: "big.csv",
+          type: "text/csv",
+          size: text.length,
+          blobId: provider.injectBlob(new Uint8Array(Buffer.from(text)), "text/csv"),
+        },
+      ],
+    });
+    const csv = await call("mail_attachment_read", {
+      id: "account-1:email:att",
+      attachment: { index: 0 },
+      maxChars: 100_000,
+    });
+    expect(Buffer.byteLength(JSON.stringify(csv.response))).toBeLessThanOrEqual(64 * 1024);
+    expect(csv.response.content).toHaveLength(1);
+    expect(csv.value).toMatchObject({ kind: "text", offset: 0, truncated: true });
+    expect(csv.value.continueFrom).toBe(csv.value.text.length);
+  });
+
   it("defaults the response budget to 64 KiB while the registry keeps 512 KiB", async () => {
     expect(DEFAULT_MCP_RESPONSE_BYTE_BUDGET).toBe(64 * 1024);
     expect(DEFAULT_RESPONSE_BYTE_BUDGET).toBe(512 * 1024);

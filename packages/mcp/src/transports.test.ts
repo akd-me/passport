@@ -59,7 +59,7 @@ describe("authenticated streamable HTTP", () => {
     const { handle, executor, bus } = await host();
     const one = await connect(handle, "one"),
       two = await connect(handle, "two");
-    expect((await one.client.listTools()).tools).toHaveLength(58);
+    expect((await one.client.listTools()).tools).toHaveLength(59);
     for (const { client } of [one, two]) {
       await client.callTool({
         name: "archive_emails",
@@ -132,7 +132,7 @@ describe("authenticated streamable HTTP", () => {
   it("accepts an explicit host override", async () => {
     const { handle } = await host({ host: "localhost" });
     expect(handle.url).toMatch(/^http:\/\/localhost:/);
-    expect((await (await connect(handle, "host-test")).client.listTools()).tools).toHaveLength(58);
+    expect((await (await connect(handle, "host-test")).client.listTools()).tools).toHaveLength(59);
   });
   it("bridges Claude Desktop stdio to authenticated HTTP", async () => {
     const { handle } = await host();
@@ -160,7 +160,7 @@ describe("authenticated streamable HTTP", () => {
     });
     cleanup.push(() => client.close());
     await client.connect(transport);
-    expect((await client.listTools()).tools).toHaveLength(58);
+    expect((await client.listTools()).tools).toHaveLength(59);
     expect(errors).not.toContain(token);
   });
   it("requires a usable configured token before opening a listener", async () => {

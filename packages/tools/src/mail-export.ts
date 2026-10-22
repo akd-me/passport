@@ -3,6 +3,7 @@ import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Email, EmailAddress, ReadMeta } from "@passport/types";
 import { formatMailAddress, parseMailHandle } from "@passport/types";
+import { AttachmentExport } from "./attachments/export.js";
 import type { Context } from "./context.js";
 import { mergeMeta, onDemand, resolveMailTarget } from "./ondemand-support.js";
 import { ToolError } from "./presentation.js";
@@ -84,6 +85,7 @@ async function writeThread(
   dir: string,
   format: "md" | "eml",
   metas: ReadMeta[],
+  attachments: AttachmentExport | null,
 ): Promise<ExportedFile[]> {
   const { emails, metas: spent } = await loadMail(ctx, handle, "thread");
   metas.push(...spent);
@@ -99,6 +101,7 @@ async function writeThread(
     await writeFile(path, content, { mode: 0o600 });
     files.push({ path, threadId, messages });
   }
+  await attachments?.add(emails, (email) => `${tag}-${slug(email.providerId)}`);
   return files;
 }
 
@@ -135,16 +138,20 @@ export function registerMailExport(ctx: Context) {
   register(
     ctx,
     "mail_export",
-    "Write threads as Markdown (one file per thread) or .eml (one file per message) into a private scratch directory so a host with a shell can use rg, jq or scripts. Returns the directory and files; they are deleted after 24 h. ~120 Gmail units per thread.",
+    "Write threads as Markdown (one file per thread) or .eml (one file per message) into a private scratch directory so a host with a shell can use rg, jq or scripts. includeAttachments also writes each attachment's raw bytes under attachments/ (25 MB each, 200 MB per call). Returns the directory and files; they are deleted after 24 h. ~120 Gmail units per thread, +20 per attachment.",
     {
       ids: o.handles.optional(),
       query: o.query.optional(),
       account: o.accountOrAll.optional(),
       max: z.number().int().min(1).max(200).default(50).describe("Maximum threads to export."),
       format: z.enum(["md", "eml"]).default("md"),
+      includeAttachments: z
+        .boolean()
+        .default(false)
+        .describe("Also write non-inline attachments (raw bytes, untrusted) under attachments/."),
     },
     false,
-    async ({ ids, query, account, max, format }, call) => {
+    async ({ ids, query, account, max, format, includeAttachments }, call) => {
       if (Boolean(ids) === (query !== undefined)) {
         throw new ToolError("INVALID_INPUT", "Provide ids or query, not both.");
       }
@@ -175,10 +182,11 @@ export function registerMailExport(ctx: Context) {
         const dir = join(root, session);
         await mkdir(dir, { recursive: true, mode: 0o700 });
         const files: ExportedFile[] = [];
+        const attachments = includeAttachments ? new AttachmentExport(call, dir, metas) : null;
         for (const handle of threads.values()) {
-          files.push(...(await writeThread(call, handle, dir, format, metas)));
+          files.push(...(await writeThread(call, handle, dir, format, metas, attachments)));
         }
-        return { dir, files, ...mergeMeta(metas) };
+        return { dir, files, ...attachments?.result(), ...mergeMeta(metas) };
       });
     },
     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
