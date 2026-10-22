@@ -50,10 +50,9 @@ export class MenuBar {
     const a = this.actions;
     const template: MenuItemConstructorOptions[] = [
       {
-        label:
-          count > 0 ? `${count} decision${count === 1 ? "" : "s"} need you` : "Nothing needs you",
+        label: count > 0 ? `Needs You (${count})` : "Nothing needs you",
         enabled: count > 0,
-        click: () => a.open("/"),
+        click: () => a.open("/needs-you"),
       },
       { label: "Open Passport", accelerator: "CommandOrControl+O", click: () => a.open() },
       { type: "separator" },

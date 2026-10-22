@@ -2,9 +2,10 @@
 // one window onto its UI, and a menu-bar item that keeps working with the window closed.
 import { join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, Notification, safeStorage, shell } from "electron";
+import type { Attention } from "./attention";
 import { installShim } from "./cli-shim";
-import { DecisionWatcher, type NewDecision } from "./decisions";
-import { decisionLink, linkFromArgv, routeFor, SCHEME } from "./deep-links";
+import { DecisionWatcher } from "./decisions";
+import { linkFromArgv, routeFor, SCHEME } from "./deep-links";
 import { desktopMasterKey, MasterKeyError } from "./master-key";
 import { dataDir, log, logDir } from "./paths";
 import { ServerSupervisor } from "./server";
@@ -13,6 +14,7 @@ import { MenuBar } from "./tray";
 import { MainWindow } from "./window";
 
 const MAX_NOTIFICATIONS = 3;
+const NEEDS_YOU = "/needs-you";
 
 // Lets a test run use its own sealed keys, settings, logs and single-instance lock.
 if (process.env.PASSPORT_DESKTOP_USER_DATA) {
@@ -95,22 +97,22 @@ async function start(): Promise<void> {
 
   // Notifications must stay referenced until clicked or closed, or their handlers are collected.
   const live = new Set<Notification>();
-  const notify = (decisions: NewDecision[]) => {
+  const notify = (items: Attention[]) => {
     const focused = BrowserWindow.getFocusedWindow();
     if (!settings.notifications || focused || !Notification.isSupported()) {
       log("info", `Skipped notifications (${focused ? "window focused" : "disabled"})`);
       return;
     }
-    const shown = decisions.slice(0, MAX_NOTIFICATIONS).map((decision) => ({
-      body: decision.title,
-      route: routeFor(decisionLink(decision.id)) ?? "/",
+    const shown = items.slice(0, MAX_NOTIFICATIONS).map((item) => ({
+      body: item.title,
+      route: routeFor(item.link) ?? NEEDS_YOU,
     }));
-    const extra = decisions.length - shown.length;
+    const extra = items.length - shown.length;
     if (extra > 0) {
-      shown.push({ body: `${extra} more decision${extra === 1 ? "" : "s"} need you`, route: "/" });
+      shown.push({ body: `${extra} more need${extra === 1 ? "s" : ""} you`, route: NEEDS_YOU });
     }
     for (const { body, route } of shown) {
-      const notification = new Notification({ title: "Passport needs a decision", body });
+      const notification = new Notification({ title: "Passport needs you", body });
       live.add(notification);
       notification.on("click", () => {
         live.delete(notification);
@@ -119,7 +121,7 @@ async function start(): Promise<void> {
       notification.on("close", () => live.delete(notification));
       notification.show();
     }
-    log("info", `Showed ${shown.length} decision notification(s)`);
+    log("info", `Showed ${shown.length} notification(s)`);
   };
 
   const tray = new MenuBar({
@@ -180,7 +182,7 @@ async function start(): Promise<void> {
     app.setBadgeCount(count);
     refreshTray();
   });
-  watcher.on("proposed", notify);
+  watcher.on("attention", notify);
 
   // The menu bar keeps Passport (and its agent) running with every window closed.
   app.on("window-all-closed", () => {});
