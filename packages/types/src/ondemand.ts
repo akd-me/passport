@@ -278,3 +278,10 @@ export function rateLimitedResult<T = MailRow>(input: {
   }
   return result;
 }
+
+/**
+ * Resolves the on-demand reader for an account, or `null` when the account's provider does not
+ * implement `MailProvider.reader()`. Injected by the composition root into the store (read-through
+ * cache), the tool registry, the agent runtime and the MCP server.
+ */
+export type MailReaderResolver = (accountId: string) => Promise<MailReader | null>;
