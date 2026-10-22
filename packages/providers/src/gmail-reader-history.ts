@@ -11,7 +11,10 @@ import { GMAIL_UNIT_COSTS } from "./quota-presets.js";
 
 const HISTORY_TYPES = ["messageAdded", "labelAdded", "labelRemoved", "messageDeleted"];
 
-type HistoryRef = { message: { id: string } };
+type HistoryRef = { message: { id: string; labelIds?: string[] } };
+
+/** New messages that are the user's own (drafts, sends, chats) are not arrivals (R1-12). */
+const OWN_LABELS = new Set(["DRAFT", "SENT", "CHAT"]);
 export interface GmailHistoryRecord {
   id: string;
   messagesAdded?: HistoryRef[];
@@ -53,6 +56,12 @@ export class HistoryCollector {
   take(record: GmailHistoryRecord): void {
     for (const { message } of record.messagesAdded ?? []) {
       this.deleted.delete(message.id);
+      if (message.labelIds?.some((label) => OWN_LABELS.has(label))) {
+        if (!this.added.has(message.id)) {
+          this.changed.add(message.id);
+        }
+        continue;
+      }
       this.changed.delete(message.id);
       this.added.add(message.id);
     }

@@ -371,3 +371,32 @@ describe("JmapMailReader", () => {
     expect(acquire).toHaveBeenCalledWith(account.id, "arrivals", 1, {});
   });
 });
+
+describe("JMAP method errors", () => {
+  it("R1-21: keeps only a plain error-type token from the server", async () => {
+    const fake = server();
+    const fetch = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const calls = init.body ? (jsonBody(init).methodCalls as Array<[string]>) : [];
+      if (calls[0]?.[0] === "Mailbox/get") {
+        const type = "serverFail <a href=//evil>click</a>";
+        return response({ methodResponses: [["error", { type }, "0"]] });
+      }
+      return fake.fetch(input, init);
+    });
+    const provider = new JmapMailProvider({ fetch: fetch as typeof globalThis.fetch });
+    await provider.connect(
+      {
+        ...account,
+        kind: "jmap",
+        settings: { sessionUrl: "https://jmap.example/.well-known/jmap" },
+      },
+      { token: "token" },
+    );
+    const error = await provider
+      .reader()
+      .labels()
+      .catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "JMAP_METHOD_ERROR" });
+    expect((error as Error).message).not.toContain("evil");
+  });
+});

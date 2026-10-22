@@ -28,11 +28,17 @@ interface Classified {
 
 const odataString = (value: string) => `'${value.replaceAll("'", "''")}'`;
 
-/** KQL value: quotes are dropped, values with spaces or KQL syntax become phrases. */
+/** KQL keywords that change a query's meaning when bare (R1-17). */
+const KQL_KEYWORD = /^(?:and|or|not|near|onear|words)$/i;
+
+/** KQL value: quotes are dropped; values with spaces, KQL syntax or keywords become phrases. */
 function kqlValue(value: string, phrase = false): string {
   const clean = value.replaceAll('"', "").replaceAll("\\", "");
-  return phrase || /[\s():<>=]/.test(clean) ? `"${clean}"` : clean;
+  return phrase || /[\s():<>=]/.test(clean) || KQL_KEYWORD.test(clean) ? `"${clean}"` : clean;
 }
+
+/** True when a date bound is not midnight UTC, so KQL's day-granular `received` is inexact. */
+const timeOfDay = (at: string) => !/^\d{4}-\d{2}-\d{2}(?:T00:00:00(?:\.0+)?Z)?$/.test(at);
 
 const isExactAddress = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
@@ -98,9 +104,14 @@ function classify(node: QueryNode, now: Date): Classified {
         return {};
       }
       const kqlOp = d.op === "ge" ? ">=" : "<";
+      // KQL is day-granular: widen `<` to the next day; the exact bound is checked client-side.
+      const day =
+        d.op === "lt" && timeOfDay(d.at)
+          ? new Date(Date.parse(d.at.slice(0, 10)) + 86_400_000).toISOString().slice(0, 10)
+          : d.at.slice(0, 10);
       return {
         filter: `receivedDateTime ${d.op} ${d.at}`,
-        search: `received${kqlOp}${d.at.slice(0, 10)}`,
+        search: `received${kqlOp}${day}`,
       };
     }
     case "size":
@@ -192,7 +203,12 @@ export function planGraphQuery(ast: QueryAst, now: Date = new Date()): GraphQuer
     };
   }
   const search = classified.flatMap((c) => (c.search ? [c.search] : [])).join(" AND ");
-  const clientFilter = classified.filter((c) => !c.search).map((c) => c.node);
+  // A bound with a time of day matches up to a day too much in KQL: re-check it (R1-18).
+  const inexact = (node: QueryNode) => {
+    const d = dateIso(node, now);
+    return d !== null && timeOfDay(d.at);
+  };
+  const clientFilter = classified.filter((c) => !c.search || inexact(c.node)).map((c) => c.node);
   return {
     strategy: clientFilter.length ? "search+clientFilter" : "search",
     search,
