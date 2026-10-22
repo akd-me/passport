@@ -76,6 +76,8 @@ describe("durable email arrivals", () => {
     const run = vi.spyOn(backend.agent, "run").mockResolvedValue(successfulRun);
     const scheduler = getSchedulerService(backend);
     await scheduler.ready;
+    // The watcher's first tick takes its cursor at "now"; later injected mail arrives.
+    await backend.syncAccount(account.id);
     return { backend, mail, run, scheduler };
   }
   async function arrival(backend: RealBackend, providerId = "new"): Promise<Email> {
@@ -241,7 +243,7 @@ describe("durable email arrivals", () => {
     await work;
   });
 
-  it("R5: defers unsynced companion calendars without consuming retries, then marks availability unverified after ten minutes", async () => {
+  it("R5: defers unsynced companion calendars without consuming retries, then marks availability unverified after one minute", async () => {
     const { backend, mail, run } = await fixture();
     await backend.store.accounts.upsert({
       ...account,
@@ -255,17 +257,20 @@ describe("durable email arrivals", () => {
     expect(run).not.toHaveBeenCalled();
     const email = await arrival(backend);
     expect(await entry(backend, email)).toMatchObject({ attempts: 0, calendarWaitStartedAt: at });
-    await vi.advanceTimersByTimeAsync(599999);
+    await vi.advanceTimersByTimeAsync(59999);
     await backend.processArrivals!();
     expect(run).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await backend.processArrivals!();
-    expect(run).toHaveBeenCalledExactlyOnceWith({
-      kind: "email.received",
-      emailId: email.id,
-      runId: `arrival:${email.id}`,
-      availabilityUnverified: true,
-    });
+    expect(run).toHaveBeenCalledExactlyOnceWith(
+      {
+        kind: "email.received",
+        emailId: email.id,
+        runId: `arrival:${email.id}`,
+        availabilityUnverified: true,
+      },
+      { priority: "background" },
+    );
   });
 
   it("R5: resumes deferred arrivals once the companion calendar has a completed sync", async () => {
@@ -371,13 +376,18 @@ describe("durable email arrivals", () => {
     backends.splice(backends.indexOf(first.backend), 1);
     await vi.advanceTimersByTimeAsync(60000);
     const second = await fixture(directory);
+    // The provider still holds the message; read-through revalidation would tombstone it otherwise.
+    second.mail.injectEmail({ providerId: "new" });
     expect(await entry(second.backend, email)).toMatchObject({ attempts: 1 });
     await second.scheduler.scheduler.runNow("agent.arrivals");
-    expect(second.run).toHaveBeenCalledExactlyOnceWith({
-      kind: "email.received",
-      emailId: email.id,
-      runId: `arrival:${email.id}`,
-    });
+    expect(second.run).toHaveBeenCalledExactlyOnceWith(
+      {
+        kind: "email.received",
+        emailId: email.id,
+        runId: `arrival:${email.id}`,
+      },
+      { priority: "background" },
+    );
     expect(await entry(second.backend, email)).toBeNull();
   });
 

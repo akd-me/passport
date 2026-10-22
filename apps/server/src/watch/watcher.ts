@@ -46,6 +46,7 @@ const REAUTHORIZE = [
   "TOKEN_EXPIRED",
   "REAUTHORIZE_REQUIRED",
 ];
+const INVALID_CURSOR = ["INVALID_CURSOR", "CURSOR_EXPIRED"];
 const MAX_BACKOFF_MS = 15 * 60_000;
 const safeCode = (error: unknown) => {
   const code = (error as { code?: unknown })?.code;
@@ -165,7 +166,7 @@ export class MailWatcher {
       let arrivals = 0;
       let expired = false;
       for (let page = 0; page < (this.options.maxPages ?? 10); page++) {
-        const { value } = await reader.changes(cursor, this.options.pageSize ?? 100, this.lane());
+        const value = await this.changes(reader, cursor);
         if (value.expired) {
           expired = true;
           const result = await this.recover(account, reader, since);
@@ -201,6 +202,19 @@ export class MailWatcher {
       };
     } catch (error) {
       return this.fail(account, error);
+    }
+  }
+
+  /** A cursor the provider rejects outright is handled like an expired one: start again at now. */
+  private async changes(reader: MailReader, cursor: string): Promise<MailChanges> {
+    try {
+      return (await reader.changes(cursor, this.options.pageSize ?? 100, this.lane())).value;
+    } catch (error) {
+      if (!INVALID_CURSOR.includes((error as { code?: string })?.code ?? "")) {
+        throw error;
+      }
+      const fresh = (await reader.changes(null, 1, this.lane())).value;
+      return { ...fresh, added: [], labelChanged: [], deleted: [], expired: true };
     }
   }
 

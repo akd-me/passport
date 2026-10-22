@@ -2,11 +2,18 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CompleteOptions, LlmClient, LlmCompletion } from "@passport/agent";
 import {
+  createMockEmails,
   createProviderRegistry,
   MockCalendarProvider,
   MockMailProvider,
 } from "@passport/providers";
-import type { ActionRecord, ActionRequest, DomainEvent } from "@passport/types";
+import {
+  type Account,
+  type ActionRecord,
+  type ActionRequest,
+  type DomainEvent,
+  mailHandle,
+} from "@passport/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { addAccount } from "./accounts.js";
 import { createApp } from "./auth.test-client.js";
@@ -74,8 +81,9 @@ describe("real backend end to end", () => {
     await Promise.all(backends.splice(0).map((backend) => backend.close()));
     vi.restoreAllMocks();
   });
-  async function fixture(triage = false) {
-    const mail = new MockMailProvider(),
+  /** `fixtures: false` starts with an empty mailbox so `deliver` can replay fixtures as new mail. */
+  async function fixture(triage = false, fixtures = true) {
+    const mail = new MockMailProvider({ fixtures }),
       calendar = new MockCalendarProvider();
     const providers = createProviderRegistry();
     vi.spyOn(providers, "mail").mockReturnValue(mail);
@@ -94,11 +102,32 @@ describe("real backend end to end", () => {
     });
     return { backend, account, mail, calendar, app: createApp(backend) };
   }
-  it("syncs real fixtures, delivers each arrival once, drains triage and serves a deterministic digest", async () => {
+  /**
+   * Watching starts at "now"; the 40 fixtures then arrive as new mail on the next tick, each also
+   * in the Inbox (like Gmail category labels) so every one is triaged.
+   */
+  async function deliver(backend: RealBackend, account: Account, mail: MockMailProvider) {
+    await backend.syncAccount(account.id);
+    const inbox = `${account.id}:mailbox:Inbox`;
+    for (const email of createMockEmails(account.id, account.emailAddress)) {
+      mail.injectEmail({ ...email, mailboxIds: [...new Set([...email.mailboxIds, inbox])] });
+    }
+    await backend.syncAccount(account.id);
+  }
+  it("watches from now without backfill, delivers each new inbox arrival once, drains triage and serves a deterministic digest", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { backend, account, app } = await fixture(true);
+    const { backend, account, mail, app } = await fixture(true, false);
     const events: DomainEvent[] = [];
     backend.bus.onAny((event) => events.push(event));
+    await backend.syncAccount(account.id);
+    expect((await backend.store.emails.query({ accountId: account.id })).items).toHaveLength(0);
+    expect(events.filter((event) => event.type === "account.watch.started")).toHaveLength(1);
+    expect(await backend.store.mailboxes.list(account.id)).toHaveLength(8);
+    expect(await backend.store.calendars.list(account.id)).toHaveLength(1);
+    expect(await backend.store.events.query({ accountId: account.id })).toHaveLength(6);
+    for (const email of createMockEmails(account.id, account.emailAddress)) {
+      mail.injectEmail(email);
+    }
     await backend.syncAccount(account.id);
     await backend.drainAgentQueue();
     const emails = await backend.store.emails.query({
@@ -106,17 +135,21 @@ describe("real backend end to end", () => {
       limit: 100,
     });
     expect(emails.items).toHaveLength(40);
-    expect(await backend.store.mailboxes.list(account.id)).toHaveLength(8);
-    expect(await backend.store.calendars.list(account.id)).toHaveLength(1);
-    expect(await backend.store.events.query({ accountId: account.id })).toHaveLength(6);
     for (const email of emails.items) {
       expect((await backend.store.threads.get(email.threadId))!.emailIds).toContain(email.id);
     }
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(40);
-    expect(events.filter((event) => event.type === "agent.run.finished")).toHaveLength(40);
+    const received = events.filter((event) => event.type === "email.received");
+    // Sent mail, drafts and mail outside the inbox are cached but never triaged.
+    expect(received.length).toBeGreaterThan(0);
+    expect(received.length).toBeLessThan(40);
+    expect(events.filter((event) => event.type === "agent.run.finished")).toHaveLength(
+      received.length,
+    );
     await backend.syncAccount(account.id);
     await backend.drainAgentQueue();
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(40);
+    expect(events.filter((event) => event.type === "email.received")).toHaveLength(
+      received.length,
+    );
     await backend.agent.run({ kind: "schedule", name: "daily_digest" });
     const response = await app.request(`/api/digest/${new Date().toISOString().slice(0, 10)}`);
     expect(response.status).toBe(200);
@@ -187,8 +220,8 @@ describe("real backend end to end", () => {
     expect(trust.categories.find((item) => item.category === "replies_known")!.approvals).toBe(2);
   });
   it("serves search_emails and policy-gated archive_emails to an in-memory MCP client", async () => {
-    const { backend, account } = await fixture();
-    await backend.syncAccount(account.id);
+    const { backend, account, mail } = await fixture(false, false);
+    await deliver(backend, account, mail);
     const client = new Client({ name: "passport-integration", version: "1" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await backend.mcp.connect(serverTransport);
@@ -320,7 +353,8 @@ describe("real backend end to end", () => {
       fields: {},
     });
     await backend.syncAccount(account.id);
-    const email = (await backend.store.emails.query({ limit: 1 })).items[0]!;
+    // Read-through: the first fixture is fetched from the provider and cached.
+    const email = (await backend.store.emails.getByProviderId(account.id, "fixture-19"))!;
     await backend.store.emails.upsertMany([
       {
         ...email,
@@ -452,7 +486,7 @@ describe("real backend end to end", () => {
     });
     expect(action.status).toBe("proposed");
   });
-  it("creates an MCP reply draft through the default registry using remapped store IDs and the original thread", async () => {
+  it("creates an MCP reply draft through the default registry using mail handles and the original thread", async () => {
     const backend = await createRealBackend(defaultConfig(), {
       storePath: ":memory:",
     });
@@ -465,8 +499,8 @@ describe("real backend end to end", () => {
     });
     await backend.syncAccount(account.id);
     const original = (await backend.store.emails.getByProviderId(account.id, "fixture-19"))!;
-    expect(original.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
-    expect(original.threadId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(original.id).toBe(mailHandle(account.id, "email", "fixture-19"));
+    expect(original.threadId).toBeTruthy();
     const client = new Client({
       name: "passport-reply-integration",
       version: "1",
@@ -521,7 +555,7 @@ describe("real backend end to end", () => {
   });
   it("keeps per-account triage sequential and continues after inference failure", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { backend, account } = await fixture(true);
+    const { backend, account, mail } = await fixture(true, false);
     let rejectFirst!: (error: Error) => void;
     const run = vi
       .spyOn(backend.agent, "run")
@@ -538,17 +572,20 @@ describe("real backend end to end", () => {
         actionIds: [],
         summary: "Done",
       });
-    await backend.syncAccount(account.id);
+    const received: string[] = [];
+    backend.bus.on("email.received", ({ email }) => received.push(email.id));
+    await deliver(backend, account, mail);
     expect(run).toHaveBeenCalledTimes(1);
     rejectFirst(new Error("LLM unavailable"));
     await backend.drainAgentQueue();
-    expect(run).toHaveBeenCalledTimes(40);
+    expect(received.length).toBeGreaterThan(1);
+    expect(run).toHaveBeenCalledTimes(received.length);
   });
   // Policy seams: agent person_update carries a complete new Person (including id and
   // verification); current executor rejects it before either triage playbook can run.
   it("policy seams: fixture newsletter produces an executed or proposed archive/label action", async () => {
-    const { backend, account } = await fixture(true);
-    await backend.syncAccount(account.id);
+    const { backend, account, mail } = await fixture(true, false);
+    await deliver(backend, account, mail);
     await backend.drainAgentQueue();
     const actions = await backend.store.actions.query({
       category: "newsletters",
@@ -563,9 +600,9 @@ describe("real backend end to end", () => {
     ).toBe(true);
   });
   it("policy seams: known-contact fixture reply produces a proposed draft_create/send visible at GET /api/decisions", async () => {
-    const { backend, account, app } = await fixture(true);
+    const { backend, account, app, mail } = await fixture(true, false);
     await backend.policy.setConfig({ globalMode: "supervised" });
-    await backend.syncAccount(account.id);
+    await deliver(backend, account, mail);
     await backend.drainAgentQueue();
     const decisions = (await (await app.request("/api/decisions")).json()) as {
       items: ActionRecord[];
@@ -580,8 +617,8 @@ describe("real backend end to end", () => {
     ).toBe(true);
   });
   it("policy seams: matter_create/matter_attach apply emailPatch category/personIds and undo restores metadata", async () => {
-    const { backend, account } = await fixture(true);
-    await backend.syncAccount(account.id);
+    const { backend, account, mail } = await fixture(true, false);
+    await deliver(backend, account, mail);
     await backend.drainAgentQueue();
     const email = (await backend.store.emails.getByProviderId(account.id, "fixture-01"))!;
     expect(email.category).toBe("newsletters");

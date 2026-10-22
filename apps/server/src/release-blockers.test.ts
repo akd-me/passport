@@ -49,6 +49,8 @@ async function fixture(llm?: { complete: (options: CompleteOptions) => Promise<L
   await mail.connect(account, {});
   await backend.policy.setConfig({ globalMode: "full_access" });
   await backend.policy.pinLevel("scheduling", "full_access");
+  // The watcher's first tick takes its cursor at "now"; later injected mail arrives.
+  await backend.syncAccount(account.id);
   return { backend, mail, calendar };
 }
 function completion(json: Record<string, unknown>): LlmCompletion {
@@ -387,8 +389,8 @@ it.each([false, true])(
   },
 );
 
-it("B2: holds a proposal until a combined account's entire sync pass finishes", async () => {
-  const { backend, mail } = await fixture();
+it("B2: holds a proposal until a combined account's calendar sync pass finishes", async () => {
+  const { backend, mail, calendar } = await fixture();
   await backend.syncAccount(account.id);
   const held = await backend.executor.submit({
     type: "calendar_propose",
@@ -413,7 +415,7 @@ it("B2: holds a proposal until a combined account's entire sync pass finishes", 
   const started = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  vi.spyOn(mail, "sync").mockImplementationOnce(async function* () {
+  vi.spyOn(calendar, "sync").mockImplementationOnce(async function* () {
     entered();
     await paused;
     yield { kind: "cursor", cursor: "complete" };
