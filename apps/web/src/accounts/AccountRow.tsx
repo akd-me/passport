@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { api } from "../api";
 import { Feedback, Icon, relativeTime } from "../components/ui";
 import { useTask } from "../state";
@@ -18,19 +17,51 @@ const kindLabel: Record<string, string> = {
 const providerName = (kind: string) => kindLabel[kind] ?? kind;
 export const needsReauthorization = (account: ConnectedAccount) =>
   !!account.settings.reauthorizationRequired || account.lastSyncError === "REAUTHORIZE_REQUIRED";
+/** Short sidebar state: "Watching", "Paused" or "Needs sign-in" (no sync progress). */
 export function syncSummary(account: ConnectedAccount) {
-  if (needsReauthorization(account)) {
-    return "Sign-in expired";
+  if (needsReauthorization(account) || account.watch?.status === "needs-sign-in") {
+    return "Needs sign-in";
   }
-  if (account.syncing) {
-    return "Syncing…";
+  if (!account.capabilities.mail) {
+    if (account.lastSyncError) {
+      return "Calendar sync failed";
+    }
+    return account.lastSyncAt
+      ? `Calendar synced ${relativeTime(account.lastSyncAt).toLowerCase()}`
+      : "Calendar not synced yet";
   }
-  if (account.lastSyncError) {
-    return "Sync failed";
+  const status = account.watch?.status;
+  return !status || status === "watching" || status === "starting" ? "Watching" : "Paused";
+}
+/** "Watching since 9:41 AM · last check 1m ago", or why the watcher is paused. */
+export function watchDetail(account: ConnectedAccount) {
+  const watch = account.watch;
+  if (!account.capabilities.mail || !watch) {
+    return null;
   }
-  return account.lastSyncAt
-    ? `Synced ${relativeTime(account.lastSyncAt).toLowerCase()}`
-    : "Not synced yet";
+  const reasons: Record<string, string> = {
+    backoff: "Paused: provider rate limit, retrying shortly",
+    stale: "Paused: no recent check",
+    error: `Paused: ${watch.error ?? "check failed"}`,
+    unsupported: "This provider cannot be watched yet",
+    "needs-sign-in": "Paused until you sign in again",
+  };
+  if (reasons[watch.status]) {
+    return reasons[watch.status];
+  }
+  if (!watch.since) {
+    return "Starting to watch for new mail…";
+  }
+  const since = new Date(watch.since).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const check = watch.lastTickAt
+    ? ` · last check ${relativeTime(watch.lastTickAt).toLowerCase()}`
+    : "";
+  return `Watching since ${since}${check}`;
 }
 
 export function AccountRow({
@@ -40,8 +71,7 @@ export function AccountRow({
   account: ConnectedAccount;
   reauthorize: () => void;
 }) {
-  const task = useTask(),
-    [days, setDays] = useState(365);
+  const task = useTask();
   const needsAuth = needsReauthorization(account);
   const oauth = ["gmail", "graph", "google-calendar", "graph-calendar"].includes(account.kind);
   return (
@@ -55,48 +85,20 @@ export function AccountRow({
           <span className={needsAuth || account.lastSyncError ? "warn" : ""}>
             {syncSummary(account)}
           </span>
-          {account.capabilities.mail && (
-            <span className="num">{account.messageCount ?? 0} messages</span>
+          {account.capabilities.mail && typeof account.messageCount === "number" && (
+            <span className="num">{account.messageCount} in Inbox</span>
           )}
         </div>
         <Feedback
           error={
             needsAuth
-              ? "Access expired or was revoked. Re-authorize to resume sync."
+              ? "Access expired or was revoked. Re-authorize to resume watching."
               : account.lastSyncError
-                ? `Last sync error: ${account.lastSyncError}`
+                ? `Last error: ${account.lastSyncError}`
                 : task.error
           }
         />
-        {account.capabilities.mail && account.kind !== "mock" && (
-          <details className="backfill">
-            <summary>Load older mail</summary>
-            <div className="backfill-row">
-              <label className="input-unit">
-                <input
-                  aria-label={`Days of history for ${account.emailAddress}`}
-                  type="number"
-                  min={1}
-                  max={36500}
-                  value={days}
-                  onChange={(e) => setDays(Number(e.target.value))}
-                />
-                <span>days</span>
-              </label>
-              <button
-                className="btn btn-sm"
-                disabled={
-                  task.busy || account.syncing || needsAuth || !Number.isInteger(days) || days < 1
-                }
-                onClick={() =>
-                  task.run(() => accountApi.backfill(account.id, days), "Older mail synced.")
-                }
-              >
-                Backfill
-              </button>
-            </div>
-          </details>
-        )}
+        {watchDetail(account) && <div className="meta">{watchDetail(account)}</div>}
       </div>
       <div className="row-actions">
         {oauth && (needsAuth || account.kind !== "mock") && (
@@ -110,11 +112,11 @@ export function AccountRow({
         )}
         <button
           className="btn btn-sm"
-          disabled={task.busy || account.syncing || needsAuth}
-          onClick={() => task.run(() => api.sync(account.id), "Account synced.")}
+          disabled={task.busy || needsAuth}
+          onClick={() => task.run(() => api.sync(account.id), "Checked for new mail.")}
         >
           <Icon name="sync" size={14} />
-          Sync now
+          Check now
         </button>
         <button
           className="icon-btn danger"

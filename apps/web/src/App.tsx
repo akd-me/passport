@@ -32,7 +32,7 @@ function OpenSettings({ section }: { section: SettingsSection }) {
   useEffect(() => {
     openSettings(section);
     if (connected) {
-      notify("Account connected. The first sync is running.");
+      notify("Connected. Passport reads your mail on demand and watches for new mail.");
     }
   }, [section, connected, openSettings, notify]);
   return <Navigate to="/" replace />;
