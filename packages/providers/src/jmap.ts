@@ -9,11 +9,13 @@ import type {
   MailboxRole,
   MailChange,
   MailProvider,
+  MailReader,
   SendResult,
   SyncDelta,
 } from "@passport/types";
 import { assertSend, localId, ProviderError, required } from "./errors.js";
-import { HttpConnection, type ProviderOptions } from "./http.js";
+import { HttpConnection, type ProviderOptions, type RequestPolicy } from "./http.js";
+import { type JmapInvocation, JmapMailReader } from "./jmap-reader.js";
 import {
   generatePreview,
   htmlToText,
@@ -88,6 +90,8 @@ export const jmapCapabilities: AccountCapabilities = {
   push: false,
   labels: true,
   submit: true,
+  search: true,
+  onDemand: true,
 };
 
 export async function normalizeJmap(
@@ -150,8 +154,59 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
   readonly capabilities = jmapCapabilities;
   private session?: JmapSession;
   private remoteAccountId = "";
+  private mailReader?: JmapMailReader;
   constructor(options: ProviderOptions = {}) {
     super(options);
+  }
+  /** On-demand reader over the JMAP session (one instance per provider). */
+  reader(): MailReader {
+    this.mailReader ??= new JmapMailReader({
+      account: () => {
+        this.check();
+        return this.account;
+      },
+      invoke: (calls, policy) => this.invoke(calls, policy),
+      ...(this.options.governor ? { governor: this.options.governor } : {}),
+      ...(this.options.verifier ? { verifier: this.options.verifier } : {}),
+      now: () => this.options.now?.() ?? new Date(),
+    });
+    return this.mailReader;
+  }
+  /**
+   * Sends several method calls in one JMAP request; later calls may back-reference earlier ones
+   * (`#ids`). Returns `[name, arguments]` per call in order, `"error"` responses included. One
+   * HTTP request costs one governor unit in `policy.lane`.
+   */
+  async invoke(
+    calls: JmapInvocation[],
+    policy: Pick<RequestPolicy, "lane"> & { signal?: AbortSignal } = {},
+  ): Promise<JmapInvocation[]> {
+    this.check();
+    if (!this.session) {
+      throw new ProviderError("NOT_CONNECTED", "JMAP session is unavailable");
+    }
+    const request = this.body({
+      using: [core, mail],
+      methodCalls: calls.map(([method, args], i) => [
+        method,
+        { accountId: this.remoteAccountId, ...args },
+        String(i),
+      ]),
+    });
+    const response = await this.json<{
+      methodResponses?: Array<[string, Record<string, unknown>, string]>;
+    }>(
+      this.session.apiUrl,
+      { ...request, ...(policy.signal ? { signal: policy.signal } : {}) },
+      { lane: policy.lane ?? "interactive", cost: 1 },
+    );
+    return calls.map((_, i): JmapInvocation => {
+      const item = response.methodResponses?.find((r) => r[2] === String(i));
+      if (!item) {
+        throw new ProviderError("INVALID_RESPONSE", "JMAP response is missing a method result");
+      }
+      return [item[0], item[1]];
+    });
   }
   override async connect(account: Account, credentials: AccountCredentials): Promise<void> {
     await super.connect(account, credentials);

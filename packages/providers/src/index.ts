@@ -19,7 +19,15 @@ export { GraphMailReader } from "./graph-reader.js";
 export type { ProviderOptions, RequestPolicy } from "./http.js";
 export type { ImapProviderOptions, SmtpClient } from "./imap.js";
 export { ImapMailProvider, imapCapabilities, imapFlagsToKeywords } from "./imap.js";
+export type { ImapReaderHost } from "./imap-reader.js";
+export { ImapMailReader } from "./imap-reader.js";
+export { IMAP_DELETE_SWEEP_MS } from "./imap-reader-changes.js";
+export { IMAP_SCAN_CAP } from "./imap-reader-scan.js";
+export type { ImapExtension } from "./imap-reader-support.js";
+export { IMAP_EXTENSIONS } from "./imap-reader-support.js";
 export { JmapMailProvider, jmapCapabilities, normalizeJmap } from "./jmap.js";
+export type { JmapInvocation, JmapReaderHost } from "./jmap-reader.js";
+export { JmapMailReader } from "./jmap-reader.js";
 export {
   createMockEmails,
   MockCalendarProvider,
@@ -47,7 +55,7 @@ export {
 } from "./query.js";
 export type { MatchableEmail, MatchContext, MatchLabel } from "./query-match.js";
 export { matchesQuery } from "./query-match.js";
-export type { GraphQueryPlan, ImapQueryPlan } from "./query-render.js";
+export type { GraphQueryPlan, ImapPlanOptions, ImapQueryPlan } from "./query-render.js";
 export {
   listFilterToAst,
   renderGmailQuery,

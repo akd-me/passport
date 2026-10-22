@@ -4,10 +4,10 @@ import type {
   AccountCredentials,
   DraftInput,
   Email,
-  MailboxRole,
   MailChange,
   MailChangeResult,
   MailProvider,
+  MailReader,
   SendResult,
   SyncDelta,
 } from "@passport/types";
@@ -24,7 +24,16 @@ import {
   SubmissionAcceptedError,
 } from "./errors.js";
 import type { ProviderOptions } from "./http.js";
-import { composeMime, decodeMimeBlob, mimeAttachment, normalizeMime } from "./normalize/index.js";
+import { ImapMailReader } from "./imap-reader.js";
+import {
+  imapFlagMap as flagMap,
+  imapIdentity as identity,
+  imapRole,
+  normalizeImapSource,
+  parseImapIdentity as parseIdentity,
+} from "./imap-reader-shared.js";
+import { type ImapExtension, probeImapExtensions } from "./imap-reader-support.js";
+import { composeMime, decodeMimeBlob, mimeAttachment } from "./normalize/index.js";
 import { resolveReplyEmail } from "./reply.js";
 
 export interface SmtpClient {
@@ -53,57 +62,10 @@ export const imapCapabilities: AccountCapabilities = {
   push: true,
   labels: false,
   submit: true,
+  search: true,
+  onDemand: true,
 };
-const roles: Record<string, MailboxRole> = {
-  "\\Inbox": "inbox",
-  "\\Archive": "archive",
-  "\\Drafts": "drafts",
-  "\\Sent": "sent",
-  "\\Trash": "trash",
-  "\\Junk": "junk",
-  "\\All": "all",
-  "\\Flagged": "important",
-};
-const flagMap: Record<string, string> = {
-  $seen: "\\Seen",
-  $flagged: "\\Flagged",
-  $draft: "\\Draft",
-  $answered: "\\Answered",
-  $forwarded: "$Forwarded",
-  $junk: "$Junk",
-  $notjunk: "$NotJunk",
-};
-
-export function imapFlagsToKeywords(flags: Iterable<string>): Email["keywords"] {
-  const reverse = Object.fromEntries(Object.entries(flagMap).map(([k, v]) => [v.toLowerCase(), k]));
-  const result: Email["keywords"] = {};
-  for (const flag of flags) {
-    if (flag !== "\\Deleted" && flag !== "\\Recent") {
-      result[reverse[flag.toLowerCase()] ?? flag] = true;
-    }
-  }
-  return result;
-}
-function identity(path: string, validity: string, uid: number): string {
-  return `imap:${encodeCursor([path, validity, uid])}`;
-}
-function parseIdentity(providerId: string): [string, string, number] {
-  if (!providerId.startsWith("imap:")) {
-    throw new ProviderError("INVALID_PROVIDER_ID", "Invalid IMAP message identity");
-  }
-  const v = decodeCursor<unknown>(providerId.slice(5));
-  if (
-    !Array.isArray(v) ||
-    typeof v[0] !== "string" ||
-    typeof v[1] !== "string" ||
-    !Number.isInteger(v[2]) ||
-    v[2] < 1
-  ) {
-    throw new ProviderError("INVALID_PROVIDER_ID", "Invalid IMAP UID identity");
-  }
-  return v as [string, string, number];
-}
-
+export { imapFlagsToKeywords } from "./imap-reader-shared.js";
 /** IMAP folder+UIDVALIDITY+UID identities deliberately change on copy/move. */
 export class ImapMailProvider implements MailProvider {
   readonly kind = "imap" as const;
@@ -112,7 +74,32 @@ export class ImapMailProvider implements MailProvider {
   private client?: ImapFlow;
   private smtp?: SmtpClient;
   private terminalError?: ProviderError;
+  private mailReader?: ImapMailReader;
+  private probed = new Set<ImapExtension>();
+  /** Recent move/copy destinations, searched by `reader().findByRfc822`. */
+  private readonly moveTargets = new Set<string>();
   constructor(private readonly options: ImapProviderOptions = {}) {}
+  /**
+   * Extensions probed on connect (ESEARCH, SORT, THREAD=REFERENCES, CONDSTORE, QRESYNC, OBJECTID,
+   * X-GM-EXT-1, MOVE, IDLE). Kept in memory: the adapter has no hook to persist Account.settings.
+   */
+  get extensions(): ReadonlySet<ImapExtension> {
+    return this.probed;
+  }
+  /** On-demand reader over the connected IMAP session (one instance per provider). */
+  reader(): MailReader {
+    this.mailReader ??= new ImapMailReader({
+      account: () => {
+        this.check();
+        return this.account;
+      },
+      client: () => this.check(),
+      extensions: () => this.probed,
+      moveTargets: () => this.moveTargets,
+      options: this.options,
+    });
+    return this.mailReader;
+  }
   async connect(account: Account, credentials: AccountCredentials): Promise<void> {
     if (this.client) {
       throw new ProviderError(
@@ -149,6 +136,7 @@ export class ImapMailProvider implements MailProvider {
     });
     try {
       await this.client.connect();
+      this.probed = probeImapExtensions(this.client);
     } catch {
       // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
 
@@ -215,20 +203,11 @@ export class ImapMailProvider implements MailProvider {
       });
     }
   }
-  private async normalize(
-    message: FetchMessageObject,
-    path: string,
-    validity: string,
-  ): Promise<Email> {
-    if (!message.source) {
-      throw new ProviderError("INVALID_RESPONSE", "IMAP FETCH did not return message source");
-    }
-    return normalizeMime(message.source, {
+  private normalize(message: FetchMessageObject, path: string, validity: string): Promise<Email> {
+    return normalizeImapSource(message, {
       accountId: this.account.id,
-      providerId: identity(path, validity, message.uid),
-      mailboxIds: [path],
-      keywords: imapFlagsToKeywords(message.flags ?? []),
-      receivedAt: message.internalDate ? new Date(message.internalDate).toISOString() : undefined,
+      path,
+      validity,
       verifier: this.options.verifier,
     });
   }
@@ -294,9 +273,7 @@ export class ImapMailProvider implements MailProvider {
               accountId: this.account.id,
               providerId: folder.path,
               name: folder.name,
-              role:
-                roles[folder.specialUse ?? ""] ??
-                (folder.path.toUpperCase() === "INBOX" ? "inbox" : null),
+              role: imapRole(folder),
               parentId: folder.parentPath
                 ? localId(this.account.id, "mailbox", folder.parentPath)
                 : null,
@@ -456,6 +433,7 @@ export class ImapMailProvider implements MailProvider {
             if (!target || path === target) {
               return;
             }
+            this.moveTargets.add(target);
             const result =
               c.op === "addToMailbox"
                 ? await client.messageCopy(uid, target, { uid: true })

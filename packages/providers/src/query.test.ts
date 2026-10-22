@@ -167,12 +167,11 @@ describe("renderGmailQuery", () => {
     );
   });
 
-  it("leaves Graph and IMAP translation to their readers", () => {
+  it("delegates Graph and IMAP translation to their planners", () => {
     const ast = parsePortableQuery("x");
     expect(renderGraphQuery(ast).strategy).toBe("search");
-    expect(() => renderImapQuery(ast)).toThrow(
-      expect.objectContaining({ code: "NOT_IMPLEMENTED" }),
-    );
+    // IMAP greps free text locally (imap-reader.test.ts covers the planner).
+    expect(renderImapQuery(ast).localFilter).toEqual([ast.nodes[0]]);
   });
 });
 
