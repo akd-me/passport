@@ -1,5 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { ActionExecutor, EventBus, PolicyEngine, Store } from "@passport/types";
+import type {
+  ActionExecutor,
+  EventBus,
+  MailReaderResolver,
+  PolicyEngine,
+  Store,
+} from "@passport/types";
 import { MailboxMcpError, required } from "./presentation.js";
 
 /** Collaborators are owned by the host; closing an MCP server never closes the store or bus. */
@@ -11,9 +17,21 @@ export interface MailboxMcpDependencies {
   bus: EventBus;
   /** Trusted host override; otherwise the MCP initialization client's name is used as an audit label. */
   clientName?: string;
-  /** Maximum serialized response size in bytes, including resource content. Default 512 KiB. */
+  /**
+   * Maximum serialized response size in bytes, including resource content. Default 64 KiB
+   * (`DEFAULT_MCP_RESPONSE_BYTE_BUDGET`), which keeps tool results under MCP clients' output
+   * warnings. The built-in agent keeps the registry's 512 KiB default.
+   */
   responseByteBudget?: number;
   freeBusy?: import("@passport/tools").FreeBusyResolver;
+  /** On-demand mail readers (v0.3); without them mail tools read the local store. */
+  readers?: MailReaderResolver;
+  /**
+   * Root of the per-session scratch directories for `mail_export` (e.g. `<dataDir>/scratch`).
+   * Each server writes under `<scratchDir>/<random session>/` (0700). The host sweeps sessions
+   * older than 24 h with `sweepScratchDir` from `@passport/tools`. Absent: no `mail_export`.
+   */
+  scratchDir?: string;
 }
 
 export class Context {

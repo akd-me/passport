@@ -1,4 +1,11 @@
-import type { ActionParams, ActionRequest, ActionType, Email, Store } from "@passport/types";
+import type {
+  ActionParams,
+  ActionRequest,
+  ActionType,
+  Email,
+  MailReader,
+  Store,
+} from "@passport/types";
 import { categorize } from "./categorize.js";
 import { destinationGuard } from "./destination.js";
 import { required, ToolError } from "./presentation.js";
@@ -40,6 +47,23 @@ export class Context {
       );
     }
     return required(accounts[0], "Account");
+  }
+
+  /** On-demand reader for an account, or null when no resolver is configured or it has none. */
+  async maybeReader(accountId: string): Promise<MailReader | null> {
+    return this.deps.readers ? await this.deps.readers(accountId) : null;
+  }
+
+  /** On-demand reader for an account; throws `ON_DEMAND_UNSUPPORTED` when there is none. */
+  async reader(accountId: string): Promise<MailReader> {
+    const reader = await this.maybeReader(accountId);
+    if (!reader) {
+      throw new ToolError(
+        "ON_DEMAND_UNSUPPORTED",
+        "On-demand mail reads are not available for this account; use the legacy store tools.",
+      );
+    }
+    return reader;
   }
 
   async email(id: string, includeBodies = false) {

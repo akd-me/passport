@@ -1,5 +1,6 @@
 import type { ActionRecord, EmailQuery, TimeRange } from "@passport/types";
 import { getEffectiveProfile } from "@passport/types";
+import { queryWriteMatches, recentFromAlias, summarizeAlias, summarizeEmails } from "./aliases.js";
 import { availability } from "./availability.js";
 import type { Context } from "./context.js";
 import { actionView, emailView, json, required, ToolError, writeResult } from "./presentation.js";
@@ -17,7 +18,7 @@ export function registerExtra(ctx: Context) {
   register(
     ctx,
     "summarize_thread",
-    "Summarize a stored thread without an LLM: participants, chronological previews, candidate open questions and last message. Questions are heuristic, not confirmed unresolved.",
+    'Deprecated: use mail_read({view:"thread"}). Summarize a thread without an LLM: participants, chronological previews, candidate open questions and last message. Questions are heuristic, not confirmed unresolved.',
     {
       threadId: s.id,
       full: s.full,
@@ -25,7 +26,11 @@ export function registerExtra(ctx: Context) {
       cursor: z.string().nullable().optional(),
     },
     false,
-    async ({ threadId, full, limit, cursor }) => {
+    async ({ threadId, full, limit, cursor }, call) => {
+      const alias = await summarizeAlias(call, { threadId, full, limit });
+      if (alias) {
+        return alias;
+      }
       const thread = required(await store.threads.get(threadId), "Thread");
       const page = await store.emails.query({
         threadId,
@@ -44,36 +49,8 @@ export function registerExtra(ctx: Context) {
         sort: "receivedAt_desc",
         limit: 1,
       });
-      const participants = [
-        ...new Map(
-          page.items
-            .flatMap((email) => [...email.from, ...email.to, ...email.cc])
-            .map((address) => [address.email.toLowerCase(), address]),
-        ).values(),
-      ];
-      const questions = page.items
-        .slice(-10)
-        .flatMap((email) =>
-          (email.textBody ?? email.preview)
-            .split(/\r?\n/)
-            .filter((line) => !/^\s*>/.test(line))
-            .flatMap((line) => line.match(/[^.!?]*\?/g) ?? [])
-            .slice(0, 5)
-            .map((text) => ({ emailId: email.id, question: text.trim().slice(0, 240) })),
-        )
-        .slice(-20);
       return json({
-        threadId,
-        participants,
-        timeline: page.items.map((email) => ({
-          emailId: email.id,
-          at: email.sentAt ?? email.receivedAt,
-          from: email.from,
-          preview: email.preview.slice(0, 240),
-        })),
-        openQuestions: questions,
-        questionsAreHeuristic: true,
-        lastMessage: last.items[0] ? emailView(last.items[0], full) : null,
+        ...summarizeEmails(threadId, page.items, last.items[0], (email) => emailView(email, full)),
         nextCursor: page.nextCursor ?? null,
         total: page.total,
       });
@@ -178,7 +155,7 @@ export function registerExtra(ctx: Context) {
   register(
     ctx,
     "list_recent_from_person",
-    "List recent incoming mail from a person's known addresses, excluding messages merely addressed to them.",
+    'Deprecated: use people_history({direction:"from"}). List recent incoming mail from a person\'s known addresses, excluding messages merely addressed to them.',
     {
       personId: s.id,
       accountId: s.id.optional(),
@@ -187,7 +164,11 @@ export function registerExtra(ctx: Context) {
       full: s.full,
     },
     false,
-    async ({ personId, accountId, limit, cursor, full }) => {
+    async ({ personId, accountId, limit, cursor, full }, call) => {
+      const alias = await recentFromAlias(call, { personId, accountId, limit, cursor });
+      if (alias) {
+        return alias;
+      }
       const person = required(await store.people.get(personId), "Person");
       const addresses = new Set(
         [...person.emails, person.primaryEmail].map((email) => email.toLowerCase()),
@@ -241,12 +222,12 @@ export function registerExtra(ctx: Context) {
     [
       "batch_archive_by_query",
       "archive",
-      "Archive matches of an EmailQuery in one audited action, capped at 200. dryRun returns count and sample without submitting.",
+      "Archive matches of an EmailQuery in one audited action. With on-demand reads, ids are resolved server-side by paging the provider search (cap 1,000); otherwise the local store (cap 200). dryRun returns count and sample without submitting.",
     ],
     [
       "apply_label_by_query",
       "label",
-      "Label matches of an EmailQuery in one audited action, capped at 200. dryRun returns count and sample without submitting.",
+      "Label matches of an EmailQuery in one audited action. With on-demand reads, ids are resolved server-side by paging the provider search (cap 1,000); otherwise the local store (cap 200). dryRun returns count and sample without submitting.",
     ],
   ] as const) {
     register(
@@ -261,21 +242,21 @@ export function registerExtra(ctx: Context) {
       },
       true,
       async (input, call) => {
-        const page = await store.emails.query({
-          ...(input.query as EmailQuery),
-          limit: 200,
-          includeBodies: false,
-        });
-        const items = page.items.slice(0, 200);
+        const matches = await queryWriteMatches(call, input.query as EmailQuery);
+        if ("error" in matches) {
+          return matches.error;
+        }
+        const { items } = matches;
         const preview = {
           count: items.length,
-          total: page.total,
-          capped: Boolean(page.nextCursor) || (page.total ?? 0) > items.length,
+          total: matches.total,
+          capped: matches.capped,
           sample: items.slice(0, 5).map((email) => ({
             id: email.id,
             subject: email.subject,
             preview: email.preview.slice(0, 160),
           })),
+          ...(matches.source ? { source: matches.source } : {}),
         };
         if (input.dryRun || !items.length) {
           return json({ dryRun: input.dryRun, ...preview });

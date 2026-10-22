@@ -4,6 +4,7 @@ import type {
   Actor,
   Email,
   EventBus,
+  MailReaderResolver,
   Person,
   PolicyEngine,
   Store,
@@ -25,11 +26,19 @@ export interface ToolContext {
   emailPatch?: Partial<Pick<Email, "category" | "personIds">>;
   matterId?: string;
 }
+/** MCP tool hints that differ from the defaults derived from `risk`. */
+export interface ToolAnnotations {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
 export interface Tool {
   name: string;
   description: string;
   inputSchema: JsonSchema & { type: "object" };
   risk: "read" | "write";
+  annotations?: ToolAnnotations;
   handler(input: unknown, ctx?: ToolContext): Promise<ToolResult>;
 }
 export interface ToolRegistryOptions {
@@ -47,4 +56,17 @@ export interface ToolRegistryOptions {
   responseByteBudget?: number;
   /** Null means no connected calendar provider for this account. */
   freeBusy?: import("./availability.js").FreeBusyResolver;
+  /**
+   * On-demand mail readers (v0.3). When set, the `mail_*` tools read the provider directly and the
+   * legacy mail reads alias them; when absent, legacy tools read the local store and the new
+   * tools return `ON_DEMAND_UNSUPPORTED`.
+   */
+  readers?: MailReaderResolver;
+  /**
+   * Root directory for `mail_export` (MCP hosts only). Files go to `<scratchDir>/<session>/`
+   * with mode 0700; the host sweeps them after 24 h (`sweepScratchDir`). Absent: no `mail_export`.
+   */
+  scratchDir?: string;
+  /** Session directory name under `scratchDir`; default a random UUID per registry. */
+  scratchSession?: string;
 }

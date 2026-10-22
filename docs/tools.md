@@ -1,67 +1,196 @@
 # Passport tools
 
-`@passport/tools` owns the 44 tool definitions, JSON Schemas, validation, inference
+`@passport/tools` owns the tool definitions, JSON Schemas, validation, inference
 and handlers consumed by both the built-in agent and the MCP server. Clients see
-the same mailbox, calendar, people, matters and tool inputs. Reads use the local
-Store; availability can prefer a host-injected connected calendar provider. No tool reads account
-credentials or provider settings.
+the same mailbox, calendar, people and matters and the same tool inputs.
+
+Since v0.3, mail is read **on demand**: the `mail_*` tools call the provider's own
+index through `MailReader` (`docs/design/on-demand.md`, research 03 §2). Nothing is
+mirrored. When the host injects no readers (the demo, tests, accounts whose provider
+has no `reader()`), the legacy mail tools keep reading the local Store and the new
+tools return `ON_DEMAND_UNSUPPORTED`. Availability can prefer a host-injected connected
+calendar provider. No tool reads account credentials or provider settings.
 
 ## Catalogue
 
-“Mail inference” uses stored classifications and sender relationships: legal and
+Columns: **Class** is `R` (read), `RW` (reversible write, the executor stores an
+inverse), `IW` (irreversible, held or asked as policy says). **Cost** is per call, in
+Gmail units / Graph requests / IMAP commands; "+20/row" means 20 Gmail units per row
+returned. Every on-demand result reports what it actually spent in `cost`.
+
+### On-demand mail reads (v0.3)
+
+| Tool | Class | Cost (Gmail / Graph / IMAP) | Purpose |
+| --- | --- | --- | --- |
+| `mail_accounts` | R | 0 (local) | Accounts, capabilities and whether on-demand reads are available |
+| `mail_labels` | R | 1 (+1/label with `counts`) / 1–3 / 1+N | `ls /`: label and folder tree with roles and optional counts |
+| `mail_list` | R | 5 +20/row / 1 / 2 | `ls <label>`: newest-first rows with structural filters only |
+| `mail_search` | R | 5 +20/row / 1 / 2 (per account) | `grep`: portable `query` or native `rawQuery`; `account:"all"` fans out and merges by date |
+| `mail_count` | R | 5 per 500 ids; facets +20/row / 1–2 / 1–2 | `wc`/`uniq -c`: exact count to `cap`, top-10 facets over a sample |
+| `mail_read` | R | 120 thread, 80 message / 1–2 / 2–6 | `Read`: thread or message as clean text, quotes collapsed, windows |
+| `mail_grep` | R | ≤60/message / 1–2 / 1–2 | `grep -C`: regex over a bounded set's bodies, with context lines |
+| `mail_changes` | R | 2 +20/added / 1 per folder / 1–2 | `git status`: arrivals, label changes and deletions since a cursor |
+| `people_history` | R | as `mail_search` | Mail with, from or to an address or a known person |
+| `provider_get` | R | per method | Read-only, allowlisted raw GET (needs `MailReader.rawGet`) |
+| `mail_export` | R (writes local files) | ~120/thread | MCP only, with `scratchDir`: threads as `.md` / `.eml` for the host's shell |
+
+Input shapes (all limits are enforced):
+
+- `mail_labels({account?: id|"all", counts?=false})`
+- `mail_list({account?, container?, filter?: {from?, fromDomain?, unread?, flagged?, hasAttachment?, after?, before?, largerThan?}, limit≤100=25, pageToken?})`
+- `mail_search({account?: id|"all", query? | rawQuery?, container?, limit≤100=25, pageToken?, includeSpamTrash?=false, threads?=false})`
+- `mail_count({account?, query? | rawQuery?, cap≤10000=2000, facets?: ("from"|"fromDomain"|"label"|"month")[], sample≤500=200, confirmCost?=false})`
+- `mail_read({id, view?: "thread"|"message"="thread", format?: "text"|"html"|"headers"="text", quoted?: "collapse"|"full"="collapse", offset?=0, length≤60000=16000, messagesFrom?})`
+- `mail_grep({ids?≤100 | query? | rawQuery?, account?, maxMessages≤100=30, pattern, flags?: ""|"i"|"m"|"im"="i", context 0–5=1, maxMatches≤200=50, confirmCost?=false})`
+- `mail_changes({account?, cursor?, limit≤200=50, kinds?: ("added"|"labelChanged"|"deleted")[]})`
+- `people_history({email | personId, account?: id|"all", direction?: "both"|"from"|"to"="both", limit≤100=25, pageToken?})`
+- `provider_get({account?, path, query?: Record<string,string>})`
+- `mail_export({ids? | query?, account?, max≤200=50, format?: "md"|"eml"="md"})` → `{dir, files[]}`
+
+`account` may be omitted when exactly one account is connected; `mail_search`,
+`mail_labels` and `people_history` then fan out to every account with a reader.
+
+The portable query language: `from:` `to:` `cc:` `bcc:` `with:` (any participant)
+`subject:` `has:attachment` `filename:` `after:`/`before:` (`YYYY-MM-DD` or epoch
+seconds) `newer_than:`/`older_than:` (`7d`, `2m`, `1y`) `in:` `label:`
+`is:unread|read|starred` `larger:`/`smaller:` `list:` `rfc822msgid:`, bare words,
+`"phrases"`, `OR`, `-` negation and parentheses. Anything else fails with
+`INVALID_QUERY`; pass provider syntax through `rawQuery` instead.
+
+### Other reads
+
+| Tool | Class | Purpose |
+| --- | --- | --- |
+| `list_matters` | R | Workspaces filtered by status, person or text |
+| `get_matter` | R | Matter with attached/linked mail, events and people |
+| `list_people` | R | Contacts filtered by relationship or text |
+| `get_person` | R | One contact and relationship context |
+| `search_people` | R | Name/address search with relationship filter |
+| `list_events` | R | Events overlapping a UTC range |
+| `free_busy` | R | Clipped, merged busy intervals, excluding cancelled/declined events |
+| `find_free_slots` | R | Duration-sized slots within a window, working hours and IANA time zone |
+| `list_pending_decisions` | R | Proposed actions and delayed outbox holds |
+| `list_actions` | R | Compact, filtered action audit log |
+| `get_trust` | R | Category trust and global/external limits |
+| `get_user_profile` | R | USER.md Markdown |
+| `get_standing_rules` | R | Bullet rules from USER.md's Standing rules section |
+| `get_daily_log` | R | Actions proposed/executed on a UTC date, grouped by current status |
+| `explain_decision` | R | Historical policy reason, current category trust and relevant constraints |
+| `preview_unsubscribe` | R | Supported method, transport and destination host/address; no request or send |
+
+### Deprecated aliases
+
+These names stay for existing clients. With readers configured they forward to the
+new tools and return the new shapes plus a `deprecated` note; without readers (or for
+store-only filters) they read the local Store as before.
+
+| Old name | Alias of | Notes |
+| --- | --- | --- |
+| `search_emails` | `mail_search` | `text`, `keywords` (`$seen`, `$flagged`), `after`/`before`, `mailboxId`, `accountId`, `limit`, `cursor` translate; `threadId`, `matterId`, `personId`, `category`, `includeDeleted` or ascending sort keep the store path |
+| `get_email` | `mail_read({view:"message"})` | 2,000 characters unless `full: true` (then quotes are kept) |
+| `get_email_body` | `mail_read({view:"message", offset, length})` | Quotes kept; `length` capped at 60,000 |
+| `get_thread` | `mail_read` | |
+| `list_mailboxes` | `mail_labels({counts:true})` | |
+| `list_recent_from_person` | `people_history({direction:"from"})` | |
+| `summarize_thread` | `mail_read` thread data | Same LLM-free summary over the provider thread |
+
+### Writes
+
+Mail inference uses stored classifications and sender relationships: legal and
 money classifications win; List-Unsubscribe normally means newsletters; otherwise
 the message category or triage applies. Outgoing draft/send inference distinguishes
 known contacts from strangers using every To/CC/BCC recipient. Unknown or mixed
 recipients use the more conservative class. Verified identity alone does not make
 a stranger a known contact. Scheduling and unsubscribe have dedicated categories.
-Read tools do not submit actions and therefore have no write policy category.
+Write tools accept mail handles (`acc:email:…`) as well as local ids.
 
-| Tool | Risk | Purpose | Policy category / action |
+| Tool | Class | Purpose | Policy category / action |
 | --- | --- | --- | --- |
-| `search_emails` | read | FTS5 and structured EmailQuery filters, previews and cursors | — |
-| `get_email` | read | One message with clipped or full bodies | — |
-| `get_email_body` | read | Body chunks with offset, length and continuation | — |
-| `get_thread` | read | Chronological message pages | — |
-| `list_mailboxes` | read | Account mailboxes and counts | — |
-| `list_matters` | read | Workspaces filtered by status, person or text | — |
-| `get_matter` | read | Matter with attached/linked mail, events and people | — |
-| `list_people` | read | Contacts filtered by relationship or text | — |
-| `get_person` | read | One contact and relationship context | — |
-| `list_events` | read | Events overlapping a UTC range | — |
-| `free_busy` | read | Clipped, merged busy intervals, excluding cancelled/declined events | — |
-| `list_pending_decisions` | read | Proposed actions and delayed outbox holds | — |
-| `list_actions` | read | Compact, filtered action audit log | — |
-| `get_trust` | read | Category trust and global/external limits | — |
-| `get_user_profile` | read | USER.md Markdown | — |
-| `archive_emails` | write | Archive a batch from one account | Mail inference / archive |
-| `label_emails` | write | Add label; `remove: true` removes it | Mail inference / label or unlabel |
-| `mark_read` | write | Mark a batch read | Mail inference / mark_read |
-| `move_emails` | write | Move within an account; destructive destinations pass through the delete ceiling | Mail inference / move |
-| `create_draft` | write | Create a reviewable draft | Outgoing inference / draft_create |
-| `reply_draft` | write | Threaded reply or reply-all, deduplicating recipients and self aliases | Outgoing inference / draft_create |
-| `send` | write | Submit one existing draft or an inline draft to policy/outbox | Outgoing inference / send |
-| `unsubscribe` | write | Header one-click/mailto, HTTPS link, or explicit reply | unsubscribe / unsubscribe |
-| `respond_to_event` | write | Accept, decline or tentatively respond to an invite | scheduling / calendar_respond |
-| `propose_meeting` | write | Submit supplied slots and invitation draft | scheduling / calendar_propose |
-| `create_matter` | write | Create a living workspace and initial attachments | matters / matter_create |
-| `update_matter` | write | Patch editable workspace fields | matters / matter_update |
-| `attach_to_matter` | write | Attach existing emails, events or people | matters / matter_attach |
-| `update_person` | write | Patch editable contact fields | matters / person_update |
-| `snooze` | write | Snooze mail and/or a matter until a future UTC time | Mail inference, or matters for matter-only snooze / snooze |
-| `undo_action` | write | Undo the trusted stored inverse by ID under current actor policy | Original category / executor.undo lifecycle |
-| `cancel_held_action` | write | Cancel this actor's own held action | Original action category / executor.cancelHold lifecycle |
-| `summarize_thread` | read | LLM-free participants, preview timeline, candidate open questions and last message | — |
-| `find_free_slots` | read | Duration-sized slots within a window, working hours and IANA time zone | — |
-| `list_recent_from_person` | read | Recent incoming mail from every known address, including untriaged mail | — |
-| `search_people` | read | Name/address search with relationship filter | — |
-| `batch_archive_by_query` | write | One archive action for up to 200 query matches; supports dryRun | Mail inference / archive |
-| `apply_label_by_query` | write | One label action for up to 200 query matches; supports dryRun | Mail inference / label |
-| `get_standing_rules` | read | Bullet rules from USER.md's Standing rules section | — |
-| `add_standing_rule` | write | Append an exact one-line rule; preserve other USER.md sections | matters / profile_update |
-| `remove_standing_rule` | write | Remove an exact bullet rule; preserve other sections | matters / profile_update |
-| `get_daily_log` | read | Actions proposed/executed on a UTC date, grouped by current status | — |
-| `explain_decision` | read | Historical policy reason, current category trust and relevant constraints | — |
-| `preview_unsubscribe` | read | Supported method, transport and destination host/address; no request or send | — |
+| `archive_emails` | RW | Archive a batch from one account | Mail inference / archive |
+| `label_emails` | RW | Add label; `remove: true` removes it | Mail inference / label or unlabel |
+| `mark_read` | RW | Mark a batch read | Mail inference / mark_read |
+| `move_emails` | RW | Move within an account; destructive destinations pass through the delete ceiling | Mail inference / move |
+| `create_draft` | RW | Create a reviewable draft | Outgoing inference / draft_create |
+| `reply_draft` | RW | Threaded reply or reply-all, deduplicating recipients and self aliases | Outgoing inference / draft_create |
+| `send` | IW | Submit one existing draft or an inline draft to policy/outbox | Outgoing inference / send |
+| `unsubscribe` | IW | Header one-click/mailto, HTTPS link, or explicit reply | unsubscribe / unsubscribe |
+| `respond_to_event` | RW | Accept, decline or tentatively respond to an invite | scheduling / calendar_respond |
+| `propose_meeting` | IW | Submit supplied slots and invitation draft | scheduling / calendar_propose |
+| `create_matter` | RW | Create a living workspace and initial attachments | matters / matter_create |
+| `update_matter` | RW | Patch editable workspace fields | matters / matter_update |
+| `attach_to_matter` | RW | Attach existing emails, events or people | matters / matter_attach |
+| `update_person` | RW | Patch editable contact fields | matters / person_update |
+| `snooze` | RW | Snooze mail and/or a matter until a future UTC time | Mail inference, or matters for matter-only snooze / snooze |
+| `undo_action` | RW | Undo the trusted stored inverse by ID under current actor policy | Original category / executor.undo lifecycle |
+| `cancel_held_action` | RW | Cancel this actor's own held action | Original action category / executor.cancelHold lifecycle |
+| `batch_archive_by_query` | RW | One archive action for a query's matches (1,000 via reader, 200 from the store); supports dryRun | Mail inference / archive |
+| `apply_label_by_query` | RW | One label action for a query's matches (1,000 via reader, 200 from the store); supports dryRun | Mail inference / label |
+| `add_standing_rule` | RW | Append an exact one-line rule; preserve other USER.md sections | matters / profile_update |
+| `remove_standing_rule` | RW | Remove an exact bullet rule; preserve other sections | matters / profile_update |
+
+## On-demand results
+
+Every on-demand result carries `source` (`provider`, `cache` or `mixed`) and `cost`
+(`gmailUnits` / `graphRequests` / `imapCommands`, `budgetRemaining`, `windowResetsAt`);
+fan-out results sum the units and report the lowest `budgetRemaining`. Collections add
+`nextPageToken` (opaque, bound to the query; a fan-out token encodes each account's
+position) and `approxTotal`, which is a provider estimate: use `mail_count` for exact
+numbers. `translation` explains a non-pass-through query translation.
+
+Rows are compact `MailRow`s (about 300 bytes): `id` and `threadId` handles, `rfc822Id`,
+`account`, `date`, `from`, `to` (first three, then `+N more`), `subject`, `snippet`
+(≤160), `labels`, `unread`, `flagged`, `attachments` (count), `listId?`, `auth?`.
+
+**Untrusted data.** Subjects, snippets, names, label names, bodies, grep lines and
+`provider_get` bodies come from senders or the provider. Each result has an `untrusted`
+notice, and those strings are neutralised: every `$`, an `@` that starts a mention
+(addresses are untouched) and a `/` at the start of a line are followed by an invisible
+U+200B so host agents never treat them as skills, mentions or slash commands. Offsets in
+`mail_read` refer to the neutralised text, so windows stay consistent between calls.
+
+**Rate limits.** Interactive reads never block on long backoff. A throttled call returns
+`{isError: true, error: "RATE_LIMITED", retryAfterSeconds, scope, hint, partial?}`;
+`partial.items` holds rows already fetched (for example from accounts that answered a
+fan-out search). Nothing is thrown to the model and query writes submit nothing.
+
+**Cost guards.** `mail_count` facets over more than 200 rows (or more than the account's
+remaining budget) and `mail_grep` over more than 30 messages return
+`{isError: true, error: "WOULD_EXCEED_BUDGET", estimatedUnits, hint}` unless
+`confirmCost: true`.
+
+**`mail_read`.** Messages are chronological. Without `messagesFrom`, the last five are in
+full and earlier ones are one-line `earlier` headers (`messagesFrom` reports where the full
+messages start). Quoted history is collapsed (`[quoted N lines collapsed; quoted:"full" to
+expand]`): reply attributions in common locales, Outlook `Original Message` and
+`From:/Sent:` blocks, `>` runs, and Gmail/Outlook/Apple HTML quote containers; forwarded
+messages are kept. HTML-only bodies become text with links shown as `text (host)` and images
+dropped. `offset`/`length` window the concatenated bodies of the full messages (UTF-16 units);
+each shown message has its stream `offset`, cut messages carry `truncated`/`continueFrom`, and
+the top-level `continueFrom` is where to resume. `format:"html"` returns sanitized `htmlBody`
+(remote images and beacons stripped); `format:"headers"` returns threading and authentication
+headers without bodies. Attachments are listed with `index`, `name`, `type` and `size`.
+
+**`mail_grep`** resolves its set from `ids` (messages or whole threads) or a query
+(`maxMessages` rows), fetches bodies four at a time per account and matches the pattern per
+line (JavaScript regex; lines over 500 characters are clipped in the output). Results list
+`id`, `threadId`, `date`, `from`, `subject`, `line`, `text`, `before` and `after`.
+
+**`mail_changes`** without a cursor returns no changes and a cursor at "now"; Passport never
+backfills. `expired: true` means the cursor was too old and a fresh one was issued.
+
+**`provider_get`** allows GET only under — Gmail: `users/me/{messages, threads, labels,
+history, drafts, settings/filters, settings/sendAs}`; Graph: `me/{messages, mailFolders,
+events, calendarView, people, contacts, mailboxSettings, outlook/masterCategories}` — and
+rejects `..`, `$batch` and other prefixes with `PATH_NOT_ALLOWED`. Providers implement the
+optional `MailReader.rawGet(path, query)`; until they do the tool returns
+`ON_DEMAND_UNSUPPORTED`.
+
+**`mail_export`** writes under `<scratchDir>/<session>/` (directory 0700, files 0600): one
+Markdown file per thread (headed by an untrusted-content note) or one `.eml` per message. The
+host removes sessions older than 24 h with `sweepScratchDir(scratchDir)`.
+
+Errors use stable codes: `ON_DEMAND_UNSUPPORTED`, `RATE_LIMITED`, `WOULD_EXCEED_BUDGET`,
+`NOT_FOUND`, `STALE_ID`, `INVALID_QUERY`, `INVALID_CURSOR`, `INVALID_INPUT`, `PATH_NOT_ALLOWED`.
 
 ## Results and write behavior
 
@@ -89,22 +218,24 @@ submission: add `query.accountId` to scope them. `dryRun: true` returns count,
 known total, cap indicator and five sample previews without submitting. An empty
 query batch returns zero matches without an action.
 
-Every tool response has a total serialized UTF-8 byte budget of 512 KiB, configurable
-with `responseByteBudget` on the registry or MCP constructor (minimum 1024). `full: true`
+Every tool response has a total serialized UTF-8 byte budget: 64 KiB over MCP
+(`DEFAULT_MCP_RESPONSE_BYTE_BUDGET`, about 16k tokens) and 512 KiB for the built-in agent's
+registry (`DEFAULT_RESPONSE_BYTE_BUDGET`). Both are configurable with `responseByteBudget` on
+the registry or MCP constructor (minimum 1024). `full: true`
 respects the budget, including across multiple emails. Truncated body views return
 `truncated: true` and a `continueFrom` offset. MCP accounts for protocol JSON escaping;
 resource contents use the same cap with truncation details in `_meta`. Oversized metadata
 returns `RESPONSE_TOO_LARGE`; request fewer results.
 
-`get_email_body({emailId,offset:0,length:16000})` returns `textBody`, sanitized `htmlBody`,
+On the store path, `get_email_body({emailId,offset:0,length:16000})` returns `textBody`, sanitized `htmlBody`,
 `offset`, `totalLength`, `truncated`, and (when more remains) `continueFrom`. Offsets and
 lengths are UTF-16 code units. Length defaults
 to 16,000 and accepts 1–1,000,000. Continue at the returned offset until `truncated: false`.
 When the text and HTML chunks have different lengths, consume only through `continueFrom`
 in each format before advancing. No provider request is made.
 
-`search_emails`, `batch_archive_by_query`, and `apply_label_by_query` exclude provider
-tombstones by default. Set `includeDeleted: true` in the email query for history access.
+On the store path, `search_emails`, `batch_archive_by_query`, and `apply_label_by_query`
+exclude provider tombstones by default. Set `includeDeleted: true` in the email query for history access.
 `get_email` by ID still returns a tombstone with `deleted: true`; thread/matter histories
 include tombstones. Triage screens money/legal/stranger requests before routine signals,
 preserves existing money/legal classifications, and only proposes playbooks for categories
@@ -127,7 +258,8 @@ zone offsets and daylight-saving changes and returns earliest non-overlapping
 slots, with `limitReached` when capped. It does not reserve time.
 
 `summarize_thread` returns a page of participants/timeline/questions and the
-actual last message, plus `nextCursor` for remaining source messages. Questions
+actual last message, plus `nextCursor` for remaining source messages (the reader
+alias summarizes the last `limit` messages of the provider thread; `nextCursor` is null). Questions
 are candidates extracted from unquoted question marks, not a claim that every
 question is unresolved. `get_daily_log` includes older actions executed on the
 requested date and groups by their current status. `explain_decision` separates
@@ -355,7 +487,12 @@ Configuration references: [Claude Code](https://code.claude.com/docs/en/mcp),
 
 ## Host integration
 
-`createMailboxMcpServer({store,executor,policy,bus,clientName?,freeBusy?,responseByteBudget?})`,
+`createMailboxMcpServer({store,executor,policy,bus,clientName?,freeBusy?,responseByteBudget?,readers?,scratchDir?})`
+and `createToolRegistry({...,readers?,scratchDir?,scratchSession?})` take the on-demand
+seams: `readers` is a `MailReaderResolver` (`accountId → MailReader | null`); `scratchDir`
+(for example `<dataDir>/scratch`) enables `mail_export`, with one random session directory
+per MCP server; the host calls `sweepScratchDir(scratchDir)` periodically. The built-in agent
+passes `readers` and no `scratchDir`. `createMailboxMcpServer(...)`,
 `createAgentRuntime(...)`, and `createToolRegistry(...)` accept an optional
 `freeBusy(accountId,range)` resolver. Return provider intervals for a connected
 calendar account, or `null` when none is connected; an empty array means confirmed
