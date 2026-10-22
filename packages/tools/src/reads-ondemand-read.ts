@@ -97,14 +97,28 @@ function messageHead(email: Email) {
     unread: !email.keywords.$seen,
     flagged: Boolean(email.keywords.$flagged),
     auth: { dmarc: v.dmarc, dkim: v.dkim, spf: v.spf, passport: v.passport },
-    attachments: email.attachments
-      .filter((attachment) => attachment.disposition !== "inline")
-      .map((attachment, index) => ({
-        index,
-        name: neutralize(attachment.name),
-        type: attachment.type,
-        size: attachment.size,
-      })),
+    // `index` and `attachmentId` are what mail_attachment_read accepts; inline parts (embedded
+    // images) have no index and follow the attachments.
+    attachments: [
+      ...email.attachments
+        .filter((attachment) => attachment.disposition !== "inline")
+        .map((attachment, index) => ({
+          index,
+          attachmentId: attachment.id,
+          name: neutralize(attachment.name),
+          type: attachment.type,
+          size: attachment.size,
+        })),
+      ...email.attachments
+        .filter((attachment) => attachment.disposition === "inline")
+        .map((attachment) => ({
+          attachmentId: attachment.id,
+          name: neutralize(attachment.name),
+          type: attachment.type,
+          size: attachment.size,
+          inline: true,
+        })),
+    ],
     listUnsubscribe: Boolean(email.headers.listUnsubscribe),
   };
 }

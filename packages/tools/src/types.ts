@@ -71,4 +71,9 @@ export interface ToolRegistryOptions {
   scratchDir?: string;
   /** Session directory name under `scratchDir`; default a random UUID per registry. */
   scratchSession?: string;
+  /**
+   * The host renders `IMAGE_CONTENT` on results as image content (the MCP server does), so
+   * `mail_attachment_read` returns images without `asImage:true`.
+   */
+  imageContent?: boolean;
 }

@@ -1,3 +1,6 @@
 packages:
   - "packages/*"
   - "apps/*"
+# pdfjs-dist (mail_attachment_read) only needs @napi-rs/canvas for rendering; CONTRACT: no native modules.
+ignoredOptionalDependencies:
+  - "@napi-rs/canvas"

@@ -87,6 +87,7 @@ const onDemandReads = [
   "mail_search",
   "mail_count",
   "mail_read",
+  "mail_attachment_read",
   "mail_grep",
   "mail_changes",
   "people_history",
@@ -169,7 +170,7 @@ describe("shared tool catalogue", () => {
     });
   });
   it("covers every catalogue entry exactly once and adapters only reshape definitions", () => {
-    expect(tools).toHaveLength(58);
+    expect(tools).toHaveLength(59);
     expect(
       new Set([
         ...reads.map(([name]) => name),

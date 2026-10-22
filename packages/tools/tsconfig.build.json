@@ -1,4 +1,8 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["src/index.ts"]
+  "include": [
+    "src/index.ts",
+    "src/attachments/attachment-worker.ts",
+    "src/attachments/pdfjs-worker.d.ts"
+  ]
 }
