@@ -48,7 +48,10 @@ describe("executor pre-images", () => {
     });
     const action = await executor.submit(request("mark_read", { emailIds: ["email"] }));
     expect(action.status).toBe("executed");
-    expect(reads).toContainEqual({ id: "email", opts: { fresh: true, includeBodies: false } });
+    expect(reads).toContainEqual({
+      id: "email",
+      opts: { fresh: true, includeBodies: false, lane: "arrivals" },
+    });
     expect(envelopeCalls[0]).toEqual(["remote-email"]);
     expect(action.inverse?.params).toMatchObject({
       __passportPolicyInverse: {
@@ -101,7 +104,10 @@ describe("executor pre-images", () => {
     provider.set("remote-email", { mailboxIds: ["inbox"], keywords: {} });
     reads.length = 0;
     await executor.undo(action.id);
-    expect(reads).toContainEqual({ id: "email", opts: { fresh: true, includeBodies: false } });
+    expect(reads).toContainEqual({
+      id: "email",
+      opts: { fresh: true, includeBodies: false, lane: "interactive" },
+    });
     // Provider state already equals the pre-image, so undo issues no provider change.
     expect(mail.changes).toEqual([
       [{ op: "setKeywords", providerIds: ["remote-email"], add: ["$seen"] }],

@@ -6,7 +6,7 @@ import {
   type ActionExecutorOptions,
   agentEmailPatchOf,
   draftOf,
-  FRESH_PRE_IMAGE,
+  freshPreImage,
   type Snapshot,
 } from "./executor-shared.js";
 
@@ -22,7 +22,7 @@ export function createRestoration(
     calendarProviderFor,
     now = () => new Date().toISOString(),
   } = options;
-  const { emailFor, eventFor } = context;
+  const { emailFor, eventFor, freshEmails } = context;
   const { mirrorEmail, mirrorMatter, mailboxFor, usesLabels, applyMailChanges } = mail;
   const restore = async (
     request: ActionRequest,
@@ -33,9 +33,26 @@ export function createRestoration(
         const labels = await usesLabels(request.accountId);
         const changes: MailChange[] = [];
         const currents: Email[] = [];
+        const skipped: string[] = [];
+        // Diff against provider state, not the cache, so the inverse undoes what is really there.
+        // One batched read; messages that no longer exist are skipped, unverifiable ones fail.
+        const found = await freshEmails(
+          snapshot.emails.map((email) => email.id),
+          request.accountId,
+          freshPreImage(request),
+        );
         for (const prior of snapshot.emails) {
-          // Diff against provider state, not the cache, so the inverse undoes what is really there.
-          const current = await emailFor(prior.id, request.accountId, FRESH_PRE_IMAGE);
+          const current = found.get(prior.id);
+          if (!current || current.keywords.$deleted) {
+            skipped.push(prior.id);
+            continue;
+          }
+          if (current.staleAsOf !== undefined) {
+            throw new PolicyError(
+              "PROVIDER_UNAVAILABLE",
+              "Current provider state is unavailable; retry the undo when the account is reachable",
+            );
+          }
           currents.push(current);
           const add = Object.keys(prior.keywords).filter(
             (key) => prior.keywords[key] && !current.keywords[key],
@@ -81,14 +98,18 @@ export function createRestoration(
           }
         }
         await applyMailChanges(request.accountId, changes, currents);
-        for (const prior of snapshot.emails) {
+        const restored = snapshot.emails.filter((prior) => !skipped.includes(prior.id));
+        for (const prior of restored) {
           await mirrorEmail(prior.id, {
             mailboxIds: prior.mailboxIds,
             keywords: prior.keywords,
             providerId: currents.find((email) => email.id === prior.id)!.providerId,
           });
         }
-        return { emailIds: snapshot.emails.map((email) => email.id) };
+        return {
+          emailIds: restored.map((email) => email.id),
+          ...(skipped.length ? { skippedEmailIds: skipped } : {}),
+        };
       }
       case "draft": {
         const provider = await mailProviderFor(request.accountId);
