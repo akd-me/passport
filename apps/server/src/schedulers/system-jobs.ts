@@ -81,18 +81,25 @@ export async function registerSystemJobs(
         vacuum?: () => Promise<void>;
         optimizeFts?: () => Promise<void>;
       };
+      // The envelope/body cache is bounded: TTL+LRU bodies, then LRU envelopes; vacuum after.
+      const bodies = await store.emails.evictBodies?.();
+      const envelopes = await store.emails.evictEnvelopes?.();
+      const evicted =
+        bodies || envelopes
+          ? `; evicted ${bodies?.evicted ?? 0} bodies and ${envelopes?.evicted ?? 0} envelopes`
+          : "";
       if (store.maintenance) {
         await store.maintenance();
       } else if (store.vacuum || store.optimizeFts) {
         await store.vacuum?.();
         await store.optimizeFts?.();
-      } else {
+      } else if (!evicted) {
         return {
           status: "skipped",
           summary: "This store does not expose maintenance operations",
         };
       }
-      return { summary: "Store maintenance complete" };
+      return { summary: `Store maintenance complete${evicted}` };
     },
   );
   // Reconcile non-HTTP account changes too, without another ad-hoc timer loop.

@@ -1,6 +1,7 @@
 import { newId } from "@passport/store";
-import type { AgentRuntime, AgentTrigger, Email, EventBus, Store } from "@passport/types";
+import type { AgentTrigger, Email, EventBus, Store } from "@passport/types";
 import { compareAndSetKv, mutateKv } from "./atomic-kv.js";
+import type { PassportAgent } from "./backend.js";
 import { calendarsReady } from "./calendar-safety.js";
 import { logger } from "./logger.js";
 
@@ -67,7 +68,7 @@ export class ArrivalQueue {
   constructor(
     private store: Store,
     private bus: EventBus,
-    private agent: AgentRuntime,
+    private agent: PassportAgent,
     private enabled: () => boolean,
   ) {}
 
@@ -244,7 +245,7 @@ export class ArrivalQueue {
         runId,
         ...(!ready ? { availabilityUnverified: true } : {}),
       };
-      const run = await this.agent.run(trigger);
+      const run = await this.agent.run(trigger, { priority: "background" });
       if (run.error) {
         throw new Error(run.error);
       }

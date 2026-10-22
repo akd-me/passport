@@ -12,10 +12,15 @@ export function installAgentRoutes(app: Hono, backend: Backend): void {
       await readEmail(backend.store, backend.readers, c.req.param("id")),
       "Email",
     );
-    if (!(await backend.store.emails.get(email.id))) {
+    if (!(await backend.store.emails.get(email.id, { cacheOnly: true }))) {
       await backend.store.emails.upsertMany([email]);
     }
-    return c.json(await backend.agent.run({ kind: "email.received", emailId: email.id }));
+    return c.json(
+      await backend.agent.run(
+        { kind: "email.received", emailId: email.id },
+        { priority: "interactive" },
+      ),
+    );
   });
   app.post("/api/agent/run", async (c) => {
     const body = await jsonBody(c.req.raw, true);
@@ -26,15 +31,18 @@ export function installAgentRoutes(app: Hono, backend: Backend): void {
       throw new ApiError("INVALID_FIELD", "emailIds must be strings");
     }
     return c.json(
-      await backend.agent.run({
-        kind: "manual",
-        instruction:
-          body.instruction === undefined
-            ? "Review active matters and prepare next steps."
-            : string(body.instruction, "instruction"),
-        matterId: body.matterId === undefined ? undefined : string(body.matterId, "matterId"),
-        emailIds: body.emailIds as string[] | undefined,
-      }),
+      await backend.agent.run(
+        {
+          kind: "manual",
+          instruction:
+            body.instruction === undefined
+              ? "Review active matters and prepare next steps."
+              : string(body.instruction, "instruction"),
+          matterId: body.matterId === undefined ? undefined : string(body.matterId, "matterId"),
+          emailIds: body.emailIds as string[] | undefined,
+        },
+        { priority: "interactive" },
+      ),
     );
   });
   app.get("/api/digest/:date", async (c) => {

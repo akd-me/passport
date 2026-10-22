@@ -4,6 +4,7 @@ import type { Account, CalendarProvider, DomainEvent, Store } from "@passport/ty
 
 type CalendarDelta =
   ReturnType<CalendarProvider["sync"]> extends AsyncIterable<infer T> ? T : never;
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountSyncService } from "./sync.js";
 

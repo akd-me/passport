@@ -37,6 +37,11 @@ export function backendWatchHooks(input: {
         throw failure;
       }
     },
+    /** `sync:<accountId>`: the bounded calendar sync alone (never a forced mail tick). */
+    syncCalendar: (id: string) =>
+      input.closed()
+        ? Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"))
+        : sync.syncAccount(id),
     watchAccount: (id: string) =>
       input.closed()
         ? Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"))
