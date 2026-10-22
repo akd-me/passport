@@ -29,7 +29,7 @@ in `docs/design/research/` (file:line references there are against commit `24e5d
 
 - Push: Gmail Pub/Sub and Graph change subscriptions. The watcher polls (IMAP IDLE triggers an
   immediate check).
-- An optional deep local index (the third quota lane is reserved for it).
+- An optional deep local index.
 - OCR for scanned PDFs and images in `mail_attachment_read`.
 - M3: signing, notarization, electron-updater and a Homebrew cask.
 - Staged task changes (the worktree analogue); approval stays per action.
