@@ -78,21 +78,20 @@ The mechanical formatting commit is recorded in `.git-blame-ignore-revs`; use
 ## Things that must be true of the whole system
 
 - Every change to mail, calendar, people or matters originated locally by a human, agent, or
-  external agent requires an `ActionRecord`. Provider mirroring by the sync service (ingesting
-  provider-side changes, including provider-side deletions) is system ingestion and is exempt
-  from this rule.
-- Provider-side email deletions retain the local email and its matter and thread memberships,
-  marking `keywords["$deleted"] = true` so matter history remains available. The same applies to
-  messages absent from a successfully completed cursor-expiry reconciliation. Reappearing
-  messages refresh provider-owned fields and clear the tombstone without another arrival.
-  Account removal may hard-delete its emails. Full resync preserves local annotations, defers
-  missing-message reconciliation until the full pass succeeds, and retries interrupted recovery
-  from a null cursor. Windowed snapshots retain older mail outside their ingestion window.
-  Explicit onboarding backfills only widen ingestion; they do not prune mail.
+  external agent requires an `ActionRecord` with an inverse unless irreversible. Inverse capture
+  reads a fresh provider pre-image. Following provider-side changes (the new-mail watcher patching
+  or dropping cached rows, the bounded calendar sync) is system ingestion and is exempt.
 - An `ActionRecord` with `status: "executed"` and `inverse: null` is only allowed for `irreversible` actions.
 - `send` is never executed synchronously when `outboxHoldMinutes > 0`; it is `held` first.
 - External agents (MCP clients) are capped by `externalAgentCeiling`.
-- Verification state (blue/green) is derived from headers/signatures, never from message content.
+- Verification state (blue/green) is derived from headers/signatures, never from message content,
+  and is computed once per envelope.
+- Passport never backfills. The watcher cursor starts at connect time; an expired cursor causes one
+  bounded sweep of recent Inbox mail, deduplicated against arrivals already handled.
+- Every provider read declares its quota cost and goes through the per-account governor.
+- Provider-derived strings in tool results and prompts are wrapped as untrusted data.
+- A task's permission mode cannot exceed the account's trust ladder, and a child task cannot exceed
+  its parent.
 
 ## Parallel-build rule (wave 1)
 

@@ -3,6 +3,37 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
+## [Unreleased]
+
+### Changed
+
+- Mail is no longer mirrored. Connecting an account takes a change cursor at "now"; Passport never
+  backfills. A new-mail watcher (`watch:<accountId>`, every 30 seconds, `watch.intervalSeconds`;
+  IMAP IDLE checks at once) follows `MailReader.changes` in the `arrivals` quota lane, caches new
+  envelopes under mail-handle ids and triages new Inbox mail that is not from you. Label changes
+  and deletions only patch the local cache. An expired cursor marks labels stale and runs one
+  bounded sweep (`in:inbox newer_than:2d`, 100 messages, deduplicated). Rate limits back off the
+  watcher and never fail the account. New `account.watch.*` events.
+- `GET /api/emails` is provider search (`q`, `account`, `limit`, `pageToken`; cache-only without a
+  reader); `GET /api/emails/:id` and `POST /api/agent/triage/:id` accept mail handles and read
+  through the cache; `GET /api/threads/:id` reads a thread handle from the provider. Rate-limited
+  reads answer `429` with `Retry-After`.
+- `GET /api/accounts`: `messageCount` is the provider Inbox total from label counts, plus `watch: {
+  since, lastTickAt, cursorAgeSeconds, status }`; `syncing` is gone. The label tree refreshes on
+  connect and every 10 minutes. Doctor reports watcher health (last check, cursor age) and calendar
+  sync age separately.
+- Calendars keep the bounded sync; arrivals wait at most one minute (was ten) for a related
+  calendar. Composer runs start before queued background arrival and schedule runs.
+- Settings → Accounts shows "Watching since … · last check …" and the Inbox count; the sidebar
+  shows Watching, Paused or Needs sign-in. Workspace refetches are throttled per event type.
+- `store.maintenance` also evicts cached bodies and envelopes.
+
+### Removed
+
+- Backfill (`POST /api/accounts/:id/backfill`, **Load older mail**), the windowed mail snapshot,
+  mail reconciliation and tombstoning by the sync service, and per-poll Gmail label refresh.
+  `sync.initialDays` is accepted with a one-time deprecation warning and ignored.
+
 ## [0.2.0] — 2026-10-21
 
 ### Added

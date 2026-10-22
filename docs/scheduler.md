@@ -9,27 +9,32 @@ create a routine. Changes arrive through the existing WebSocket event stream.
 
 | ID                       | Default schedule                                                | Work                                                                                                |
 | ------------------------ | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `sync:<accountId>`       | Every 2 minutes (`syncIntervalSeconds`)                         | Incremental account sync, plus a first sync on fresh startup                                        |
-| `sync:<accountId>:watch` | Long poll, reconnect 1 second after completion                  | Optional provider `waitForChanges`; notifications run the account sync job                          |
+| `watch:<accountId>`      | Every 30 seconds (`watch.intervalSeconds`), and on every start  | One new-mail check (`MailReader.changes`); label tree + counts on connect and at most every 10 min  |
+| `watch:<accountId>:push` | Long poll, reconnect 1 second after completion                  | Optional provider `waitForChanges` (IMAP IDLE); a signal runs `watch:<accountId>` at once           |
+| `sync:<accountId>`       | Every 2 minutes (`syncIntervalSeconds`)                         | Bounded calendar sync for accounts with a calendar, plus a first sync on fresh startup              |
 | `accounts.refresh`       | Same interval as sync                                           | Discover account additions/removals made outside the HTTP API                                       |
-| `agent.arrivals` | Every 30 seconds | Retry durable arrivals; defer unsynced calendars up to 10 minutes |
+| `agent.arrivals`         | Every 30 seconds                                                | Retry durable arrivals; defer unsynced calendars up to 1 minute                                     |
 | `outbox.release`         | Every 30 seconds                                                | Release due held actions through the existing executor                                              |
 | `trust.decay`            | Daily 03:00                                                     | Apply trust decay                                                                                   |
 | `agent.daily_digest`     | Daily `dailyDigestHour` (`PASSPORT_DIGEST_HOUR`, default 08:00) | Agent daily digest                                                                                  |
 | `agent.matter_review`    | Daily 04:00                                                     | Agent matter review                                                                                 |
-| `store.maintenance`      | Sunday 03:30                                                    | Call optional store `maintenance()`, or `vacuum()` / `optimizeFts()`; record skipped if unavailable |
+| `store.maintenance`      | Sunday 03:30                                                    | Evict cached bodies/envelopes, then optional `maintenance()` or `vacuum()` / `optimizeFts()`         |
 
 Daily/weekly defaults use the machine's local IANA time zone, captured when registered.
 All timestamps in persisted job state are ISO-8601 UTC. Built-ins work with both the real
 backend and the ephemeral DemoBackend. Demo routine runs use fixtures and the demo action gate.
-The default SQLite Store currently exposes no maintenance hook, so that job reports skipped.
+`store.maintenance` evicts the envelope cache (`evictBodies`: older than 7 days, then LRU beyond
+200 MB; `evictEnvelopes`: LRU beyond 100,000 rows) and reports skipped only when the store exposes
+neither eviction nor maintenance.
 
-Push jobs run alongside regular polling, preserving fallback sync if the push connection
-fails. Each long poll is bounded by the configured sync interval and receives a linked
-abort signal. A provider must settle on abort. Notifications and manual sync execution
-share the same account job's single-flight lock; notifications honor a paused sync job.
-Account API writes reconcile immediately;
-`account.synced` events and `accounts.refresh` catch other changes. Integrators can call the
+The watcher never backfills: the first `watch:<accountId>` run ever only takes a cursor at "now".
+A rate-limited check backs off (30 seconds doubling to 15 minutes, or the provider's hint) and
+completes with a backoff summary; it never fails the job or the account. Push jobs run
+alongside the 30-second checks, so new mail is still found if the push connection fails. Each long
+poll is bounded by the watch interval and receives a linked abort signal. A provider must settle on
+abort. Push signals and **Check now** share the watch job's single-flight lock; signals honor a
+paused watch job. Account API writes reconcile immediately; `account.synced` and
+`account.watch.started` events and `accounts.refresh` catch other changes. Integrators can call the
 scheduler handle's `registerAccount(accountId)` / `unregisterAccount(accountId)` hooks.
 
 ## Agent routines
