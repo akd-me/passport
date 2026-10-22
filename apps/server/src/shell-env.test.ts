@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HostAgentStatus } from "@passport/types";
@@ -153,13 +153,16 @@ describe("host-agent settings routes", () => {
         body: JSON.stringify({ geminiPath: "/x" }),
       });
       expect(unknown.status).toBe(400);
+      const claude = join(dir, "custom", "claude");
+      await mkdir(join(dir, "custom"));
+      await writeFile(claude, "#!/bin/sh\n", { mode: 0o755 });
 
       detected = [
         {
           kind: "claude-code",
           label: "Claude Code",
           installed: true,
-          binaryPath: "/custom/claude",
+          binaryPath: claude,
           version: "2.1.0",
           loggedIn: true,
           account: "claude.ai",
@@ -169,22 +172,22 @@ describe("host-agent settings routes", () => {
       ];
       const saved = await app.request("/api/settings/host-agents", {
         method: "PUT",
-        body: JSON.stringify({ claudePath: " /custom/claude " }),
+        body: JSON.stringify({ claudePath: ` ${claude} ` }),
       });
       expect(saved.status).toBe(200);
       expect(await saved.json()).toMatchObject({
-        paths: { "claude-code": { configured: "/custom/claude", environment: null } },
+        paths: { "claude-code": { configured: claude, environment: null } },
         agents: detected,
       });
-      expect(process.env.PASSPORT_CLAUDE_PATH).toBe("/custom/claude");
+      expect(process.env.PASSPORT_CLAUDE_PATH).toBe(claude);
       expect(detector).toHaveBeenCalledWith({ refresh: true });
       expect(backend.config.llm.provider).toBe("claude-code");
       const file = JSON.parse(await readFile(join(dir, "passport.config.json"), "utf8"));
-      expect(file.hostAgents).toEqual({ claudePath: "/custom/claude" });
+      expect(file.hostAgents).toEqual({ claudePath: claude });
       // The detected agent is runtime state; the file keeps the configured fallback.
       expect(file.llm.provider).toBe("anthropic");
       expect((await loadConfig({ PASSPORT_DATA_DIR: dir })).hostAgents).toEqual({
-        claudePath: "/custom/claude",
+        claudePath: claude,
       });
 
       const redetected = await app.request("/api/settings/host-agents/redetect", {
@@ -206,6 +209,34 @@ describe("host-agent settings routes", () => {
       expect(process.env.PASSPORT_CLAUDE_PATH).toBeUndefined();
       const after = JSON.parse(await readFile(join(dir, "passport.config.json"), "utf8"));
       expect(after).not.toHaveProperty("hostAgents");
+    } finally {
+      await backend.close();
+    }
+  });
+
+  it("R3-16: only an existing claude/codex file that only its owner can modify is accepted", async () => {
+    const dir = await dataDir();
+    const backend = await createRealBackend(defaultConfig(dir));
+    try {
+      const app = createApp(backend);
+      const put = async (body: Record<string, string>) =>
+        (
+          await app.request("/api/settings/host-agents", {
+            method: "PUT",
+            body: JSON.stringify(body),
+          })
+        ).status;
+      const shell = join(dir, "sh");
+      await writeFile(shell, "#!/bin/sh\n", { mode: 0o755 });
+      expect(await put({ claudePath: "/bin/sh" })).toBe(400); // any program but claude
+      expect(await put({ claudePath: join(dir, "claude") })).toBe(400); // missing
+      const writable = join(dir, "codex");
+      await writeFile(writable, "#!/bin/sh\n");
+      await chmod(writable, 0o777);
+      expect(await put({ codexPath: writable })).toBe(400); // anyone could replace it
+      await mkdir(join(dir, "claude-dir"));
+      expect(await put({ claudePath: join(dir, "claude-dir") })).toBe(400); // not a file
+      expect(backend.config.hostAgents).toBeUndefined();
     } finally {
       await backend.close();
     }

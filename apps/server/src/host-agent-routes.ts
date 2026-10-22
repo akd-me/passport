@@ -1,5 +1,6 @@
+import { statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import type { Hono } from "hono";
 import type { Backend } from "./backend.js";
 import { AUTO_FALLBACK, type ConfigWithFallback, type PassportConfig } from "./config.js";
@@ -15,8 +16,37 @@ import {
 import { string } from "./validation.js";
 
 const FIELDS = ["claudePath", "codexPath"] as const;
+const PROGRAMS: Record<(typeof FIELDS)[number], string> = {
+  claudePath: "claude",
+  codexPath: "codex",
+};
 
-function binaryPath(value: unknown, name: string): string | undefined {
+/**
+ * The server runs a saved path at once (and later pipes mail-derived prompts into it), so only
+ * accept an existing `claude`/`codex` file that only its owner (the user, or root) can modify.
+ */
+function trustedProgram(path: string, name: (typeof FIELDS)[number]): void {
+  if (!basename(path).toLowerCase().startsWith(PROGRAMS[name])) {
+    throw new ApiError("INVALID_FIELD", `${name} must point to the ${PROGRAMS[name]} program`);
+  }
+  let info: ReturnType<typeof statSync>;
+  try {
+    info = statSync(path);
+  } catch {
+    // Missing or unreadable: there is nothing to run.
+    throw new ApiError("INVALID_FIELD", `${name} does not exist`);
+  }
+  const uid = process.getuid?.();
+  if (
+    !info.isFile() ||
+    (process.platform !== "win32" && (info.mode & 0o022) !== 0) ||
+    (uid !== undefined && info.uid !== uid && info.uid !== 0)
+  ) {
+    throw new ApiError("INVALID_FIELD", `${name} must be a file only you (or root) can modify`);
+  }
+}
+
+function binaryPath(value: unknown, name: (typeof FIELDS)[number]): string | undefined {
   if (value === null) {
     return undefined;
   }
@@ -28,6 +58,7 @@ function binaryPath(value: unknown, name: string): string | undefined {
   if (!isAbsolute(path)) {
     throw new ApiError("INVALID_FIELD", `${name} must be an absolute path`);
   }
+  trustedProgram(path, name);
   return path;
 }
 
