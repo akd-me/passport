@@ -1241,4 +1241,5 @@ export interface SetupTask {
 // On-demand mail (additive, v0.3): MailReader, MailRow, ReadResult, quota lanes.
 // ---------------------------------------------------------------------------
 
+export * from "./mail-row.js";
 export * from "./ondemand.js";

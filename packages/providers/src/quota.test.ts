@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { RateLimitedError } from "./errors.js";
-import { GMAIL_UNIT_COSTS, type QuotaConfig, QuotaGovernor, type QuotaLease } from "./quota.js";
+import { QuotaGovernor, type QuotaLease } from "./quota.js";
 import { ManualClock } from "./quota-clock.js";
+import { GMAIL_UNIT_COSTS, type QuotaConfig } from "./quota-presets.js";
 
 const start = Date.parse("2026-10-22T12:00:00Z");
 
