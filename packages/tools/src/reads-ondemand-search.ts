@@ -151,12 +151,13 @@ async function fanoutSearch(
   return {
     account: "all",
     items: merged.items.map(safeRow),
-    ...(Object.keys(merged.next).length
-      ? { nextPageToken: encodeToken({ v: 1, key, accounts: merged.next }) }
-      : {}),
+    nextPageToken: Object.keys(merged.next).length
+      ? encodeToken({ v: 1, key, accounts: merged.next })
+      : null,
     ...(totals.every((total) => total !== undefined)
       ? { approxTotal: totals.reduce<number>((sum, total) => sum + (total ?? 0), 0) }
       : {}),
+    ...([...pages.values()].some(isCapped) ? { capped: true } : {}),
     ...mergeMeta([...pages.values()] as ReadMeta[]),
   };
 }
@@ -172,12 +173,16 @@ function worstFailure(failures: unknown[]): unknown {
   );
 }
 
-function pageMeta(page: ReadResult<unknown>) {
+/** Paging fields of one provider page; `capped` marks a provider result ceiling (Graph `$search`). */
+export function pageMeta(page: ReadResult<unknown>) {
   return {
-    ...(page.nextPageToken ? { nextPageToken: page.nextPageToken } : {}),
+    nextPageToken: page.nextPageToken ?? null,
     ...(page.approxTotal !== undefined ? { approxTotal: page.approxTotal } : {}),
+    ...(isCapped(page) ? { capped: true } : {}),
   };
 }
+
+const isCapped = (page: ReadResult<unknown>) => (page as { capped?: unknown }).capped === true;
 
 /**
  * k-way merge of one page per account. Stops early when an account with more pages runs out of

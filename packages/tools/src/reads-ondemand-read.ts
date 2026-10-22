@@ -208,6 +208,7 @@ export function readMail(ctx: Context, input: ReadInput): Promise<ToolResult> {
       messages,
       truncated: false,
       continueFrom: null,
+      nextPageToken: null,
       ...mergeMeta(metas),
       untrusted: UNTRUSTED_NOTICE,
     };

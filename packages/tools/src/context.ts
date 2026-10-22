@@ -4,6 +4,7 @@ import type {
   ActionType,
   Email,
   MailReader,
+  MailReaderResolver,
   Store,
 } from "@passport/types";
 import { categorize } from "./categorize.js";
@@ -49,9 +50,14 @@ export class Context {
     return required(accounts[0], "Account");
   }
 
+  /** On-demand readers for this call: the trusted call context first, then the registry's. */
+  get readers(): MailReaderResolver | undefined {
+    return this.callContext.readers ?? this.deps.readers;
+  }
+
   /** On-demand reader for an account, or null when no resolver is configured or it has none. */
   async maybeReader(accountId: string): Promise<MailReader | null> {
-    return this.deps.readers ? await this.deps.readers(accountId) : null;
+    return this.readers ? await this.readers(accountId) : null;
   }
 
   /** On-demand reader for an account; throws `ON_DEMAND_UNSUPPORTED` when there is none. */

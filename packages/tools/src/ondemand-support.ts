@@ -88,7 +88,7 @@ export async function onDemand(
 ): Promise<ToolResult> {
   const partial = new PartialRows();
   try {
-    return await run(partial);
+    return withReadMeta(await run(partial));
   } catch (error) {
     const code = (error as { code?: unknown } | null)?.code;
     if (code === MAIL_READ_ERROR_CODES.RATE_LIMITED) {
@@ -119,6 +119,22 @@ export async function onDemand(
     }
     throw error;
   }
+}
+
+/**
+ * Every successful on-demand result carries `source`, `cost` and `nextPageToken` (null when the
+ * result is complete or unpaged), so agents can rely on the fields being present.
+ */
+export function withReadMeta(result: ToolResult): ToolResult {
+  if (result.isError) {
+    return result;
+  }
+  return {
+    ...result,
+    source: result.source ?? "cache",
+    cost: result.cost ?? {},
+    nextPageToken: result.nextPageToken ?? null,
+  };
 }
 
 /** Builds the `WOULD_EXCEED_BUDGET` result for an expensive shape. */
