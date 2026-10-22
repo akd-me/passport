@@ -502,4 +502,36 @@ describe("real provider ingestion", () => {
     expect(connect).toHaveBeenCalledTimes(2);
     await pool.close();
   });
+  it("keeps a sync's connection when a concurrent operation fails, invalidating once idle", async () => {
+    const registry = createProviderRegistry();
+    vi.spyOn(registry, "mail").mockReturnValue(mail);
+    const disconnect = vi.spyOn(mail, "disconnect");
+    const pool = new ProviderConnections(store, registry, async (_id, _method, value) => value);
+    const provider = await pool.mail(account.id);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(mail, "sync").mockImplementation(async function* () {
+      await gate;
+      yield { kind: "cursor", cursor: "done" };
+    });
+    const sync = (async () => {
+      const deltas: SyncDelta[] = [];
+      for await (const delta of provider.sync(null)) {
+        deltas.push(delta);
+      }
+      return deltas;
+    })();
+    await vi.waitFor(() => expect(mail.sync).toHaveBeenCalled());
+    vi.spyOn(mail, "getEmail").mockRejectedValueOnce(new Error("throttled"));
+    await expect(provider.getEmail("fixture-01")).rejects.toThrow("throttled");
+    expect(disconnect).not.toHaveBeenCalled();
+    release();
+    await expect(sync).resolves.toEqual([{ kind: "cursor", cursor: "done" }]);
+    vi.spyOn(mail, "getEmail").mockRejectedValueOnce(new Error("broken"));
+    await expect(provider.getEmail("fixture-01")).rejects.toThrow("broken");
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    await pool.close();
+  });
 });

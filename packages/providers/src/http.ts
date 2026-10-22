@@ -11,37 +11,83 @@ export interface ProviderOptions {
   now?: () => Date;
   /** Resolve store IDs (e.g. ULIDs) when composing a reply; omit when retaining adapter IDs. */
   resolveEmail?: (id: string) => Promise<Email | null>;
+  /** Waits between rate-limited read retries; tests inject a fake clock. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
+// Per-user quotas (e.g. Gmail's 6,000 units/minute) reset within a minute; the
+// backoff schedule spans one window so a long sync slows down instead of failing.
+const rateLimitDelaysMs = [2_000, 4_000, 8_000, 16_000, 32_000];
+
+/** Google reports per-user quota exhaustion as 403 rather than 429. */
+async function isRateLimited(response: Response): Promise<boolean> {
+  if (response.status === 429) {
+    return true;
+  }
+  if (response.status !== 403) {
+    return false;
+  }
+  try {
+    return /"(?:rateLimitExceeded|userRateLimitExceeded|RATE_LIMIT_EXCEEDED)"/.test(
+      await response.clone().text(),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function retryDelay(response: Response, backoff: number): number {
+  const header = response.headers.get("retry-after");
+  const seconds = header === null ? NaN : Number(header);
+  const server = Number.isFinite(seconds)
+    ? seconds * 1000
+    : header === null
+      ? NaN
+      : Date.parse(header) - Date.now();
+  return Math.min(60_000, Math.max(backoff, Number.isFinite(server) ? server : 0));
+}
+
+/** With sleep, rate-limited reads are retried; mutations are never replayed. */
 async function request(
   fetcher: typeof fetch,
   url: string,
   init: RequestInit = {},
+  sleep?: (ms: number) => Promise<void>,
 ): Promise<Response> {
-  let response: Response;
-  try {
-    response = await fetcher(url, {
-      ...init,
-      redirect: "error",
-      signal: init.signal ?? AbortSignal.timeout(30_000),
-    });
-  } catch {
-    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
+  const retries =
+    sleep && (init.method ?? "GET").toUpperCase() === "GET" ? rateLimitDelaysMs.length : 0;
+  for (let attempt = 0; ; attempt++) {
+    let response: Response;
+    try {
+      response = await fetcher(url, {
+        ...init,
+        redirect: "error",
+        signal: init.signal ?? AbortSignal.timeout(30_000),
+      });
+    } catch {
+      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
 
-    throw new ProviderError("NETWORK_ERROR", "Provider request failed or timed out");
-  }
-  if (!response.ok) {
+      throw new ProviderError("NETWORK_ERROR", "Provider request failed or timed out");
+    }
+    if (response.ok) {
+      return response;
+    }
+    const throttled = await isRateLimited(response);
+    if (throttled && sleep && attempt < retries) {
+      await response.body?.cancel();
+      await sleep(retryDelay(response, rateLimitDelaysMs[attempt] ?? 60_000));
+      continue;
+    }
     throw new ProviderError(
       response.status === 401
         ? "AUTH_FAILED"
-        : response.status === 429
+        : throttled
           ? "RATE_LIMITED"
           : `HTTP_${response.status}`,
       `Provider request failed (HTTP ${response.status})`,
       response.status,
     );
   }
-  return response;
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -95,12 +141,14 @@ export class HttpConnection {
   protected credentials: AccountCredentials = {};
   protected connected = false;
   protected readonly fetcher: typeof fetch;
+  private readonly sleep: (ms: number) => Promise<void>;
   private refreshing?: Promise<void>;
   constructor(
     protected readonly options: ProviderOptions = {},
     private readonly oauth?: "google" | "microsoft",
   ) {
     this.fetcher = options.fetch ?? globalThis.fetch;
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
   async connect(account: Account, credentials: AccountCredentials): Promise<void> {
     if (this.connected && this.account.id !== account.id) {
@@ -208,7 +256,7 @@ export class HttpConnection {
       throw new ProviderError("CONFIG_REQUIRED", "Missing provider credentials");
     }
     try {
-      return await request(this.fetcher, url, { ...init, headers });
+      return await request(this.fetcher, url, { ...init, headers }, this.sleep);
     } catch (e) {
       // Only an authenticated 401 with refresh credentials is retried after refresh.
 
@@ -224,7 +272,7 @@ export class HttpConnection {
         await this.refresh();
       }
       headers.set("authorization", `Bearer ${this.credentials.access_token}`);
-      return request(this.fetcher, url, { ...init, headers });
+      return request(this.fetcher, url, { ...init, headers }, this.sleep);
     }
   }
   protected async json<T>(url: string, init: RequestInit = {}): Promise<T> {

@@ -60,7 +60,14 @@ export class ProviderConnections {
         });
         await current.connected;
       };
+      // Operations share one adapter: a failure invalidates it only once no other operation is
+      // using it, so a rejected agent call cannot disconnect a sync mid-flight. A truly broken
+      // connection fails those operations too, and the last one invalidates it.
+      let active = 0;
       const fail = async () => {
+        if (active > 0) {
+          return;
+        }
         current.connected = undefined;
         await raw.disconnect().catch(() => {
           // Provider disconnect failed while invalidating a connection.
@@ -77,13 +84,20 @@ export class ProviderConnections {
           if (property === "sync") {
             return async function* (...args: unknown[]) {
               await connect();
+              active++;
+              let failed = false;
               try {
                 yield* value.apply(target, args);
               } catch (error) {
                 // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
 
-                await fail();
+                failed = true;
                 throw error;
+              } finally {
+                active--;
+                if (failed) {
+                  await fail();
+                }
               }
             };
           }
@@ -92,6 +106,8 @@ export class ProviderConnections {
           }
           return async (...args: unknown[]) => {
             await connect();
+            active++;
+            let failed = false;
             try {
               const result = await value.apply(target, args);
               return await this.normalize(id, String(property), result);
@@ -99,8 +115,13 @@ export class ProviderConnections {
               // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
 
               // Invalidate for the next operation. Retrying a send here could deliver twice.
-              await fail();
+              failed = true;
               throw error;
+            } finally {
+              active--;
+              if (failed) {
+                await fail();
+              }
             }
           };
         },

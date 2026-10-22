@@ -83,6 +83,46 @@ describe("Gmail API adapter", () => {
     await p.connect(account, { access_token: "token" });
     await expect(collect(p.sync("expired"))).rejects.toMatchObject({ code: "CURSOR_EXPIRED" });
   });
+  it("backs off on Gmail's per-user quota 403 instead of failing the read", async () => {
+    const quota = { error: { code: 403, errors: [{ reason: "rateLimitExceeded" }] } };
+    let throttled = 2;
+    const waits: number[] = [];
+    const p = new GmailMailProvider({
+      fetch: fixtureFetch(() =>
+        throttled-- > 0
+          ? response(quota, 403, { "retry-after": "5" })
+          : response({ ...sample, id: "m1" }),
+      ),
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    });
+    await p.connect(account, { access_token: "token" });
+    await expect(p.getEmail("m1")).resolves.toMatchObject({ subject: expect.any(String) });
+    expect(waits).toEqual([5000, 5000]);
+  });
+  it("reports exhausted quota as RATE_LIMITED and leaves other 403s unretried", async () => {
+    const quota = { error: { errors: [{ reason: "userRateLimitExceeded" }] } };
+    for (const [body, code, attempts] of [
+      [quota, "RATE_LIMITED", 6],
+      [{ error: { errors: [{ reason: "insufficientPermissions" }] } }, "HTTP_403", 1],
+    ] as const) {
+      const fetcher = fixtureFetch(() => response(body, 403));
+      const p = new GmailMailProvider({ fetch: fetcher, sleep: async () => {} });
+      await p.connect(account, { access_token: "token" });
+      await expect(p.getEmail("m1")).rejects.toMatchObject({ code, status: 403 });
+      expect(fetcher).toHaveBeenCalledTimes(attempts);
+    }
+  });
+  it("never replays a rate-limited mutation", async () => {
+    const fetcher = fixtureFetch(() => response({}, 429));
+    const p = new GmailMailProvider({ fetch: fetcher, sleep: async () => {} });
+    await p.connect(account, { access_token: "token" });
+    await expect(p.applyChanges([{ op: "delete", providerIds: ["m"] }])).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it("modifies seen/flag labels and moves deletes to trash", async () => {
     const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
     const p = new GmailMailProvider({
