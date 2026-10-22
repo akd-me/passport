@@ -32,6 +32,8 @@ export function TaskComposer({
     [error, setError] = useState("");
   const { composer } = useUi(),
     { upsert, trackRuns } = useTasks();
+  // Inbox and routine runs can't be stopped or steered; messages to them queue (R5-8).
+  const live = running && task.kind === "task";
   const send = async (mode: TaskMessageMode) => {
     const message = text.trim();
     if (!message || sending) {
@@ -96,7 +98,7 @@ export function TaskComposer({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              void send(e.metaKey || e.ctrlKey ? "steer" : "queue");
+              void send(live && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
             } else if (e.key === "Escape") {
               e.currentTarget.blur();
             }
@@ -107,13 +109,13 @@ export function TaskComposer({
           <PlanToggle task={task} />
           <span className="composer-hint" aria-hidden="true">
             <Kbd>↵</Kbd> {running ? "queue" : "send"}
-            {running && (
+            {live && (
               <>
                 <Kbd>{mod}↵</Kbd> steer
               </>
             )}
           </span>
-          {running && (
+          {live && (
             <button
               type="button"
               className="btn btn-sm stop-btn"

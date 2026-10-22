@@ -39,10 +39,15 @@ export function Sidebar() {
     { mode } = useAccounts(),
     tasks = useTasks(),
     [params] = useSearchParams();
-  const decisions = useResource<Page<ActionRecord>>("/decisions");
+  // Only the demo backend (no tasks) counts proposals here.
+  const decisions = useResource<Page<ActionRecord>>(tasks.available ? null : "/decisions");
   const proposed = decisions.data?.items.filter((a) => a.status === "proposed") ?? [];
-  const waiting = tasks.available ? needsYou(tasks.tasks).length : proposed.length;
   const scope = params.get("accountId");
+  // Tasks (not proposals) when tasks exist, in the account scope like the page (R5-16).
+  const waiting = tasks.available
+    ? needsYou(tasks.tasks).filter((t) => !scope || t.accountIds.includes(scope)).length
+    : proposed.length;
+  const unit = tasks.available ? (waiting === 1 ? "task needs" : "tasks need") : "need";
   const withScope = (path: string) =>
     scope ? `${path}?accountId=${encodeURIComponent(scope)}` : path;
   return (
@@ -95,9 +100,9 @@ export function Sidebar() {
           <Icon name="queue" size={15} />
           <span className="side-label">Needs you</span>
           {waiting > 0 && (
-            <span className="side-count strong">
+            <span className="side-count strong" title={`${waiting} ${unit} you`}>
               {waiting}
-              <span className="sr-only"> need you</span>
+              <span className="sr-only"> {unit} you</span>
             </span>
           )}
         </NavLink>

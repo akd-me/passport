@@ -1,6 +1,6 @@
 import type { Task } from "@passport/types";
 import { Link } from "react-router";
-import { AccountDot } from "../accounts/AccountFilter";
+import { AccountDot, useAccountId } from "../accounts/AccountFilter";
 import { relativeTime } from "../components/ui";
 import { needsYou } from "../tasks/model";
 import { useTasks } from "../tasks/store";
@@ -46,8 +46,10 @@ export function TaskCard({ task }: { task: Task }) {
 
 /** Tasks that came back needing the person, at the top of "Needs you". */
 export function TasksNeedingYou() {
-  const { tasks, available } = useTasks();
-  const list = needsYou(tasks);
+  const { tasks, available } = useTasks(),
+    accountId = useAccountId();
+  // The page's account scope applies to tasks too (R5-16).
+  const list = needsYou(tasks).filter((t) => !accountId || t.accountIds.includes(accountId));
   if (!available || !list.length) {
     return null;
   }

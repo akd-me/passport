@@ -27,12 +27,16 @@ export function countByType(records: ActionRecord[]): [ActionType, number][] {
   return [...counts].sort((a, b) => b[1] - a[1]);
 }
 
+/** "SERVER_RESTARTED" reads "server restarted"; prose errors pass through (R5-18). */
+export const errorText = (error: string) =>
+  /^[A-Z][A-Z0-9_]+$/.test(error) ? error.toLowerCase().replaceAll("_", " ") : error;
+
 export function RunStatus({ run }: { run: TaskRun }) {
   return (
     <span className={`run-chip ${run.status}`}>
       {isActiveRun(run) && <Icon name="spinner" size={12} />}
       {runStatusText[run.status]}
-      {run.status === "failed" && run.error ? `: ${run.error}` : ""}
+      {run.status === "failed" && run.error ? `: ${errorText(run.error)}` : ""}
     </span>
   );
 }
