@@ -11,6 +11,7 @@ import {
   type Store,
   type StoreTasks,
   type Task,
+  type TaskByAction,
   type TaskDetail,
   type TaskItem,
   type TaskMessage,
@@ -21,6 +22,7 @@ import {
   taskTitleFrom,
 } from "@passport/types";
 import { ApiError } from "../errors.js";
+import { contextItems, taskByAction } from "./context.js";
 import { type RunCeilings, type RunDescription, TaskRunner } from "./runner.js";
 import { idleStatus } from "./status.js";
 import { frameUntrusted } from "./untrusted.js";
@@ -201,6 +203,7 @@ export class TaskService {
         runId,
         cancellable: true,
         onCreated: created,
+        items: await contextItems(this.options.store, context),
       },
       (options) =>
         this.options.agent.run(
@@ -218,6 +221,11 @@ export class TaskService {
     done.catch(() => undefined).finally(() => this.requests.delete(runId));
     const run = await Promise.race([persisted, done.then(() => null)]);
     return { run: run ?? (await persisted), done };
+  }
+
+  /** The task and run behind an action (`GET /api/tasks/by-action/:actionId`). */
+  byAction(actionId: string): Promise<TaskByAction> {
+    return taskByAction(this.options.store, this.tasks, actionId);
   }
 
   /** Cancels the task's cancellable message runs; returns their messages for the restart. */

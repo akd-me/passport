@@ -11,7 +11,8 @@ Vocabulary: "task" is agent work, "conversation" is an email thread, "matter" is
 
 | Type | Fields |
 |---|---|
-| `Task` | `id`, `title`, `accountIds`, `status` (`inbox` / `working` / `snoozed` / `settled` / `archived`), `pinned`, `snoozedUntil?`, `permissionMode` (`supervised` / `auto_accept_edits` / `auto` / `full_access`), `permissionModePinned?`, `interactionMode` (`default` / `plan`), `createdBy` (`user` / `agent` / `system`), `kind` (`task` / `inbox` / `routine`), `parentTaskId?`, `needsUser` (`null` / `approval` / `question` / `failure`), `pendingActionIds?`, `lastActivityAt`, `createdAt`, `settledAt?`, `watches: ConversationWatch[]`, `jobId?` (routine), `revision?` |
+| `Task` | `id`, `title`, `accountIds`, `status` (`inbox` / `working` / `snoozed` / `settled` / `archived`), `pinned`, `snoozedUntil?`, `permissionMode` (`supervised` / `auto_accept_edits` / `auto` / `full_access`), `permissionModePinned?`, `interactionMode` (`default` / `plan`), `createdBy` (`user` / `agent` / `system`), `kind` (`task` / `inbox` / `routine`), `parentTaskId?`, `needsUser` (`null` / `approval` / `question` / `failure`), `pendingActionIds?`, `lastActivityAt`, `createdAt`, `settledAt?`, `watches: ConversationWatch[]`, `jobId?` (routine), `revision?`, `approvalGrants?: TaskApprovalGrant[]` |
+| `TaskApprovalGrant` | `category`, `actionId`, `trustLevel`, `risk`, `reversibility`, `grantedAt` (see [Approval scopes](#approval-scopes)) |
 | `ConversationWatch` | `threadHandle`, `account`, `since`, `lastWakeAt?`, `consecutiveWakes` |
 | `TaskRun` | `id`, `taskId`, `status` (`queued` / `running` / `waiting` / `completed` / `failed` / `cancelled`), `trigger`, `priority` (`interactive` / `background`), `agentRunId`, `createdAt`, `startedAt?`, `endedAt?`, `summary?`, `actionIds`, `usage?` (`llmCalls`, `toolCalls`, `inputTokens`, `outputTokens`), `error?` (a stable code) |
 | `TaskRunTrigger` | `{ kind: "message", itemId, mode }` · `{ kind: "arrival", emailId }` · `{ kind: "schedule", jobId, name }` · `{ kind: "watch", threadHandle, emailId }` · `{ kind: "wake", reason }` |
@@ -26,8 +27,8 @@ Item payloads by `kind`:
 | `tool_call` | `{ name, inputSummary, resultSummary, cost?, durationMs, isError, planned? }`; summaries are redacted (bodies, secrets, token-shaped strings) and at most 200 characters |
 | `approval_request` | `{ actionId, summary }`; approve or reject with `/api/actions/:id/{approve,reject}` |
 | `question` | `{ text }` (reserved: nothing emits it yet) |
-| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks) |
-| `notification` | `{ source: "arrival" \| "watch" \| "schedule" \| "system", summary, row? }`; `row` is a `MailRow` |
+| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`) |
+| `notification` | `{ source: "arrival" \| "watch" \| "schedule" \| "system", summary, row? }`; `row` is a `MailRow`. A task created with `matterId` or `emailIds` gets a `system` one on its first run ("With matter “…” and 2 messages “…”, “…”"; `row` when there is exactly one message) |
 
 **Untrusted data.** Items with `untrusted: true` contain provider-derived strings (subjects,
 senders, snippets, tool arguments and results, model text). Their `$`, mention-style `@` and
@@ -191,7 +192,8 @@ Every route requires the bearer token. Errors use the standard body
 | Method and path | Body / query | Response |
 |---|---|---|
 | `GET /api/tasks` | `status=inbox,working` (comma list), `kind=task,inbox,routine`, `pinned=true\|false`, `limit` (1–500, default 50), `cursor` | `Page<Task>`: `{ items, total, nextCursor }`, ordered by `lastActivityAt` desc |
-| `POST /api/tasks` | `{ message, title?, accountIds?, permissionMode?, interactionMode?, parentTaskId? }` | `201 { task, run }` (the first run, `queued`) |
+| `POST /api/tasks` | `{ message, title?, accountIds?, permissionMode?, interactionMode?, parentTaskId?, matterId?, emailIds? }` | `201 { task, run }` (the first run, `queued`) |
+| `GET /api/tasks/by-action/:actionId` | | `TaskByAction`: `{ taskId, runId }`; `404 NOT_FOUND` when no task run holds the action |
 | `GET /api/tasks/:id` | | `TaskDetail`: `{ task, runs }` (runs newest first, at most 50) |
 | `GET /api/tasks/:id/items` | `afterSeq` (default 0), `limit` (default 100) | `{ items, lastSeq }` (ascending `seq`) |
 | `POST /api/tasks/:id/messages` | `{ text, mode?: "queue" \| "steer" }` | `202 { task, run }` |
@@ -202,11 +204,26 @@ Every route requires the bearer token. Errors use the standard body
 | `POST /api/tasks/:id/pin` · `/unpin` | | `Task` |
 | `POST /api/tasks/:id/unwatch` | `{ threadHandle? }` (omit to stop every watch) | `Task` |
 | `PATCH /api/tasks/:id` | `{ title?, permissionMode?, interactionMode? }` | `Task` (mode clamped) |
-| `POST /api/actions/:id/approve` · `/reject` | unchanged | `ActionRecord`; the task's `pendingActionIds` and `needsUser` follow |
+| `POST /api/actions/:id/approve` | `{ request?, scope?: "once" \| "task" \| "always" }` | `ActionRecord`; with `task` or `always` also `approvalScope: ApprovalScopeResult` (`{ requested, applied, taskId?, pinnedLevel?, code? }`). The task's `pendingActionIds` and `needsUser` follow |
+| `POST /api/actions/:id/reject` | unchanged | `ActionRecord` |
 | `POST /api/agent/run` | unchanged v0.2 body `{ instruction?, emailIds?, matterId? }` | the finished `AgentRun` plus `taskId`; a `kind: "task"` task is created per call |
 
 Text limits: `message` and `text` are 1–20,000 characters, and `title` 1–200 (stored at most
 60). Unknown body fields are rejected with `400 INVALID_FIELD`.
+
+**Composer context** (`POST /api/tasks`). `emailIds` (at most 100) takes email ULIDs or mail
+handles (`<account>:email:<providerId>`); an uncached handle is read from the provider and
+cached. The first run receives `{ matterId, emailIds }` exactly as `/api/agent/run` passes them,
+and the timeline gets a `notification` (`source: "system"`) naming them. Errors, all `400`:
+`INVALID_FIELD` (shape, an empty `matterId`), `UNKNOWN_ACCOUNT` (an `accountIds` entry),
+`UNKNOWN_MATTER`, `UNKNOWN_EMAIL`, and `ACCOUNT_MISMATCH` (a message outside `accountIds`).
+Nothing is created when validation fails.
+
+**Decision lookup** (`GET /api/tasks/by-action/:actionId`). Resolves through the run whose
+`actionIds` lists the action (searched within the action's `request.runId` when the record
+exists), falling back to the newest TaskRun whose `agentRunId` equals `request.runId`. Any task
+status is returned, archived included, so `?decision=<id>` deep links open
+`/tasks/:taskId?approval=<id>`.
 
 Example:
 
@@ -240,6 +257,40 @@ POST /api/tasks/01K…/messages
 { "text": "Only the PDFs", "mode": "steer" }
 202 { "task": { …, "status": "working" }, "run": { …, "status": "queued" } }
 ```
+
+## Approval scopes
+
+`POST /api/actions/:id/approve` takes an optional `scope`:
+
+- **`once`** (the default): approves this action only.
+- **`task`**: approves it and adds a `TaskApprovalGrant` to the task of the run that proposed it
+  (`400 NOT_A_TASK_ACTION` for other actions, checked before approving). When a later run of
+  the same task proposes an action, the runner approves it at once, with a `TASK_APPROVED`
+  notice instead of an `approval_request`, when a grant covers it:
+  - same `category`;
+  - `decision.risk` no higher and `decision.reversibility` no worse
+    (`reversible` < `delayed` < `irreversible`) than the approved action's;
+  - `decision.trustLevel` (global dial, ladder and the task's effective mode) not below the
+    grant's. Lowering any of them voids the grant, so a grant never exceeds the task's
+    permission mode or the ladder;
+  - policy asked only because of the trust level. Identity changes, held drafts, always-ask
+    categories and the external-agent ceiling still ask;
+  - the agent proposed it (not an external client), the task is not settled or archived, and
+    it is not in plan mode.
+
+  Approved sends still go through the outbox hold. Auto-approvals don't count as the person's
+  feedback, so they never train the trust ladder. If the approval fails, the proposal stays
+  pending and asks as usual.
+- **`always`**: pins the category's trust level with the existing trust pin
+  (`PUT /api/trust/:category/pin`) to `auto_accept_edits`, so reversible actions of that
+  category run without asking everywhere, and also grants `task`. It pins only when that
+  changes the outcome: the action is reversible, policy asked only because of the trust level,
+  the global mode is at least `auto_accept_edits` and the ladder is below it. Otherwise it acts as
+  `task` and the task gets an `ALWAYS_UNAVAILABLE` notice that says why
+  (`approvalScope.applied: "task"`, `code: "ALWAYS_UNAVAILABLE"`). An action outside a task can
+  use `always` only when it pins.
+
+The task gets an `APPROVAL_SCOPE` notice for `task` and for a pinned `always`.
 
 ## WebSocket
 
@@ -300,8 +351,9 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 
 - `question` items and `needsUser: "question"` are reserved. No tool asks the person yet.
 - Staged changes, the worktree analogue, are not implemented. Approval stays per action.
-- Approval choices "accept for this task" and "always" are not task-scoped yet. "Always" maps to
-  the existing trust pin (`PUT /api/trust/:category/pin`).
+- Approval scopes apply to later proposals only: approving with `task` does not approve the
+  task's other proposals that are already pending. The proposing tool call returns `proposed`
+  even when a grant approves it a moment later; the run's change summary shows the outcome.
 - Child tasks: `parentTaskId` is honored for the permission clamp, but no tool spawns a child
   task yet.
 
@@ -313,12 +365,6 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 - **R4-23:** replies sent from a send-as alias that is neither an account address nor a
   verified-self person and that the provider files outside Sent can still wake the task (they
   are classified `reply`, so the loop guard applies).
-- **R4-24 (packages/agent):** the `matter_review` prompt and the manual runtime's "Initial context
-  (untrusted data)" line embed matter notes and email JSON with a label instead of the random-tag
-  frame above. The agent's system prompt treats them as untrusted, but a forged closing marker is
-  not neutralised there.
-- **R4-27 (packages/store):** a data directory first opened by the pre-release task-model branch
-  build skips the `matter_refs` migration; v0.2 data directories migrate correctly.
 - **R4-29:** `passport sync` in client mode runs its own forced watcher tick next to the server's.
   Arrival dedupe prevents double triage; the cost is duplicate provider reads.
 - **R4-32:** explicit triage of an uncached handle caches the provider row without normalising

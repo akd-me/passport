@@ -25,6 +25,17 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   on a conversation, a bounce or auto-reply arrives, or after 14 days. Replays are deduped on
   Message-ID for 7 days, bursts are coalesced per thread over 120 s (persisted across restarts),
   and 3 automatic, no-op or unattended-send wakes in a row stop the watch.
+- `POST /api/tasks` accepts `matterId` and `emailIds` (ULIDs or mail handles) like
+  `/api/agent/run`, validates them and `accountIds` (`UNKNOWN_MATTER`, `UNKNOWN_EMAIL`,
+  `UNKNOWN_ACCOUNT`, `ACCOUNT_MISMATCH`), and records a `notification` naming the context on the
+  timeline.
+- `GET /api/tasks/by-action/:actionId` returns `{ taskId, runId }` for an action, archived tasks
+  included, so `?decision=<id>` deep links open the right task.
+- Approval scopes: `POST /api/actions/:id/approve` takes `{ scope: "once" | "task" | "always" }`.
+  `task` approves later proposals of the same category in that task (never riskier, less
+  reversible or at a lower trust level than the approved one, and never past an always-ask
+  rule); `always` pins the category to `auto_accept_edits` for reversible actions and otherwise
+  acts as `task` with an `ALWAYS_UNAVAILABLE` notice. New `Task.approvalGrants`.
 - Hooks for integrators: the tool registry `observer` and `readOnly` options and
   `ToolContext.taskId`; `AgentRuntime.run(trigger, { runId, observer, readOnly, taskId, signal,
   priority })`; the policy engine `ceiling` option; `Store.tasks`.
@@ -77,8 +88,11 @@ version; release tags must match it. Move Unreleased to a date before tagging.
     people/matter resources (notes fenced last) are neutralised and marked untrusted; the
     neutraliser also covers fullwidth sigils, Unicode indentation and NEL (R4-3, R4-4, R4-5,
     R4-33, R4-34, R4-35).
-  - Model-supplied regexes are bounded: long or catastrophic patterns are refused, and `mail_grep`
-    matches in a worker with a 2 s limit (R4-6).
+  - Model-supplied regexes are bounded: long or catastrophic patterns are refused, and
+    `mail_grep` and `notes_search` (`Store.notes.search` with `pattern`) match in a worker with a
+    2 s limit (`PATTERN_TIMEOUT`) (R4-6).
+  - The `matter_review` prompt and the manual run's initial context wrap matter and mail data in
+    the random-tag frame and leave out agent-written matter notes and refs (R4-24).
   - `watch_conversation` accepts only thread handles, is planned (not run) in plan mode and
     refuses settled or archived tasks (`TASK_SETTLED`) (R4-9, R4-17, R4-18).
   - Watcher and calendar-sync failures carry a bounded code and fixed text into job history and
@@ -102,6 +116,9 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   watcher no longer clears a calendar sync error (R4-28); the retired `sync` block is not written
   back (R4-30); broken IMAP reader connections are replaced (R4-31); explicit triage of a queued
   arrival answers 409 (R4-32).
+- A data directory first opened by the pre-release task-model build gets its missing
+  `matter_refs` table: the migration is idempotent and re-applied, and the store refuses to open
+  a database that lacks a required table (R4-27).
 
 ### Removed
 

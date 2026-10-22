@@ -1,5 +1,39 @@
 import { TASKS_MIGRATION } from "./store-tasks-migration.js";
 
+/**
+ * v0.3: people and matters as notes. `Matter.refs` (JSON) is the source of truth for a matter's
+ * conversations; matter_refs indexes it for lookups by message, thread or Message-ID. v0.2
+ * matters get refs derived from the cached envelopes of their attached emails. Idempotent: it is
+ * applied again as the last migration (R4-27).
+ */
+export const MATTER_REFS_MIGRATION = String.raw`
+  CREATE TABLE IF NOT EXISTS matter_refs (
+    matter_id TEXT NOT NULL, account_id TEXT NOT NULL, provider_id TEXT NOT NULL,
+    rfc822_id TEXT, thread_pid TEXT, date TEXT NOT NULL, position INTEGER NOT NULL,
+    PRIMARY KEY(matter_id, account_id, provider_id)
+  );
+  CREATE INDEX IF NOT EXISTS matter_refs_message ON matter_refs(account_id, provider_id);
+  CREATE INDEX IF NOT EXISTS matter_refs_thread ON matter_refs(account_id, thread_pid) WHERE thread_pid IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS matter_refs_rfc822 ON matter_refs(rfc822_id) WHERE rfc822_id IS NOT NULL;
+  UPDATE matters SET data = json_set(data, '$.refs', json((
+    SELECT COALESCE(json_group_array(json(ref)), '[]') FROM (
+      SELECT json_object(
+        'account', e.account_id, 'providerId', e.provider_id,
+        'rfc822Id', json_extract(e.data, '$.headers.messageId'),
+        'date', e.received_at, 'subject', e.subject
+      ) AS ref
+      FROM matter_emails me JOIN emails e ON e.id = me.email_id
+      WHERE me.matter_id = matters.id
+      ORDER BY e.received_at, e.id
+    )
+  ))) WHERE json_type(data, '$.refs') IS NULL;
+  INSERT OR IGNORE INTO matter_refs(matter_id, account_id, provider_id, rfc822_id, thread_pid, date, position)
+    SELECT m.id, json_extract(r.value, '$.account'), json_extract(r.value, '$.providerId'),
+      json_extract(r.value, '$.rfc822Id'), json_extract(r.value, '$.threadPid'),
+      json_extract(r.value, '$.date'), r.key
+    FROM matters m, json_each(m.data, '$.refs') r;
+`;
+
 // Append migrations; never change an already released migration.
 export const migrations: readonly string[] = [
   String.raw`
@@ -151,36 +185,7 @@ export const migrations: readonly string[] = [
       VALUES (new.rowid, new.subject, new."from", new.preview);
   END;
 `,
-  // v0.3: people and matters as notes. `Matter.refs` (JSON) is the source of truth for a matter's
-  // conversations; matter_refs indexes it for lookups by message, thread or Message-ID. v0.2
-  // matters get refs derived from the cached envelopes of their attached emails.
-  String.raw`
-  CREATE TABLE matter_refs (
-    matter_id TEXT NOT NULL, account_id TEXT NOT NULL, provider_id TEXT NOT NULL,
-    rfc822_id TEXT, thread_pid TEXT, date TEXT NOT NULL, position INTEGER NOT NULL,
-    PRIMARY KEY(matter_id, account_id, provider_id)
-  );
-  CREATE INDEX matter_refs_message ON matter_refs(account_id, provider_id);
-  CREATE INDEX matter_refs_thread ON matter_refs(account_id, thread_pid) WHERE thread_pid IS NOT NULL;
-  CREATE INDEX matter_refs_rfc822 ON matter_refs(rfc822_id) WHERE rfc822_id IS NOT NULL;
-  UPDATE matters SET data = json_set(data, '$.refs', json((
-    SELECT COALESCE(json_group_array(json(ref)), '[]') FROM (
-      SELECT json_object(
-        'account', e.account_id, 'providerId', e.provider_id,
-        'rfc822Id', json_extract(e.data, '$.headers.messageId'),
-        'date', e.received_at, 'subject', e.subject
-      ) AS ref
-      FROM matter_emails me JOIN emails e ON e.id = me.email_id
-      WHERE me.matter_id = matters.id
-      ORDER BY e.received_at, e.id
-    )
-  ))) WHERE json_type(data, '$.refs') IS NULL;
-  INSERT OR IGNORE INTO matter_refs(matter_id, account_id, provider_id, rfc822_id, thread_pid, date, position)
-    SELECT m.id, json_extract(r.value, '$.account'), json_extract(r.value, '$.providerId'),
-      json_extract(r.value, '$.rfc822Id'), json_extract(r.value, '$.threadPid'),
-      json_extract(r.value, '$.date'), r.key
-    FROM matters m, json_each(m.data, '$.refs') r;
-`,
+  MATTER_REFS_MIGRATION,
   TASKS_MIGRATION,
   // v0.3: label revalidation rewrites the row; reindex FTS only when an indexed column changed.
   String.raw`
@@ -195,4 +200,10 @@ export const migrations: readonly string[] = [
       VALUES (new.rowid, new.subject, new."from", new.preview);
   END;
 `,
+  // R4-27: a data dir first opened by the pre-release task-model build recorded the tasks
+  // migration as #3, so it never ran matter_refs. Re-applying the idempotent migration repairs it.
+  MATTER_REFS_MIGRATION,
 ];
+
+/** Tables every migrated database has; `migrate` fails loudly when one is missing (R4-27). */
+export const REQUIRED_TABLES = ["matter_refs", "tasks", "task_runs", "task_items", "emails_fts"];
