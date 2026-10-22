@@ -26,6 +26,7 @@ import {
 import { json, required, ToolError } from "./presentation.js";
 import { PROVIDER_READ, peopleQuery } from "./reads-ondemand.js";
 import { register } from "./register.js";
+import { compileSafeRegex, REGEX_MAX_LENGTH } from "./safe-regex.js";
 import { schema as z } from "./schema.js";
 import * as s from "./schemas.js";
 import * as o from "./schemas-ondemand.js";
@@ -251,12 +252,21 @@ export function registerNotes(ctx: Context) {
     "Search local person and matter notes, names, addresses and summaries. pattern is a case-insensitive substring, or a JavaScript regular expression with regex=true (multiline: ^ and $ match lines). Returns matching line snippets. No provider cost.",
     {
       pattern: z.string().trim().min(1).max(500),
-      regex: z.boolean().default(false),
+      regex: z
+        .boolean()
+        .default(false)
+        .describe(
+          `Treat pattern as a regular expression (at most ${REGEX_MAX_LENGTH} characters; no backreferences or nested quantifiers).`,
+        ),
       kind: kind.optional(),
       limit: s.limit,
     },
     false,
     async ({ pattern, regex, kind: noteKind, limit }, call) => {
+      if (regex) {
+        // The store matches on the main thread: refuse backtracking-prone shapes first (R4-6).
+        compileSafeRegex(pattern, "imu");
+      }
       const hits = await searchNotes(call, {
         ...(regex ? { pattern } : { text: pattern }),
         ...(noteKind ? { kind: noteKind } : {}),

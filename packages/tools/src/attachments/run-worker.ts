@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { Worker } from "node:worker_threads";
+import type { GrepHits, GrepJob } from "../grep-match.js";
 import { ToolError } from "../presentation.js";
 import type { Extracted, ExtractJob, WorkerReply } from "./extract.js";
 import { EXTRACTION_TIMEOUT_MS } from "./kinds.js";
@@ -29,6 +30,37 @@ function workerEntry(): { url: URL; execArgv?: string[] } {
  * terminated and `EXTRACTION_TIMEOUT` is thrown.
  */
 export function runExtraction(job: ExtractJob): Promise<Extracted> {
+  return runWorkerJob<Extracted>(job, extraction.timeoutMs, {
+    timeout: new ToolError(
+      "EXTRACTION_TIMEOUT",
+      `Extraction took longer than ${Math.round(extraction.timeoutMs / 1000)} s and was stopped. Try a smaller pages or rows range.`,
+    ),
+    error: new ToolError("EXTRACTION_FAILED", "The attachment could not be parsed."),
+    exit: new ToolError("EXTRACTION_FAILED", "The extraction worker stopped unexpectedly."),
+  });
+}
+
+/** `mail_grep` matching limits; tests lower the timeout. */
+export const grepLimits = { timeoutMs: 2000 };
+
+/** Matches lines in a worker; past `grepLimits.timeoutMs` it is stopped (`PATTERN_TIMEOUT`). */
+export function runGrep(job: GrepJob): Promise<GrepHits> {
+  const failed = new ToolError("GREP_FAILED", "Matching failed.");
+  return runWorkerJob<GrepHits>(job, grepLimits.timeoutMs, {
+    timeout: new ToolError(
+      "PATTERN_TIMEOUT",
+      `The pattern took longer than ${grepLimits.timeoutMs / 1000} s and was stopped. Use a simpler pattern (no nested or adjacent open-ended quantifiers) or fewer messages.`,
+    ),
+    error: failed,
+    exit: failed,
+  });
+}
+
+function runWorkerJob<T>(
+  job: ExtractJob | GrepJob,
+  timeoutMs: number,
+  errors: { timeout: ToolError; error: ToolError; exit: ToolError },
+): Promise<T> {
   const { url, execArgv } = workerEntry();
   return new Promise((resolve, reject) => {
     const worker = new Worker(url, {
@@ -41,7 +73,7 @@ export function runExtraction(job: ExtractJob): Promise<Extracted> {
     worker.stdout.resume();
     worker.stderr.resume();
     let settled = false;
-    const finish = (error: ToolError | null, value?: Extracted) => {
+    const finish = (error: ToolError | null, value?: T) => {
       if (settled) {
         return;
       }
@@ -51,28 +83,15 @@ export function runExtraction(job: ExtractJob): Promise<Extracted> {
       if (error) {
         reject(error);
       } else {
-        resolve(value as Extracted);
+        resolve(value as T);
       }
     };
-    const timer = setTimeout(
-      () =>
-        finish(
-          new ToolError(
-            "EXTRACTION_TIMEOUT",
-            `Extraction took longer than ${Math.round(extraction.timeoutMs / 1000)} s and was stopped. Try a smaller pages or rows range.`,
-          ),
-        ),
-      extraction.timeoutMs,
+    const timer = setTimeout(() => finish(errors.timeout), timeoutMs);
+    worker.once("message", (reply: WorkerReply | { ok: true; value: T }) =>
+      reply.ok ? finish(null, reply.value as T) : finish(new ToolError(reply.code, reply.message)),
     );
-    worker.once("message", (reply: WorkerReply) =>
-      reply.ok ? finish(null, reply.value) : finish(new ToolError(reply.code, reply.message)),
-    );
-    worker.once("error", () =>
-      finish(new ToolError("EXTRACTION_FAILED", "The attachment could not be parsed.")),
-    );
-    worker.once("exit", () =>
-      finish(new ToolError("EXTRACTION_FAILED", "The extraction worker stopped unexpectedly.")),
-    );
+    worker.once("error", () => finish(errors.error));
+    worker.once("exit", () => finish(errors.exit));
     worker.postMessage(job);
   });
 }

@@ -26,7 +26,7 @@ describe("R4 untrusted framing (tools)", () => {
       } as unknown as Email["headers"],
     });
     const search = await call("mail_search", { query: "subject:hello" });
-    expect(rows(search)[0]?.rfc822Id).toBeNull();
+    expect((rows(search)[0] as Row | undefined)?.rfc822Id).toBeNull();
     const read = await call("mail_read", { id: "account-1:thread:t1", format: "headers" });
     const message = messages(read)[0]!;
     expect(message.rfc822Id).toBeNull();
