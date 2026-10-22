@@ -5,6 +5,30 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 
 ## [Unreleased]
 
+### Added
+
+- Tasks ([docs/tasks.md](docs/tasks.md)): the unit of agent work, like a T3 Code thread. A task
+  holds runs (interactive lane for your messages, background lane for arrivals, routines and
+  wakes) and a timeline of items: messages, redacted tool calls, approval requests, notices and
+  notifications. It has a server-owned lifecycle (inbox / working / snoozed / settled /
+  archived; auto-settle after 3 idle days). Follow-ups queue or steer; interrupt stops a run at
+  its next step. Plan mode records writes as proposals. A task's permission mode is clamped to
+  the trust dial and its parent, and enforced on every action of its runs. Proposed actions
+  surface the task with `needsUser: "approval"`; approvals still use `/api/actions/:id/approve`.
+  New routes under `/api/tasks`; new WebSocket events `task.updated`, `task.run.updated` and
+  `task.item.appended`. `/api/agent/run` now creates a task per instruction and returns its
+  `taskId`.
+- Every mail account gets a system Inbox task that records arrival triage as a timeline. Model
+  routines (`agent.daily_digest`, `agent.matter_review`, user routines) each run on their own
+  routine task (`JobState.taskId`).
+- `watch_conversation` / `unwatch_conversation` tools: a task is woken when someone else replies
+  on a conversation, a bounce or auto-reply arrives, or after 14 days. Replays are deduped on
+  Message-ID for 7 days, bursts are coalesced per thread over 120 s, and 3 automatic or no-op
+  wakes in a row stop the watch.
+- Hooks for integrators: the tool registry `observer` and `readOnly` options and
+  `ToolContext.taskId`; `AgentRuntime.run(trigger, { runId, observer, readOnly, taskId, signal,
+  priority })`; the policy engine `ceiling` option; `Store.tasks`.
+
 ### Changed
 
 - Mail is no longer mirrored. Connecting an account takes a change cursor at "now"; Passport never

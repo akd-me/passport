@@ -1,4 +1,4 @@
-import type { EventBus, Store } from "@passport/types";
+import type { AgentRunOptions, EventBus, Store } from "@passport/types";
 import type { Schedule } from "./schedule.js";
 export type JobStatus = "ok" | "error" | "skipped";
 export interface JobResult {
@@ -12,6 +12,10 @@ export interface JobContext {
   runId: string;
   signal: AbortSignal;
   now(): Date;
+  /** The task this job records its runs on (`JobDefinition.taskId`). */
+  taskId?: string;
+  /** Set by `SchedulerOptions.runOnTask`: pass to `AgentRuntime.run` so the run lands on the task. */
+  agentRunOptions?: AgentRunOptions;
 }
 export interface JobDefinition {
   id: string;
@@ -22,6 +26,8 @@ export interface JobDefinition {
   concurrency?: "single";
   timeoutMs?: number;
   retry?: { maxAttempts: number; baseMs: number; maxMs: number };
+  /** Bind the job to a task (routines): each run is recorded on it through `runOnTask`. */
+  taskId?: string;
 }
 export interface JobRun {
   runId: string;
@@ -47,6 +53,8 @@ export interface JobState {
   running: boolean;
   /** Durable occurrence claim, retained across interrupted processes. */
   activeRun?: { runId: string; occurrenceAt: string; startedAt: string } | null;
+  /** Task bound to this job, if any. */
+  taskId?: string;
 }
 export interface Scheduler {
   register(def: JobDefinition): Promise<JobState>;
@@ -88,4 +96,13 @@ export type SchedulerOptions = {
   now?: () => number | Date;
   logger?: { warn(message: string): void };
   stopTimeoutMs?: number;
+  /**
+   * Seam for task-bound jobs: wraps every run of a job with `taskId`. The host records the run on
+   * the task and passes `agentRunOptions` in the context it hands to `run`.
+   */
+  runOnTask?: (
+    taskId: string,
+    ctx: JobContext,
+    run: (ctx: JobContext) => Promise<JobResult>,
+  ) => Promise<JobResult>;
 };

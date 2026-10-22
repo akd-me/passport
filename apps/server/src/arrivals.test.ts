@@ -262,6 +262,7 @@ describe("durable email arrivals", () => {
     expect(run).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await backend.processArrivals!();
+    // Arrival runs now carry task run options (inbox task timeline) as a second argument.
     expect(run).toHaveBeenCalledExactlyOnceWith(
       {
         kind: "email.received",
@@ -269,7 +270,7 @@ describe("durable email arrivals", () => {
         runId: `arrival:${email.id}`,
         availabilityUnverified: true,
       },
-      { priority: "background" },
+      expect.objectContaining({ runId: `arrival:${email.id}`, priority: "background" }),
     );
   });
 
@@ -381,12 +382,8 @@ describe("durable email arrivals", () => {
     expect(await entry(second.backend, email)).toMatchObject({ attempts: 1 });
     await second.scheduler.scheduler.runNow("agent.arrivals");
     expect(second.run).toHaveBeenCalledExactlyOnceWith(
-      {
-        kind: "email.received",
-        emailId: email.id,
-        runId: `arrival:${email.id}`,
-      },
-      { priority: "background" },
+      { kind: "email.received", emailId: email.id, runId: `arrival:${email.id}` },
+      expect.objectContaining({ runId: `arrival:${email.id}`, priority: "background" }),
     );
     expect(await entry(second.backend, email)).toBeNull();
   });

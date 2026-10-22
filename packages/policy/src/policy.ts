@@ -1,5 +1,6 @@
 import {
   type ActionCategory,
+  type ActionRequest,
   BASE_REVERSIBILITY,
   BASE_RISK,
   compareTrust,
@@ -27,6 +28,13 @@ export interface PolicyEngineOptions {
   store: Store;
   bus: EventBus;
   now?: () => Timestamp;
+  /**
+   * Extra per-request trust ceiling, e.g. the permission mode of the task whose run proposed the
+   * action. Applied like `externalAgentCeiling`: it can only lower the effective level.
+   */
+  ceiling?: (
+    request: ActionRequest,
+  ) => TrustLevel | null | undefined | Promise<TrustLevel | null | undefined>;
 }
 const categories: ActionCategory[] = [
   "triage",
@@ -66,6 +74,7 @@ export function createPolicyEngine({
   store,
   bus,
   now = () => new Date().toISOString(),
+  ceiling,
 }: PolicyEngineOptions): PolicyEngine {
   let queue = Promise.resolve();
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -213,6 +222,10 @@ export function createPolicyEngine({
         const external = request.actor.kind === "external-agent";
         if (external) {
           trustLevel = minTrust(trustLevel, config.externalAgentCeiling);
+        }
+        const requestCeiling = await ceiling?.(request);
+        if (requestCeiling) {
+          trustLevel = minTrust(trustLevel, requestCeiling);
         }
         const reversibility = BASE_REVERSIBILITY[request.type];
         let riskIndex = risks.indexOf(BASE_RISK[request.type]);

@@ -30,17 +30,24 @@ export function installAgentRoutes(app: Hono, backend: Backend): void {
     ) {
       throw new ApiError("INVALID_FIELD", "emailIds must be strings");
     }
+    const instruction =
+      body.instruction === undefined
+        ? "Review active matters and prepare next steps."
+        : string(body.instruction, "instruction");
+    const matterId = body.matterId === undefined ? undefined : string(body.matterId, "matterId");
+    const emailIds = body.emailIds as string[] | undefined;
+    if (backend.tasks) {
+      // v0.2 composer compatibility: every instruction becomes a task; the reply is the run.
+      const { task, done } = await backend.tasks.service.create({
+        message: instruction,
+        emailIds,
+        matterId,
+      });
+      return c.json({ ...(await done), taskId: task.id });
+    }
     return c.json(
       await backend.agent.run(
-        {
-          kind: "manual",
-          instruction:
-            body.instruction === undefined
-              ? "Review active matters and prepare next steps."
-              : string(body.instruction, "instruction"),
-          matterId: body.matterId === undefined ? undefined : string(body.matterId, "matterId"),
-          emailIds: body.emailIds as string[] | undefined,
-        },
+        { kind: "manual", instruction, matterId, emailIds },
         { priority: "interactive" },
       ),
     );

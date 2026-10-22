@@ -12,8 +12,14 @@ import { createMailboxMcpServer } from "@passport/mcp";
 import { createActionExecutor, createPolicyEngine } from "@passport/policy";
 import { createProviderRegistry, type PassportVerifier } from "@passport/providers";
 import { InMemoryEventBus, openStore } from "@passport/store";
-import type { ActionExecutor, CalendarEvent, Email, ProviderRegistry } from "@passport/types";
-import { PriorityRunQueue } from "./agent-queue.js";
+import type {
+  ActionExecutor,
+  AgentRunOptions,
+  AgentRuntime,
+  CalendarEvent,
+  Email,
+  ProviderRegistry,
+} from "@passport/types";
 import { type Arrival, ArrivalQueue, type ArrivalTrigger } from "./arrivals.js";
 import type { Backend, PassportAgent } from "./backend.js";
 import { calendarSafeStore } from "./calendar-safety.js";
@@ -25,6 +31,7 @@ import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
 import { withMcpReaders } from "./ondemand-wiring.js";
 import { attachSetupTasks } from "./setup/routes.js";
 import { ProviderConnections } from "./sync/connections.js";
+import { createTaskSystem, LaneQueue, RunCeilings, runPriority } from "./tasks/wiring.js";
 import { backendWatchHooks } from "./watch/backend.js";
 import { attachMailWatcher } from "./watch/watcher.js";
 import { createOnDemandWiring } from "./watch/wiring.js";
@@ -135,7 +142,8 @@ export async function createRealBackend(
       calendarFor: connections.calendar,
       sync,
     });
-    const policy = createPolicyEngine({ store, bus });
+    const ceilings = new RunCeilings();
+    const policy = createPolicyEngine({ store, bus, ceiling: ceilings.lookup });
     const evaluate = policy.evaluate.bind(policy);
     policy.evaluate = async (request) => {
       const decision = await evaluate(request);
@@ -175,8 +183,8 @@ export async function createRealBackend(
     const agentJobs = new Set<Promise<unknown>>();
     let closing: Promise<void> | undefined;
     let stopped = false;
-    let runtime: ReturnType<typeof createAgentRuntime>;
-    const runQueue = new PriorityRunQueue();
+    let runtime: AgentRuntime;
+    const lanes = new LaneQueue();
     let enabled = false;
     let currentTrigger: ArrivalTrigger | undefined;
     let currentStep: string | undefined;
@@ -309,7 +317,7 @@ export async function createRealBackend(
     const agent: PassportAgent = {
       getUserProfile: () => runtime.getUserProfile(),
       setUserProfile: (markdown) => runtime.setUserProfile(markdown),
-      run: (trigger, runOptions = {}) => {
+      run: (trigger, runOptions?: AgentRunOptions) => {
         if (stopped) {
           return Promise.reject(new ApiError("BACKEND_CLOSED", "Backend is closed"));
         }
@@ -318,16 +326,18 @@ export async function createRealBackend(
           return Promise.reject(new ApiError("LLM_NOT_CONFIGURED", "LLM not configured"));
         }
         // Keep one serialization boundary even when account/model settings replace the runtime.
-        const priority =
-          runOptions.priority ?? (trigger.kind === "manual" ? "interactive" : "background");
-        const job = runQueue.enqueue(priority, async () => {
-          currentTrigger = trigger as ArrivalTrigger;
-          try {
-            return await runtime.run(trigger, { priority });
-          } finally {
-            currentTrigger = undefined;
-          }
-        });
+        const job = lanes.enqueue(
+          runPriority(trigger, runOptions?.priority),
+          async () => {
+            currentTrigger = trigger as ArrivalTrigger;
+            try {
+              return await runtime.run(trigger, runOptions);
+            } finally {
+              currentTrigger = undefined;
+            }
+          },
+          runOptions?.signal,
+        );
         agentJobs.add(job);
         void job.then(
           () => agentJobs.delete(job),
@@ -336,9 +346,17 @@ export async function createRealBackend(
         return job;
       },
     };
+    const tasks = options.clientMode
+      ? undefined
+      : createTaskSystem({ store, bus, policy, agent, ceilings, watcher });
     const arrivals = options.clientMode
       ? undefined
-      : new ArrivalQueue(store, bus, agent, () => enabled && !stopped);
+      : new ArrivalQueue(
+          store,
+          bus,
+          tasks?.triggers.arrivalAgent(agent) ?? agent,
+          () => enabled && !stopped,
+        );
     const unsubscribe = options.clientMode
       ? () => {}
       : bus.on("email.received", ({ email }) => {
@@ -366,6 +384,7 @@ export async function createRealBackend(
             providers,
             config,
             agent,
+            tasks,
             mcp,
             providerKinds: [
               "gmail",
@@ -417,6 +436,7 @@ export async function createRealBackend(
                 await watcher.stop();
                 unsubscribe();
                 await drainAgentQueue();
+                await tasks?.close();
                 stopped = true;
                 await Promise.allSettled([...servers].map((server) => server.close()));
                 await connections.close();

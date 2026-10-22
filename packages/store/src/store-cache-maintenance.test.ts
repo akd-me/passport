@@ -190,12 +190,9 @@ describe("migration from a v0.2 database", () => {
         await migrated.close();
       }
       const check = new DatabaseSync(path);
-      expect(check.prepare("SELECT version FROM schema_version").all()).toEqual([
-        { version: 1 },
-        { version: 2 },
-        // Migration 3 (matter refs) follows; this test only covers the v0.2 → envelope cache step.
-        { version: 3 },
-      ]);
+      expect(check.prepare("SELECT version FROM schema_version").all()).toEqual(
+        migrations.map((_, index) => ({ version: index + 1 })),
+      );
       check.close();
     } finally {
       await rm(directory, { recursive: true, force: true });

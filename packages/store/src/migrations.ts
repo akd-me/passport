@@ -1,3 +1,5 @@
+import { TASKS_MIGRATION } from "./store-tasks-migration.js";
+
 // Append migrations; never change an already released migration.
 export const migrations: readonly string[] = [
   String.raw`
@@ -179,4 +181,5 @@ export const migrations: readonly string[] = [
       json_extract(r.value, '$.date'), r.key
     FROM matters m, json_each(m.data, '$.refs') r;
 `,
+  TASKS_MIGRATION,
 ];

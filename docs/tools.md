@@ -33,6 +33,8 @@ returned. Every on-demand result reports what it actually spent in `cost`.
 | `people_history` | R | as `mail_search` | Mail with, from or to an address or a known person |
 | `provider_get` | R | per method | Read-only, allowlisted raw GET (needs `MailReader.rawGet`) |
 | `mail_export` | R (writes local files) | ~120/thread | MCP only, with `scratchDir`: threads as `.md` / `.eml` for the host's shell |
+| `watch_conversation` | task state | 0 | Wake the calling [task](tasks.md) when someone else replies on a conversation, a bounce or auto-reply arrives, or after 14 days |
+| `unwatch_conversation` | task state | 0 | Stop watching one conversation (or all) and hand the task back |
 
 Input shapes (all limits are enforced):
 
@@ -46,6 +48,8 @@ Input shapes (all limits are enforced):
 - `people_history({email | personId, account?: id|"all", direction?: "both"|"from"|"to"="both", limit≤100=25, pageToken?})`
 - `provider_get({account?, path, query?: Record<string,string>})`
 - `mail_export({ids? | query?, account?, max≤200=50, format?: "md"|"eml"="md"})` → `{dir, files[]}`
+- `watch_conversation({threadHandle, account?})` → `{watching, threadHandle, since}`; needs a task run (`ToolContext.taskId`), else `TASK_REQUIRED`
+- `unwatch_conversation({threadHandle?})` → `{watching: threadHandle[]}`
 
 `account` may be omitted when exactly one account is connected; `mail_search`,
 `mail_labels` and `people_history` then fan out to every account with a reader.

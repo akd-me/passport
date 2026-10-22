@@ -70,6 +70,8 @@ const toolNames = [
   "notes_search",
   "notes_write",
   "people_lookup",
+  "watch_conversation",
+  "unwatch_conversation",
 ];
 
 describe("mailbox MCP over SDK InMemoryTransport", () => {
