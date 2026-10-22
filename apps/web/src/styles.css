@@ -3094,3 +3094,20 @@ fieldset.field legend {
     forced-color-adjust: none;
   }
 }
+.host-agent-program {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--r-l);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  margin-bottom: 10px;
+  min-width: 0;
+}
+.host-agent-program strong {
+  font-size: 0.875rem;
+}
+.host-agent-program .field {
+  margin-top: 6px;
+}

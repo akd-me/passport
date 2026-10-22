@@ -55,6 +55,12 @@ export interface AccountData {
 /** A coding agent installed on this machine that Passport can drive (`GET /api/host-agents`). */
 export type HostAgent = HostAgentStatus;
 export type ModelProvider = LlmConfig["provider"] | HostAgent["kind"];
+/** `GET /api/settings/host-agents`: where PATH came from, binary overrides, and detection. */
+export interface HostAgentSettings {
+  pathSource: { source: string; label: string; entries: number };
+  paths: Record<HostAgent["kind"], { configured: string | null; environment: string | null }>;
+  agents: HostAgent[];
+}
 export interface AgentInstruction {
   instruction?: string;
   emailIds?: string[];
@@ -157,6 +163,10 @@ export const api = {
     },
   ) => write<AccountData["llm"]>("/settings/llm", "PUT", config),
   hostAgents: () => request<HostAgent[]>("/host-agents"),
+  hostAgentSettings: () => request<HostAgentSettings>("/settings/host-agents"),
+  saveHostAgentPaths: (paths: { claudePath?: string | null; codexPath?: string | null }) =>
+    write<HostAgentSettings>("/settings/host-agents", "PUT", paths),
+  redetectHostAgents: () => write<HostAgentSettings>("/settings/host-agents/redetect", "POST"),
   saveProfile: (markdown: string) =>
     write<{ markdown: string }>("/user-profile", "PUT", { markdown }),
   runAgent: (body: AgentInstruction = {}) => write<AgentRun>("/agent/run", "POST", body),

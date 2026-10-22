@@ -73,7 +73,7 @@ function useHostAgents(): Detection {
   return detection;
 }
 
-function agentStatus(agent: HostAgent | undefined) {
+export function agentStatus(agent: HostAgent | undefined) {
   if (!agent?.installed) {
     return { tone: "off", text: "Not installed" };
   }

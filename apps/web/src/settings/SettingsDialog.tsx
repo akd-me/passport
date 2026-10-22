@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Dialog } from "../components/Dialog";
 import { Icon } from "../components/ui";
 import { type SettingsSection, useUi } from "../ui-state";
@@ -5,6 +6,7 @@ import { RoutinesSettings } from "../views/Scheduler";
 import { TrustSettings } from "../views/Trust";
 import { AccountsSettings } from "./AccountsSettings";
 import { AdvancedSettings } from "./AdvancedSettings";
+import { HostAgentPaths } from "./HostAgentPaths";
 import { ModelSettings } from "./ModelSettings";
 
 export const settingsSections: {
@@ -48,6 +50,8 @@ export const settingsSections: {
 /** One dialog, five sections; opened from the sidebar gear, ⌘, or the command palette. */
 export function SettingsDialog() {
   const { settings, openSettings, closeSettings } = useUi();
+  // Saving a binary path or re-detecting remounts the agent picker with fresh detection.
+  const [detection, setDetection] = useState(0);
   if (!settings) {
     return null;
   }
@@ -80,7 +84,12 @@ export function SettingsDialog() {
           <h2>{section.label}</h2>
           <p>{section.description}</p>
         </header>
-        {settings === "model" && <ModelSettings />}
+        {settings === "model" && (
+          <>
+            <ModelSettings key={detection} />
+            <HostAgentPaths onChange={() => setDetection((n) => n + 1)} />
+          </>
+        )}
         {settings === "accounts" && <AccountsSettings />}
         {settings === "trust" && <TrustSettings />}
         {settings === "routines" && <RoutinesSettings />}
