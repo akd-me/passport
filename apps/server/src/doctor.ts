@@ -1,4 +1,4 @@
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ import {
 } from "./doctor-host-agents.js";
 import { resolveLlmSelection } from "./llm-selection.js";
 import { logger } from "./logger.js";
+import { KEYCHAIN_MARKER, suppliedMasterKey } from "./master-key.js";
 import { prepareHostEnvironment } from "./shell-env.js";
 import { watchChecks } from "./watch/doctor.js";
 
@@ -105,7 +106,7 @@ export async function runDoctor(
       return "Writable";
     });
     await check("Master key", async () => {
-      if (process.env.PASSPORT_MASTER_KEY) {
+      if (suppliedMasterKey()) {
         return "Configured in environment";
       }
       const key = await stat(join(backend.config.dataDir, "master.key"));
@@ -297,7 +298,7 @@ export async function doctorCommand(demo = false): Promise<void> {
         detail: "Missing or not writable. Run passport init to create a workspace.",
       });
     }
-    if (!process.env.PASSPORT_MASTER_KEY) {
+    if (!suppliedMasterKey()) {
       try {
         const key = await stat(join(config.dataDir, "master.key"));
         if (!key.isFile() || (key.mode & 0o777) !== 0o600 || key.size < 32) {
@@ -310,8 +311,9 @@ export async function doctorCommand(demo = false): Promise<void> {
         checks.push({
           name: "Master key",
           status: "error",
-          detail:
-            "Missing, empty or not mode 0600. Initialize a new workspace, or restore its existing private master key.",
+          detail: existsSync(join(config.dataDir, KEYCHAIN_MARKER))
+            ? "Kept in the macOS Keychain by Passport.app; the CLI cannot read it. Use Passport.app."
+            : "Missing, empty or not mode 0600. Initialize a new workspace, or restore its existing private master key.",
         });
       }
     }

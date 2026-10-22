@@ -15,6 +15,7 @@ import { doctorCommand } from "./doctor.js";
 import { ApiError } from "./errors.js";
 import { resolveLlmSelection } from "./llm-selection.js";
 import { logger } from "./logger.js";
+import { readBootstrap, takeEnvironmentKey } from "./master-key.js";
 import { authorizeOAuth } from "./oauth.js";
 import { initializePassport } from "./onboarding/init.js";
 import { acquireOwner, activeOwner } from "./owner-lock.js";
@@ -24,6 +25,9 @@ import { prepareHostEnvironment } from "./shell-env.js";
 
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
+  // Before anything can spawn a child process that would inherit the key.
+  readBootstrap();
+  takeEnvironmentKey();
   const [command = "serve", subcommand, kind] = args;
   if (command === "mcp" && (subcommand === "install" || subcommand === "proxy")) {
     return (await import("./cli/mcp-install.js")).handleMcpCommand(args);
@@ -102,18 +106,28 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   let shutdownOwner: (() => void) | undefined;
   const owner = ["serve", "demo"].includes(command)
-    ? acquireOwner(config.dataDir, () => {
-        logger.error("Workspace owner lease lost; stopping background work.");
-        process.exitCode = 1;
-        shutdownOwner?.();
-      })
+    ? acquireOwner(
+        config.dataDir,
+        () => {
+          logger.error("Workspace owner lease lost; stopping background work.");
+          process.exitCode = 1;
+          shutdownOwner?.();
+        },
+        { host: config.host, port: config.port, mode: command === "demo" ? "demo" : "real" },
+      )
     : undefined;
   let backend: Awaited<ReturnType<typeof createDemoBackend>>;
   try {
     backend =
       command === "demo" || (command !== "mcp" && args.includes("--demo"))
         ? await createDemoBackend(config)
-        : await createRealBackend(config, { clientMode: command !== "serve" });
+        : await createRealBackend(config, {
+            clientMode: command !== "serve",
+            // Listing commands work without the master key; nothing they do needs credentials.
+            readOnly:
+              ["trust", "decisions"].includes(command) ||
+              (command === "accounts" && subcommand === "list"),
+          });
   } catch (error) {
     // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
 
@@ -173,11 +187,17 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       process.exitCode = 1;
       void handle.close();
     });
+    // Passport.app signs in with the token file itself and keeps the stdin pipe open while it
+    // lives: EOF means its main process is gone, so stop rather than linger unowned.
+    const desktop = process.env.PASSPORT_PARENT === "desktop";
+    delete process.env.PASSPORT_PARENT;
     handle.server.on("listening", () => {
       const address = handle.server.address();
-      logger.info(
-        `${backend.mode} workspace → ${getAuth(backend).loginUrl(config.host, typeof address === "object" && address ? address.port : config.port)}`,
+      const url = getAuth(backend).loginUrl(
+        config.host,
+        typeof address === "object" && address ? address.port : config.port,
       );
+      logger.info(`${backend.mode} workspace → ${desktop ? new URL(url).origin : url}`);
     });
     handle.server.on("error", () => {
       logger.error("HTTP listener failed");
@@ -196,6 +216,13 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     shutdownOwner = shutdown;
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);
+    if (desktop) {
+      process.stdin.once("end", () => {
+        logger.warn("Passport.app exited; stopping the server.");
+        shutdown();
+      });
+      process.stdin.resume();
+    }
     return;
   }
   try {

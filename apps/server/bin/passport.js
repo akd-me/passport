@@ -77,6 +77,9 @@ run().catch((error) => {
       "WRONG_SERVER",
       "OWNER_RUNNING",
       "OWNER_BUSY",
+      "MASTER_KEY_UNAVAILABLE",
+      "MASTER_KEY_MISMATCH",
+      "INVALID_BOOTSTRAP",
     ].includes(error?.code) || args[1] === "install"
       ? error.message
       : "Passport failed. Check your Node version, configuration and provider credentials.",
