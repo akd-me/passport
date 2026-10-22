@@ -14,6 +14,7 @@ import { logger } from "../logger";
 import { useWorkspace, useWorkspaceEvents } from "../state";
 import { ActionsProvider } from "./actions-store";
 import { taskApi } from "./api";
+import { isOpen, listOpen, listSettled } from "./list-loader";
 import { isActiveRun } from "./model";
 
 export type TaskAction =
@@ -31,6 +32,9 @@ interface TasksState {
   error?: string;
   tasks: Task[];
   get: (id: string) => Task | undefined;
+  /** Unpinned settled tasks page in on demand (the folded section, R5-3). */
+  settled: { loaded: boolean; loading: boolean; more: boolean };
+  loadSettled: () => void;
   /** A run of the task is queued or running, as far as this client has seen. */
   running: (id: string) => boolean;
   upsert: (task: Task) => void;
@@ -44,6 +48,8 @@ const Tasks = createContext<TasksState>({
   available: true,
   tasks: [],
   get: () => undefined,
+  settled: { loaded: false, loading: false, more: false },
+  loadSettled: () => {},
   running: () => false,
   upsert: () => {},
   trackRuns: () => {},
@@ -64,8 +70,14 @@ const done: Record<TaskAction["kind"], string> = {
   pin: "Pinned.",
   unpin: "Unpinned.",
   snooze: "Snoozed. It comes back sooner if it needs you.",
-  settle: "Settled.",
-  archive: "Archived.",
+  // No route reverses these (R5-9); the toast says where the task went instead of offering Undo.
+  settle: "Settled. A message to it opens it again.",
+  archive: "Archived. Find it under Show archived on Tasks.",
+};
+/** The change that reverses an action, where the API has one. */
+const inverse: Partial<Record<TaskAction["kind"], TaskAction>> = {
+  pin: { kind: "unpin" },
+  unpin: { kind: "pin" },
 };
 function call(id: string, action: TaskAction) {
   switch (action.kind) {
@@ -86,32 +98,54 @@ const newer = (incoming: Task, known?: Task) =>
 
 /** The task list for the shell: sidebar, palette, deep links. Kept current from `/ws`. */
 export function TasksProvider({ children }: { children: ReactNode }) {
-  const { version, notify } = useWorkspace();
+  const { version, reconnects, notify } = useWorkspace();
   const [tasks, setTasks] = useState<Map<string, Task>>(() => new Map()),
     [status, setStatus] = useState<{ loaded: boolean; available: boolean; error?: string }>({
       loaded: false,
       available: true,
     }),
+    [settled, setSettled] = useState({ loaded: false, loading: false, more: false }),
     [active, setActive] = useState<Map<string, Set<string>>>(() => new Map());
   const latest = useRef(tasks);
   latest.current = tasks;
-  /** Tasks with an optimistic change in flight: list refetches do not overwrite them. */
-  const inflight = useRef(new Map<string, number>());
+  /**
+   * Tasks with an optimistic change in flight, and its fields: list refetches do not overwrite
+   * them and frames are read with the guess on top (R5-11).
+   */
+  const inflight = useRef(new Map<string, { count: number; fields: Partial<Task> }>());
+  /** When a frame or a create last wrote each task: a list request older than that is stale (R5-13). */
+  const seenAt = useRef(new Map<string, number>());
+  /** Runs seen finished; a late detail response cannot mark them running again (R5-4). */
+  const ended = useRef(new Set<string>());
+  const activeIds = useRef<string[]>([]);
+  activeIds.current = [...active].filter(([, runs]) => runs.size).map(([id]) => id);
+  const settledCursor = useRef<string | null | undefined>(undefined),
+    settledShown = useRef(0);
 
-  const upsert = useCallback(
-    (task: Task) =>
-      setTasks((current) =>
-        newer(task, current.get(task.id)) ? new Map(current).set(task.id, task) : current,
-      ),
-    [],
-  );
+  const upsert = useCallback((task: Task) => {
+    seenAt.current.set(task.id, Date.now());
+    const guess = inflight.current.get(task.id)?.fields;
+    const incoming = guess ? { ...task, ...guess } : task;
+    setTasks((current) =>
+      newer(incoming, current.get(task.id)) ? new Map(current).set(task.id, incoming) : current,
+    );
+  }, []);
   const trackRuns = useCallback(
-    (runs: TaskRun[]) =>
+    /** `replaceFor`: these are all the task's runs, so forget what was thought active. */
+    (runs: TaskRun[], replaceFor?: string) =>
       setActive((current) => {
         const next = new Map(current);
         for (const run of runs) {
+          if (!isActiveRun(run)) {
+            ended.current.add(run.id);
+          }
+        }
+        if (replaceFor) {
+          next.set(replaceFor, new Set());
+        }
+        for (const run of runs) {
           const ids = new Set(next.get(run.taskId));
-          if (isActiveRun(run)) {
+          if (isActiveRun(run) && !ended.current.has(run.id)) {
             ids.add(run.id);
           } else {
             ids.delete(run.id);
@@ -123,29 +157,62 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  /** Merge a list response over the store: `covers` says which known tasks it is complete for. */
+  const merge = useCallback((items: Task[], covers: (task: Task) => boolean, startedAt: number) => {
+    setTasks((current) => {
+      const next = new Map<string, Task>();
+      for (const task of current.values()) {
+        // Archived and other uncovered tasks stay; so do tasks written after the request began.
+        if (
+          !covers(task) ||
+          inflight.current.has(task.id) ||
+          (seenAt.current.get(task.id) ?? 0) >= startedAt
+        ) {
+          next.set(task.id, task);
+        }
+      }
+      for (const task of items) {
+        const known = next.get(task.id) ?? current.get(task.id);
+        const keep = inflight.current.has(task.id) || !newer(task, known);
+        next.set(task.id, keep && known ? known : task);
+      }
+      return next;
+    });
+  }, []);
+
+  const loadSettled = useCallback(
+    (refetch = false) => {
+      const startedAt = Date.now();
+      setSettled((s) => ({ ...s, loading: true }));
+      const cursor = refetch ? undefined : settledCursor.current;
+      listSettled(cursor, refetch ? settledShown.current : undefined)
+        .then((page) => {
+          settledCursor.current = page.nextCursor;
+          settledShown.current = (refetch ? 0 : settledShown.current) + page.items.length;
+          merge(
+            page.items,
+            (task) => refetch && task.status === "settled" && !task.pinned,
+            startedAt,
+          );
+          setSettled({ loaded: true, loading: false, more: !!page.nextCursor });
+        })
+        .catch(() => {
+          logger.warn("Settled tasks request failed");
+          setSettled((s) => ({ ...s, loading: false }));
+        });
+    },
+    [merge],
+  );
+
   useEffect(() => {
     let cancelled = false;
-    taskApi
-      .list()
-      .then((page) => {
+    const startedAt = Date.now();
+    listOpen()
+      .then((items) => {
         if (cancelled) {
           return;
         }
-        setTasks((current) => {
-          const next = new Map<string, Task>();
-          for (const task of current.values()) {
-            // Archived tasks are not listed; keep the ones this client has seen.
-            if (task.status === "archived" || inflight.current.has(task.id)) {
-              next.set(task.id, task);
-            }
-          }
-          for (const task of page.items) {
-            const known = current.get(task.id);
-            const keep = inflight.current.has(task.id) || !newer(task, known);
-            next.set(task.id, keep && known ? known : task);
-          }
-          return next;
-        });
+        merge(items, isOpen, startedAt);
         setStatus({ loaded: true, available: true });
       })
       .catch((error: unknown) => {
@@ -158,10 +225,32 @@ export function TasksProvider({ children }: { children: ReactNode }) {
           });
         }
       });
+    if (version && settledShown.current) {
+      loadSettled(true);
+    }
     return () => {
       cancelled = true;
     };
-  }, [version]);
+  }, [version, merge, loadSettled]);
+
+  // After a reconnect, runs may have ended while frames were lost: ask each task that looked
+  // busy for its runs again, replacing what this client thought (R5-4).
+  useEffect(() => {
+    if (!reconnects) {
+      return;
+    }
+    const busy = [...latest.current.values()].filter((task) => task.status === "working");
+    const ids = new Set([...busy.map((task) => task.id), ...activeIds.current]);
+    for (const id of ids) {
+      taskApi
+        .get(id)
+        .then((detail) => {
+          upsert(detail.task);
+          trackRuns(detail.runs, id);
+        })
+        .catch(() => logger.warn("Task refresh after reconnect failed"));
+    }
+  }, [reconnects, upsert, trackRuns]);
 
   useWorkspaceEvents((event) => {
     if (event.type === "task.updated") {
@@ -174,13 +263,18 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const act = useCallback(
     async (task: Task, action: TaskAction) => {
       const previous = latest.current.get(task.id) ?? task;
-      const guess = { ...previous, ...optimistic[action.kind](previous, action) };
-      inflight.current.set(task.id, (inflight.current.get(task.id) ?? 0) + 1);
+      const fields = optimistic[action.kind](previous, action),
+        guess = { ...previous, ...fields };
+      const held = inflight.current.get(task.id);
+      inflight.current.set(task.id, {
+        count: (held?.count ?? 0) + 1,
+        fields: { ...held?.fields, ...fields },
+      });
       setTasks((current) => new Map(current).set(task.id, guess));
       const release = () => {
-        const left = (inflight.current.get(task.id) ?? 1) - 1;
-        if (left > 0) {
-          inflight.current.set(task.id, left);
+        const left = inflight.current.get(task.id);
+        if (left && left.count > 1) {
+          inflight.current.set(task.id, { ...left, count: left.count - 1 });
         } else {
           inflight.current.delete(task.id);
         }
@@ -189,7 +283,11 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         const result = await call(task.id, action);
         release();
         upsert(result);
-        notify(done[action.kind]);
+        const undo = inverse[action.kind];
+        notify(
+          done[action.kind],
+          undo && { label: "Undo", run: () => void actRef.current(result, undo) },
+        );
         return true;
       } catch (error) {
         logger.warn("Task lifecycle change failed; rolling back");
@@ -204,18 +302,22 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     },
     [notify, upsert],
   );
+  const actRef = useRef(act);
+  actRef.current = act;
 
   const value = useMemo<TasksState>(
     () => ({
       ...status,
       tasks: [...tasks.values()],
       get: (id) => tasks.get(id),
+      settled,
+      loadSettled: () => loadSettled(),
       running: (id) => !!active.get(id)?.size,
       upsert,
       trackRuns,
       act,
     }),
-    [status, tasks, active, upsert, trackRuns, act],
+    [status, tasks, settled, loadSettled, active, upsert, trackRuns, act],
   );
   return (
     <Tasks.Provider value={value}>

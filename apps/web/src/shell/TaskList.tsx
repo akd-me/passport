@@ -1,6 +1,6 @@
 import type { Task } from "@passport/types";
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router";
+import { NavLink, useLocation } from "react-router";
 import { AccountDot } from "../accounts/AccountFilter";
 import { Icon, relativeTime } from "../components/ui";
 import { groupTasks, kindLabel, SECTIONS, type SectionId } from "../tasks/model";
@@ -11,9 +11,12 @@ import { isTyping } from "../ui-state";
 
 /**
  * j/k move between task rows, Enter opens the focused one. The list in the main column wins over
- * the sidebar; the decisions queue keeps its own j/k.
+ * the sidebar; the decisions queue keeps its own j/k. Mounted by the shell, so it works with the
+ * sidebar hidden (R5-10).
  */
 export function useTaskListKeys() {
+  const { pathname } = useLocation();
+  const queue = pathname === "/needs-you";
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (
@@ -22,7 +25,9 @@ export function useTaskListKeys() {
         event.ctrlKey ||
         event.altKey ||
         isTyping(event.target) ||
-        document.querySelector('[aria-modal="true"], [data-decision]')
+        document.querySelector('[aria-modal="true"]') ||
+        // Only the queue moves between decision cards; a card in a task timeline does not.
+        (queue && document.querySelector("main [data-decision]"))
       ) {
         return;
       }
@@ -47,7 +52,12 @@ export function useTaskListKeys() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [queue]);
+}
+
+/** "Wakes in 20h", or "Wakes soon" once the time has passed and the server has not caught up. */
+export function wakeText(until: string, now = Date.now()) {
+  return Date.parse(until) - now < 60_000 ? "Wakes soon" : `Wakes ${relativeTime(until)}`;
 }
 
 export function TaskRow({ task, running }: { task: Task; running: boolean }) {
@@ -72,7 +82,7 @@ export function TaskRow({ task, running }: { task: Task; running: boolean }) {
             ))}
             <span>
               {task.status === "snoozed" && task.snoozedUntil
-                ? `Until ${relativeTime(task.snoozedUntil).replace(/^in /, "")}`
+                ? wakeText(task.snoozedUntil)
                 : relativeTime(task.lastActivityAt)}
             </span>
           </small>
@@ -100,30 +110,50 @@ function Section({
   tasks: Task[];
   running: (id: string) => boolean;
 }) {
-  const [open, setOpen] = useState(id !== "settled");
-  if (!tasks.length && id !== "inbox") {
+  const [open, setOpen] = useState(id !== "settled"),
+    { settled, loadSettled } = useTasks();
+  // Settled tasks page in when the fold opens (R5-3).
+  const lazy = id === "settled";
+  useEffect(() => {
+    if (lazy && open && !settled.loaded && !settled.loading) {
+      loadSettled();
+    }
+  }, [lazy, open, settled.loaded, settled.loading, loadSettled]);
+  if (!tasks.length && id !== "inbox" && !(lazy && !settled.loaded)) {
     return null;
   }
   return (
     <section className="side-group task-section" aria-label={label}>
       <div className="side-group-head">
-        <button
-          type="button"
-          className="section-toggle"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          <Icon name={open ? "chevron" : "next"} size={12} />
-          <h2>{label}</h2>
-        </button>
-        <span className="side-count">{tasks.length || ""}</span>
+        <h2>
+          <button
+            type="button"
+            className="section-toggle"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            <Icon name={open ? "chevron" : "next"} size={12} />
+            {label}
+          </button>
+        </h2>
+        <span className="side-count">
+          {tasks.length ? `${tasks.length}${lazy && settled.more ? "+" : ""}` : ""}
+        </span>
       </div>
       {open && (
         <ul>
           {tasks.map((task) => (
             <TaskRow key={task.id} task={task} running={running(task.id)} />
           ))}
-          {!tasks.length && <li className="side-empty">Nothing has come back to you.</li>}
+          {!tasks.length && !lazy && <li className="side-empty">Nothing has come back to you.</li>}
+          {lazy && settled.loading && <li className="side-empty">Loading…</li>}
+          {lazy && settled.more && !settled.loading && (
+            <li>
+              <button type="button" className="link-btn side-more" onClick={loadSettled}>
+                Show more
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </section>
@@ -133,7 +163,6 @@ function Section({
 /** Pinned, Inbox (came back to you), Working, Snoozed, Settled (collapsed). */
 export function TaskList() {
   const { tasks, running, loaded, available, error } = useTasks();
-  useTaskListKeys();
   if (!available) {
     return (
       <p className="side-empty side-note">

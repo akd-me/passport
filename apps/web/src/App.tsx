@@ -8,6 +8,7 @@ import { SetupFlow } from "./connect/SetupFlow";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { CommandPalette } from "./shell/CommandPalette";
 import { BrandMark, Sidebar } from "./shell/Sidebar";
+import { useTaskListKeys } from "./shell/TaskList";
 import { Surface } from "./shell/Surface";
 import { useWorkspace } from "./state";
 import { DecisionLink } from "./tasks/DecisionLink";
@@ -113,6 +114,7 @@ function Shell() {
   const { notice, noticeAction, notify } = useWorkspace(),
     ui = useUi();
   useGlobalShortcuts();
+  useTaskListKeys();
   return (
     <div className={`app ${ui.sidebar ? "with-sidebar" : "sidebar-hidden"}`}>
       <a href="#main" className="skip-link">

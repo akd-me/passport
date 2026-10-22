@@ -39,6 +39,10 @@ export function groupTasks(tasks: Iterable<Task>): Record<SectionId, Task[]> {
   for (const list of Object.values(groups)) {
     list.sort(byActivity);
   }
+  // Snoozed tasks in the order they come back (R5-18).
+  groups.snoozed.sort(
+    (a, b) => (a.snoozedUntil ?? "").localeCompare(b.snoozedUntil ?? "") || byActivity(a, b),
+  );
   return groups;
 }
 

@@ -4,7 +4,13 @@ import { describe, expect, it } from "vitest";
 import { TasksProvider } from "../tasks/store";
 import { minutesAgo, task } from "../tasks/test-fixtures";
 import { Harness, stubApi } from "../test-utils";
-import { TaskList } from "./TaskList";
+import { TaskList, useTaskListKeys } from "./TaskList";
+
+/** The shell mounts the j/k handler (R5-10). */
+function Keys() {
+  useTaskListKeys();
+  return null;
+}
 
 const tasks: Task[] = [
   task("older", { title: "Older inbox task", lastActivityAt: minutesAgo(40) }),
@@ -29,6 +35,7 @@ function renderList(pin: (url: URL, init?: RequestInit) => unknown = () => tasks
   render(
     <Harness>
       <TasksProvider>
+        <Keys />
         <nav aria-label="Tasks">
           <TaskList />
         </nav>

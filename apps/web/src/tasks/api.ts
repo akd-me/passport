@@ -11,9 +11,12 @@ import type {
 } from "@passport/types";
 import { queryString, request } from "../api";
 
-/** `POST /api/tasks` body (docs/tasks.md); the route rejects any other field. */
+/** `POST /api/tasks` body (docs/tasks.md); older servers reject `matterId` and `emailIds`. */
 export interface NewTaskInput {
   message: string;
+  /** Context the agent reads through its tools, as ids (never as text in `message`). */
+  matterId?: string;
+  emailIds?: string[];
   title?: string;
   accountIds?: string[];
   permissionMode?: TrustLevel;
@@ -24,11 +27,6 @@ export interface TaskItemsPage {
   items: TaskItem[];
   lastSeq: number;
 }
-/** The sidebar list: everything except archived tasks. */
-export const LIST_QUERY = queryString({
-  status: ["inbox", "working", "snoozed", "settled"],
-  limit: 200,
-});
 export const ITEMS_PAGE = 100;
 
 const path = (id: string, rest = "") => `/tasks/${encodeURIComponent(id)}${rest}`;
@@ -39,8 +37,13 @@ const send = <T>(url: string, method: string, body?: unknown) =>
   });
 
 export const taskApi = {
-  list: (query = LIST_QUERY) => request<Page<Task>>(`/tasks${query}`),
+  list: (query: string) => request<Page<Task>>(`/tasks${query}`),
   get: (id: string, signal?: AbortSignal) => request<TaskDetail>(path(id), { signal }),
+  /** The task holding an action, for `?decision=` links; 404 when unknown or on older servers. */
+  byAction: (actionId: string) =>
+    request<{ taskId: string; runId?: string | null }>(
+      `/tasks/by-action/${encodeURIComponent(actionId)}`,
+    ),
   items: (id: string, afterSeq: number, limit = ITEMS_PAGE) =>
     request<TaskItemsPage>(path(id, `/items${queryString({ afterSeq, limit })}`)),
   create: (input: NewTaskInput) => send<{ task: Task; run: TaskRun }>("/tasks", "POST", input),
