@@ -26,8 +26,8 @@ fallback; see [Start a workspace](#start-a-workspace)), Google Chrome or Microso
    instead of guessing. A checklist and a log in Passport show what it is doing.
 4. Passport stores the client encrypted and the agent opens Google's (or Microsoft's) consent page in
    the same window. **You** choose the account and approve; Google will say the app is unverified,
-   which is expected for your own client (**Advanced → Go to Passport**). The mailbox connects and the
-   first sync starts.
+   which is expected for your own client (**Advanced → Go to Passport**). The mailbox connects and
+   Passport starts watching for new mail at once; there is no first sync.
 
 When the agent asks you to confirm something, **No** tells it to stop that step and ask you how to
 proceed. Cancel at any time; the agent and the browser stop, and a consent page still open in the
@@ -77,7 +77,7 @@ listener port set `PASSPORT_OAUTH_REDIRECT_URI`; register that exact callback fo
 Run `passport serve`, then open `http://127.0.0.1:3000/accounts`. An empty workspace opens the account
 wizard at `/` too. `PASSPORT_PORT` changes the HTTP port. All browser instructions below use
 `http://127.0.0.1:<port>/oauth/callback`; substitute the running server's port. Keep the original tab
-open: it shows authorization progress and receives sync updates over WebSocket. The consent tab
+open: it shows authorization progress and receives account updates over WebSocket. The consent tab
 returns to Accounts after connecting. Repeat for every personal, work and secondary mailbox.
 
 ## Set up manually
@@ -107,7 +107,7 @@ The same OAuth clients the agent creates, step by step, plus IMAP.
    Click **Connect**. If the browser blocked the tab, use **Open authorization tab**.
 8. Select the intended Google account and grant the requested mail permissions. Calendar consent
    is optional; Passport creates the calendar account only when that scope was granted. Return to
-   Passport and wait for the initial sync. The account address comes from Google's userinfo endpoint.
+   Passport; the account is usable as soon as it shows **Watching**. The account address comes from Google's userinfo endpoint.
 
 Google may show **Google hasn't verified this app**. For a client you created for your own use,
 choose **Advanced → Go to <your app name> (unsafe)** and review the permissions. If Google blocks
@@ -139,7 +139,7 @@ in the authorization URL. See [Google's desktop flow](https://developers.google.
 3. In Passport choose **IMAP / SMTP**. Use your full Gmail address as email and username,
    IMAP host `imap.gmail.com`, port `993`, TLS; SMTP host `smtp.gmail.com`, port `465`, TLS.
    SMTP username/password can remain blank to reuse IMAP credentials.
-4. Click **Test connection**, then **Add account**. This path syncs mail; it does not connect a calendar.
+4. Click **Test connection**, then **Add account**. This path connects mail only; it does not connect a calendar.
    Do not enter your normal Google password. A Workspace administrator must allow IMAP access.
 
 ### Outlook.com and Microsoft 365
@@ -165,7 +165,7 @@ in the authorization URL. See [Google's desktop flow](https://developers.google.
    confidential-client registration may supply its own secret; it must permit the chosen redirect
    and client flow.
 7. Select calendar access if wanted, click **Connect**, sign in with the intended account, grant
-   permissions, then wait for sync. Passport reads `/me` and uses `mail`, falling back to
+   permissions. The account is usable as soon as it shows **Watching**. Passport reads `/me` and uses `mail`, falling back to
    `userPrincipalName`, for the address. Repeat for other accounts.
 
 The Graph adapter uses immutable message IDs and a folder hierarchy delta plus one message delta per
@@ -184,7 +184,7 @@ and NOOP; SMTP submission is not tested and no message is sent by the test.
 
 If special folders are not advertised, set the optional Drafts, Sent and Trash folder paths to the
 exact paths your server uses. **Test connection** is non-persisting; **Add account** saves encrypted
-credentials and starts sync. OAuth-only IMAP services need their own OAuth setup; use Gmail or Graph
+credentials and starts watching for new mail. OAuth-only IMAP services need their own OAuth setup; use Gmail or Graph
 above where possible. Microsoft deployments that disable password authentication cannot be connected
 by entering an app password here.
 
@@ -270,8 +270,9 @@ calls were made during this implementation.** Confirm these behaviors with your 
   calendar delta. Message metadata pagination continues past the history window to preserve delta.
 - IMAP servers with large mailboxes, SEARCH SINCE day granularity, UIDVALIDITY resets, CONDSTORE,
   IDLE/reconnect, and SPECIAL-USE discovery. Test SMTP separately with an approved held send.
-- Restart with every account configured; compare recent message counts with the provider, widen
-  history, and check duplicate-free ingestion and complete multi-account filtering.
+- Restart with every account configured; check that the watcher resumes from its saved cursor
+  without re-triaging old mail, that `mail_search` and `mail_read` agree with the provider's own UI,
+  and that multi-account filtering is complete.
 
 Provider changes in this track: public-client Google PKCE with optional secret; removal of Google's
 unsupported installed-app incremental-consent parameter; per-attempt scopes for both providers;

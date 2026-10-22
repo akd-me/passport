@@ -7,8 +7,13 @@ Thanks for helping build an agent-native email harness.
 - Read `docs/CONTRACT.md` first. It defines the package boundaries and the invariants
   (every state change is a logged Action; sends are held in the outbox; verification never
   comes from message content; external agents are capped by policy).
+- Mail is read on demand ([design](docs/design/on-demand.md)). Never add a backfill or a mirror:
+  the watcher's cursor starts at connect time, every provider read declares its quota cost and
+  goes through the per-account governor, and provider-derived strings in prompts and tool results
+  are framed as untrusted data.
 - `packages/types` is the contract. Add, don't rename. A change there is a cross-package change.
-- No native modules. Node ≥ 22.5, pnpm 10, TypeScript strict, vitest.
+- No native modules. Node 24 (persistent workspaces need ≥ 22.16 with SQLite FTS5), pnpm 10,
+  TypeScript strict, vitest.
 - Tests run offline. Use the mock providers and in-memory stores; never hit a live API in tests.
 - Never log credentials or full message bodies.
 
@@ -23,7 +28,11 @@ pnpm format:check
 PASSPORT_SKIP_LIVE_HOST_AGENTS=1 pnpm test
 pnpm format                           # apply Biome formatting
 pnpm --filter @passport/server demo     # UI on fixture data
+pnpm --filter @passport/desktop test    # Mac app unit tests and the Electron FTS5 probe
 ```
+
+Changes to `apps/desktop` should also pass `pnpm dist:desktop`, which packages and smoke-tests the
+app (macOS, Apple silicon); see [the Mac app guide](docs/desktop.md).
 
 Biome reads `biome.json`; the commented `biome-baseline.jsonc` records existing warning
 rules that need manual review without changing behavior. Package-local lint commands remain
@@ -54,4 +63,4 @@ The formatting revision is listed in `.git-blame-ignore-revs`; use
 
 ## Reporting a security issue
 
-Email the maintainer directly rather than opening a public issue.
+Do not open a public issue. Follow [SECURITY.md](SECURITY.md) to report privately.
