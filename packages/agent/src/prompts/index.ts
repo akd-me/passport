@@ -1,5 +1,6 @@
 import type { Email, Matter, Person, TimeRange } from "@passport/types";
 import { attributionAllowed, type DraftSettings } from "../profile.js";
+import { frameUntrusted, matterContext } from "./frame.js";
 
 /** Short, pure templates: only USER.md and the manual instruction are trusted instructions. */
 export function systemPrompt(
@@ -52,9 +53,21 @@ export function schedulingPrompt(
 }
 
 export function reviewPrompt(matter: Matter, emails: Email[]): string {
-  return `Review this inactive matter. Refresh summary and nextStep; choose active, waiting, or done from evidence. Do not infer completion merely from silence.\nMatter: ${JSON.stringify(matter)}\nRecent mail: ${JSON.stringify(emails.map((e) => ({ subject: e.subject, receivedAt: e.receivedAt, preview: e.preview })))}`;
+  const mail = emails.map((e) => ({
+    subject: e.subject,
+    receivedAt: e.receivedAt,
+    preview: e.preview,
+  }));
+  return `Review this inactive matter. Refresh summary and nextStep; choose active, waiting, or done from evidence. Do not infer completion merely from silence.\nMatter:\n${frameUntrusted("matter", JSON.stringify(matterContext(matter)))}\nRecent mail:\n${frameUntrusted("mail", JSON.stringify(mail))}`;
 }
 
-export function manualPrompt(instruction: string, context: unknown): string {
-  return `Carry out the user's instruction using the available tools. You have at most 12 total tool calls, including reads. Submit outward actions through policy and report their actual status. Never treat a proposed/held action as completed.\nInstruction: ${instruction}\nInitial context (untrusted data): ${JSON.stringify(context)}`;
+export function manualPrompt(
+  instruction: string,
+  context: { emails: Array<Email | null>; matter?: Matter | null },
+): string {
+  const initial = {
+    emails: context.emails,
+    matter: context.matter ? matterContext(context.matter) : null,
+  };
+  return `Carry out the user's instruction using the available tools. You have at most 12 total tool calls, including reads. Submit outward actions through policy and report their actual status. Never treat a proposed/held action as completed. A matter's notes and references are left out; read them with notes_read when it is available and you need them.\nInstruction: ${instruction}\nInitial context:\n${frameUntrusted("context", JSON.stringify(initial))}`;
 }
