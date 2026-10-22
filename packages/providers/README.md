@@ -2,7 +2,10 @@
 
 Bring-your-own-provider implementations of the frozen `@passport/types` contracts. Gmail,
 Microsoft Graph, IMAP/SMTP and JMAP normalize mail into `Email`/`Mailbox`; Google Calendar,
-Graph Calendar and CalDAV normalize calendars. Deterministic in-memory providers support offline
+Graph Calendar and CalDAV normalize calendars. Since v0.3, Passport reads mail **on demand**
+through each mail provider's `reader()` ([below](#on-demand-reads-v03)) and follows new mail with
+`reader().changes`; it no longer mirrors mailboxes with `sync()`, which remains for calendars and
+for callers that still want a full mail delta. Deterministic in-memory providers support offline
 development. There are no live-service tests, built-in OAuth clients, native modules, or credential logs.
 
 ## Use it in 20 lines
@@ -18,10 +21,9 @@ const registry = createProviderRegistry({
 const setup = registry.describe("gmail"); // fields, scopes, URL builder, code exchange
 const provider = registry.mail(account.kind as "gmail"); // a fresh instance per call
 await provider.connect(account as Account, credentials);
-for await (const delta of provider.sync(previousCursor)) {
-  // Ingest mailbox/email/thread deltas before persisting the final cursor.
-  await ingest(delta);
-}
+const reader = provider.reader?.(); // on-demand reads; see "On-demand reads (v0.3)"
+const page = await reader?.search({ query: "from:sam newer_than:7d", limit: 25 });
+const { value: cursor } = (await reader?.changes(null, 50)) ?? {}; // "now": never a backfill
 // The composition root's ActionExecutor owns permission, logging, undo and delayed sends.
 // Do not expose provider mutations directly to agents or bypass that executor.
 await provider.disconnect();
@@ -32,7 +34,7 @@ testMail.injectEmail({ subject: "New arrival", textBody: "Hello Alex" });
 await arrival;
 ```
 
-The snippet's `store`, account/credentials, `ingest`, cursor and signal are supplied by the composition
+The snippet's `store`, account/credentials and signal are supplied by the composition
 root. Only import this package's public root. Factory calls are independent; retain the connected
 instance per account instead of calling the factory for every operation. Call `disconnect()` to close
 IMAP/SMTP resources and clear HTTP credentials.
@@ -127,17 +129,18 @@ not run an IMAP OAuth consent or refresh flow. Never disable TLS verification to
 
 UIDVALIDITY/UIDNEXT/MODSEQ and known UID lists are stored in the opaque cursor. CONDSTORE fetches changed
 messages; servers without MODSEQ are scanned. UID enumeration detects expunges. Message IDs encode the
-folder, UIDVALIDITY and UID: a copy/move or UIDVALIDITY reset changes identity and is reconciled by sync.
+folder, UIDVALIDITY and UID: a copy/move or UIDVALIDITY reset changes identity; the reader re-finds such a message by Message-ID
+(`findByRfc822`).
 Draft writes append MIME to Drafts and require APPENDUID/UIDPLUS to identify the result. An append whose
-ID cannot be obtained throws `IMAP_UIDPLUS_REQUIRED`; resync Drafts before retrying. Updating a draft
+ID cannot be obtained throws `IMAP_UIDPLUS_REQUIRED`; re-list Drafts before retrying. Updating a draft
 appends a replacement and removes the old draft; callers must use the returned provider ID.
 
 SMTP uses an explicit envelope (including Bcc) and removes Bcc from transmitted headers. On acceptance
 it appends a private sent copy and deletes a submitted draft. If that cleanup fails,
 `SubmissionAcceptedError` has code `SUBMISSION_ACCEPTED` and `messageId`: **do not retry submission**;
-resync and repair the sent copy/draft instead. SMTP errors before acceptance use `SMTP_SEND_FAILED`.
+re-read Sent and Drafts and repair the sent copy/draft instead. SMTP errors before acceptance use `SMTP_SEND_FAILED`.
 `waitForChanges(signal)` monitors the Inbox through ImapFlow's automatic IDLE and cleans up listeners
-when aborted/disconnected; periodic sync is still needed for other folders. Library logging is disabled.
+when aborted/disconnected; the watcher's periodic `changes` call covers other folders. Library logging is disabled.
 
 See [ImapFlow's fetching guide](https://imapflow.com/docs/guides/fetching-messages/).
 
@@ -151,7 +154,7 @@ Settings: `sessionUrl`, the final authenticated HTTPS session discovery URL (typ
 use the final session URL if your service redirects discovery. API/download endpoints come from the
 authenticated session and must use HTTPS.
 
-Email/query + Email/get establish full sync, Email/changes advances state, and Email/set handles flags,
+Email/query + Email/get serve the reader and `sync()`, Email/changes advances state, and Email/set handles flags,
 mailboxes and drafts. Submission needs the server's submission capability and an Identity matching the
 account owner. Draft content is immutable in JMAP, so updates create a replacement and delete the old
 draft. Deletes move to a trash-role mailbox and fail if none exists; they never silently destroy mail.

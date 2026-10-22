@@ -48,7 +48,7 @@ identities. Stdio actors use a random ID allocated at server startup; HTTP actor
 use the bearer-authenticated session's issued ID. A trusted host may provide
 `clientName` to override the audit label in action reasons; it never changes ownership.
 
-The host must run provider synchronization and the executor's `releaseDue()`
+The host must run the new-mail watcher, calendar sync and the executor's `releaseDue()`
 outbox scheduler. It also supplies the human approval UI/API. This package does
 not own these lifecycles. Keep stdout exclusive to MCP in a stdio process;
 write private, credential-free diagnostics to stderr. MCP error responses redact
@@ -123,9 +123,12 @@ search, query batches, standing rules, daily logs, decision explanations and
 unsubscribe previews. `passport mcp install --client <client> [--http]` installs
 client configuration with backups and supports `--dry-run`.
 
-Read tools:
+Read tools (since v0.3 the on-demand `mail_*` tools read the provider and these
+names are deprecated aliases that forward to them when the host supplies readers; see
+[deprecated aliases](../../docs/tools.md#deprecated-aliases)):
 
-- `search_emails`: flat `EmailQuery` arguments, including `text` (FTS5 syntax),
+- `search_emails`: flat `EmailQuery` arguments, including `text` (FTS5 syntax over
+  cached envelopes on the store path),
   account/mailbox/thread/matter/person filters, keywords, category, timestamps,
   sort, cursor, `limit`, `includeBodies` and `full`.
 - `get_email`: `emailId`, optional `full`.
