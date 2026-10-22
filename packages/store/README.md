@@ -108,3 +108,16 @@ including totals and pagination. Use `emails.query({includeDeleted:true,...filte
 thread/matter history or reconciliation that needs the previous inclusive behavior. ID and
 provider-ID lookups still return tombstones. Clearing `$deleted` makes the message searchable
 again; tombstone filtering does not remove bodies, FTS entries, or memberships.
+
+## Read-through envelope cache (v0.3)
+
+After `setMailReaderResolver`, `emails.get` / `getMany` / `getByProviderId` revalidate labels when
+`fresh` is set or the account's cursor-expiry watermark (`watcher-tick:<account>`) is newer than the
+row, fetch bodies for `includeBodies: true`, and fill handle misses from `MailReader.envelopes`
+(batched per account in `getMany`). Provider failures serve the cached row marked `staleAsOf`;
+only `fresh` reads propagate them. Label revalidation is compare-and-set, so a local write during
+the provider read wins. A provider id that stopped resolving is rebound by Message-ID
+(`findByRfc822`) before the row is tombstoned. `get` refreshes the LRU stamp at most once a minute.
+`evictEnvelopes` deletes in batches and never evicts rows linked to a matter, drafts, rows whose id
+is not their current handle (v0.2 ULIDs, rebound rows), rows referenced by open or undoable actions,
+or rows with a pending arrival (`arrival:<id>` in kv).

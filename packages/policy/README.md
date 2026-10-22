@@ -263,3 +263,15 @@ Always-ask categories require approval for label/unlabel as well as archive and 
 edits; internal matter/person bookkeeping retains its existing exemption. USER.md inverses
 capture `getEffectiveProfile(store)` from `@passport/types`, so the first edit restores the
 complete default template on undo.
+
+## Known limitations
+
+- **R2-14** The policy computes destructive risk (unread / flagged) from the cached row before the
+  executor takes its fresh pre-image, and does not re-evaluate afterwards. Only the risk label and the
+  `irreversible && riskIndex <= 1` auto path are affected; fixing it means capturing before evaluating.
+- **R2-16** Undo diffs the whole pre-image against current provider state. A label the user added
+  out of band after the action is removed by undo, and an adapter mailbox id the label cache has not
+  seen yet fails the undo with `MAILBOX_NOT_FOUND`. Limiting the diff to what the action changed needs
+  a post-image in the inverse.
+- **R2-21** Inverses written by v0.2 still hold full `Email` bodies in `actions.data`; no migration
+  scrubs them. Only actions created by v0.3 have body-free pre-images.
