@@ -1,3 +1,5 @@
+import type { RateLimitScope } from "@passport/types";
+
 /** A provider failure with a stable, machine-readable code. No remote bodies or secrets are included. */
 export class ProviderError extends Error {
   constructor(
@@ -14,6 +16,23 @@ export class NotImplementedError extends ProviderError {
   constructor(message: string) {
     super("NOT_IMPLEMENTED", message);
     this.name = "NotImplementedError";
+  }
+}
+
+/**
+ * Quota is exhausted, or waiting for it would block an interactive call for too long. Tools turn
+ * this into a `RateLimitedResult` (`rateLimitedResult` in `@passport/types`).
+ */
+export class RateLimitedError extends ProviderError {
+  constructor(
+    /** Seconds until a retry is expected to succeed (rounded up, at least 1). */
+    public readonly retryAfterSeconds: number,
+    /** Which limit was hit, e.g. `"gmail:user-quota"` or `"passport:governor"`. */
+    public readonly scope: RateLimitScope,
+    status?: number,
+  ) {
+    super("RATE_LIMITED", `Rate limited (${scope}); retry in ~${retryAfterSeconds}s`, status);
+    this.name = "RateLimitedError";
   }
 }
 

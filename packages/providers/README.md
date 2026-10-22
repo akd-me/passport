@@ -196,6 +196,46 @@ adds a message, `injectBlob(bytes, contentType)` adds attachment bytes, `sentMai
 and `waitForChanges(signal)` wakes on changes or cancellation. Returned mail, sent records and bytes are
 defensive copies. Mock helpers are for tests/development and do not apply policy themselves.
 
+## On-demand reads (v0.3)
+
+`MailProvider.reader?()` returns a `MailReader` (`search`, `list`, `labels`, `envelopes`, `thread`,
+`body`, `countIds`, `changes`, `findByRfc822`). Collections return `ReadResult<T>`, everything else
+`ReadValue<T>`; both carry `source` and `cost`. Only the mock implements it so far.
+
+```ts
+const governor = new QuotaGovernor(); // one per process
+governor.configure(account.id, account.kind as MailProviderKind); // QUOTA_PRESETS
+const mail = new MockMailProvider({ governor });
+await mail.connect(account, {});
+const reader = mail.reader();
+const page = await reader.search({ query: "from:sam newer_than:7d has:attachment", limit: 25 });
+page.items; // MailRow[]; page.cost = { gmailUnits: 5 + 20 per row, budgetRemaining, windowResetsAt }
+const { value: since } = await reader.changes(null, 50); // starts at "now"; never a backfill
+```
+
+- **Quota.** `QuotaGovernor` keeps a token bucket per account: Gmail 6,000 units/min (100/s, burst
+  1,500), Graph 1,000 requests/min (burst 250, 4 in flight), IMAP one pipeline, JMAP 4 in flight.
+  Lanes are `interactive > arrivals > background`; while an interactive call waits, the other lanes
+  get at most 30% of the refill. Interactive acquires fail fast with `RateLimitedError`
+  (`retryAfterSeconds`, `scope`) when the wait would exceed `INTERACTIVE_MAX_WAIT_MS` (5 s).
+  `report()` applies Retry-After and Graph's `x-ms-throttle-limit-percentage`. Tests inject
+  `ManualClock`. `GMAIL_UNIT_COSTS` lists Gmail's per-method units.
+- **HTTP adapters.** Pass `governor` in `ProviderOptions` and call
+  `this.json(url, init, { lane, cost })`: the cost is acquired first and throttling responses are
+  reported. With `lane: "interactive"`, rate-limited GETs retry only while the total wait is ≤ 5 s,
+  then throw `RateLimitedError`. Without a lane, the v0.2 2/4/8/16/32 s schedule is unchanged.
+- **Queries.** `parsePortableQuery` parses the portable mini-language (see `query.ts`) into a
+  `QueryAst`; `renderGmailQuery` renders Gmail `q`; `listFilterToAst` maps `mail_list` filters;
+  `matchesQuery` evaluates an AST locally (mock, client-side filters, grep). Unportable Gmail
+  operators throw `INVALID_QUERY` (use `rawQuery`).
+- **Mock reader.** Prices calls as Gmail would and records them in `reader().costLog` /
+  `totalUnits`. `setNow(date)` moves the fixture clock (default: one hour after the newest fixture)
+  for `newer_than:` and change-cursor expiry (`MOCK_CHANGE_RETENTION_MS`, 7 days → `expired: true`).
+  The mock's `rawQuery` uses the portable syntax.
+
+**Stubbed:** `renderGraphQuery` and `renderImapQuery` throw `NotImplementedError`; Gmail, Graph,
+IMAP and JMAP adapters do not implement `reader()` yet.
+
 ## Normalization, verification, and integration limits
 
 - Every successful sync yields a final `{ kind: "cursor" }`, including empty syncs. Persist that cursor

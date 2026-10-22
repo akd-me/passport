@@ -1,5 +1,13 @@
-import type { Account, AccountCredentials, Email } from "@passport/types";
+import type {
+  Account,
+  AccountCredentials,
+  Email,
+  QuotaLane,
+  RateLimitScope,
+} from "@passport/types";
 import { ProviderError, required } from "./errors.js";
+import { type RetryOptions, request } from "./http-request.js";
+import type { QuotaGovernor } from "./quota.js";
 import { resolveReplyEmail } from "./reply.js";
 import type { PassportVerifier } from "./verification.js";
 
@@ -13,81 +21,25 @@ export interface ProviderOptions {
   resolveEmail?: (id: string) => Promise<Email | null>;
   /** Waits between rate-limited read retries; tests inject a fake clock. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Per-account quota governor (v0.3). When set, requests that declare a `cost` acquire it first,
+   * and throttling responses are reported to it. The composition root configures the account.
+   */
+  governor?: QuotaGovernor;
 }
 
-// Per-user quotas (e.g. Gmail's 6,000 units/minute) reset within a minute; the
-// backoff schedule spans one window so a long sync slows down instead of failing.
-const rateLimitDelaysMs = [2_000, 4_000, 8_000, 16_000, 32_000];
-
-/** Google reports per-user quota exhaustion as 403 rather than 429. */
-async function isRateLimited(response: Response): Promise<boolean> {
-  if (response.status === 429) {
-    return true;
-  }
-  if (response.status !== 403) {
-    return false;
-  }
-  try {
-    return /"(?:rateLimitExceeded|userRateLimitExceeded|RATE_LIMIT_EXCEEDED)"/.test(
-      await response.clone().text(),
-    );
-  } catch {
-    return false;
-  }
-}
-
-function retryDelay(response: Response, backoff: number): number {
-  const header = response.headers.get("retry-after");
-  const seconds = header === null ? NaN : Number(header);
-  const server = Number.isFinite(seconds)
-    ? seconds * 1000
-    : header === null
-      ? NaN
-      : Date.parse(header) - Date.now();
-  return Math.min(60_000, Math.max(backoff, Number.isFinite(server) ? server : 0));
-}
-
-/** With sleep, rate-limited reads are retried; mutations are never replayed. */
-async function request(
-  fetcher: typeof fetch,
-  url: string,
-  init: RequestInit = {},
-  sleep?: (ms: number) => Promise<void>,
-): Promise<Response> {
-  const retries =
-    sleep && (init.method ?? "GET").toUpperCase() === "GET" ? rateLimitDelaysMs.length : 0;
-  for (let attempt = 0; ; attempt++) {
-    let response: Response;
-    try {
-      response = await fetcher(url, {
-        ...init,
-        redirect: "error",
-        signal: init.signal ?? AbortSignal.timeout(30_000),
-      });
-    } catch {
-      // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
-
-      throw new ProviderError("NETWORK_ERROR", "Provider request failed or timed out");
-    }
-    if (response.ok) {
-      return response;
-    }
-    const throttled = await isRateLimited(response);
-    if (throttled && sleep && attempt < retries) {
-      await response.body?.cancel();
-      await sleep(retryDelay(response, rateLimitDelaysMs[attempt] ?? 60_000));
-      continue;
-    }
-    throw new ProviderError(
-      response.status === 401
-        ? "AUTH_FAILED"
-        : throttled
-          ? "RATE_LIMITED"
-          : `HTTP_${response.status}`,
-      `Provider request failed (HTTP ${response.status})`,
-      response.status,
-    );
-  }
+/**
+ * Per-request quota policy (v0.3). Omitting `lane` keeps the v0.2 behaviour: rate-limited GETs
+ * retry for 2+4+8+16+32 s, and a governed request uses the background lane.
+ */
+export interface RequestPolicy {
+  /**
+   * `"interactive"` retries only while the cumulative wait stays within
+   * `INTERACTIVE_MAX_WAIT_MS`, then throws `RateLimitedError`. Other lanes keep the long schedule.
+   */
+  lane?: QuotaLane;
+  /** Units to acquire from `ProviderOptions.governor` (Gmail units, Graph requests). */
+  cost?: number;
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -143,12 +95,23 @@ export class HttpConnection {
   protected readonly fetcher: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
   private refreshing?: Promise<void>;
+  /**
+   * Reported in `RateLimitedError.scope`. Defaults from the OAuth family (Google → Gmail quota,
+   * Microsoft → Graph mailbox); subclasses such as calendars may override it.
+   */
+  protected rateLimitScope: RateLimitScope;
   constructor(
     protected readonly options: ProviderOptions = {},
     private readonly oauth?: "google" | "microsoft",
   ) {
     this.fetcher = options.fetch ?? globalThis.fetch;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.rateLimitScope =
+      oauth === "google"
+        ? "gmail:user-quota"
+        : oauth === "microsoft"
+          ? "graph:mailbox"
+          : "provider:http";
   }
   async connect(account: Account, credentials: AccountCredentials): Promise<void> {
     if (this.connected && this.account.id !== account.id) {
@@ -233,8 +196,39 @@ export class HttpConnection {
       this.refreshing = undefined;
     }
   }
-  protected async http(url: string, init: RequestInit = {}): Promise<Response> {
+  /**
+   * Authenticated request. With `policy.cost` and a governor, quota is acquired first (in
+   * `policy.lane`, default background) and released when the response arrives.
+   */
+  protected async http(
+    url: string,
+    init: RequestInit = {},
+    policy: RequestPolicy = {},
+  ): Promise<Response> {
     this.check();
+    const governor = this.options.governor;
+    if (!governor || policy.cost === undefined) {
+      return this.authorized(url, init, policy);
+    }
+    const lease = await governor.acquire(
+      this.account.id,
+      policy.lane ?? "background",
+      policy.cost,
+      {
+        ...(init.signal ? { signal: init.signal } : {}),
+      },
+    );
+    try {
+      return await this.authorized(url, init, policy);
+    } finally {
+      lease.release();
+    }
+  }
+  private async authorized(
+    url: string,
+    init: RequestInit,
+    policy: RequestPolicy,
+  ): Promise<Response> {
     if (
       this.oauth &&
       (!this.credentials.access_token ||
@@ -255,8 +249,14 @@ export class HttpConnection {
     } else {
       throw new ProviderError("CONFIG_REQUIRED", "Missing provider credentials");
     }
+    const accountId = this.account.id;
+    const retry: RetryOptions = {
+      scope: this.rateLimitScope,
+      onThrottle: (signal) => this.options.governor?.report(accountId, signal),
+      ...(policy.lane ? { lane: policy.lane } : {}),
+    };
     try {
-      return await request(this.fetcher, url, { ...init, headers }, this.sleep);
+      return await request(this.fetcher, url, { ...init, headers }, this.sleep, retry);
     } catch (e) {
       // Only an authenticated 401 with refresh credentials is retried after refresh.
 
@@ -272,11 +272,15 @@ export class HttpConnection {
         await this.refresh();
       }
       headers.set("authorization", `Bearer ${this.credentials.access_token}`);
-      return request(this.fetcher, url, { ...init, headers }, this.sleep);
+      return request(this.fetcher, url, { ...init, headers }, this.sleep, retry);
     }
   }
-  protected async json<T>(url: string, init: RequestInit = {}): Promise<T> {
-    return readJson<T>(await this.http(url, init));
+  protected async json<T>(
+    url: string,
+    init: RequestInit = {},
+    policy: RequestPolicy = {},
+  ): Promise<T> {
+    return readJson<T>(await this.http(url, init, policy));
   }
   protected body(value: unknown, method = "POST"): RequestInit {
     return { method, headers: { "content-type": "application/json" }, body: JSON.stringify(value) };
