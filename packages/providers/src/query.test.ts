@@ -172,9 +172,8 @@ describe("renderGmailQuery", () => {
     expect(() => renderGraphQuery(ast)).toThrow(
       expect.objectContaining({ code: "NOT_IMPLEMENTED" }),
     );
-    expect(() => renderImapQuery(ast)).toThrow(
-      expect.objectContaining({ code: "NOT_IMPLEMENTED" }),
-    );
+    // IMAP greps free text locally (imap-reader.test.ts covers the planner).
+    expect(renderImapQuery(ast).localFilter).toEqual([ast.nodes[0]]);
   });
 });
 
