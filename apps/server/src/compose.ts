@@ -327,6 +327,7 @@ export async function createRealBackend(
           bus,
           tasks?.triggers.arrivalAgent(agent) ?? agent,
           () => enabled && !stopped,
+          tasks ? (counts) => tasks.triggers.reportDroppedArrivals(counts) : undefined,
         );
     const unsubscribe = options.clientMode
       ? () => {}

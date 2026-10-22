@@ -5,6 +5,7 @@
  * fixes names in one place.
  */
 import { join } from "node:path";
+import { sweepScratchDir } from "@passport/mcp";
 import {
   type Email,
   type Mailbox,
@@ -98,8 +99,17 @@ export interface McpReaderOptions extends ToolReaderOptions {
   responseByteBudget?: number;
 }
 
+export function scratchDirFor(dataDir: string): string {
+  return join(dataDir, "scratch");
+}
+
 export function toolReaderOptions(readers: MailReaderResolver, dataDir: string): ToolReaderOptions {
-  return { readers, scratchDir: join(dataDir, "scratch") };
+  return { readers, scratchDir: scratchDirFor(dataDir) };
+}
+
+/** Removes `mail_export` sessions older than 24 h (startup and `tasks.maintenance`, R4-14). */
+export async function sweepExports(dataDir: string): Promise<number> {
+  return (await sweepScratchDir(scratchDirFor(dataDir))).length;
 }
 
 /** MCP dependencies plus the on-demand options; extra keys are ignored until the tools agent lands. */
