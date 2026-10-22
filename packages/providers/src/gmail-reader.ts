@@ -56,6 +56,7 @@ import {
 import { parsePortableQuery, queryScopesSpamTrash } from "./query.js";
 import { listFilterToAst, renderGmailQuery } from "./query-render.js";
 import { GMAIL_UNIT_COSTS as UNITS } from "./quota-presets.js";
+import { clampCap } from "./reader-limits.js";
 
 /** One priced call, recorded so tests and callers can audit cost accounting. */
 export interface GmailCostEntry {
@@ -247,7 +248,7 @@ export class GmailMailReader implements MailReader {
     const call = this.call(opts);
     const ast = opts.raw ? null : parsePortableQuery(query);
     const q = ast ? renderGmailQuery(ast) : query.trim();
-    const limit = Number.isFinite(cap) ? Math.max(0, Math.floor(cap)) : 0;
+    const limit = clampCap(cap);
     const request = {
       q,
       scope: {},

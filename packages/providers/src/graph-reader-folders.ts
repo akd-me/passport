@@ -7,6 +7,7 @@ import {
   type GraphCall,
   type GraphReaderTransport,
   graphUrl,
+  type ReaderMessage,
 } from "./graph-reader-support.js";
 import { type QueryAst, queryScopesSpamTrash } from "./query.js";
 import type { GraphQueryPlan } from "./query-render.js";
@@ -175,5 +176,28 @@ export class GraphFolderCache {
     // A Graph message lives in exactly one folder.
     const empty = Boolean(fromContainer && fromQuery && fromContainer !== fromQuery);
     return { folderId, hidden, empty };
+  }
+
+  /** Provider id for a Message-ID; duplicates prefer a received, non-deleted copy. */
+  async findByRfc822(call: GraphCall, rfc822Id: string): Promise<string | null> {
+    const id = `<${rfc822Id.trim().replace(/^</, "").replace(/>$/, "")}>`;
+    const page = await call.get<{ value?: ReaderMessage[] }>(
+      graphUrl("/me/messages", {
+        $filter: `internetMessageId eq '${id.replaceAll("'", "''")}'`,
+        $select: "id,parentFolderId",
+        $top: "10",
+      }),
+    );
+    const found = page.value ?? [];
+    if (found.length <= 1) {
+      return found[0]?.id ?? null;
+    }
+    // Duplicate Message-IDs (Sent and Inbox copies).
+    const roles = await this.roleIds(call);
+    const rank = (m: ReaderMessage) => {
+      const role = roles.get(m.parentFolderId ?? "");
+      return role === "sent" || role === "drafts" ? 2 : role === "trash" ? 1 : 0;
+    };
+    return [...found].sort((a, b) => rank(a) - rank(b))[0]?.id ?? null;
   }
 }

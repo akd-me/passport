@@ -36,6 +36,7 @@ import { listFilterToAst } from "./query-render.js";
 import type { QuotaGovernor } from "./quota.js";
 import { GMAIL_UNIT_COSTS } from "./quota-presets.js";
 import { assertAttachmentSize, attachmentData, pickAttachment } from "./reader-attachments.js";
+import { clampCap } from "./reader-limits.js";
 
 /** Live view of `MockMailProvider` state that the reader reads from. */
 export interface MockReaderSource {
@@ -258,7 +259,7 @@ export class MockMailReader implements MailReader {
     const total = this.match(parsePortableQuery(query), {
       includeSpamTrash: opts.includeSpamTrash,
     }).length;
-    const count = Math.min(total, Math.max(0, cap));
+    const count = Math.min(total, clampCap(cap));
     // Gmail pages ids 500 at a time; at least one list call is made.
     const units = GMAIL_UNIT_COSTS.messagesList * Math.max(1, Math.ceil(count / 500));
     return {

@@ -54,6 +54,7 @@ import {
 } from "./graph-reader-support.js";
 import { parsePortableQuery, type QueryAst } from "./query.js";
 import { type GraphQueryPlan, listFilterToAst, renderGraphQuery } from "./query-render.js";
+import { clampCap } from "./reader-limits.js";
 
 export interface GraphReaderOptions {
   /** Folders `changes` tracks (ids or well-known names). Default `["inbox"]`. */
@@ -190,7 +191,8 @@ export class GraphMailReader implements MailReader {
     const value = new Map<string, MailEnvelope | null>();
     for (const [i, id] of unique.entries()) {
       const inner = responses.get(String(i));
-      if (!inner || inner.status === 404) {
+      // 400: a malformed or foreign id (ErrorInvalidIdMalformed) resolves to nothing (R1-20).
+      if (!inner || inner.status === 404 || inner.status === 400) {
         value.set(id, null);
       } else if (inner.status >= 300) {
         throw batchError(inner);
@@ -235,10 +237,14 @@ export class GraphMailReader implements MailReader {
     const plan = opts.raw ? planRawGraphQuery(query) : renderGraphQuery(ast, this.transport.now());
     const scope = await this.folders.scope(call, plan, null, ast, Boolean(opts.includeSpamTrash));
     const folders = plan.clientFilter.length ? await this.folders.tree(call) : new Map();
-    const value = await readCount(call, plan, scope, Math.max(0, Math.floor(cap)), (m) =>
+    const { scanned, ...value } = await readCount(call, plan, scope, clampCap(cap), (m) =>
       this.keep(call, plan, scope, folders, m),
     );
-    return { value, ...this.done("countIds", call, plan.translation) };
+    const translation =
+      scanned !== undefined && value.capped
+        ? `${plan.translation}; scanned=${scanned} capped`
+        : plan.translation;
+    return { value, ...this.done("countIds", call, translation) };
   }
 
   async changes(
@@ -256,25 +262,7 @@ export class GraphMailReader implements MailReader {
     opts: MailReadOptions = {},
   ): Promise<ReadValue<string | null>> {
     const call = this.call(opts);
-    const id = `<${rfc822Id.trim().replace(/^</, "").replace(/>$/, "")}>`;
-    const page = await call.get<{ value?: ReaderMessage[] }>(
-      graphUrl("/me/messages", {
-        $filter: `internetMessageId eq '${id.replaceAll("'", "''")}'`,
-        $select: "id,parentFolderId",
-        $top: "10",
-      }),
-    );
-    const found = page.value ?? [];
-    let value = found[0]?.id ?? null;
-    if (found.length > 1) {
-      // Duplicate Message-IDs (Sent and Inbox copies): prefer a received, non-deleted copy.
-      const roles = await this.folders.roleIds(call);
-      const rank = (m: ReaderMessage) => {
-        const role = roles.get(m.parentFolderId ?? "");
-        return role === "sent" || role === "drafts" ? 2 : role === "trash" ? 1 : 0;
-      };
-      value = [...found].sort((a, b) => rank(a) - rank(b))[0]?.id ?? null;
-    }
+    const value = await this.folders.findByRfc822(call, rfc822Id);
     return { value, ...this.done("findByRfc822", call) };
   }
 

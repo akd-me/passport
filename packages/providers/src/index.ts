@@ -79,6 +79,7 @@ export {
   NotDownloadableError,
 } from "./reader-attachments.js";
 export { clipJson, gmailRawGetUnits } from "./reader-raw-get.js";
+export { setReaderTokenSecret } from "./reader-tokens.js";
 export {
   createProviderRegistry,
   GOOGLE_CALENDAR_SCOPES,

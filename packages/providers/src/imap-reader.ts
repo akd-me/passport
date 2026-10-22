@@ -34,6 +34,7 @@ import { type ImapCriteria, ImapSession } from "./imap-reader-support.js";
 import { fetchImapEmail, fetchImapThread, type ImapBodyContext } from "./imap-reader-thread.js";
 import { parsePortableQuery } from "./query.js";
 import { type ImapQueryPlan, listFilterToAst, renderImapQuery } from "./query-render.js";
+import { clampCap } from "./reader-limits.js";
 
 export type { ImapReaderHost } from "./imap-reader-scan.js";
 
@@ -233,7 +234,7 @@ export class ImapMailReader implements MailReader {
         opts.raw ? query : undefined,
         { includeSpamTrash: opts.includeSpamTrash },
       );
-      const limit = Math.max(0, Math.floor(cap));
+      const limit = clampCap(cap);
       let total: number;
       let truncated = false;
       let scanned: ImapScanResult | undefined;

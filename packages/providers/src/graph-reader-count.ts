@@ -8,6 +8,9 @@ import {
 } from "./graph-reader-support.js";
 import type { GraphQueryPlan } from "./query-render.js";
 
+/** Pages (250 rows each) a count may scan before it reports `capped` (R1-7). */
+export const MAX_COUNT_PAGES = 8;
+
 interface CountPage {
   value?: ReaderMessage[];
   "@odata.nextLink"?: string;
@@ -27,7 +30,10 @@ async function countFilter(
   return typeof page["@odata.count"] === "number" ? page["@odata.count"] : null;
 }
 
-/** Pages ids 250 at a time, counting rows `keep` accepts, up to `ceiling`. */
+/**
+ * Pages ids 250 at a time, counting rows `keep` accepts, up to `ceiling` matches or
+ * `MAX_COUNT_PAGES` pages, whichever comes first.
+ */
 async function pageCount(
   call: GraphCall,
   plan: GraphQueryPlan,
@@ -41,7 +47,10 @@ async function pageCount(
   let link: string | undefined = planUrl(plan, scope, { top: 250, select, count: false });
   let count = 0;
   let scanned = 0;
-  while (link) {
+  for (let pages = 0; link; pages++) {
+    if (pages >= MAX_COUNT_PAGES) {
+      return { count, capped: true, scanned };
+    }
     const page: CountPage = await call.get<CountPage>(link);
     for (const message of page.value ?? []) {
       if (!(await keep(message))) {
@@ -62,7 +71,8 @@ async function pageCount(
 /**
  * `MailReader.countIds`. A pure `$filter` plan uses `$count=true` (minus the Spam/Trash folders
  * when they are hidden: one extra request each). Otherwise ids are paged 250 at a time up to
- * `cap` (and the 1,000-result `$search` ceiling), applying `keep` to each row.
+ * `cap` (and the 1,000-result `$search` ceiling), applying `keep` to each row, for at most
+ * `MAX_COUNT_PAGES` pages; `scanned` reports the rows read.
  */
 export async function readCount(
   call: GraphCall,
@@ -70,7 +80,7 @@ export async function readCount(
   scope: GraphScope,
   cap: number,
   keep: (message: ReaderMessage) => Promise<MailRow | null>,
-): Promise<{ count: number; capped: boolean }> {
+): Promise<{ count: number; capped: boolean; scanned?: number }> {
   if (scope.empty) {
     return { count: 0, capped: false };
   }
@@ -96,5 +106,6 @@ export async function readCount(
   return {
     count: result.count,
     capped: result.capped || (search && result.scanned >= SEARCH_CEILING),
+    scanned: result.scanned,
   };
 }

@@ -43,6 +43,7 @@ import {
 } from "./jmap-reader-query.js";
 import { listFilterToAst } from "./query-render.js";
 import type { QuotaGovernor } from "./quota.js";
+import { clampCap } from "./reader-limits.js";
 import type { PassportVerifier } from "./verification.js";
 
 export type { JmapInvocation } from "./jmap-reader-query.js";
@@ -285,7 +286,7 @@ export class JmapMailReader implements MailReader {
         ],
       ]);
       const total = Number(ok(response, "Email/query").total ?? 0);
-      const count = Math.min(total, Math.max(0, Math.floor(cap)));
+      const count = Math.min(total, clampCap(cap));
       return { value: { count, capped: total > count }, translation: filter.translation };
     });
   }
