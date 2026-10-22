@@ -57,13 +57,58 @@ seconds) `newer_than:`/`older_than:` (`7d`, `2m`, `1y`) `in:` `label:`
 `"phrases"`, `OR`, `-` negation and parentheses. Anything else fails with
 `INVALID_QUERY`; pass provider syntax through `rawQuery` instead.
 
+### People and matters as notes (v0.3)
+
+People and matters are notes the agent maintains, like memory files, next to a small
+structured table the policy reads (`docs/design/on-demand.md` §2 principle 5, research 03
+§4.3). On a `Person`, `relationship`, `verification`, `verifiedSelf`, `lastSeenBlueAt`,
+`downgradeAcknowledgedAt` and `stats` are **security state**: they are never free text and
+`notes_write` never changes them (`PERSON_SECURITY_FIELDS`). Knowledge lives in
+`Person.notes`, `Matter.notes` (markdown), `Matter.refs` (provider references
+`{account, providerId, rfc822Id?, threadPid?, date, subject}` that survive cache eviction;
+the source of truth for a matter's conversations, while `emailIds` stays for v0.2 rows) and
+`Matter.watch` (a saved portable query the triage agent checks on arrival).
+
+| Tool | Class | Cost | Purpose |
+| --- | --- | --- | --- |
+| `notes_read` | R | 0 (local) | A person or matter as a frontmatter-like header of structured fields plus the notes body |
+| `notes_search` | R | 0 (local) | Substring (or `regex: true`) search over names, addresses, summaries and notes; returns matching-line snippets |
+| `notes_write` | RW | 0 | `mode: "append"` adds one dated line (`- 2026-10-20: …`); `"replace"` rewrites the body |
+| `people_lookup` | R | ~3 reads per account (Gmail: 5 + 5 + 25) | Security state, notes, cached stats and fresh evidence: messages from them (`countIds`, cap 3), whether we ever sent to them (`countIds`, cap 1), the newest exchange |
+
+- `notes_read({kind: "person"|"matter", id? | email? (person) | matterId? (matter)})` →
+  `{kind, id, fields, notes, markdown, source: "cache", untrusted}`
+- `notes_search({pattern≤500, regex?=false, kind?, limit≤100=25})` → `{items: NotesSearchHit[]}`
+  (`{kind, id, name, field: "name"|"email"|"summary"|"notes", snippet, updatedAt}`)
+- `notes_write({kind, id, notes≤64000, mode?="append", accountId?, reason})` → write result
+- `people_lookup({query: address | name, account?: id|"all"})` →
+  `{person, notes, candidates?, evidence: {received, receivedCapped, sentEver, newest, perAccount} | null, source, cost}`
+
+Writes are `person_update` / `matter_update` actions in category `matters` (low risk,
+reversible). A patch that touches only knowledge fields is inverted to the **prior** content
+of those fields (the `profile_update` pattern), so undo restores the notes without rolling
+back security state or matter status written since. `create_matter` and `update_matter`
+accept `notes`, `refs` and `watch`; `attach_to_matter` stores a ref per email from its cached
+envelope (and still fills `emailIds`). `get_matter` returns the notes and resolves `refs`
+lazily to rows through the read-through envelope cache (no bodies; unresolvable refs keep
+their stored subject and date with `row: null`). Subjects, names and notes are neutralized
+and framed as untrusted: notes are agent-written but may quote mail.
+
+The built-in triage agent appends one dated line per arrival to the matter's notes
+(`- 2026-10-20: other “Lease renewal” from Dana (acc:email:…): …`, tagged `[watch]` when the
+matter's watch matched) and, for non-routine mail, to the sender's notes. It checks the
+`watch` queries of at most five open matters per arrival (those involving the message's
+people first) with one `(<watch>) rfc822msgid:<id>` search each in the arrivals lane; matches
+are offered to the model first. The MCP resources `passport://people/{id}` and
+`passport://matters/{id}` include the notes (and a matter's watch and newest refs).
+
 ### Other reads
 
 | Tool | Class | Purpose |
 | --- | --- | --- |
 | `list_matters` | R | Workspaces filtered by status, person or text |
-| `get_matter` | R | Matter with attached/linked mail, events and people |
-| `list_people` | R | Contacts filtered by relationship or text |
+| `get_matter` | R | Matter with notes, refs resolved to rows, attached/linked mail, events and people |
+| `list_people` | R | Deprecated (use `notes_search({kind:"person"})` or `people_lookup`): contacts by relationship or text, including notes |
 | `get_person` | R | One contact and relationship context |
 | `search_people` | R | Name/address search with relationship filter |
 | `list_events` | R | Events overlapping a UTC range |
@@ -116,10 +161,11 @@ Write tools accept mail handles (`acc:email:…`) as well as local ids.
 | `unsubscribe` | IW | Header one-click/mailto, HTTPS link, or explicit reply | unsubscribe / unsubscribe |
 | `respond_to_event` | RW | Accept, decline or tentatively respond to an invite | scheduling / calendar_respond |
 | `propose_meeting` | IW | Submit supplied slots and invitation draft | scheduling / calendar_propose |
-| `create_matter` | RW | Create a living workspace and initial attachments | matters / matter_create |
-| `update_matter` | RW | Patch editable workspace fields | matters / matter_update |
-| `attach_to_matter` | RW | Attach existing emails, events or people | matters / matter_attach |
+| `create_matter` | RW | Create a living workspace and initial attachments, notes, refs and watch | matters / matter_create |
+| `update_matter` | RW | Patch editable workspace fields, including notes, refs and watch | matters / matter_update |
+| `attach_to_matter` | RW | Attach existing emails (stored as provider refs), events or people | matters / matter_attach |
 | `update_person` | RW | Patch editable contact fields | matters / person_update |
+| `notes_write` | RW | Append a dated line to, or replace, person or matter notes | matters / person_update or matter_update |
 | `snooze` | RW | Snooze mail and/or a matter until a future UTC time | Mail inference, or matters for matter-only snooze / snooze |
 | `undo_action` | RW | Undo the trusted stored inverse by ID under current actor policy | Original category / executor.undo lifecycle |
 | `cancel_held_action` | RW | Cancel this actor's own held action | Original action category / executor.cancelHold lifecycle |
