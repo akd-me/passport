@@ -50,8 +50,9 @@ Input shapes (all limits are enforced):
 - `people_history({email | personId, account?: id|"all", direction?: "both"|"from"|"to"="both", limit≤100=25, pageToken?})`
 - `provider_get({account?, path, query?: Record<string,string>})`
 - `mail_export({ids? | query?, account?, max≤200=50, format?: "md"|"eml"="md", includeAttachments?=false})` → `{dir, fileCount, files[], attachmentsDir?, attachments?, skippedAttachments?}`
-- `watch_conversation({threadHandle, account?})` → `{watching, threadHandle, since}`; needs a task run (`ToolContext.taskId`), else `TASK_REQUIRED`
+- `watch_conversation({threadHandle, account?})` → `{watching, threadHandle, since}`; needs a task run (`ToolContext.taskId`), else `TASK_REQUIRED`. `threadHandle` must be a thread handle (a row's `threadId`), else `INVALID_INPUT`; a settled or archived task answers `TASK_SETTLED`
 - `unwatch_conversation({threadHandle?})` → `{watching: threadHandle[]}`
+- Both are write tools: in plan mode they return `{ status: "planned" }` and change nothing
 
 `account` may be omitted when exactly one account is connected; `mail_search`,
 `mail_labels` and `people_history` then fan out to every account with a reader.

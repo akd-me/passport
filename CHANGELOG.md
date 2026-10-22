@@ -23,8 +23,8 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   routine task (`JobState.taskId`).
 - `watch_conversation` / `unwatch_conversation` tools: a task is woken when someone else replies
   on a conversation, a bounce or auto-reply arrives, or after 14 days. Replays are deduped on
-  Message-ID for 7 days, bursts are coalesced per thread over 120 s, and 3 automatic or no-op
-  wakes in a row stop the watch.
+  Message-ID for 7 days, bursts are coalesced per thread over 120 s (persisted across restarts),
+  and 3 automatic, no-op or unattended-send wakes in a row stop the watch.
 - Hooks for integrators: the tool registry `observer` and `readOnly` options and
   `ToolContext.taskId`; `AgentRuntime.run(trigger, { runId, observer, readOnly, taskId, signal,
   priority })`; the policy engine `ceiling` option; `Store.tasks`.
@@ -51,6 +51,45 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 - Settings → Accounts shows "Watching since … · last check …" and the Inbox count; the sidebar
   shows Watching, Paused or Needs sign-in. Workspace refetches are throttled per event type.
 - `store.maintenance` also evicts cached bodies and envelopes.
+
+### Security
+
+- Review r4 fixes for the task model, watcher and on-demand tools:
+  - Server prompt framing can no longer be forged: mail text is wrapped in a per-frame random
+    `<untrusted-data-…>` tag and any `untrusted-data` tag inside it is defused (R4-1).
+  - `mail_export` never writes through symlinks: the session and `attachments/` directories must
+    be real 0700 directories inside the scratch root, files are created exclusively, names are
+    hashed ids, bodies are quoted, and exports older than 24 h are actually swept (R4-2, R4-14,
+    R4-36, R4-37).
+  - Message-ID, In-Reply-To and References, attachment names, summary fields, JSON keys and MCP
+    people/matter resources (notes fenced last) are neutralised and marked untrusted; the
+    neutraliser also covers fullwidth sigils, Unicode indentation and NEL (R4-3, R4-4, R4-5,
+    R4-33, R4-34, R4-35).
+  - Model-supplied regexes are bounded: long or catastrophic patterns are refused, and `mail_grep`
+    matches in a worker with a 2 s limit (R4-6).
+  - `watch_conversation` accepts only thread handles, is planned (not run) in plan mode and
+    refuses settled or archived tasks (`TASK_SETTLED`) (R4-9, R4-17, R4-18).
+  - Watcher and calendar-sync failures carry a bounded code and fixed text into job history and
+    `job.finished` (R4-26).
+
+### Fixed
+
+- Watches: coalesced wakes survive a restart, the loop guard counts each wake once and catches
+  autoresponder ping-pong, and a guard stop or expiry surfaces the task before auto-settle
+  (R4-7, R4-8, R4-10). Settle, archive and snooze during a run win when it ends (R4-9); steer keeps
+  the cancelled message on long tasks and no longer bounces the task (R4-19, R4-20); maintenance
+  wakes every due snoozed task (R4-21).
+- Arrivals: the queue keeps the newest 200 and drops arrivals older than 24 h, so configuring a
+  model later is not a backfill; messages gone at the provider are dropped after one retry; both
+  leave an `ARRIVALS_DROPPED` notice on the Inbox task (R4-11, R4-12).
+- `GET /api/emails` across accounts returns the healthy accounts plus `skipped[]` (R4-13).
+- `mail_read` resumes at the text actually returned under the MCP budget, and large
+  `mail_grep`, `provider_get`, list and `mail_export` results are clipped with `omittedItems`
+  instead of failing (R4-15, R4-16).
+- Smaller fixes: account changes no longer 500 when the scheduler failed to start (R4-25); the
+  watcher no longer clears a calendar sync error (R4-28); the retired `sync` block is not written
+  back (R4-30); broken IMAP reader connections are replaced (R4-31); explicit triage of a queued
+  arrival answers 409 (R4-32).
 
 ### Removed
 

@@ -193,9 +193,12 @@ by entering an app password here.
 Passport keeps no copy of your mailbox. Connecting an account takes a change cursor at "now" and
 fetches the label tree with counts; nothing older is downloaded. Searching, listing and reading go
 to the provider on demand (`GET /api/emails` is provider search; `GET /api/emails/<id>` and
-`GET /api/threads/<id>` read through a small local cache). There is no backfill and no initial
-sync window: `sync.initialDays` is ignored, and Passport logs a one-time deprecation warning if your
-`passport.config.json` still has it.
+`GET /api/threads/<id>` read through a small local cache). A search across all accounts skips
+accounts that need sign-in or fail and lists them as `skipped: [{ account, code,
+retryAfterSeconds? }]`; it answers `429` only when every account is rate limited. There is no
+backfill and no initial sync window: `sync.initialDays` is ignored, Passport logs a one-time
+deprecation warning if your `passport.config.json` still has it, and the next settings save drops
+it.
 
 The watcher checks each mail account every 30 seconds (`watch.intervalSeconds`,
 `PASSPORT_WATCH_INTERVAL_SECONDS`, 5–86400) with one provider change query in the `arrivals`
