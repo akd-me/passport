@@ -613,7 +613,8 @@ describe("registry integration and tool budgets", () => {
       emailFixture({ subject: "Meeting invite" }),
     );
     const run = await env.runtime.run({ kind: "email.received", emailId: "email-1" });
-    expect(run.toolBudget.callsMade).toBe(4);
+    // 4 triage calls plus two notes_write log lines (matter notes and the sender's notes).
+    expect(run.toolBudget.callsMade).toBe(6);
     expect(env.executor.requests.at(-1)).toMatchObject({
       type: "draft_create",
       category: "scheduling",

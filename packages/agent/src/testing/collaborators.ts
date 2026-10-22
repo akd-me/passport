@@ -13,7 +13,14 @@ import type {
   PolicyOutcome,
   TrustState,
 } from "@passport/types";
-import { BASE_REVERSIBILITY, BASE_RISK, DEFAULT_POLICY_CONFIG } from "@passport/types";
+import {
+  BASE_REVERSIBILITY,
+  BASE_RISK,
+  DEFAULT_POLICY_CONFIG,
+  type MailRef,
+  mailRefOf,
+  mergeMailRefs,
+} from "@passport/types";
 import { AgentError } from "../errors.js";
 import { newAgentId } from "../id.js";
 import { getAgentEmailPatch } from "../integration.js";
@@ -147,6 +154,11 @@ export class FakeExecutor implements ActionExecutor {
     return this.store.actions.insert(record);
   }
 
+  private async refsOf(refs: MailRef[], emailIds: string[]): Promise<MailRef[]> {
+    const emails = await Promise.all(emailIds.map((id) => this.store.emails.get(id)));
+    return mergeMailRefs(refs, emails.filter((email) => email !== null).map(mailRefOf));
+  }
+
   private async apply(request: ActionRequest): Promise<Record<string, unknown>> {
     switch (request.type) {
       case "person_update": {
@@ -178,6 +190,8 @@ export class FakeExecutor implements ActionExecutor {
         const id = newAgentId();
         await this.store.matters.upsert({
           ...matter,
+          // Mirrors the executor: attached emails become provider refs.
+          refs: matter.refs ?? (await this.refsOf([], matter.emailIds)),
           id,
           createdAt: this.now(),
           updatedAt: this.now(),
@@ -199,6 +213,7 @@ export class FakeExecutor implements ActionExecutor {
           emailIds: [...new Set([...matter.emailIds, ...(input.emailIds ?? [])])],
           personIds: [...new Set([...matter.personIds, ...(input.personIds ?? [])])],
           eventIds: [...new Set([...matter.eventIds, ...(input.eventIds ?? [])])],
+          refs: await this.refsOf(matter.refs ?? [], input.emailIds ?? []),
           updatedAt: this.now(),
         });
         await this.store.emails.patchMany(input.emailIds ?? [], {
