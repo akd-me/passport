@@ -156,6 +156,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@passport/providers':
+        specifier: workspace:*
+        version: link:../providers
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
@@ -233,6 +236,9 @@ importers:
         specifier: workspace:*
         version: link:../types
     devDependencies:
+      '@passport/providers':
+        specifier: workspace:*
+        version: link:../providers
       typescript:
         specifier: ^5.8.0
         version: 5.9.3

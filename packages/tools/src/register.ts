@@ -2,7 +2,7 @@ import type { Context } from "./context.js";
 import { errorResult } from "./presentation.js";
 import { limitResponse } from "./response-budget.js";
 import { type Output, type Schema, schema } from "./schema.js";
-import type { ToolResult } from "./types.js";
+import type { ToolAnnotations, ToolResult } from "./types.js";
 
 export function register<S extends Record<string, Schema<unknown>>>(
   ctx: Context,
@@ -11,6 +11,7 @@ export function register<S extends Record<string, Schema<unknown>>>(
   shape: S,
   write: boolean,
   handler: (args: Output<S>, ctx: Context) => Promise<ToolResult>,
+  annotations?: ToolAnnotations,
 ) {
   const input = schema.strictObject(shape);
   ctx.tools.push({
@@ -18,6 +19,7 @@ export function register<S extends Record<string, Schema<unknown>>>(
     description,
     inputSchema: input.json as typeof input.json & { type: "object" },
     risk: write ? "write" : "read",
+    ...(annotations ? { annotations } : {}),
     async handler(args, callContext) {
       try {
         return limitResponse(

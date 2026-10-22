@@ -1,4 +1,5 @@
 import { getEffectiveProfile } from "@passport/types";
+import { labelsAlias, readAlias, searchAlias } from "./aliases.js";
 import { availability } from "./availability.js";
 import type { Context } from "./context.js";
 import {
@@ -18,10 +19,14 @@ export function registerReads(ctx: Context) {
   register(
     ctx,
     "search_emails",
-    "Search local email using EmailQuery filters and FTS5; compact results, paginated by cursor. full=true includes full bodies.",
+    "Deprecated: use mail_search. With on-demand reads it aliases mail_search (compact rows, cursor = pageToken); otherwise searches the local store with EmailQuery filters and FTS5. full=true includes full bodies on the store path.",
     s.emailQuery,
     false,
     async ({ full, ...query }, ctx) => {
+      const alias = await searchAlias(ctx, query);
+      if (alias) {
+        return alias;
+      }
       const page = await store.emails.query({
         ...query,
         includeBodies: full || query.includeBodies,
@@ -32,15 +37,17 @@ export function registerReads(ctx: Context) {
   register(
     ctx,
     "get_email",
-    "Read one email. Bodies are clipped to 2000 characters unless full=true.",
+    'Deprecated: use mail_read({view:"message"}). Read one email. Bodies are clipped to 2000 characters unless full=true.',
     { emailId: s.id, full: s.full },
     false,
-    async ({ emailId, full }, ctx) => json(emailView(await ctx.email(emailId, true), full)),
+    async ({ emailId, full }, ctx) =>
+      (await readAlias(ctx, emailId, "message", { full }, 'mail_read({view:"message"})')) ??
+      json(emailView(await ctx.email(emailId, true), full)),
   );
   register(
     ctx,
     "get_email_body",
-    "Read body chunks using UTF-16 offsets. Returns textBody and sanitized htmlBody; continue with continueFrom until truncated=false. The response byte budget still applies.",
+    "Deprecated: use mail_read offset/length. Read body chunks using UTF-16 offsets; continue with continueFrom until truncated=false. The response byte budget still applies.",
     {
       emailId: s.id,
       offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
@@ -48,6 +55,16 @@ export function registerReads(ctx: Context) {
     },
     false,
     async ({ emailId, offset, length }, ctx) => {
+      const alias = await readAlias(
+        ctx,
+        emailId,
+        "message",
+        { full: true, offset, length },
+        'mail_read({view:"message",offset,length})',
+      );
+      if (alias) {
+        return alias;
+      }
       const email = await ctx.email(emailId, true);
       const text = email.textBody ?? "",
         html = stripTrackingPixels(email.htmlBody ?? "");
@@ -74,10 +91,14 @@ export function registerReads(ctx: Context) {
   register(
     ctx,
     "get_thread",
-    "Read a thread as chronological emails; continue with nextCursor. Bodies are clipped unless full=true.",
+    "Deprecated: use mail_read. Read a thread as chronological emails; continue with nextCursor. Bodies are clipped unless full=true.",
     { threadId: s.id, full: s.full, limit: s.limit, cursor: z.string().nullable().optional() },
     false,
     async ({ threadId, full, limit, cursor }, ctx) => {
+      const alias = await readAlias(ctx, threadId, "thread", { full }, "mail_read");
+      if (alias) {
+        return alias;
+      }
       const thread = required(await store.threads.get(threadId), "Thread");
       const page = await store.emails.query({
         threadId,
@@ -99,10 +120,14 @@ export function registerReads(ctx: Context) {
   register(
     ctx,
     "list_mailboxes",
-    "List mailboxes and counts for one account, or all accounts when accountId is omitted.",
+    "Deprecated: use mail_labels. List mailboxes and counts for one account, or all accounts when accountId is omitted.",
     { accountId: s.id.optional() },
     false,
     async ({ accountId }, ctx) => {
+      const alias = await labelsAlias(ctx, accountId);
+      if (alias) {
+        return alias;
+      }
       const accounts = accountId ? [await ctx.account(accountId)] : await store.accounts.list();
       return json({
         items: (
