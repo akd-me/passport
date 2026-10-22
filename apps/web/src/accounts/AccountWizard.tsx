@@ -150,6 +150,9 @@ export function AccountWizard({
             setFields((f) => ({ ...f, clientSecret: "" }));
             if (tab) {
               tab.location.href = result.authUrl;
+            } else {
+              // The Mac app refuses blank popups and hands http(s) URLs to the system browser.
+              window.open(result.authUrl, "_blank", "noopener");
             }
           }, "Authorization opened. Return here after granting access.");
           if (!ok) {
