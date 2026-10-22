@@ -55,6 +55,16 @@ const toolNames = [
   "get_daily_log",
   "explain_decision",
   "preview_unsubscribe",
+  "mail_accounts",
+  "mail_labels",
+  "mail_list",
+  "mail_search",
+  "mail_count",
+  "mail_read",
+  "mail_grep",
+  "mail_changes",
+  "people_history",
+  "provider_get",
 ];
 
 describe("mailbox MCP over SDK InMemoryTransport", () => {

@@ -1,6 +1,10 @@
 import { Context } from "./context.js";
 import { registerExtra } from "./extra.js";
+import { registerMailExport } from "./mail-export.js";
 import { registerReads } from "./reads.js";
+import { registerOnDemandReads } from "./reads-ondemand.js";
+import { registerOnDemandExtra } from "./reads-ondemand-extra.js";
+import { registerMailRead } from "./reads-ondemand-read.js";
 import { responseByteBudget } from "./response-budget.js";
 import type { Tool, ToolRegistryOptions } from "./types.js";
 import { registerWrites } from "./writes.js";
@@ -12,6 +16,10 @@ export function createToolRegistry(options: ToolRegistryOptions): Tool[] {
   registerReads(ctx);
   registerWrites(ctx);
   registerExtra(ctx);
+  registerOnDemandReads(ctx);
+  registerMailRead(ctx);
+  registerOnDemandExtra(ctx);
+  registerMailExport(ctx);
   return ctx.tools;
 }
 
@@ -37,17 +45,27 @@ export const toMcpTools = (tools: readonly Tool[]) =>
       destructiveHint: tool.risk === "write",
       idempotentHint: tool.risk === "read",
       openWorldHint: tool.risk === "write",
+      ...tool.annotations,
     },
   }));
 export type { FreeBusyResolver } from "./availability.js";
 export { availability, availabilityEvents, expandRecurringEvents } from "./availability.js";
 export type { CategorizeInput } from "./categorize.js";
 export { categorize } from "./categorize.js";
+export { SCRATCH_MAX_AGE_MS, sweepScratchDir } from "./mail-export.js";
+export { neutralize, UNTRUSTED_NOTICE } from "./ondemand-support.js";
 export { ToolError } from "./presentation.js";
+export { collapseQuoted, htmlToText } from "./quoted.js";
 export {
   DEFAULT_RESPONSE_BYTE_BUDGET,
   limitResponse,
   responseByteBudget,
 } from "./response-budget.js";
 export type { JsonSchema } from "./schema.js";
-export type { Tool, ToolContext, ToolRegistryOptions, ToolResult } from "./types.js";
+export type {
+  Tool,
+  ToolAnnotations,
+  ToolContext,
+  ToolRegistryOptions,
+  ToolResult,
+} from "./types.js";

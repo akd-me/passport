@@ -75,6 +75,19 @@ const reads: Array<[string, object]> = [
   ["explain_decision", { actionId: "action-fixture" }],
   ["preview_unsubscribe", { emailId: "email-1" }],
 ];
+/** v0.3 provider-backed reads; covered with a mock reader in ondemand*.test.ts. */
+const onDemandReads = [
+  "mail_accounts",
+  "mail_labels",
+  "mail_list",
+  "mail_search",
+  "mail_count",
+  "mail_read",
+  "mail_grep",
+  "mail_changes",
+  "people_history",
+  "provider_get",
+];
 const writes: Array<[string, object, string]> = [
   ["archive_emails", { emailIds: ["email-1"] }, "archive"],
   ["mark_read", { emailIds: ["email-1"] }, "mark_read"],
@@ -147,12 +160,13 @@ describe("shared tool catalogue", () => {
     });
   });
   it("covers every catalogue entry exactly once and adapters only reshape definitions", () => {
-    expect(tools).toHaveLength(44);
+    expect(tools).toHaveLength(54);
     expect(
       new Set([
         ...reads.map(([name]) => name),
         ...writes.map(([name]) => name),
         "cancel_held_action",
+        ...onDemandReads,
       ]),
     ).toEqual(new Set(tools.map((tool) => tool.name)));
     for (const [index, tool] of tools.entries()) {

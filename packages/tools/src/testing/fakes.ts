@@ -57,6 +57,8 @@ export class MemoryStore implements Store {
   };
   credentialReads = 0;
   emailQueries: EmailQuery[] = [];
+  /** Simulates the v0.3 read-through `emails.get` for handles missing from the map. */
+  readThrough?: (id: string) => Promise<Email | null>;
   config: GlobalPolicyConfig | null = null;
   async migrate() {}
   async close() {}
@@ -96,7 +98,11 @@ export class MemoryStore implements Store {
     },
   };
   emails: Store["emails"] = {
-    get: async (id, opts) => this.withBodies(this.data.emails.get(id), opts?.includeBodies),
+    get: async (id, opts) =>
+      this.withBodies(
+        this.data.emails.get(id) ?? (await this.readThrough?.(id)) ?? undefined,
+        opts?.includeBodies,
+      ),
     getByProviderId: async (accountId, providerId) =>
       clone(
         [...this.data.emails.values()].find(
