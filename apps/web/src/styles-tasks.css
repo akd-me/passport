@@ -28,8 +28,10 @@
 }
 .task-row {
   position: relative;
+  min-width: 0;
 }
 .task-link {
+  min-width: 0;
   padding-top: 5px;
   padding-bottom: 5px;
   padding-right: 30px;
@@ -194,6 +196,9 @@
   font-size: var(--t-s);
   color: var(--ink);
 }
+.task-card-what .need.failure {
+  color: var(--red);
+}
 .task-card time {
   font-size: var(--t-xs);
   color: var(--muted);
@@ -266,7 +271,7 @@
   font-weight: 580;
 }
 
-.timeline {
+.task-timeline {
   list-style: none;
   margin: 0;
   padding: 0;

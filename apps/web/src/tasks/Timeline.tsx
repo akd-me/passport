@@ -53,7 +53,7 @@ export function Timeline({
   return (
     <>
       <Feedback error={error} />
-      <ol className="timeline" aria-label="Timeline" role="log" aria-live="polite">
+      <ol className="task-timeline" aria-label="Timeline" role="log" aria-live="polite">
         {entries.map((entry) => (
           <li key={entry.key} className={`tl-entry tl-${entry.kind}`}>
             {entry.kind === "run" ? (

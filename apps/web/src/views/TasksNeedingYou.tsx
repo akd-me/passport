@@ -33,7 +33,7 @@ export function TaskCard({ task }: { task: Task }) {
         <TaskGlyph task={task} running={running(task.id)} />
         <span className="task-card-what">
           <strong>{task.title}</strong>
-          {needText(task) && <span>{needText(task)}</span>}
+          {needText(task) && <span className={`need ${task.needsUser}`}>{needText(task)}</span>}
         </span>
         {task.accountIds.slice(0, 3).map((id) => (
           <AccountDot key={id} id={id} />

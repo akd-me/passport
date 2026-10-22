@@ -3,11 +3,11 @@
 Passport is an open-source, local-first email harness where AI agents handle mail and calendar through a trust policy you control. You see decisions, build context around people and matters, and bring your own mail providers, models and agents.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/queue-dark.png">
-  <img alt="Passport's queue: proposals grouped by matter with the draft, approve/edit/reject, the outbox, the composer and the proposal's context" src="docs/screenshots/queue-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/task-dark.png">
+  <img alt="A Passport task: the task list in the sidebar, the timeline with collapsed tool calls, a per-run change summary, inline approvals, and the approval panel above the composer" src="docs/screenshots/task-light.png">
 </picture>
 
-More screens: [permission mode](docs/screenshots/permission-mode.png), [a matter](docs/screenshots/matter.png), [connecting an account](docs/screenshots/connect.png), [settings](docs/screenshots/settings.png) and the [command palette](docs/screenshots/command-palette.png).
+More screens: [starting a task](docs/screenshots/new-task.png), [Needs you](docs/screenshots/queue-light.png), [permission mode](docs/screenshots/permission-mode.png), [a matter](docs/screenshots/matter.png), [connecting an account](docs/screenshots/connect.png), [settings](docs/screenshots/settings.png) and the [command palette](docs/screenshots/command-palette.png).
 
 ## Why
 
