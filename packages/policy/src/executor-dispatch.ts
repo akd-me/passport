@@ -2,6 +2,7 @@ import type { ActionRecord, ActionRequest, DraftInput, Matter } from "@passport/
 import { PolicyError } from "./errors.js";
 import type { ExecutorContext } from "./executor-context.js";
 import type { MailActions } from "./executor-mail.js";
+import { refsWithEmails } from "./executor-notes.js";
 import type { Restoration } from "./executor-restoration.js";
 import {
   type ActionExecutorOptions,
@@ -11,6 +12,9 @@ import {
   snapshotOf,
 } from "./executor-shared.js";
 import { parseListUnsubscribe, requestUnsubscribe } from "./unsubscribe.js";
+
+/** Envelope reads for matter refs: the capture step just cached these rows. */
+const CACHED = { includeBodies: false, cacheOnly: true } as const;
 
 export function createDispatch(
   options: ActionExecutorOptions,
@@ -244,8 +248,13 @@ export function createDispatch(
           throw new PolicyError("INVALID_INVERSE", "Matter snapshot is required");
         }
         const at = now(),
+          created = request.params.matter,
           matter: Matter = {
-            ...request.params.matter,
+            ...created,
+            // Attached emails become provider references unless the caller supplied refs.
+            refs:
+              created.refs ??
+              refsWithEmails({}, await allEmails(created.emailIds, request.accountId, CACHED)),
             id: snapshot.id,
             createdAt: at,
             updatedAt: at,
@@ -276,6 +285,10 @@ export function createDispatch(
           emailIds: unique(prior.emailIds, request.params.emailIds),
           eventIds: unique(prior.eventIds, request.params.eventIds),
           personIds: unique(prior.personIds, request.params.personIds),
+          refs: refsWithEmails(
+            prior,
+            await allEmails(request.params.emailIds ?? [], request.accountId, CACHED),
+          ),
           updatedAt: now(),
         };
         await writeMatter(request, snapshot, matter);

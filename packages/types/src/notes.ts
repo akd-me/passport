@@ -156,9 +156,7 @@ export function mergeMailRefs(refs: readonly MailRef[], added: readonly MailRef[
   for (const ref of [...refs, ...added]) {
     merged.set(`${ref.account}\u0000${ref.providerId}`, ref);
   }
-  return [...merged.values()]
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(-MATTER_REFS_MAX);
+  return [...merged.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-MATTER_REFS_MAX);
 }
 
 /** One dated log line: `- 2026-10-20: text`, single-line. */

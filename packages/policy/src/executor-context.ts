@@ -9,6 +9,7 @@ import type {
   Matter,
 } from "@passport/types";
 import { PolicyError } from "./errors.js";
+import { assertKnowledge } from "./executor-notes.js";
 import {
   type ActionExecutorOptions,
   draftOf,
@@ -167,6 +168,7 @@ export function createExecutorContext(options: ActionExecutorOptions) {
         "Profile updates require matters category and markdown",
       );
     }
+    assertKnowledge(request);
     const personParams =
       request.type === "person_update" ? (request.params as ActionParams["person_update"]) : null;
     const completePerson = personParams && isCompletePerson(personParams.patch);
