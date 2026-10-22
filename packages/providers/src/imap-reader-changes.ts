@@ -2,10 +2,20 @@ import type { MailChanges } from "@passport/types";
 import type { FetchMessageObject } from "imapflow";
 import { decodeCursor, encodeCursor, ProviderError } from "./errors.js";
 import { imapIdentity } from "./imap-reader-shared.js";
-import { type ImapSession, packUids, type SelectedBox, unpackUids } from "./imap-reader-support.js";
+import {
+  type ImapSession,
+  MAX_PACKED_UIDS,
+  missingUids,
+  packUids,
+  parseUidSet,
+  type SelectedBox,
+  uidSetSize,
+} from "./imap-reader-support.js";
 
 /** Without QRESYNC, deletions are found by diffing the UID list at most this often. */
 export const IMAP_DELETE_SWEEP_MS = 5 * 60_000;
+/** More deletions than this in one sweep expire the cursor instead of listing them. */
+const MAX_SWEEP_DELETIONS = 5_000;
 /** The watched mailbox. Other folders are read on demand. */
 const WATCHED = "INBOX";
 
@@ -17,8 +27,17 @@ interface ChangeCursor {
   uidNext: number;
   /** HIGHESTMODSEQ (CONDSTORE), as a decimal string. */
   modseq?: string;
-  /** Known UIDs as a sequence set, kept only without QRESYNC (for the deletion sweep). */
+  /**
+   * Known UIDs below `uidNext` as a sequence set, kept only without QRESYNC (for the deletion
+   * sweep) and only while it packs into `MAX_PACKED_UIDS` characters (R1-3, R1-5).
+   */
   uids?: string;
+  /**
+   * Instead of `uids` for fragmented mailboxes: how many UIDs below `uidNext` existed. UIDs are
+   * never reused, so a smaller count at the next sweep means something was deleted; the cursor
+   * then expires (labels stale, bounded sweep) because the ids are unknown.
+   */
+  count?: number;
   /** When the UID list was last diffed (epoch ms). */
   sweptAt?: number;
 }
@@ -140,22 +159,68 @@ async function uidNextStep(
   };
 }
 
-/** Without QRESYNC: diff the known UID list every `IMAP_DELETE_SWEEP_MS`. */
-async function sweepDeleted(session: ImapSession, c: ChangeCursor, step: Step, now: number) {
-  let known = new Set(unpackUids(c.uids ?? ""));
-  let sweptAt = c.sweptAt ?? 0;
-  if (now - sweptAt >= IMAP_DELETE_SWEEP_MS) {
-    const current = new Set(await session.uids({ query: {} }));
-    step.deleted.push(...[...known].filter((uid) => !current.has(uid)));
-    known = new Set([...current].filter((uid) => uid < c.uidNext));
-    sweptAt = now;
+/** The compact known-UID snapshot for a cursor: the packed set when it fits, else its size. */
+function snapshot(uids: number[]): Pick<ChangeCursor, "uids" | "count"> {
+  const packed = packUids(uids);
+  return packed.length <= MAX_PACKED_UIDS ? { uids: packed } : { count: uids.length };
+}
+
+/**
+ * Without QRESYNC: diff the known UIDs every `IMAP_DELETE_SWEEP_MS`. Returns false when
+ * deletions happened that the cursor cannot name (count-only snapshot, or too many).
+ */
+async function sweepDeleted(
+  session: ImapSession,
+  c: ChangeCursor,
+  step: Step,
+  now: number,
+): Promise<boolean> {
+  const known = c.uids === undefined ? null : parseUidSet(c.uids, c.uidNext);
+  const arrivals = step.taken
+    .filter((e) => e.added && e.uid < step.next.uidNext)
+    .map((e) => e.uid)
+    .sort((a, b) => a - b);
+  if (now - (c.sweptAt ?? 0) < IMAP_DELETE_SWEEP_MS) {
+    // Not due: extend the snapshot with this step's arrivals (all above the known set).
+    const packed = known && [c.uids, packUids(arrivals)].filter(Boolean).join(",");
+    const fits = packed !== null && packed.length <= MAX_PACKED_UIDS;
+    const size = known ? uidSetSize(known) : c.count;
+    step.next = {
+      ...step.next,
+      ...(fits ? { uids: packed } : size !== undefined ? { count: size + arrivals.length } : {}),
+      sweptAt: c.sweptAt ?? now,
+    };
+    return true;
   }
-  for (const entry of step.taken) {
-    if (entry.added) {
-      known.add(entry.uid);
+  const current = (await session.uids({ query: {} }))
+    .filter((uid) => uid < c.uidNext)
+    .sort((a, b) => a - b);
+  if (known) {
+    const gone = missingUids(known, current, MAX_SWEEP_DELETIONS);
+    if (gone === null) {
+      return false;
     }
+    step.deleted.push(...gone);
+  } else if (c.count !== undefined && current.length < c.count) {
+    return false;
   }
-  step.next = { ...step.next, uids: packUids(known), sweptAt };
+  step.next = { ...step.next, ...snapshot([...current, ...arrivals]), sweptAt: now };
+  return true;
+}
+
+/** Validates a decoded cursor's fields; anything off is `INVALID_CURSOR` (R1-3). */
+function validCursor(c: ChangeCursor): boolean {
+  const uidNext = c.uidNext;
+  return (
+    Number.isInteger(uidNext) &&
+    uidNext >= 1 &&
+    uidNext < 2 ** 32 &&
+    typeof c.validity === "string" &&
+    (c.modseq === undefined || /^\d{1,20}$/.test(String(c.modseq))) &&
+    (c.sweptAt === undefined || Number.isFinite(c.sweptAt)) &&
+    (c.count === undefined || (Number.isInteger(c.count) && c.count >= 0 && c.count < uidNext)) &&
+    (c.uids === undefined || (typeof c.uids === "string" && c.uids.length <= MAX_PACKED_UIDS))
+  );
 }
 
 /**
@@ -187,26 +252,35 @@ export async function imapChanges(
       encode({
         uidNext: box.uidNext,
         ...(condstore ? { modseq: String(box.modseq) } : {}),
-        ...(qresync ? {} : { uids: packUids(await session.uids({ query: {} })), sweptAt: now }),
+        ...(qresync ? {} : { ...snapshot(await session.uids({ query: {} })), sweptAt: now }),
       });
     const empty = { added: [], labelChanged: [], deleted: [] };
     if (cursor === null) {
       return { ...empty, cursor: await fresh() };
     }
     const c = decodeCursor<ChangeCursor>(cursor);
-    if (c.account !== accountId || c.kind !== "imap-changes" || c.path !== box.path) {
+    if (
+      c.account !== accountId ||
+      c.kind !== "imap-changes" ||
+      c.path !== box.path ||
+      !validCursor(c)
+    ) {
       throw new ProviderError("INVALID_CURSOR", "Change cursor does not belong to this mailbox");
     }
     if (c.validity !== box.validity) {
       return { ...empty, cursor: await fresh(), expired: true };
+    }
+    if (c.uids !== undefined) {
+      // Parse (bounded) before any command so a malformed set fails as INVALID_CURSOR.
+      parseUidSet(c.uids, c.uidNext);
     }
     const budget = Math.max(1, Math.floor(limit));
     const step =
       condstore && c.modseq !== undefined
         ? await modseqStep(session, c, box, budget)
         : await uidNextStep(session, c, box, budget, condstore);
-    if (!qresync) {
-      await sweepDeleted(session, c, step, now);
+    if (!qresync && !(await sweepDeleted(session, c, step, now))) {
+      return { ...empty, cursor: await fresh(), expired: true };
     }
     const value: MailChanges = {
       added: step.taken.filter((e) => e.added).map((e) => id(e.uid)),

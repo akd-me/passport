@@ -1,12 +1,9 @@
 import type { Email } from "@passport/types";
-import type { FetchMessageObject, FetchQueryObject, SearchObject } from "imapflow";
+import type { SearchObject } from "imapflow";
 import { ProviderError } from "./errors.js";
-import type { ImapMailboxes } from "./imap-reader-scan.js";
-import {
-  normalizeImapSource,
-  parseImapIdentity,
-  SERVER_THREAD_PREFIX,
-} from "./imap-reader-shared.js";
+import { fetchEmails } from "./imap-reader-bodies.js";
+import type { ImapMailboxes, ImapReaderHost } from "./imap-reader-mailboxes.js";
+import { imapIdentity, parseImapIdentity, SERVER_THREAD_PREFIX } from "./imap-reader-shared.js";
 import type { ImapSession } from "./imap-reader-support.js";
 import type { PassportVerifier } from "./verification.js";
 
@@ -19,33 +16,6 @@ export interface ImapBodyContext {
   verifier?: PassportVerifier | undefined;
 }
 
-/** `UID FETCH (UID FLAGS INTERNALDATE BODY.PEEK[])`, plus the server thread id when there is one. */
-function sourceQuery(session: ImapSession): FetchQueryObject {
-  const threads = session.ext.has("OBJECTID") || session.ext.has("X-GM-EXT-1");
-  return {
-    uid: true,
-    flags: true,
-    internalDate: true,
-    source: true,
-    ...(threads ? { threadId: true } : {}),
-  };
-}
-
-function normalize(
-  ctx: ImapBodyContext,
-  message: FetchMessageObject,
-  path: string,
-  validity: string,
-): Promise<Email> {
-  return normalizeImapSource(message, {
-    accountId: ctx.accountId,
-    path,
-    validity,
-    verifier: ctx.verifier,
-    serverThreadId: message.threadId,
-  });
-}
-
 /** Full message by provider id. `STALE_ID` after a UIDVALIDITY change, `NOT_FOUND` if gone. */
 export async function fetchImapEmail(ctx: ImapBodyContext, providerId: string): Promise<Email> {
   const [path, validity, uid] = parseImapIdentity(providerId);
@@ -53,11 +23,11 @@ export async function fetchImapEmail(ctx: ImapBodyContext, providerId: string): 
     if (box.validity !== validity) {
       throw new ProviderError("STALE_ID", "IMAP UIDVALIDITY changed; find the message again");
     }
-    const [message] = await ctx.session.fetch([uid], sourceQuery(ctx.session));
-    if (!message) {
+    const [email] = await fetchEmails(ctx, path, validity, [uid]);
+    if (!email) {
       throw new ProviderError("NOT_FOUND", "Message does not exist");
     }
-    return normalize(ctx, message, path, validity);
+    return email;
   });
 }
 
@@ -93,8 +63,7 @@ export async function fetchImapThread(
   for (const path of await mailboxes.resolveAll(session, specs)) {
     await session.select(path, async (box) => {
       const uids = (await session.uids({ query })).slice(0, IMAP_THREAD_CAP);
-      for (const message of await session.fetch(uids, sourceQuery(session))) {
-        const email = await normalize(ctx, message, path, box.validity);
+      for (const email of await fetchEmails(ctx, path, box.validity, uids)) {
         const key = email.headers.messageId ?? email.providerId;
         if (!seen.has(key)) {
           seen.add(key);
@@ -104,4 +73,31 @@ export async function fetchImapThread(
     });
   }
   return emails;
+}
+
+/** Provider id for a Message-ID: received copies first, the Sent copy last (duplicates). */
+export async function findImapByRfc822(
+  session: ImapSession,
+  mailboxes: ImapMailboxes,
+  host: Pick<ImapReaderHost, "moveTargets">,
+  rfc822Id: string,
+): Promise<string | null> {
+  const header = `<${rfc822Id.trim().replace(/^<|>$/g, "")}>`;
+  const boxes: string[] = [];
+  for (const spec of ["INBOX", "\\Archive", ...host.moveTargets(), "\\Sent"]) {
+    const path = await mailboxes.resolve(session, spec);
+    if (path && !boxes.includes(path)) {
+      boxes.push(path);
+    }
+  }
+  for (const path of boxes) {
+    const found = await session.select(path, async (box) => {
+      const uids = await session.uids({ query: { header: { "message-id": header } } });
+      return uids[0] ? imapIdentity(box.path, box.validity, uids[0]) : null;
+    });
+    if (found) {
+      return found;
+    }
+  }
+  return null;
 }

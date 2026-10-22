@@ -23,12 +23,15 @@ export const IMAP_ROW_HEADERS = [
   "authentication-results",
 ];
 
-/** Bytes of source fetched per candidate when a local filter has to match body text. */
+/** Bytes of the body fetched per candidate when a local filter has to match body text. */
 export const IMAP_GREP_BYTES = 65_536;
+/** Extra header fields fetched for grep, so the body prefix can be MIME-decoded. */
+const GREP_HEADERS = ["content-type", "content-transfer-encoding", "mime-version"];
 
 /**
  * `UID FETCH (UID ENVELOPE FLAGS INTERNALDATE RFC822.SIZE BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS
- * (…)])`, plus the server thread id / Gmail labels when available and a source prefix for grep.
+ * (…)])`, plus the server thread id / Gmail labels when available. Grep adds the MIME framing
+ * headers and `BODY.PEEK[TEXT]<0.65536>`: a bounded body prefix, never the whole message (R1-9).
  */
 export function imapRowQuery(ext: ReadonlySet<ImapExtension>, grep = false): FetchQueryObject {
   return {
@@ -38,10 +41,10 @@ export function imapRowQuery(ext: ReadonlySet<ImapExtension>, grep = false): Fet
     internalDate: true,
     size: true,
     bodyStructure: true,
-    headers: IMAP_ROW_HEADERS,
+    headers: grep ? [...IMAP_ROW_HEADERS, ...GREP_HEADERS] : IMAP_ROW_HEADERS,
     ...(ext.has("OBJECTID") || ext.has("X-GM-EXT-1") ? { threadId: true } : {}),
     ...(ext.has("X-GM-EXT-1") ? { labels: true } : {}),
-    ...(grep ? { source: { maxLength: IMAP_GREP_BYTES } } : {}),
+    ...(grep ? { bodyParts: [{ key: "TEXT", maxLength: IMAP_GREP_BYTES }] } : {}),
   };
 }
 
@@ -142,9 +145,13 @@ export async function imapRecord(
   headers.inReplyTo ??= envelope.inReplyTo ?? null;
   let textBody: string | null = null;
   let preview = "";
-  if (message.source) {
-    // A truncated source still parses; text past IMAP_GREP_BYTES is simply not matched.
-    const parsed = await normalizeImapSource(message, { accountId, path, validity });
+  const text = [...(message.bodyParts ?? [])].find(([key]) => /^text/i.test(key))?.[1];
+  if (text) {
+    // Header fields + a truncated body still parse; text past IMAP_GREP_BYTES is not matched.
+    const head = message.headers ?? Buffer.alloc(0);
+    const gap = head.toString("latin1").endsWith("\r\n\r\n") ? "" : "\r\n";
+    const source = Buffer.concat([head, Buffer.from(gap), text]);
+    const parsed = await normalizeImapSource({ ...message, source }, { accountId, path, validity });
     textBody = parsed.textBody ?? null;
     preview = parsed.preview;
   }

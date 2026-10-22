@@ -1,116 +1,20 @@
-import type { Account, MailboxRole, MailEnvelope, MailRow } from "@passport/types";
-import type { ImapFlow, ListResponse } from "imapflow";
-import { decodeCursor, encodeCursor, ProviderError } from "./errors.js";
+import type { MailEnvelope, MailRow } from "@passport/types";
+import { ProviderError } from "./errors.js";
+import type { ImapMailboxes } from "./imap-reader-mailboxes.js";
 import { type ImapRowRecord, imapRecord, imapRowQuery } from "./imap-reader-rows.js";
-import { imapRole, imapRoles } from "./imap-reader-shared.js";
-import type { ImapCriteria, ImapExtension, ImapSession } from "./imap-reader-support.js";
+import type { ImapCriteria, ImapSession } from "./imap-reader-support.js";
 import type { QueryNode } from "./query.js";
 import { type MatchLabel, matchesQuery } from "./query-match.js";
-import type { QuotaGovernor } from "./quota.js";
+import { openToken, sealToken } from "./reader-tokens.js";
 import type { PassportVerifier } from "./verification.js";
 
 /** Newest candidates per mailbox scanned when a query needs local evaluation (research §5.6). */
 export const IMAP_SCAN_CAP = 500;
+
+export type { ImapReaderHost } from "./imap-reader-mailboxes.js";
+export { ImapMailboxes } from "./imap-reader-mailboxes.js";
+
 const MAX_LIMIT = 100;
-
-/** What the reader needs from `ImapMailProvider`. */
-export interface ImapReaderHost {
-  /** The connected account; throws `NOT_CONNECTED` otherwise. */
-  account(): Account;
-  /** The live connection; throws when disconnected or failed. */
-  client(): ImapFlow;
-  /** Extensions probed on connect. */
-  extensions(): ReadonlySet<ImapExtension>;
-  /** Destinations of recent moves/copies (searched by `findByRfc822`). */
-  moveTargets(): ReadonlySet<string>;
-  options: { verifier?: PassportVerifier; governor?: QuotaGovernor; now?: () => Date };
-}
-
-/** LIST cache and container resolution (paths, SPECIAL-USE attributes, roles, handles). */
-export class ImapMailboxes {
-  private cache?: { client: ImapFlow; list: ListResponse[] };
-  constructor(private readonly host: ImapReaderHost) {}
-
-  /** `LIST "" *`, cached per connection unless `refresh`. */
-  async list(session: ImapSession, refresh = false): Promise<ListResponse[]> {
-    const client = this.host.client();
-    if (refresh || this.cache?.client !== client) {
-      session.commands++;
-      this.cache = { client, list: await client.list() };
-    }
-    return this.cache.list;
-  }
-
-  /** Display name and role of a path, from the cached LIST. */
-  describe(path: string): { name: string; role: MailboxRole } {
-    const folder = this.cache?.list.find((f) => f.path === path);
-    if (!folder) {
-      return { name: path, role: path.toUpperCase() === "INBOX" ? "inbox" : null };
-    }
-    return { name: folder.name || folder.path, role: imapRole(folder) };
-  }
-
-  /**
-   * Resolves a container to a path: a SPECIAL-USE attribute (`\Archive` falls back to `\All`), a
-   * `<role>Folder` account setting, a role name (`"sent"`, `"spam"`), a path or name (any case),
-   * or a mailbox handle. Null when nothing matches.
-   */
-  async resolve(session: ImapSession, spec: string): Promise<string | null> {
-    const account = this.host.account();
-    const prefix = `${account.id}:mailbox:`;
-    const wanted = spec.startsWith(prefix) ? decodeURIComponent(spec.slice(prefix.length)) : spec;
-    if (wanted.toUpperCase() === "INBOX" || wanted === "\\Inbox") {
-      return "INBOX";
-    }
-    const list = (await this.list(session)).filter((f) => !f.flags.has("\\Noselect"));
-    const lower = wanted.toLowerCase();
-    const byPath = list.find(
-      (f) => f.path.toLowerCase() === lower || f.name.toLowerCase() === lower,
-    );
-    if (byPath && !wanted.startsWith("\\")) {
-      return byPath.path;
-    }
-    const attribute = wanted.startsWith("\\")
-      ? wanted
-      : Object.entries(imapRoles).find(
-          ([, role]) => role === (lower === "spam" ? "junk" : lower),
-        )?.[0];
-    if (!attribute) {
-      return null;
-    }
-    const role = imapRoles[attribute];
-    const configured = role ? account.settings[`${role}Folder`] : undefined;
-    if (typeof configured === "string" && configured) {
-      return configured;
-    }
-    const fallbacks = attribute === "\\Archive" ? ["\\Archive", "\\All"] : [attribute];
-    for (const use of fallbacks) {
-      const found = list.find((f) => f.specialUse === use);
-      if (found) {
-        return found.path;
-      }
-    }
-    return null;
-  }
-
-  /** Resolves several containers, dropping duplicates and symbolic ones the server lacks. */
-  async resolveAll(session: ImapSession, specs: string[]): Promise<string[]> {
-    const paths: string[] = [];
-    for (const spec of specs) {
-      const path = await this.resolve(session, spec);
-      if (path === null && !spec.startsWith("\\")) {
-        throw new ProviderError("NOT_FOUND", "Label or folder does not exist");
-      }
-      if (path !== null && !paths.includes(path)) {
-        paths.push(path);
-      }
-    }
-    if (paths.length === 0) {
-      throw new ProviderError("NOT_FOUND", "Label or folder does not exist");
-    }
-    return paths;
-  }
-}
 
 /** One scan: mailboxes to search, server criteria and the predicates evaluated locally. */
 export interface ImapScanRequest {
@@ -135,13 +39,19 @@ export interface ImapScanResult {
   capped?: boolean;
 }
 
+/**
+ * Sealed page token (R1-10). Pages are anchored on UIDs, not offsets: each mailbox keeps the
+ * highest UID it had on the first page (later arrivals wait for a new search) and the last UID
+ * consumed from its newest-first list; local-filter scans resume strictly after the last row.
+ */
 interface PageToken {
   account: string;
   kind: "search" | "list";
   key: string;
-  offset: number;
-  /** `[path, uidvalidity]` of every mailbox searched for the first page. */
-  boxes: Array<[string, string]>;
+  /** `[path, uidvalidity, maxUid, lastUid]` of every mailbox searched; `lastUid` 0 = none yet. */
+  boxes: Array<[string, string, number, number]>;
+  /** Local-filter scans: the last row returned, in `byNewest` order. */
+  after?: [receivedAt: string, uid: number, path: string];
 }
 
 interface BoxHits {
@@ -173,7 +83,9 @@ function containsText(node: QueryNode): boolean {
 }
 
 const byNewest = (a: ImapRowRecord, b: ImapRowRecord) =>
-  b.envelope.receivedAt.localeCompare(a.envelope.receivedAt) || b.uid - a.uid;
+  b.envelope.receivedAt.localeCompare(a.envelope.receivedAt) ||
+  b.uid - a.uid ||
+  b.path.localeCompare(a.path);
 
 /** Fetches rows for `uids` of one mailbox (one SELECT + one UID FETCH), in `uids` order. */
 export async function hydrate(
@@ -211,18 +123,30 @@ export async function hydrate(
 }
 
 function decodePage(token: string, accountId: string, req: ImapScanRequest): PageToken {
-  const c = decodeCursor<PageToken>(token);
+  const c = openToken<PageToken>(token);
   if (
     c.account !== accountId ||
     c.kind !== req.kind ||
     c.key !== req.key ||
-    !Number.isInteger(c.offset) ||
-    c.offset < 0 ||
-    !Array.isArray(c.boxes)
+    !Array.isArray(c.boxes) ||
+    !c.boxes.every((b) => Array.isArray(b) && Number.isInteger(b[2]) && Number.isInteger(b[3]))
   ) {
     throw new ProviderError("INVALID_CURSOR", "Page token belongs to a different query");
   }
   return c;
+}
+
+/** Position after `last` in a newest-first UID list (or after where it was, if expunged). */
+function after(uids: readonly number[], last: number): number {
+  if (last === 0) {
+    return 0;
+  }
+  const at = uids.indexOf(last);
+  if (at >= 0) {
+    return at + 1;
+  }
+  const older = uids.findIndex((uid) => uid < last);
+  return older < 0 ? uids.length : older;
 }
 
 /** Evaluates the local filter over the newest candidates of every mailbox. */
@@ -279,60 +203,100 @@ async function mergeByDate(ctx: ImapScanContext, hits: BoxHits[], end: number) {
 }
 
 /**
- * Runs a search or list: `UID SORT`/`UID SEARCH` per mailbox, then pages by slicing UIDs and
+ * Runs a search or list: `UID SORT`/`UID SEARCH` per mailbox, then pages along the UID lists and
  * hydrates only the page. Local filters (and `threads`) scan the newest `IMAP_SCAN_CAP`
  * candidates per mailbox instead.
  */
 export async function scan(ctx: ImapScanContext, req: ImapScanRequest): Promise<ImapScanResult> {
   const token = req.pageToken ? decodePage(req.pageToken, ctx.accountId, req) : null;
-  const offset = token?.offset ?? 0;
   const size = Math.min(MAX_LIMIT, Math.max(1, Math.floor(req.limit)));
   const hits: BoxHits[] = [];
+  const state = new Map<string, { maxUid: number; last: number }>();
   for (const path of req.boxes) {
     await ctx.session.select(path, async (box) => {
-      const pinned = token?.boxes.find(([p]) => p === path)?.[1];
-      if (token && pinned !== box.validity) {
+      const pinned = token?.boxes.find(([p]) => p === path);
+      if (token && pinned?.[1] !== box.validity) {
         throw new ProviderError(
           "INVALID_CURSOR",
           "Mailbox changed since the first page; search again",
         );
       }
-      hits.push({ path, validity: box.validity, uids: await ctx.session.uids(req.criteria) });
+      let uids = await ctx.session.uids(req.criteria);
+      const maxUid = pinned ? pinned[2] : uids.reduce((max, uid) => Math.max(max, uid), 0);
+      // Mail that arrived after the first page waits for a new search (R1-10).
+      uids = uids.filter((uid) => uid <= maxUid);
+      state.set(path, { maxUid, last: pinned?.[3] ?? 0 });
+      hits.push({ path, validity: box.validity, uids });
     });
   }
   let page: ImapRowRecord[];
   let total: number;
+  let more: boolean;
+  let anchor: PageToken["after"];
   const extra: Pick<ImapScanResult, "scanned" | "capped"> = {};
   if (req.local.length > 0 || req.threads) {
     const local = await scanLocally(ctx, req, hits);
     total = local.list.length;
-    page = local.list.slice(offset, offset + size);
+    const from = token?.after;
+    const start = from
+      ? local.list.findIndex(
+          (r) =>
+            byNewest(r, {
+              uid: from[1],
+              path: from[2],
+              envelope: { receivedAt: from[0] },
+            } as ImapRowRecord) > 0,
+        )
+      : 0;
+    const rest = start < 0 ? [] : local.list.slice(start);
+    page = rest.slice(0, size);
+    more = rest.length > page.length;
+    const last = page.at(-1);
+    anchor = last ? [last.envelope.receivedAt, last.uid, last.path] : undefined;
     Object.assign(extra, { scanned: local.scanned, capped: local.capped });
-  } else if (hits.length === 1 && hits[0]) {
-    const hit = hits[0];
-    total = hit.uids.length;
-    page = await hydrate(ctx, hit.path, hit.validity, hit.uids.slice(offset, offset + size));
   } else {
     total = hits.reduce((sum, h) => sum + h.uids.length, 0);
-    const heads = (await mergeByDate(ctx, hits, offset + size)).slice(offset, offset + size);
-    const records = new Map<string, ImapRowRecord>();
-    for (const hit of hits) {
-      const uids = heads.filter((h) => h.hit === hit).map((h) => h.uid);
-      for (const record of await hydrate(ctx, hit.path, hit.validity, uids)) {
-        records.set(`${hit.path}\n${record.uid}`, record);
+    // Each mailbox's remaining list, after the last UID consumed from it.
+    const rest = hits.map((hit) => ({
+      ...hit,
+      uids: hit.uids.slice(after(hit.uids, state.get(hit.path)?.last ?? 0)),
+    }));
+    const taken = new Map<string, number[]>();
+    if (rest.length === 1 && rest[0]) {
+      taken.set(rest[0].path, rest[0].uids.slice(0, size));
+    } else {
+      // Merge by INTERNALDATE, then take a prefix of each mailbox's list so nothing is skipped.
+      const heads = (await mergeByDate(ctx, rest, size)).slice(0, size);
+      for (const hit of rest) {
+        taken.set(hit.path, hit.uids.slice(0, heads.filter((h) => h.hit === hit).length));
       }
     }
-    page = heads.flatMap((h) => records.get(`${h.hit.path}\n${h.uid}`) ?? []);
+    page = [];
+    for (const hit of rest) {
+      const uids = taken.get(hit.path) ?? [];
+      page.push(...(await hydrate(ctx, hit.path, hit.validity, uids)));
+      const last = uids.at(-1);
+      if (last !== undefined) {
+        (state.get(hit.path) as { last: number }).last = last;
+      }
+    }
+    if (rest.length > 1) {
+      page.sort(byNewest);
+    }
+    more = rest.some((hit) => hit.uids.length > (taken.get(hit.path)?.length ?? 0));
   }
-  const next = offset + page.length;
   const result: ImapScanResult = { items: page.map((r) => r.row), approxTotal: total, ...extra };
-  if (page.length > 0 && next < total) {
-    result.nextPageToken = encodeCursor({
+  // A page whose rows were all expunged meanwhile still advances the anchors.
+  if (more) {
+    result.nextPageToken = sealToken({
       account: ctx.accountId,
       kind: req.kind,
       key: req.key,
-      offset: next,
-      boxes: hits.map((h) => [h.path, h.validity]),
+      boxes: hits.map((h) => {
+        const s = state.get(h.path);
+        return [h.path, h.validity, s?.maxUid ?? 0, s?.last ?? 0];
+      }),
+      ...(anchor ? { after: anchor } : {}),
     } satisfies PageToken);
   }
   return result;

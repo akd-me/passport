@@ -6,6 +6,7 @@
  */
 import { EventEmitter } from "node:events";
 import type { ImapFlow, SearchObject } from "imapflow";
+import { address, mime, structure } from "./imap-reader-fake-mime.js";
 
 export interface FakeMessageInput {
   from: string;
@@ -42,100 +43,13 @@ interface FakeFolder {
   vanished: Array<{ uid: number; modseq: bigint }>;
 }
 
-function address(value: string): { name?: string; address: string } {
-  const match = /^(.*)<([^>]+)>$/.exec(value.trim());
-  return match?.[1]?.trim()
-    ? { name: match[1].trim(), address: match[2] as string }
-    : { address: (match?.[2] ?? value).trim() };
-}
-
-function mime(m: FakeMessageInput): Buffer {
-  const head = [
-    `From: ${m.from}`,
-    `To: ${m.to ?? "Alex <alex@example.com>"}`,
-    `Subject: ${m.subject}`,
-    `Message-ID: ${m.messageId}`,
-    `Date: ${new Date(m.date).toUTCString()}`,
-    ...(m.inReplyTo ? [`In-Reply-To: ${m.inReplyTo}`] : []),
-    ...(m.references ? [`References: ${m.references}`] : []),
-    ...(m.listId ? [`List-Id: ${m.listId}`] : []),
-    "MIME-Version: 1.0",
-  ];
-  const text = m.body ?? "Hello";
-  if (!m.attachment && !m.inline) {
-    return Buffer.from(
-      [...head, "Content-Type: text/plain; charset=utf-8", "", text, ""].join("\r\n"),
-    );
-  }
-  const parts = ["--b1", "Content-Type: text/plain; charset=utf-8", "", text];
-  if (m.attachment) {
-    parts.push(
-      "--b1",
-      `Content-Type: application/pdf; name="${m.attachment}"`,
-      `Content-Disposition: attachment; filename="${m.attachment}"`,
-      "Content-Transfer-Encoding: base64",
-      "",
-      PDF_BASE64,
-    );
-  }
-  if (m.inline) {
-    parts.push(
-      "--b1",
-      `Content-Type: image/png; name="${m.inline.name}"`,
-      `Content-Disposition: inline; filename="${m.inline.name}"`,
-      `Content-ID: <${m.inline.cid}>`,
-      "Content-Transfer-Encoding: base64",
-      "",
-      PNG_BASE64,
-    );
-  }
-  return Buffer.from(
-    [...head, 'Content-Type: multipart/mixed; boundary="b1"', "", ...parts, "--b1--", ""].join(
-      "\r\n",
-    ),
-  );
-}
-
-/** `%PDF-` and a PNG signature, base64 as they appear in the fake MIME. */
-const PDF_BASE64 = "JVBERi0=";
-const PNG_BASE64 = "iVBORw==";
-
-/** BODYSTRUCTURE leaves of a fake message and the raw (encoded) bytes of each part. */
-function structure(m: Omit<FakeMessageInput, "flags">) {
-  const nodes: Array<Record<string, unknown> & { part: string; raw: string }> = [
-    { part: "1", type: "text/plain", size: 5, raw: m.body ?? "Hello" },
-  ];
-  if (m.attachment) {
-    nodes.push({
-      part: "2",
-      type: "application/pdf",
-      disposition: "attachment",
-      dispositionParameters: { filename: m.attachment },
-      encoding: "base64",
-      size: m.attachmentSize ?? 5,
-      raw: PDF_BASE64,
-    });
-  }
-  if (m.inline) {
-    nodes.push({
-      part: String(nodes.length + 1),
-      type: "image/png",
-      disposition: "inline",
-      dispositionParameters: { filename: m.inline.name },
-      id: `<${m.inline.cid}>`,
-      encoding: "base64",
-      size: PNG_BASE64.length,
-      raw: PNG_BASE64,
-    });
-  }
-  return nodes;
-}
-
 const includes = (haystack: string | undefined, needle: string) =>
   (haystack ?? "").toLowerCase().includes(needle.toLowerCase());
 
 export class FakeImapServer extends EventEmitter {
   readonly log: string[] = [];
+  /** Body bytes returned by FETCH (`BODY[]` and body parts), to assert bounded reads. */
+  fetchedBytes = 0;
   readonly capabilities: Map<string, boolean>;
   readonly enabled: Set<string>;
   readonly folders = new Map<string, FakeFolder>();
@@ -322,12 +236,17 @@ export class FakeImapServer extends EventEmitter {
 
   private project(m: FakeMessage, query: Record<string, unknown>) {
     const source = query.source as boolean | { maxLength?: number } | undefined;
-    const headers = (query.headers as string[] | undefined) ?? [];
+    const headers = (query.headers as string[] | boolean | undefined) ?? [];
     const headerLines = m.source
       .toString()
       .split("\r\n\r\n")[0]
       ?.split("\r\n")
-      .filter((line) => headers.includes(line.slice(0, line.indexOf(":")).toLowerCase()));
+      .filter(
+        (line) =>
+          headers === true ||
+          (Array.isArray(headers) &&
+            headers.includes(line.slice(0, line.indexOf(":")).toLowerCase())),
+      );
     const gmail = this.capabilities.has("X-GM-EXT-1") || this.capabilities.has("OBJECTID");
     return {
       seq: m.uid,
@@ -351,26 +270,48 @@ export class FakeImapServer extends EventEmitter {
               childNodes: structure(m).map(({ raw: _raw, ...node }) => node),
             }
           : { type: "text/plain", size: 5 },
-      ...(Array.isArray(query.bodyParts)
-        ? {
-            bodyParts: new Map(
-              structure(m)
-                .filter((node) => (query.bodyParts as string[]).includes(node.part))
-                .map((node) => [node.part, Buffer.from(node.raw)]),
-            ),
-          }
-        : {}),
+      ...(Array.isArray(query.bodyParts) ? { bodyParts: this.parts(m, query.bodyParts) } : {}),
       headers: Buffer.from(`${(headerLines ?? []).join("\r\n")}\r\n`),
       ...(source
         ? {
-            source:
+            source: this.count(
               typeof source === "object" && source.maxLength
                 ? m.source.subarray(0, source.maxLength)
                 : m.source,
+            ),
           }
         : {}),
       ...(gmail && query.threadId && m.threadId ? { threadId: m.threadId } : {}),
     };
+  }
+
+  /** `BODY.PEEK[<part>]<0.n>` for structure parts and `TEXT`; every fetched part is logged. */
+  private parts(m: FakeMessage, wanted: unknown[]): Map<string, Buffer> {
+    const out = new Map<string, Buffer>();
+    for (const want of wanted) {
+      const { key, maxLength } =
+        typeof want === "string"
+          ? { key: want, maxLength: undefined }
+          : (want as { key: string; maxLength?: number });
+      const raw =
+        key.toUpperCase() === "TEXT"
+          ? m.source.subarray(m.source.indexOf("\r\n\r\n") + 4)
+          : (() => {
+              const node = structure(m).find((n) => n.part === key);
+              return node ? Buffer.from(node.raw) : undefined;
+            })();
+      if (raw) {
+        const bytes = maxLength ? raw.subarray(0, maxLength) : raw;
+        this.fetchedBytes += bytes.length;
+        out.set(key.toUpperCase() === "TEXT" ? "text" : key, bytes);
+      }
+    }
+    return out;
+  }
+
+  private count(bytes: Buffer): Buffer {
+    this.fetchedBytes += bytes.length;
+    return bytes;
   }
 
   private matching(query: SearchObject): number[] {
