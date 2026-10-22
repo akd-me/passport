@@ -35,6 +35,8 @@ export interface GraphReaderTransport {
   /** The connected account id; throws `NOT_CONNECTED` otherwise. */
   accountId(): string;
   json<T>(url: string, init: RequestInit, policy: RequestPolicy): Promise<T>;
+  /** Governed raw request: attachment `$value` downloads and `rawGet`. */
+  http(url: string, init: RequestInit, policy: RequestPolicy): Promise<Response>;
   /** Validates a continuation link against the Graph origin. */
   safeLink(link: string): string;
   /** Feeds throttling signals from `$batch` inner responses to the governor. */
@@ -88,6 +90,16 @@ export class GraphCall {
   async get<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
     this.requests += 1;
     return this.transport.json<T>(
+      this.transport.safeLink(url),
+      { headers: { Prefer: IMMUTABLE_ID, ...headers }, ...this.init() },
+      { lane: this.lane, cost: 1 },
+    );
+  }
+
+  /** One governed GET returning the raw response (binary `$value`, `rawGet`). */
+  async raw(url: string, headers: Record<string, string> = {}): Promise<Response> {
+    this.requests += 1;
+    return this.transport.http(
       this.transport.safeLink(url),
       { headers: { Prefer: IMMUTABLE_ID, ...headers }, ...this.init() },
       { lane: this.lane, cost: 1 },

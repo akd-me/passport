@@ -166,6 +166,11 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
         return this.account;
       },
       invoke: (calls, policy) => this.invoke(calls, policy),
+      download: (blobId, meta, policy) =>
+        this.http(this.downloadUrl(blobId, meta), policy.signal ? { signal: policy.signal } : {}, {
+          lane: policy.lane ?? "interactive",
+          cost: 1,
+        }),
       ...(this.options.governor ? { governor: this.options.governor } : {}),
       ...(this.options.verifier ? { verifier: this.options.verifier } : {}),
       now: () => this.options.now?.() ?? new Date(),
@@ -425,25 +430,24 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
     return p.list[0] ? normalizeJmap(p.list[0], this.account.id, this.options.verifier) : null;
   }
   async getBlob(blobId: string): Promise<{ type: string; data: Uint8Array }> {
-    this.check();
-    if (!this.session) {
-      throw new ProviderError("NOT_CONNECTED", "JMAP session is unavailable");
-    }
-    const values: Record<string, string> = {
-      accountId: this.remoteAccountId,
-      blobId,
-      name: "attachment",
-      type: "application/octet-stream",
-    };
-    const url = this.session.downloadUrl.replace(
-      /\{(accountId|blobId|name|type)\}/g,
-      (_, key: string) => encodeURIComponent(values[key]!),
+    const response = await this.http(
+      this.downloadUrl(blobId, { name: "attachment", type: "application/octet-stream" }),
     );
-    const response = await this.http(url);
     return {
       type: response.headers.get("content-type") ?? "application/octet-stream",
       data: new Uint8Array(await response.arrayBuffer()),
     };
+  }
+  /** Fills the session's `downloadUrl` template (RFC 8620 §6.2). */
+  private downloadUrl(blobId: string, meta: { name: string; type: string }): string {
+    this.check();
+    if (!this.session) {
+      throw new ProviderError("NOT_CONNECTED", "JMAP session is unavailable");
+    }
+    const values: Record<string, string> = { accountId: this.remoteAccountId, blobId, ...meta };
+    return this.session.downloadUrl.replace(/\{(accountId|blobId|name|type)\}/g, (_, key: string) =>
+      encodeURIComponent(values[key]!),
+    );
   }
   async applyChanges(changes: MailChange[]): Promise<void> {
     const escape = (s: string) => s.replace(/~/g, "~0").replace(/\//g, "~1");

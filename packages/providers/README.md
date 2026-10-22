@@ -187,8 +187,8 @@ See [CalDAV RFC 4791](https://www.rfc-editor.org/rfc/rfc4791) and
 
 No configuration or credentials are needed. Forty deterministic mail fixtures include newsletters
 with List-Unsubscribe/one-click headers, receipts, Sam's replies, two cold introductions, recruiters,
-build notifications, a scheduling exchange, three calendar attachments, and explicit DKIM pass/fail
-messages. Categories are represented by message content; the agent remains responsible for classification.
+build notifications, a scheduling exchange, three calendar attachments, a receipt (fixture-11) with a
+PDF and an inline logo image, and explicit DKIM pass/fail messages. Categories are represented by message content; the agent remains responsible for classification.
 There are six deterministic calendar fixtures. Mail/calendar changes have revision cursors.
 
 `MockMailProvider({ fixtures: false, now?, verifier?, resolveEmail? })` starts an empty inbox. `injectEmail(partialEmail)`
@@ -199,8 +199,9 @@ defensive copies. Mock helpers are for tests/development and do not apply policy
 ## On-demand reads (v0.3)
 
 `MailProvider.reader?()` returns a `MailReader` (`search`, `list`, `labels`, `envelopes`, `thread`,
-`body`, `countIds`, `changes`, `findByRfc822`). Collections return `ReadResult<T>`, everything else
-`ReadValue<T>`; both carry `source` and `cost`. Only the mock implements it so far.
+`body`, `countIds`, `changes`, `findByRfc822`, plus the optional `attachment` and `rawGet`).
+Collections return `ReadResult<T>`, everything else `ReadValue<T>`; both carry `source` and `cost`.
+Gmail, Graph, IMAP, JMAP and the mock implement it.
 
 ```ts
 const governor = new QuotaGovernor(); // one per process
@@ -233,8 +234,35 @@ const { value: since } = await reader.changes(null, 50); // starts at "now"; nev
   for `newer_than:` and change-cursor expiry (`MOCK_CHANGE_RETENTION_MS`, 7 days → `expired: true`).
   The mock's `rawQuery` uses the portable syntax.
 
-**Stubbed:** `renderGraphQuery` and `renderImapQuery` throw `NotImplementedError`; Gmail, Graph,
-IMAP and JMAP adapters do not implement `reader()` yet.
+### Attachments and raw GET
+
+`reader.attachment(providerId, { attachmentId?, index?, name? })` downloads one attachment as
+`MailAttachmentData` (`name`, `type`, `size`, `data: Uint8Array`, `inline`, `contentId?`). The
+reference resolves `attachmentId` first (the provider's id, the MIME part, or the `Attachment.id` /
+`blobId` from `body`/`thread`), then `index` (position among non-inline attachments, as `mail_read`
+lists them), then `name` (exact, then case-insensitive). Downloads are capped at
+`MAIL_ATTACHMENT_MAX_BYTES` (25 MiB): the size the provider reports is checked before downloading,
+and the bytes are checked again while reading (`AttachmentTooLargeError`, code
+`ATTACHMENT_TOO_LARGE`, `detail: { size, limit }`). An empty reference throws
+`INVALID_ATTACHMENT_REF`; unknown messages or attachments throw `NOT_FOUND`.
+
+| Provider | Calls | Cost |
+|---|---|---|
+| Gmail | `messages.get(format=full)` for the part manifest (`format=metadata` has no MIME tree; skipped when `body`/`thread`/`attachment` already saw the message, cache of 200 per reader), then `messages.attachments.get` unless the part bytes are inline | 20, or 60 + 20 cold |
+| Graph | `GET /me/messages/{id}/attachments?$select=id,name,contentType,size,isInline` (cached per message), then `/attachments/{aid}/$value`. `referenceAttachment` → `NotDownloadableError` (`NOT_DOWNLOADABLE`, `cloudLink`: host only, or null when v1.0 omits `sourceUrl`). No `contentId` (not in the manifest) | 1–2 requests (+1 for a reference) |
+| IMAP | `UID FETCH (BODYSTRUCTURE)`, then `UID FETCH (BODY.PEEK[<part>])`, decoded locally (base64, quoted-printable). The size check uses the decoded bound of the BODYSTRUCTURE size | 2 commands + SELECT |
+| JMAP | `Email/get` (`attachments` only), then the blob through the session's `downloadUrl` | 2 requests |
+| Mock | fixture bytes | 20 units |
+
+`reader.rawGet(path, query)` backs the `provider_get` tool on Gmail and Graph: one GET relative to
+the API root, re-checked with `isProviderGetAllowed` (scheme/host prefixes, `..`, query strings and
+odd query keys are refused with `PATH_NOT_ALLOWED` / `INVALID_QUERY` before any request). Bodies
+are parsed as JSON (or returned as text) and clipped to `RAW_GET_MAX_BYTES` (256 KiB) by dropping
+trailing items of the largest arrays (`clipJson`); a clipped response sets `truncated` and
+`totalBytes`. Cost: Gmail by method (`gmailRawGetUnits`: e.g. `messages/{id}` 60, or 20 with
+`format=metadata`/`minimal`; unknown methods 5); Graph 1 request. IMAP and JMAP leave `rawGet`
+undefined: IMAP has no REST surface and raw commands cannot be confined to reads, and JMAP is method
+calls rather than paths (`provider_get` has no allowlist for either).
 
 ## Normalization, verification, and integration limits
 

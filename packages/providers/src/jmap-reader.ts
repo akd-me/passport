@@ -1,6 +1,8 @@
 import type {
   Account,
   Email,
+  MailAttachmentData,
+  MailAttachmentRef,
   MailBody,
   MailChanges,
   MailCountOptions,
@@ -18,6 +20,7 @@ import type {
 } from "@passport/types";
 import { decodeCursor, encodeCursor, ProviderError } from "./errors.js";
 import { type JmapEmail, normalizeJmap } from "./jmap.js";
+import { fetchJmapAttachment, type JmapDownload } from "./jmap-reader-attachments.js";
 import {
   JMAP_BODY_PROPERTIES,
   JMAP_ROW_PROPERTIES,
@@ -52,6 +55,12 @@ export interface JmapReaderHost {
     calls: JmapInvocation[],
     policy: { lane?: QuotaLane; signal?: AbortSignal },
   ): Promise<JmapInvocation[]>;
+  /** One governed blob download through the session's `downloadUrl` template. */
+  download(
+    blobId: string,
+    meta: { name: string; type: string },
+    policy: { lane?: QuotaLane; signal?: AbortSignal },
+  ): Promise<Response>;
   governor?: QuotaGovernor;
   verifier?: PassportVerifier;
   now(): Date;
@@ -227,6 +236,25 @@ export class JmapMailReader implements MailReader {
     });
   }
 
+  /** `Email/get` for the attachment manifest, then one blob download (2 requests). */
+  async attachment(
+    providerId: string,
+    attachmentRef: MailAttachmentRef,
+    opts: MailReadOptions = {},
+  ): Promise<ReadValue<MailAttachmentData>> {
+    return this.run(opts, async (send, download) => ({
+      value: await fetchJmapAttachment(
+        send,
+        download,
+        this.host.account().id,
+        providerId,
+        attachmentRef,
+      ),
+    }));
+  }
+
+  // No `rawGet`: JMAP is method calls, not REST paths; `provider_get` has no JMAP allowlist.
+
   async countIds(
     query: string,
     cap: number,
@@ -346,7 +374,7 @@ export class JmapMailReader implements MailReader {
   /** Counts HTTP requests (`graphRequests`, JMAP being Graph-like) and adds `source` / `cost`. */
   private async run<R extends object>(
     opts: MailReadOptions,
-    fn: (send: Send) => Promise<R>,
+    fn: (send: Send, download: JmapDownload) => Promise<R>,
   ): Promise<R & { source: "provider"; cost: ReadCost }> {
     const account = this.host.account();
     if (opts.signal?.aborted) {
@@ -357,10 +385,16 @@ export class JmapMailReader implements MailReader {
       lane: opts.lane ?? "interactive",
       ...(opts.signal ? { signal: opts.signal } : {}),
     };
-    const result = await fn((calls) => {
-      requests++;
-      return this.host.invoke(calls, policy);
-    });
+    const result = await fn(
+      (calls) => {
+        requests++;
+        return this.host.invoke(calls, policy);
+      },
+      (blobId, name, type) => {
+        requests++;
+        return this.host.download(blobId, { name, type }, policy);
+      },
+    );
     return {
       ...result,
       source: "provider",

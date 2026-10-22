@@ -17,6 +17,7 @@ import {
   fixtureEpoch,
   folderNames,
   mockCapabilities,
+  mockFile,
   mockInvite,
 } from "./mock-fixtures.js";
 import { MockMailReader } from "./mock-reader.js";
@@ -76,6 +77,7 @@ export class MockMailProvider implements MailProvider {
       get: (providerId) => this.emails.get(providerId),
       folders: () => this.folderNames,
       log: () => this.changes,
+      blob: (blobId) => this.findBlob(blobId),
       now: () => this.now(),
       verify: async (email) => {
         if (this.options.verifier) {
@@ -242,18 +244,28 @@ export class MockMailProvider implements MailProvider {
   }
   async getBlob(blobId: string): Promise<{ type: string; data: Uint8Array }> {
     this.check();
+    const found = this.findBlob(blobId);
+    if (!found) {
+      throw new ProviderError("NOT_FOUND", "Mock attachment does not exist");
+    }
+    return found;
+  }
+  /** Uploaded blobs, invites and fixture files that some message still references. */
+  private findBlob(blobId: string): { type: string; data: Uint8Array } | undefined {
     const stored = this.blobs.get(blobId);
     if (stored) {
       return clone(stored);
     }
-    const email = this.emails.get(blobId.replace(/^mock-invite:/, ""));
-    if (
-      !blobId.startsWith("mock-invite:") ||
-      !email?.attachments.some((a) => a.blobId === blobId)
-    ) {
-      throw new ProviderError("NOT_FOUND", "Mock attachment does not exist");
+    const invite = blobId.startsWith("mock-invite:");
+    const providerId = invite
+      ? blobId.slice("mock-invite:".length)
+      : (/^mock-file:(.+):[^:]+$/.exec(blobId)?.[1] ?? "");
+    if (!this.emails.get(providerId)?.attachments.some((a) => a.blobId === blobId)) {
+      return undefined;
     }
-    return { type: "text/calendar", data: Buffer.from(mockInvite(email.providerId)) };
+    return invite
+      ? { type: "text/calendar", data: Buffer.from(mockInvite(providerId)) }
+      : mockFile(blobId);
   }
   async applyChanges(changes: MailChange[]): Promise<void> {
     const account = this.check();

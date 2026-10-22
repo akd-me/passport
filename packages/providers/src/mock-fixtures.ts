@@ -183,20 +183,67 @@ export function createMockEmails(accountId: string, owner = "alex@example.com"):
       size: Buffer.byteLength(text) + 500,
       personIds: [],
       verification: parseAuthenticationResults(headers),
-      attachments: invite
-        ? [
-            {
-              id: localId(accountId, "attachment", providerId),
-              name: "invite.ics",
-              type: "text/calendar",
-              size: Buffer.byteLength(mockInvite(providerId)),
-              blobId: `mock-invite:${providerId}`,
-              disposition: "attachment",
-            },
-          ]
-        : [],
+      attachments:
+        index === 10
+          ? receiptAttachments(accountId, providerId)
+          : invite
+            ? [
+                {
+                  id: localId(accountId, "attachment", providerId),
+                  name: "invite.ics",
+                  type: "text/calendar",
+                  size: Buffer.byteLength(mockInvite(providerId)),
+                  blobId: `mock-invite:${providerId}`,
+                  disposition: "attachment",
+                },
+              ]
+            : [],
     };
   });
+}
+
+const PLACEHOLDER_PDF = "%PDF-1.4\n% Passport mock receipt placeholder\n%%EOF\n";
+/** A 1×1 transparent PNG. */
+const PLACEHOLDER_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+/**
+ * Placeholder bytes of fixture files (`mock-file:<providerId>:<name>`): the receipt PDF and the
+ * inline logo of fixture-11. Undefined for other ids.
+ */
+export function mockFile(blobId: string): { type: string; data: Uint8Array } | undefined {
+  const name = /^mock-file:.+:([^:]+)$/.exec(blobId)?.[1];
+  if (name?.endsWith(".pdf")) {
+    return { type: "application/pdf", data: new Uint8Array(Buffer.from(PLACEHOLDER_PDF)) };
+  }
+  if (name?.endsWith(".png")) {
+    return { type: "image/png", data: new Uint8Array(Buffer.from(PLACEHOLDER_PNG, "base64")) };
+  }
+  return undefined;
+}
+
+/** fixture-11 (a receipt): a PDF attachment and an inline logo referenced by Content-ID. */
+function receiptAttachments(accountId: string, providerId: string): Email["attachments"] {
+  const file = (name: string) => `mock-file:${providerId}:${name}`;
+  return [
+    {
+      id: localId(accountId, "attachment", `${providerId}:0`),
+      name: "receipt-2400.pdf",
+      type: "application/pdf",
+      size: Buffer.byteLength(PLACEHOLDER_PDF),
+      blobId: file("receipt-2400.pdf"),
+      disposition: "attachment",
+    },
+    {
+      id: localId(accountId, "attachment", `${providerId}:1`),
+      name: "logo.png",
+      type: "image/png",
+      size: Buffer.from(PLACEHOLDER_PNG, "base64").byteLength,
+      blobId: file("logo.png"),
+      disposition: "inline",
+      cid: "<logo@shop.example>",
+    },
+  ];
 }
 
 export function mockInvite(uid: string): string {

@@ -179,6 +179,7 @@ export class GraphMailProvider extends HttpConnection implements MailProvider {
           return this.account.id;
         },
         json: (url, init, policy) => this.json(url, init, policy),
+        http: (url, init, policy) => this.http(url, init, policy),
         safeLink: (link) => this.safeLink(link, `${graphBase}/`),
         report: (signal) => options.governor?.report(this.account.id, signal),
         snapshot: () => options.governor?.snapshot(this.account.id) ?? {},

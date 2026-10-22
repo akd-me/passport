@@ -1,5 +1,7 @@
 import type {
   Email,
+  MailAttachmentData,
+  MailAttachmentRef,
   MailBody,
   MailChanges,
   MailCountOptions,
@@ -11,13 +13,19 @@ import type {
   MailRow,
   MailSearchInput,
   QuotaLane,
+  RawGetResponse,
   ReadCost,
   ReadResult,
   ReadValue,
 } from "@passport/types";
-import { ProviderError, required } from "./errors.js";
+import { ProviderError } from "./errors.js";
+import {
+  GmailManifestCache,
+  gmailRawGet,
+  readGmailAttachment,
+} from "./gmail-reader-attachments.js";
 import { batchGet } from "./gmail-reader-batch.js";
-import { readHistory } from "./gmail-reader-history.js";
+import { gmailChanges } from "./gmail-reader-history.js";
 import { GmailLabelCache, toMailLabels } from "./gmail-reader-labels.js";
 import {
   type GmailLabel,
@@ -37,9 +45,7 @@ import {
   scopesSpamTrash,
 } from "./gmail-reader-query.js";
 import {
-  decodeChangeCursor,
   decodePageToken,
-  encodeChangeCursor,
   encodePageToken,
   GmailCall,
   type GmailTransport,
@@ -70,6 +76,7 @@ const enc = encodeURIComponent;
 export class GmailMailReader implements MailReader {
   private readonly costs: GmailCostEntry[] = [];
   private readonly labelCache: GmailLabelCache;
+  private readonly manifests = new GmailManifestCache();
   constructor(private readonly transport: GmailTransport) {
     this.labelCache = new GmailLabelCache(() => transport.accountId());
   }
@@ -269,38 +276,7 @@ export class GmailMailReader implements MailReader {
     opts: MailReadOptions = {},
   ): Promise<ReadValue<MailChanges>> {
     const call = this.call(opts);
-    const account = this.transport.accountId();
-    const now = async (): Promise<MailChanges> => ({
-      added: [],
-      labelChanged: [],
-      deleted: [],
-      cursor: encodeChangeCursor(
-        account,
-        required(
-          (await call.get<{ historyId?: string }>("profile", UNITS.getProfile)).historyId,
-          "Gmail historyId",
-        ),
-      ),
-    });
-    if (cursor === null) {
-      // Start at "now": Passport never backfills.
-      return { value: await now(), ...this.finish("changes", call) };
-    }
-    const start = decodeChangeCursor(account, cursor);
-    const max = clampLimit(limit, Number.MAX_SAFE_INTEGER);
-    let changes: Omit<MailChanges, "cursor"> & { next: string };
-    try {
-      changes = await readHistory(call, start, max);
-    } catch (e) {
-      // Gmail keeps about a week of history; 404 means the cursor is too old. Restart at "now".
-
-      if (!isNotFound(e)) {
-        throw e;
-      }
-      return { value: { ...(await now()), expired: true }, ...this.finish("changes", call) };
-    }
-    const { next, ...lists } = changes;
-    const value: MailChanges = { ...lists, cursor: encodeChangeCursor(account, next) };
+    const value = await gmailChanges(call, this.transport.accountId(), cursor, limit);
     return { value, ...this.finish("changes", call) };
   }
 
@@ -323,6 +299,34 @@ export class GmailMailReader implements MailReader {
       matches.length > 1 ? (await lookup(`rfc822msgid:${id} -in:sent`))[0] : undefined;
     const value = (preferred ?? matches[0])?.id ?? null;
     return { value, ...this.finish("findByRfc822", call) };
+  }
+
+  async attachment(
+    providerId: string,
+    attachmentRef: MailAttachmentRef,
+    opts: MailReadOptions = {},
+  ): Promise<ReadValue<MailAttachmentData>> {
+    const call = this.call(opts);
+    const account = this.transport.accountId();
+    const value = await readGmailAttachment(
+      call,
+      this.manifests,
+      account,
+      providerId,
+      attachmentRef,
+    );
+    return { value, ...this.finish("attachment", call) };
+  }
+
+  /** `provider_get`: one allowlisted GET, priced per method (`gmailRawGetUnits`). */
+  async rawGet(
+    path: string,
+    query: Record<string, string>,
+    opts: MailReadOptions = {},
+  ): Promise<ReadValue<RawGetResponse>> {
+    const call = this.call(opts);
+    const value = await gmailRawGet(call, path, query);
+    return { value, ...this.finish("rawGet", call) };
   }
 
   // -------------------------------------------------------------------------
@@ -413,6 +417,7 @@ export class GmailMailReader implements MailReader {
         UNITS.attachmentsGet,
       ),
     );
+    this.manifests.remember(message, this.transport.accountId());
     return this.normalize(message);
   }
 }

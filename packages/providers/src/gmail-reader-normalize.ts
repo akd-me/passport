@@ -1,4 +1,4 @@
-import type { Email, MailboxRole } from "@passport/types";
+import type { Attachment, Email, MailboxRole } from "@passport/types";
 import { encodeCursor, localId, ProviderError } from "./errors.js";
 import {
   generatePreview,
@@ -57,7 +57,8 @@ export const GMAIL_LABEL_ROLES: Readonly<Record<string, MailboxRole>> = {
 export function flattenParts(part?: GmailPart): GmailPart[] {
   return part ? [part, ...(part.parts ?? []).flatMap(flattenParts)] : [];
 }
-function isAttachment(part: GmailPart): boolean {
+/** True for parts `normalizeGmail` lists as attachments (everything but the text bodies). */
+export function isAttachment(part: GmailPart): boolean {
   return Boolean(
     part.filename ||
       part.mimeType === "text/calendar" ||
@@ -155,8 +156,7 @@ export async function normalizeGmail(
     { accountId, providerId: message.id },
   );
   const parts = flattenParts(message.payload);
-  const attachments = parts.filter(isAttachment);
-  const texts = parts.filter((p) => !attachments.includes(p));
+  const texts = parts.filter((p) => !isAttachment(p));
   const html =
     texts
       .filter((p) => p.mimeType === "text/html")
@@ -185,22 +185,38 @@ export async function normalizeGmail(
     preview: generatePreview(text || htmlToText(message.snippet ?? "")),
     textBody: text,
     htmlBody: html,
-    attachments: attachments.map((p, i) => ({
-      id: localId(accountId, "attachment", `${message.id}:${p.partId ?? i}`),
-      name: p.filename || (p.mimeType === "text/calendar" ? "invite.ics" : "attachment"),
-      type: p.mimeType ?? "application/octet-stream",
-      size: p.body?.size ?? 0,
-      blobId: `gmail:${encodeCursor([message.id, p.body?.attachmentId ?? null, p.partId ?? "", p.mimeType ?? "application/octet-stream"])}`,
-      disposition: p.headers?.some(
-        (h) => h.name.toLowerCase() === "content-disposition" && /^inline/i.test(h.value),
-      )
-        ? "inline"
-        : "attachment",
-      cid: p.headers?.find((h) => h.name.toLowerCase() === "content-id")?.value ?? null,
-    })),
+    attachments: gmailAttachments(message, accountId).map((entry) => entry.attachment),
     headers,
     size: message.sizeEstimate ?? 0,
     verification: await verifyHeaders(headers, verifier),
     personIds: [],
   };
+}
+
+/**
+ * The attachment manifest of a `format=full` message, in MIME order, each with the part it came
+ * from. `normalizeGmail` lists exactly these; `GmailMailReader.attachment` downloads them.
+ */
+export function gmailAttachments(
+  message: GmailMessage,
+  accountId: string,
+): Array<{ attachment: Attachment; part: GmailPart }> {
+  return flattenParts(message.payload)
+    .filter(isAttachment)
+    .map((p, i) => ({
+      part: p,
+      attachment: {
+        id: localId(accountId, "attachment", `${message.id}:${p.partId ?? i}`),
+        name: p.filename || (p.mimeType === "text/calendar" ? "invite.ics" : "attachment"),
+        type: p.mimeType ?? "application/octet-stream",
+        size: p.body?.size ?? 0,
+        blobId: `gmail:${encodeCursor([message.id, p.body?.attachmentId ?? null, p.partId ?? "", p.mimeType ?? "application/octet-stream"])}`,
+        disposition: p.headers?.some(
+          (h) => h.name.toLowerCase() === "content-disposition" && /^inline/i.test(h.value),
+        )
+          ? "inline"
+          : "attachment",
+        cid: p.headers?.find((h) => h.name.toLowerCase() === "content-id")?.value ?? null,
+      },
+    }));
 }
