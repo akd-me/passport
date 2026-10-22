@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { HOST_AGENT_DEFAULT_MODELS } from "@passport/agent";
 import type { Account, LlmConfig, LlmSelection } from "@passport/types";
 import { ApiError } from "./errors.js";
@@ -21,6 +21,11 @@ export interface PassportConfig {
    * falling back to `llm`; `explicit` uses `llm` as chosen. See llm-selection.ts.
    */
   llmSelection?: LlmSelection;
+  /**
+   * Absolute paths to host CLIs outside the discovered locations (Settings → Model).
+   * `PASSPORT_CLAUDE_PATH` / `PASSPORT_CODEX_PATH` take precedence.
+   */
+  hostAgents?: { claudePath?: string; codexPath?: string };
   accounts: Account[];
 }
 
@@ -105,7 +110,23 @@ export function validateConfig(config: PassportConfig): PassportConfig {
   ) {
     throw new ApiError("INVALID_CONFIG", "llmSelection must be auto or explicit");
   }
+  validateHostAgentPaths(config.hostAgents);
   return config;
+}
+
+function validateHostAgentPaths(hostAgents: unknown): void {
+  if (hostAgents === undefined) {
+    return;
+  }
+  if (typeof hostAgents !== "object" || hostAgents === null || Array.isArray(hostAgents)) {
+    throw new ApiError("INVALID_CONFIG", "hostAgents must be an object");
+  }
+  for (const key of ["claudePath", "codexPath"] as const) {
+    const value = (hostAgents as Record<string, unknown>)[key];
+    if (value !== undefined && (typeof value !== "string" || !isAbsolute(value))) {
+      throw new ApiError("INVALID_CONFIG", `hostAgents.${key} must be an absolute path`);
+    }
+  }
 }
 
 export function llmConfigured(llm: LlmConfig): boolean {

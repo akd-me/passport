@@ -12,6 +12,7 @@ import {
 } from "./doctor-host-agents.js";
 import { resolveLlmSelection } from "./llm-selection.js";
 import { logger } from "./logger.js";
+import { prepareHostEnvironment } from "./shell-env.js";
 
 export interface DoctorCheck {
   name: string;
@@ -290,6 +291,7 @@ export async function doctorCommand(demo = false): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  await prepareHostEnvironment(config, "doctor");
   if (!demo) {
     const checks: DoctorCheck[] = [];
     try {

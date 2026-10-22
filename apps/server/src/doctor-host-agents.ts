@@ -5,14 +5,21 @@ import { isHostAgentProvider, llmConfigured, type PassportConfig } from "./confi
 import type { DoctorCheck } from "./doctor.js";
 import { hostAgents } from "./llm-selection.js";
 import { logger } from "./logger.js";
+import { type PathState, pathState } from "./shell-env.js";
 
 export interface HostAgentDoctorOptions {
   hostAgents?: () => Promise<HostAgentStatus[]>;
+  /** Where PATH came from; defaults to this process. */
+  pathState?: () => PathState;
   /** Replaces the live test completion for a selected host agent. */
   pingHostAgent?: (config: PassportConfig) => Promise<void>;
 }
 
-/** One row per host CLI, with the fix (`codex login`, install link) when it is not usable. */
+/**
+ * "PATH source" (login shell, launchctl, fallback, inherited or prepared by the app), then one
+ * row per host CLI with its resolved binary and the fix (`codex login`, install link) when it is
+ * not usable.
+ */
 export async function hostAgentChecks(
   config: PassportConfig,
   options: HostAgentDoctorOptions = {},
@@ -23,24 +30,42 @@ export async function hostAgentChecks(
     return [];
   });
   const anyAgent = statuses.some((status) => status.ready) || llmConfigured(config.llm);
-  return statuses.map((status): DoctorCheck => {
+  const path = (options.pathState ?? pathState)();
+  const source: DoctorCheck = {
+    name: "PATH source",
+    status: path.source === "fallback" && !anyAgent ? "warning" : "ok",
+    detail: `${path.label}, ${path.entries} entries${
+      path.source === "fallback" && !anyAgent
+        ? ". Set the binary path under Settings → Model if a CLI is installed."
+        : ""
+    }`,
+  };
+  const agents = statuses.map((status): DoctorCheck => {
     const selected = config.llm.provider === status.kind;
     if (status.ready) {
       return {
         name: status.label,
         status: "ok",
-        detail: [status.version, status.account && `${status.account} login`, selected && "in use"]
+        detail: [
+          status.version,
+          status.account && `${status.account} login`,
+          selected && "in use",
+          status.binaryPath,
+        ]
           .filter(Boolean)
           .join(" · "),
       };
     }
-    const state = status.installed ? "Not logged in." : "Not installed.";
+    const state = status.installed
+      ? `Not logged in${status.binaryPath ? ` (${status.binaryPath})` : ""}.`
+      : "Not installed.";
     return {
       name: status.label,
       status: selected ? "error" : anyAgent ? "ok" : "warning",
       detail: `${state}${!selected && anyAgent ? " (optional)" : ""} ${status.fix ?? ""}`.trim(),
     };
   });
+  return [source, ...agents];
 }
 
 /** A one-word completion through the selected host agent's fast model. */

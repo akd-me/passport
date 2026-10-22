@@ -8,6 +8,7 @@ import { installAgentRoutes } from "./agent-routes.js";
 import { getAuth, installAuth, type PassportAuth } from "./auth.js";
 import type { Backend } from "./backend.js";
 import { ApiError } from "./errors.js";
+import { installHostAgentRoutes } from "./host-agent-routes.js";
 import { installLlmRoutes } from "./llm-routes.js";
 import { logger } from "./logger.js";
 import { installMailRoutes } from "./mail-routes.js";
@@ -50,6 +51,7 @@ export function createApp(
   registerOnboarding(app, backend);
   registerSetup(app, backend);
   installLlmRoutes(app, backend);
+  installHostAgentRoutes(app, backend);
   app.get("/api/health", (c) => c.json({ ok: true, mode: backend.mode }));
   installActionsRoutes(app, backend);
 

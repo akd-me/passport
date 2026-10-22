@@ -341,25 +341,39 @@ describe("host agent doctor checks", () => {
       ...defaultConfig(await dataDir()),
       llm: { provider: "codex" as const, model: "gpt-6.1-sol" },
     };
+    const shell = () => ({
+      source: "login-shell" as const,
+      label: "login shell (zsh)",
+      entries: 9,
+    });
     const rows = await hostAgentChecks(config, {
       hostAgents: async () => [status("codex", true), status("claude-code", false, false)],
+      pathState: shell,
     });
     expect(rows).toEqual([
-      { name: "Codex", status: "ok", detail: "1.0.0 · ChatGPT login · in use" },
+      { name: "PATH source", status: "ok", detail: "login shell (zsh), 9 entries" },
+      { name: "Codex", status: "ok", detail: "1.0.0 · ChatGPT login · in use · /bin/codex" },
       { name: "Claude Code", status: "ok", detail: "Not installed. (optional) Install it" },
     ]);
     const missing = await hostAgentChecks(config, {
       hostAgents: async () => [status("codex", false), status("claude-code", false, false)],
+      pathState: shell,
     });
-    expect(missing[0]).toMatchObject({
+    expect(missing[1]).toMatchObject({
       name: "Codex",
       status: "error",
-      detail: expect.stringContaining("codex login"),
+      detail: "Not logged in (/bin/codex). Run `codex login`",
     });
     const unused = await hostAgentChecks(defaultConfig(await dataDir()), {
       hostAgents: async () => [status("codex", false), status("claude-code", false, false)],
+      pathState: () => ({
+        source: "fallback",
+        label: "fallback (inherited PATH only)",
+        entries: 4,
+      }),
     });
-    expect(unused.map((row) => row.status)).toEqual(["warning", "warning"]);
+    expect(unused.map((row) => row.status)).toEqual(["warning", "warning", "warning"]);
+    expect(unused[0]!.detail).toContain("Settings → Model");
 
     expect(await pingHostAgent(config, { pingHostAgent: async () => {} })).toMatchObject({
       name: "LLM",
@@ -402,7 +416,7 @@ describe("host agent doctor checks", () => {
       expect(report.checks).toContainEqual({
         name: "Claude Code",
         status: "ok",
-        detail: "1.0.0 · claude.ai (max) login · in use",
+        detail: "1.0.0 · claude.ai (max) login · in use · /bin/claude-code",
       });
       expect(report.checks).toContainEqual(expect.objectContaining({ name: "LLM", status: "ok" }));
     } finally {

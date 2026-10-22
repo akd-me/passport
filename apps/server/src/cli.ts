@@ -20,6 +20,7 @@ import { initializePassport } from "./onboarding/init.js";
 import { acquireOwner, activeOwner } from "./owner-lock.js";
 import { runJobsCommand } from "./schedulers/cli.js";
 import { startServer } from "./server.js";
+import { prepareHostEnvironment } from "./shell-env.js";
 
 /** Exported for CLI tests; importing the package never starts a listener. */
 export async function main(args = process.argv.slice(2)): Promise<void> {
@@ -59,6 +60,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     throw new ApiError("INVALID_COMMAND", "Unknown command. Run passport --help.");
   }
   const config = await loadConfig();
+  await prepareHostEnvironment(config, command);
   if (command === "token") {
     console.log(apiToken(config.dataDir, { rotate: args.includes("--rotate") }));
     return;

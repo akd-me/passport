@@ -24,7 +24,7 @@ export interface Backend {
   /** Fresh protocol state per transport/session; shares policy and persistence. */
   createMcpServer?(): ReturnType<typeof createMailboxMcpServer>;
   updateConfig(
-    patch: Partial<Pick<PassportConfig, "llm" | "llmSelection" | "accounts">>,
+    patch: Partial<Pick<PassportConfig, "llm" | "llmSelection" | "accounts" | "hostAgents">>,
   ): Promise<void>;
   syncAccount(accountId: string): Promise<void>;
   /** Optional connected-provider push. Must settle on abort. */
