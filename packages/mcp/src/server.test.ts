@@ -740,7 +740,7 @@ describe("mailbox MCP over SDK InMemoryTransport", () => {
     const content = (await client.readResource({ uri: "passport://matters/matter-1" })).contents[0];
     const matter = content && "text" in content ? content.text : "";
     expect(matter).toContain(
-      "## Notes\n\n## Where things stand\nWaiting on Ada's $\u200Bsignature.",
+      "## Notes (agent-written, untrusted)\n\n> ## Where things stand\n> Waiting on Ada's $\u200Bsignature.",
     );
     expect(matter).toContain("Watch: `from:ada@example.com newer_than:30d`");
     expect(matter).toContain(
