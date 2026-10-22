@@ -1,6 +1,6 @@
 import type { ActionRecord, Matter, Page } from "@passport/types";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useAccountId, useAccountScopeLink } from "../accounts/AccountFilter";
 import { queryString } from "../api";
 import { Empty, Feedback, Kbd, Loading } from "../components/ui";
@@ -10,20 +10,25 @@ import { useResource } from "../state";
 import { DecisionCard, HandledToday, OutboxStrip } from "./DecisionCard";
 import { draftOf, type Grouping, groupProposals, useQueueKeys } from "./decision-model";
 import { ProposalDetails } from "./ProposalDetails";
+import { TasksNeedingYou } from "./TasksNeedingYou";
 import { PromotionPrompts } from "./Trust";
 
 export { DecisionCard, UndoButton } from "./DecisionCard";
 export { groupProposals } from "./decision-model";
 
-/** The home surface: everything the agent needs a decision on, plus the composer. */
+/**
+ * "Needs you": tasks waiting on the person, then every open proposal across tasks (the v0.2
+ * queue), plus the composer.
+ */
 export function WorkQueue() {
   const accountId = useAccountId(),
     scope = useAccountScopeLink();
   const decisions = useResource<Page<ActionRecord>>(`/decisions${queryString({ accountId })}`),
     matters = useResource<Matter[]>(`/matters${queryString({ accountId })}`);
-  const [selected, setSelected] = useState<string>(),
-    [grouping, setGrouping] = useState<Grouping>("matter"),
-    [fresh, setFresh] = useState<string[]>([]);
+  const [params] = useSearchParams(),
+    deepLink = params.get("decision") ?? undefined;
+  const [selected, setSelected] = useState<string | undefined>(deepLink),
+    [grouping, setGrouping] = useState<Grouping>("matter");
   const items = decisions.data?.items ?? [],
     proposed = items.filter((a) => a.status === "proposed"),
     held = items.filter((a) => a.status === "held");
@@ -37,6 +42,14 @@ export function WorkQueue() {
   );
   const ordered = useMemo(() => groups.flatMap(([, list]) => list), [groups]);
   useEffect(() => {
+    if (deepLink && ordered.some((a) => a.id === deepLink)) {
+      setSelected(deepLink);
+      document
+        .querySelector(`[data-decision="${CSS.escape(deepLink)}"]`)
+        ?.scrollIntoView?.({ block: "center" });
+    }
+  }, [deepLink, ordered]);
+  useEffect(() => {
     if (!ordered.some((a) => a.id === selected)) {
       setSelected(ordered[0]?.id);
     }
@@ -46,7 +59,7 @@ export function WorkQueue() {
   const matterTitle = (id: string) => matters.data?.find((m) => m.id === id)?.title ?? "Matter";
   return (
     <Surface
-      title="Queue"
+      title="Needs you"
       details={<ProposalDetails action={current} />}
       detailsLabel="Proposal context"
       composer={
@@ -62,12 +75,6 @@ export function WorkQueue() {
                   }
                 : undefined
             }
-            onRun={(run) => {
-              setFresh(run.actionIds);
-              if (run.actionIds[0]) {
-                setSelected(run.actionIds[0]);
-              }
-            }}
           />
         </>
       }
@@ -78,7 +85,7 @@ export function WorkQueue() {
             ? proposed.length
               ? `${proposed.length} ${proposed.length === 1 ? "proposal needs" : "proposals need"} you`
               : "Nothing needs you"
-            : "Queue"}
+            : "Needs you"}
         </h1>
         {proposed.length > 1 && (
           <div className="segmented small" role="radiogroup" aria-label="Group proposals">
@@ -96,6 +103,7 @@ export function WorkQueue() {
           </div>
         )}
       </div>
+      <TasksNeedingYou />
       <Feedback error={decisions.error} />
       {decisions.loading && !decisions.data ? (
         <Loading />
@@ -137,7 +145,6 @@ export function WorkQueue() {
                   key={action.id}
                   action={action}
                   selected={selected === action.id}
-                  fresh={fresh.includes(action.id)}
                   onSelect={() => setSelected(action.id)}
                 />
               ))}

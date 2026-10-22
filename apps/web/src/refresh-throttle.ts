@@ -22,6 +22,10 @@ export const REFRESH_SPACING_MS: Readonly<Record<string, number>> = {
   "account.synced": 5_000,
   "email.received": 1_000,
   "email.updated": 2_000,
+  // Task events are applied directly from the frame; the refetch only catches up the rest.
+  "task.updated": 5_000,
+  "task.run.updated": 5_000,
+  "task.item.appended": 15_000,
 };
 
 /** A tick that found nothing changes nothing on screen. */

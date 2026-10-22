@@ -202,8 +202,7 @@ export function MatterPage() {
     { data, error } = useResource<MatterDetail>(`/matters/${encodeURIComponent(id!)}`),
     decisions = useResource<Page<ActionRecord>>("/decisions"),
     task = useTask(),
-    [selected, setSelected] = useState<string>(),
-    [fresh, setFresh] = useState<string[]>([]);
+    [selected, setSelected] = useState<string>();
   const timeline = useMemo<TimelineItem[]>(
     () =>
       data
@@ -286,13 +285,7 @@ export function MatterPage() {
           ))}
         </select>
       }
-      composer={
-        <Composer
-          matterId={data.matter.id}
-          matterTitle={data.matter.title}
-          onRun={(run) => setFresh(run.actionIds)}
-        />
-      }
+      composer={<Composer matterId={data.matter.id} matterTitle={data.matter.title} />}
     >
       <header className="matter-head">
         <h1>{data.matter.title}</h1>
@@ -317,7 +310,6 @@ export function MatterPage() {
               key={a.id}
               action={a}
               selected={current === a.id}
-              fresh={fresh.includes(a.id)}
               onSelect={() => setSelected(a.id)}
             />
           ))}

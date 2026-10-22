@@ -7,12 +7,17 @@ import { Icon, Kbd, mod } from "../components/ui";
 import { logger } from "../logger";
 import { settingsSections } from "../settings/SettingsDialog";
 import { useResource, useWorkspace } from "../state";
+import { taskApi } from "../tasks/api";
+import { byActivity } from "../tasks/model";
+import { useTasks } from "../tasks/store";
+import { statusLabel } from "../tasks/TaskDetails";
 import { useUi } from "../ui-state";
+import { needText } from "../views/TasksNeedingYou";
 import { modes } from "../views/Trust";
 
 export interface Command {
   id: string;
-  group: "Actions" | "Go to" | "Matters" | "People" | "Settings";
+  group: "Actions" | "Go to" | "Tasks" | "Matters" | "People" | "Settings";
   label: string;
   hint?: string;
   icon: string;
@@ -45,7 +50,8 @@ export function filterCommands(commands: Command[], query: string): Command[] {
 function useCommands(close: () => void): Command[] {
   const navigate = useNavigate(),
     ui = useUi(),
-    { notify } = useWorkspace();
+    { notify } = useWorkspace(),
+    tasks = useTasks();
   const matters = useResource<Matter[]>("/matters"),
     people = useResource<Person[]>("/people?limit=200");
   return useMemo(() => {
@@ -87,19 +93,15 @@ function useCommands(close: () => void): Command[] {
         icon: "agent",
         keywords: "run agent next steps",
         run: act(() => {
-          notify("Reviewing your active matters…");
-          api
-            .runAgent()
-            .then((run) =>
-              notify(
-                run.actionIds.length
-                  ? `Review done: ${run.actionIds.length} actions.`
-                  : "Review done. Nothing new needs you.",
-              ),
-            )
+          taskApi
+            .create({ message: "Review my active matters and propose the next step for each." })
+            .then(({ task, run }) => {
+              tasks.upsert(task);
+              tasks.trackRuns([run]);
+              navigate(`/tasks/${encodeURIComponent(task.id)}`);
+            })
             .catch((e: Error) => {
-              // Agent review command failed.
-              logger.warn("Agent review command failed");
+              logger.warn("Matter review task could not start");
               return notify(e.message);
             });
         }),
@@ -123,12 +125,28 @@ function useCommands(close: () => void): Command[] {
         }),
       })),
       {
-        id: "queue",
+        id: "new-task",
         group: "Go to",
-        label: "Queue",
-        icon: "queue",
-        keywords: "decisions home inbox",
+        label: "New task",
+        icon: "plus",
+        keywords: "home start ask",
         run: go("/"),
+      },
+      {
+        id: "needs-you",
+        group: "Go to",
+        label: "Needs you",
+        icon: "queue",
+        keywords: "queue decisions approvals proposals inbox",
+        run: go("/needs-you"),
+      },
+      {
+        id: "tasks",
+        group: "Go to",
+        label: "All tasks",
+        icon: "sparkle",
+        keywords: "pinned working snoozed settled archived",
+        run: go("/tasks"),
       },
       {
         id: "activity",
@@ -196,6 +214,18 @@ function useCommands(close: () => void): Command[] {
         shortcut: `${mod}.`,
         run: act(ui.toggleDetails),
       },
+      ...[...tasks.tasks]
+        .filter((t) => t.status !== "archived")
+        .sort(byActivity)
+        .map((t) => ({
+          id: `task-${t.id}`,
+          group: "Tasks" as const,
+          label: t.title,
+          hint: needText(t) || statusLabel(t),
+          icon: t.kind === "routine" ? "routine" : t.kind === "inbox" ? "mail" : "sparkle",
+          keywords: `task ${t.status} ${t.kind}`,
+          run: go(`/tasks/${encodeURIComponent(t.id)}`),
+        })),
       ...(matters.data ?? []).map((m) => ({
         id: `matter-${m.id}`,
         group: "Matters" as const,
@@ -216,10 +246,17 @@ function useCommands(close: () => void): Command[] {
       })),
     ];
     return list;
-  }, [matters.data, people.data, close, navigate, ui, notify]);
+  }, [matters.data, people.data, tasks, close, navigate, ui, notify]);
 }
 
-const groupOrder: Command["group"][] = ["Actions", "Go to", "Matters", "People", "Settings"];
+const groupOrder: Command["group"][] = [
+  "Actions",
+  "Go to",
+  "Tasks",
+  "Matters",
+  "People",
+  "Settings",
+];
 
 export function CommandPalette() {
   const { palette, setPalette } = useUi();
@@ -240,7 +277,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       : groupOrder.flatMap((g) =>
           filtered
             .filter((c) => c.group === g)
-            .slice(0, g === "People" || g === "Matters" ? 5 : 20),
+            .slice(0, g === "People" || g === "Matters" ? 5 : g === "Tasks" ? 8 : 20),
         );
   }, [commands, query]);
   const current = Math.min(active, Math.max(0, results.length - 1));
@@ -260,8 +297,8 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           aria-controls="palette-list"
           aria-autocomplete="list"
           aria-activedescendant={results[current] ? `cmd-${results[current].id}` : undefined}
-          aria-label="Search commands, matters and people"
-          placeholder="Search commands, matters and people"
+          aria-label="Search commands, tasks, matters and people"
+          placeholder="Search tasks, commands, matters and people"
           value={query}
           autoFocus
           onChange={(e) => {
