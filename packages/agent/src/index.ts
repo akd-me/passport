@@ -58,4 +58,6 @@ export type {
 } from "./llm/types.js";
 export type { DraftSettings } from "./profile.js";
 export { DEFAULT_USER_PROFILE, getUserProfile, setUserProfile } from "./profile.js";
+export type { ReadUsage } from "./reads.js";
+export { RUN_READ_BUDGET } from "./reads.js";
 export { createAgentRuntime } from "./runtime.js";

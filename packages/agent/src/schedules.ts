@@ -1,6 +1,6 @@
-import type { PolicyEngine, TrustState } from "@passport/types";
+import type { Email, PolicyEngine, TrustState } from "@passport/types";
 import type { RunContext } from "./context.js";
-import { allActions, allEmails } from "./data.js";
+import { allActions } from "./data.js";
 import { pendingDecisions } from "./decisions.js";
 import { AgentError } from "./errors.js";
 import type { AgentDecision } from "./integration.js";
@@ -97,19 +97,21 @@ export async function dailyDigest(ctx: RunContext, policy: PolicyEngine): Promis
   );
 }
 
+/** Referenced emails fetched per matter review: the newest ids the matter lists. */
+export const MATTER_REVIEW_EMAILS = 20;
+
 export async function reviewMatters(ctx: RunContext, days: number): Promise<void> {
   const cutoff = Date.parse(ctx.now()) - days * 86_400_000;
   let reviewed = 0;
   for (const matter of await ctx.store.matters.list({ status: ["active"] })) {
-    const emails = await allEmails(ctx.store, { matterId: matter.id });
-    for (const id of matter.emailIds) {
-      if (!emails.some((email) => email.id === id)) {
-        const email = await ctx.store.emails.get(id);
-        if (email) {
-          emails.push(email);
-        }
-      }
-    }
+    // Only the matter's own references, newest last in `emailIds`; never a store scan by matter.
+    const emails = (
+      await Promise.all(
+        [...new Set(matter.emailIds)]
+          .slice(-MATTER_REVIEW_EMAILS)
+          .map((id) => ctx.store.emails.get(id)),
+      )
+    ).filter((email): email is Email => email !== null);
     const events = await ctx.store.events.query({ matterId: matter.id });
     const activity = [
       matter.updatedAt,

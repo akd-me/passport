@@ -95,9 +95,12 @@ redacted. Live tests in `src/host/host.live.test.ts` skip when a CLI is absent o
 
 ## How triage decides
 
-1. Read the stored email, including available bodies. Resolve from/to/cc case-insensitively.
+1. Read the email through `store.emails.get(id, { includeBodies: true })`; an envelope without
+   bodies gets one reader `body` call, or is triaged from its subject and preview. Resolve from/to/cc case-insensitively.
    Infer `self` from configured addresses or human-verified self contacts, `service` from List-Id/no-reply/bulk headers, and
    `known` from any prior sent mail or at least two **prior** received emails; otherwise `stranger`.
+   With a reader (see "On-demand readers" below) that evidence is two capped provider counts; the rest of
+   this step describes the reader-less fallback, which scans only the newest 200 stored emails and executed actions.
    Sent evidence requires a sent-role mailbox, explicit provider sent provenance, or an
    executed send action; From headers alone never prove outbound contact. Drafts and
    later messages are excluded from history. Provider tombstones remain available as prior-contact
@@ -115,8 +118,9 @@ redacted. Live tests in `src/host/host.live.test.ts` skip when a CLI is absent o
    calendar parts/ICS/invite subjects as scheduling, and service senders as notifications.
    A model cannot turn an unestablished contact into
    `replies_known`, even if their identity is blue.
-3. Collect matter candidates from the current/thread mail, persisted people, and quoted FTS
-   subject tokens. The main model picks a supplied ID or proposes a new matter. Receipts
+3. Collect up to 12 matter candidates: the email's matter, open matters referencing the thread or
+   (with a reader) recent mail with the sender (`with:<addr> newer_than:90d`), the people's matters,
+   and matters whose title or summary shares a subject word. There is no FTS query over bodies. The main model picks a supplied ID or proposes a new matter. Receipts
    use `Purchases/<sender name or domain>`. Unknown model-supplied matter IDs are rejected.
 4. For any category in `alwaysAsk`, record only a proposal/attention item explaining the
    approval requirement; never label, archive, or mark read automatically. Otherwise submit the playbook: newsletters → label `Newsletters`, archive; receipts → label `Receipts`,
@@ -173,16 +177,36 @@ batched calls. Recoverable input errors return to the model; dependency/LLM fail
 persist the failed run before throwing. `run()` returns an `AgentRunResult` with
 `toolBudget: {callsMade,llmCalls,inputTokens,outputTokens,totalTokens}`, also persisted
 with the run. Triage calls count in that budget too. Token counts use reported usage.
-Sends use the policy-controlled outbox. Runs on one runtime instance are serialized;
-the composition root still owns event deduplication and cross-runtime coordination.
+Sends use the policy-controlled outbox. Runs on one runtime instance are serialized through one
+queue with two priorities: `run(trigger, { priority })` takes `"interactive"` (default for manual
+triggers) or `"background"` (default for arrivals and schedules). Interactive runs start before any
+queued background run but never preempt the run in progress; `queued()` reports waiting runs.
+The composition root still owns event deduplication and cross-runtime coordination.
 
 `daily_digest` writes UTC `digest:YYYY-MM-DD` Markdown covering completed/failed work, pending
 actions/outbox items, attention summaries, matters updated that day, and observed trust/verification
 changes. It uses journaled run data and trust snapshots, not an invented LLM narrative. Trust changes
 before the first recorded snapshot cannot be reconstructed from this Store contract.
 `matter_review` checks active matters against the configurable inactivity threshold, considering
-mail/event activity, and submits evidence-based summary/nextStep/status updates through policy.
+event activity and the newest 20 emails the matter references (fetched by id, never a store scan), and submits evidence-based summary/nextStep/status updates through policy.
 `outbox` delegates due-release processing to `executor.releaseDue`.
+
+## On-demand readers (v0.3)
+
+Pass `readers: MailReaderResolver` to `createAgentRuntime` to read through the provider instead of a
+local mirror. Each run resolves an account's reader at most once and spends at most 12 reader calls
+(`RUN_READ_BUDGET`) in the run's quota lane (`interactive` for interactive runs, `arrivals` for
+triage, `background` otherwise). Reads that fail or exceed the budget degrade to cached or local data;
+`toolBudget.reads` reports calls, failures, skips and provider units.
+
+- **People.** `known` evidence is `countIds("in:sent (to:x OR cc:x OR bcc:x)", 1)` and
+  `countIds("from:x", 3)` over all of the person's addresses, stored in `stats` with
+  `statsRefreshedAt` on the person row. Counts that establish the relationship are reused for seven
+  days (`PERSON_STATS_MAX_AGE_MS`); weaker counts are recounted on every arrival, since one more
+  message can promote a stranger. `resolvePeople({ refreshStats: true })` forces a recount. Nothing
+  scans the store. Unchanged person rows are not resubmitted as `person_update`.
+- **Replies.** Thread context is one `thread(threadProviderId, { format: "text" })` call, falling
+  back to stored thread rows.
 
 ## Integrator requirements: frozen contract adaptations
 

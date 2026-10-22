@@ -134,6 +134,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.25.0
         version: 1.32.1(zod@4.6.7)
+      '@passport/providers':
+        specifier: workspace:*
+        version: link:../providers
       typescript:
         specifier: ^5.8.0
         version: 5.9.3

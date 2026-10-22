@@ -3,9 +3,12 @@ import type {
   ActionExecutor,
   ActionRecord,
   AgentRun,
+  AgentRunOptions,
   EventBus,
   LlmConfig,
+  MailReaderResolver,
   PolicyEngine,
+  QuotaLane,
   Store,
 } from "@passport/types";
 import type { AgentDecision, DailyDigest } from "./integration.js";
@@ -17,6 +20,7 @@ import type {
   LlmUsage,
 } from "./llm/types.js";
 import type { DraftSettings } from "./profile.js";
+import type { ReadUsage, RunReads } from "./reads.js";
 
 export interface AgentRuntimeOptions {
   log?: (message: string) => void;
@@ -36,6 +40,11 @@ export interface AgentRuntimeOptions {
   triageStep?: <T>(step: string, task: () => Promise<T>) => Promise<T>;
   /** A host may supply a stable identity for retries of the same durable trigger. */
   runId?: (trigger: import("@passport/types").AgentTrigger) => string | undefined;
+  /**
+   * On-demand readers (v0.3). When an account resolves to a reader, people evidence, matter
+   * candidates and reply threads come from the provider instead of local mirror scans.
+   */
+  readers?: MailReaderResolver;
 }
 
 export interface RunContext {
@@ -54,6 +63,10 @@ export interface RunContext {
   now: () => string;
   freeBusy?: import("@passport/tools").FreeBusyResolver;
   triageStep?: AgentRuntimeOptions["triageStep"];
+  /** Quota lane for this run's provider reads (interactive runs use `"interactive"`). */
+  lane: QuotaLane;
+  /** Metered provider reads, shared across the run's steps. */
+  reads: RunReads;
   complete: (opts: CompleteOptions) => Promise<LlmCompletion>;
   structured: (
     schema: JsonSchema,
@@ -72,8 +85,16 @@ export interface AgentRunResult extends AgentRun {
     inputTokens: number;
     outputTokens: number;
     totalTokens: number;
+    /** Provider reads through the injected `readers`; absent when none were attempted. */
+    reads?: ReadUsage;
   };
 }
 export interface RegistryAgentRuntime extends Omit<import("@passport/types").AgentRuntime, "run"> {
-  run(trigger: import("@passport/types").AgentTrigger): Promise<AgentRunResult>;
+  /** Queue a run. Manual triggers default to `"interactive"` priority, everything else `"background"`. */
+  run(
+    trigger: import("@passport/types").AgentTrigger,
+    options?: AgentRunOptions,
+  ): Promise<AgentRunResult>;
+  /** Runs waiting to start, by priority (the run in progress is not counted). */
+  queued(): Record<import("@passport/types").AgentRunPriority, number>;
 }
