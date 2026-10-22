@@ -10,6 +10,8 @@ import {
   closeSetupBrowser,
   detectSetupBrowser,
   NO_BROWSER_MESSAGE,
+  NO_NPX_MESSAGE,
+  npxAvailable,
   prepareBrowserMcp,
 } from "./browser.js";
 import { DECLINED, SetupMcpListener, type SetupToolHost } from "./mcp.js";
@@ -75,6 +77,7 @@ export class SetupTaskRunner {
   constructor(private readonly options: SetupRunnerOptions) {
     this.browser = {
       detect: () => detectSetupBrowser(),
+      npx: () => npxAvailable(),
       prepare: (signal) => prepareBrowserMcp({ signal }),
       server: browserMcpServer,
       close: closeSetupBrowser,
@@ -291,6 +294,9 @@ export class SetupTaskRunner {
       const browser = this.browser.detect();
       if (!browser) {
         return state.fail(NO_BROWSER_MESSAGE);
+      }
+      if (this.browser.npx && !this.browser.npx()) {
+        return state.fail(NO_NPX_MESSAGE);
       }
       state.step("prepare", "running", "Preparing the browser");
       try {
