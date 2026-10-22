@@ -2,7 +2,7 @@
  * Tasks, runs and timeline items (v0.3 wave 2). `IF NOT EXISTS` keeps the migration safe to
  * reorder against other wave-2 migrations merged in parallel.
  */
-export const TASKS_MIGRATION = String.raw`
+export const TASKS_MIGRATION = `
   CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY, data TEXT NOT NULL CHECK(json_valid(data)),
     status TEXT NOT NULL, kind TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0,

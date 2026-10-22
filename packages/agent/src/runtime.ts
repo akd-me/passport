@@ -105,6 +105,8 @@ class PersonalAgentRuntime implements AgentRuntime {
         cancelled(options.signal);
         const response = await this.llm.complete(opts);
         ctx.usages.push(response.usage);
+        // A steer or stop during the call discards its answer.
+        cancelled(options.signal);
         if (!opts.json && response.text.trim()) {
           options.observer?.assistantMessage?.(response.text);
         }
@@ -291,7 +293,7 @@ class PersonalAgentRuntime implements AgentRuntime {
   }
 }
 
-/** Cooperative cancellation for task runs: checked before each model call and tool call. */
+/** Cooperative cancellation for task runs: checked around each model call and before tool calls. */
 function cancelled(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
     throw new AgentError("Run cancelled", "RUN_CANCELLED");

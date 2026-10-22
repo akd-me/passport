@@ -79,6 +79,7 @@ const LABEL: Record<WakeKind, string> = {
 export class TaskWatchMonitor {
   private readonly pending = new Map<string, Pending>();
   private readonly runs = new Set<Promise<unknown>>();
+  private readonly observing = new Set<Promise<unknown>>();
   private closed = false;
 
   constructor(
@@ -115,8 +116,21 @@ export class TaskWatchMonitor {
     }
   }
 
-  /** Fires every pending coalesced wake now (shutdown, tests). */
+  /** The watcher hook: matches in the background; `flush` waits for it. */
+  observeLater(accountId: string, emails: Email[]): void {
+    const job = this.observe(accountId, emails).catch(() => {
+      // Watch matching is best effort per tick; the arrival path is unaffected.
+      logger.warn("Conversation watch matching failed");
+    });
+    this.observing.add(job);
+    void job.finally(() => this.observing.delete(job));
+  }
+
+  /** Fires every pending coalesced wake now (shutdown, tests), after in-flight matching. */
   async flush(): Promise<void> {
+    while (this.observing.size) {
+      await Promise.allSettled([...this.observing]);
+    }
     for (const [key, entry] of [...this.pending]) {
       clearTimeout(entry.timer);
       this.pending.delete(key);

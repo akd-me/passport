@@ -36,12 +36,9 @@ export function createTaskSystem(input: {
   const service = new TaskService(input);
   const triggers = new TaskTriggers(service);
   const watches = new TaskWatchMonitor(service, input.agent, input.coalesceMs);
-  const off = input.watcher?.onAdded((accountId, emails) => {
-    void watches.observe(accountId, emails).catch(() => {
-      // Watch matching is best effort per tick; the arrival path is unaffected.
-      logger.warn("Conversation watch matching failed");
-    });
-  });
+  const off = input.watcher?.onAdded((accountId, emails) =>
+    watches.observeLater(accountId, emails),
+  );
   const recovered = service.recover().catch(() => {
     // Stale runs stay visible as open; the next maintenance pass does not depend on them.
     logger.warn("Task run recovery failed");
