@@ -818,9 +818,11 @@
 .approval-panel .approval-draft {
   font-size: var(--t-xs);
 }
+.quick-decision {
+  align-items: center;
+}
 .quick-decision .loading-note,
 .quick-decision.unavailable {
-  align-items: center;
   font-size: var(--t-xs);
 }
 .timeline-older {
