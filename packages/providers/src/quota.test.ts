@@ -154,8 +154,9 @@ describe("QuotaGovernor", () => {
     const fifth = track(governor.acquire("acc", "interactive", 1));
     await clock.advance(1_000);
     expect(fifth.lease).toBeUndefined();
-    leases[0]!.release();
-    leases[0]!.release(); // idempotent
+    const [first] = leases;
+    first?.release();
+    first?.release(); // idempotent
     await clock.advance(0);
     expect(fifth.lease).toBeDefined();
     const sixth = track(governor.acquire("acc", "interactive", 1));
