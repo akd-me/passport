@@ -61,10 +61,12 @@ const freePort = () =>
     server.on("error", reject);
   });
 
-/** Starts `<app>/Contents/Resources/server/bin/passport.js serve` exactly as the app's supervisor does. */
-export async function smokePackaged(app) {
-  const executable = join(app, "Contents/MacOS/Passport");
-  const versions = probeSqlite(executable);
+/**
+ * Starts `<app>/Contents/Resources/server/bin/passport.js serve` exactly as the app's supervisor
+ * does, then stops it the way the app's Quit does (SIGTERM, pipe still open) or the way a crashed
+ * app does (the pipe closes).
+ */
+async function serveOnce(app, executable, stop) {
   const dataDir = mkdtempSync(join(tmpdir(), "passport-smoke-"));
   const [port, mcpPort] = [await freePort(), await freePort()];
   const child = spawn(
@@ -115,18 +117,29 @@ export async function smokePackaged(app) {
     if (existsSync(join(dataDir, "master.key"))) {
       throw new Error("The packaged server wrote master.key despite a bootstrap key");
     }
-    // The app's liveness pipe: closing stdin is what a crashed main process looks like.
-    child.stdin.end();
-    const code = await Promise.race([exited, new Promise((r) => setTimeout(r, 15_000, "hung"))]);
-    if (code === "hung" || existsSync(join(dataDir, "owner.lock"))) {
-      throw new Error(`The packaged server did not stop cleanly on parent exit:\n${output}`);
+    if (stop === "quit") {
+      child.kill("SIGTERM"); // the supervisor gives it 10 s before SIGKILL
+    } else {
+      child.stdin.end(); // the app's liveness pipe closing: a crashed main process
+    }
+    const code = await Promise.race([exited, new Promise((r) => setTimeout(r, 9_000, "hung"))]);
+    if (code !== 0 || existsSync(join(dataDir, "owner.lock"))) {
+      throw new Error(`The packaged server did not stop cleanly (${stop}: ${code}):\n${output}`);
     }
   } finally {
     child.kill("SIGKILL");
     rmSync(dataDir, { recursive: true, force: true });
   }
+}
+
+export async function smokePackaged(app) {
+  const executable = join(app, "Contents/MacOS/Passport");
+  const versions = probeSqlite(executable);
+  for (const stop of ["quit", "crash"]) {
+    await serveOnce(app, executable, stop);
+  }
   console.log(
-    `ok: packaged ${app}: electron ${versions.electron}, node ${versions.node}, sqlite ${versions.sqlite}; server started, signed in and stopped`,
+    `ok: packaged ${app}: electron ${versions.electron}, node ${versions.node}, sqlite ${versions.sqlite}; server started, signed in, and stopped on quit and on app exit`,
   );
 }
 

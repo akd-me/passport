@@ -48,3 +48,39 @@ it("R3-5/R3-18: a server started by Passport.app stops when the app's pipe close
     await rm(dataDir, { recursive: true, force: true });
   }
 }, 60_000);
+
+it("R3-5: with the app's pipe still open, SIGTERM (Quit) stops the server promptly", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "passport-parent-"));
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith("PASSPORT_")),
+  );
+  const child = spawn(process.execPath, ["--import", "tsx", cli, "serve"], {
+    env: {
+      ...env,
+      PASSPORT_DATA_DIR: dataDir,
+      PASSPORT_PORT: "0",
+      PASSPORT_MCP_PORT: "0",
+      PASSPORT_SHELL_ENV_PREPARED: "1",
+      PASSPORT_PARENT: "desktop",
+      PASSPORT_MASTER_KEY: "k",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk) => (output += chunk));
+  child.stderr?.on("data", (chunk) => (output += chunk));
+  const exited = new Promise<number | null>((resolve) => child.once("exit", resolve));
+  try {
+    const deadline = Date.now() + 30_000;
+    while (!output.includes("workspace →") && Date.now() < deadline && child.exitCode === null) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const started = Date.now();
+    child.kill("SIGTERM");
+    expect(await exited).toBe(0);
+    expect(Date.now() - started).toBeLessThan(5000);
+  } finally {
+    child.kill("SIGKILL");
+    await rm(dataDir, { recursive: true, force: true });
+  }
+}, 60_000);

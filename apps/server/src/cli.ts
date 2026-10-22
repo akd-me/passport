@@ -222,6 +222,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         shutdown();
       });
       process.stdin.resume();
+      // Watch the pipe without keeping the process alive once the server has closed.
+      (process.stdin as { unref?: () => void }).unref?.();
     }
     return;
   }
