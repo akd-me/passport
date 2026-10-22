@@ -1,4 +1,4 @@
-import type { AccountCapabilities, Email } from "@passport/types";
+import type { AccountCapabilities, Email, MailboxRole } from "@passport/types";
 import { localId } from "./errors.js";
 import { generatePreview, normalizeHeaders } from "./normalize/index.js";
 import { parseAuthenticationResults } from "./verification.js";
@@ -10,6 +10,8 @@ export const mockCapabilities: AccountCapabilities = {
   push: true,
   labels: true,
   submit: true,
+  search: true,
+  onDemand: true,
 };
 
 export const folderNames = [
@@ -22,6 +24,16 @@ export const folderNames = [
   "Newsletters",
   "Receipts",
 ];
+
+/** Special-use roles of the fixture folders; other folders are plain labels. */
+export const folderRoles: Readonly<Record<string, MailboxRole>> = {
+  Inbox: "inbox",
+  Archive: "archive",
+  Drafts: "drafts",
+  Sent: "sent",
+  Trash: "trash",
+  Junk: "junk",
+};
 
 export const fixtureEpoch = Date.parse("2026-01-15T09:00:00Z");
 

@@ -1,12 +1,17 @@
 /** Provider adapters for composition roots. Mutations must be dispatched through ActionExecutor. */
 
 export { CalDavCalendarProvider, normalizeIcalendar } from "./caldav.js";
-export { NotImplementedError, ProviderError, SubmissionAcceptedError } from "./errors.js";
+export {
+  NotImplementedError,
+  ProviderError,
+  RateLimitedError,
+  SubmissionAcceptedError,
+} from "./errors.js";
 export { GmailMailProvider, gmailCapabilities, normalizeGmail } from "./gmail.js";
 export { GoogleCalendarProvider, normalizeGoogleEvent } from "./google-calendar.js";
 export { GraphMailProvider, graphCapabilities, normalizeGraph } from "./graph.js";
 export { GraphCalendarProvider, normalizeGraphEvent } from "./graph-calendar.js";
-export type { ProviderOptions } from "./http.js";
+export type { ProviderOptions, RequestPolicy } from "./http.js";
 export type { ImapProviderOptions, SmtpClient } from "./imap.js";
 export { ImapMailProvider, imapCapabilities, imapFlagsToKeywords } from "./imap.js";
 export { JmapMailProvider, jmapCapabilities, normalizeJmap } from "./jmap.js";
@@ -16,6 +21,9 @@ export {
   MockMailProvider,
   mockCapabilities,
 } from "./mock.js";
+export type { MockMailOptions } from "./mock-mail.js";
+export type { MockCostEntry, MockReaderSource } from "./mock-reader.js";
+export { MOCK_CHANGE_RETENTION_MS, MockMailReader } from "./mock-reader.js";
 export {
   generatePreview,
   htmlToText,
@@ -25,6 +33,33 @@ export {
   parseListUnsubscribe,
   toIso,
 } from "./normalize/index.js";
+export type { QueryAst, QueryField, QueryNode } from "./query.js";
+export {
+  PORTABLE_CONTAINERS,
+  parsePortableQuery,
+  queryScopesSpamTrash,
+  relativeCutoff,
+} from "./query.js";
+export type { MatchableEmail, MatchContext, MatchLabel } from "./query-match.js";
+export { matchesQuery } from "./query-match.js";
+export type { GraphQueryPlan, ImapQueryPlan } from "./query-render.js";
+export {
+  listFilterToAst,
+  renderGmailQuery,
+  renderGraphQuery,
+  renderImapQuery,
+} from "./query-render.js";
+export type { AcquireOptions, QuotaGovernorOptions, QuotaLease } from "./quota.js";
+export { QuotaGovernor } from "./quota.js";
+export type { QuotaClock } from "./quota-clock.js";
+export { ManualClock, systemClock } from "./quota-clock.js";
+export type { QuotaConfig, ThrottleSignal } from "./quota-presets.js";
+export {
+  BACKGROUND_SHARE,
+  GMAIL_UNIT_COSTS,
+  INTERACTIVE_MAX_WAIT_MS,
+  QUOTA_PRESETS,
+} from "./quota-presets.js";
 export {
   createProviderRegistry,
   GOOGLE_CALENDAR_SCOPES,

@@ -19,14 +19,24 @@ import {
   mockCapabilities,
   mockInvite,
 } from "./mock-fixtures.js";
+import { MockMailReader } from "./mock-reader.js";
 import { generatePreview, normalizeAddresses, normalizeHeaders } from "./normalize/index.js";
+import type { QuotaGovernor } from "./quota.js";
 import { resolveReplyEmail } from "./reply.js";
 import { parseAuthenticationResults, verifyHeaders } from "./verification.js";
 
 export interface MockMailOptions
   extends Pick<ProviderOptions, "now" | "verifier" | "resolveEmail"> {
   fixtures?: boolean;
+  /**
+   * Quota governor for `reader()` calls (configure the account first). Configure it with
+   * `"gmail"` limits to exercise RATE_LIMITED paths against the mock's Gmail-priced costs.
+   */
+  governor?: QuotaGovernor;
 }
+
+/** Default fixture clock: one hour after the newest fixture message. */
+const defaultClock = fixtureEpoch + 40 * 3600_000;
 
 /** In-memory provider; injectEmail and sentMail are intentionally public integration-test helpers. */
 export class MockMailProvider implements MailProvider {
@@ -41,7 +51,42 @@ export class MockMailProvider implements MailProvider {
   private blobs = new Map<string, { type: string; data: Uint8Array }>();
   private sequence = 0;
   private folderNames = [...folderNames];
+  private clock = defaultClock;
+  private mailReader?: MockMailReader;
   constructor(private readonly options: MockMailOptions = {}) {}
+  /**
+   * Sets the fixture clock used by `reader()` for `newer_than:` / `older_than:` and change-cursor
+   * expiry. Ignored when `options.now` is supplied.
+   */
+  setNow(value: Date | string | number): void {
+    this.clock = new Date(value).getTime();
+  }
+  /** Current fixture time. */
+  now(): Date {
+    return this.options.now?.() ?? new Date(this.clock);
+  }
+  /**
+   * On-demand reader over this mailbox (one instance per provider). Calls are priced in Gmail
+   * units and recorded in `costLog`.
+   */
+  reader(): MockMailReader {
+    this.mailReader ??= new MockMailReader({
+      account: () => this.check(),
+      emails: () => this.emails.values(),
+      get: (providerId) => this.emails.get(providerId),
+      folders: () => this.folderNames,
+      log: () => this.changes,
+      now: () => this.now(),
+      verify: async (email) => {
+        if (this.options.verifier) {
+          email.verification = await verifyHeaders(email.headers, this.options.verifier);
+        }
+        return email;
+      },
+      ...(this.options.governor ? { governor: this.options.governor } : {}),
+    });
+    return this.mailReader;
+  }
   get sentMail(): readonly Email[] {
     return clone(this.sent);
   }
