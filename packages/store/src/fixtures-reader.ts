@@ -81,5 +81,11 @@ export class FakeMailReader implements MailReader {
   thread = unsupported;
   countIds = unsupported;
   changes = unsupported;
-  findByRfc822 = unsupported;
+  async findByRfc822(rfc822Id: string, opts?: MailReadOptions): Promise<ReadValue<string | null>> {
+    this.record("findByRfc822", [rfc822Id], opts);
+    const match = [...this.messages.values()].find(
+      (message) => message.headers.messageId === rfc822Id,
+    );
+    return { value: match?.providerId ?? null, ...meta };
+  }
 }

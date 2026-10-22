@@ -149,4 +149,17 @@ export const migrations: readonly string[] = [
       VALUES (new.rowid, new.subject, new."from", new.preview);
   END;
 `,
+  // v0.3: label revalidation rewrites the row; reindex FTS only when an indexed column changed.
+  String.raw`
+  DROP TRIGGER emails_fts_update;
+  CREATE TRIGGER emails_fts_update AFTER UPDATE OF subject, "from", preview ON emails
+  WHEN old.subject IS NOT new.subject OR old."from" IS NOT new."from"
+    OR old.preview IS NOT new.preview
+  BEGIN
+    INSERT INTO emails_fts(emails_fts, rowid, subject, "from", preview)
+      VALUES ('delete', old.rowid, old.subject, old."from", old.preview);
+    INSERT INTO emails_fts(rowid, subject, "from", preview)
+      VALUES (new.rowid, new.subject, new."from", new.preview);
+  END;
+`,
 ];

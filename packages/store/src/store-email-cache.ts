@@ -1,50 +1,28 @@
 import type {
+  Account,
   Email,
   EmailGetOptions,
   EnvelopeFreshness,
-  EvictionResult,
   MailEnvelope,
   MailReader,
   MailReaderResolver,
-  MailReadOptions,
   Store,
   Thread,
 } from "@passport/types";
 import { mailHandle, parseMailHandle, watcherTickKey } from "@passport/types";
 import type { StoreDatabase } from "./store-database.js";
+import { createEviction } from "./store-email-eviction.js";
+import {
+  createRevalidation,
+  ENVELOPE_BATCH,
+  localMailboxIds,
+  readOptions,
+} from "./store-email-revalidate.js";
 import type { EmailRows } from "./store-email-rows.js";
 import type { Row } from "./store-query.js";
 import { unique } from "./store-query.js";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-const BODY_BYTES =
-  "COALESCE(length(CAST(textBody AS BLOB)), 0) + COALESCE(length(CAST(html_body AS BLOB)), 0)";
-const NOT_DRAFT =
-  "NOT EXISTS (SELECT 1 FROM json_each(data, '$.keywords') k WHERE k.key = '$draft' AND k.type = 'true')";
-
-/** Maps adapter mailbox ids (`account:mailbox:<providerId>`) to cached mailbox rows. */
-export function localMailboxIds(db: StoreDatabase, accountId: string, ids: string[]): string[] {
-  const prefix = `${accountId}:mailbox:`;
-  return unique(
-    ids.map((id) => {
-      if (!id.startsWith(prefix)) {
-        return id;
-      }
-      let providerId: string;
-      try {
-        providerId = decodeURIComponent(id.slice(prefix.length));
-      } catch {
-        // Not an id we issued; keep it verbatim.
-        return id;
-      }
-      const row = db.one("SELECT id FROM mailboxes WHERE account_id = ? AND provider_id = ?", [
-        accountId,
-        providerId,
-      ]);
-      return (row?.id as string | undefined) ?? id;
-    }),
-  );
-}
+export { localMailboxIds };
 
 /**
  * Read-through envelope cache over the `emails` table (contract: `@passport/types`
@@ -55,8 +33,7 @@ export function createEmailCache(
   rows: EmailRows,
   resolver: () => MailReaderResolver | null,
 ) {
-  const readOptions = (opts: EmailGetOptions): MailReadOptions =>
-    opts.lane ? { lane: opts.lane } : {};
+  const { refresh, fetchBody } = createRevalidation(db, rows);
   const isStale = (row: Row): boolean => {
     const tick = db.one("SELECT value FROM kv WHERE key = ?", [
       watcherTickKey(row.account_id as string),
@@ -67,6 +44,8 @@ export function createEmailCache(
     const fresh = row.labels_fresh_at as string | null;
     return fresh === null || Date.parse(fresh) < Date.parse(tick);
   };
+  const onDemand = (accountId: string) =>
+    db.get<Account>("accounts", accountId)?.capabilities.onDemand === true;
   const threadOf = (email: Email) => {
     const thread = db.get<Thread>("threads", email.threadId) ?? {
       id: email.threadId,
@@ -94,109 +73,170 @@ export function createEmailCache(
       threadOf(email);
     });
   };
-  const revalidate = async (reader: MailReader, row: Row, opts: EmailGetOptions): Promise<void> => {
-    const providerId = row.provider_id as string;
-    const accountId = row.account_id as string;
-    let envelope: MailEnvelope | null;
+  /**
+   * The account's reader. `strict` (misses: no cached copy to serve) and `fresh` propagate
+   * resolution errors; otherwise a failure is reported so the cached rows are marked stale.
+   */
+  const readerFor = async (
+    accountId: string,
+    opts: EmailGetOptions,
+    strict: boolean,
+  ): Promise<{ reader: MailReader | null; failed: boolean }> => {
+    const resolve = opts.cacheOnly ? null : resolver();
+    if (!resolve) {
+      return { reader: null, failed: false };
+    }
     try {
-      envelope =
-        (await reader.envelopes([providerId], readOptions(opts))).value.get(providerId) ?? null;
+      return { reader: await resolve(accountId), failed: false };
     } catch (error) {
-      // Offline or throttled: serve the cached row unless the caller needs provider truth.
-      if (opts.fresh) {
+      if (strict || opts.fresh) {
         throw error;
       }
-      return;
-    }
-    const email = rows.getEmail(row.id as string);
-    if (!email) {
-      return;
-    }
-    const keywords = envelope ? envelope.keywords : { ...email.keywords, $deleted: true };
-    const mailboxIds = envelope
-      ? localMailboxIds(db, accountId, envelope.mailboxIds)
-      : email.mailboxIds;
-    db.transaction(() => rows.saveEmail({ ...email, keywords, mailboxIds }, { labelsFresh: true }));
-  };
-  const fetchBody = async (reader: MailReader, row: Row, opts: EmailGetOptions) => {
-    const body = (await reader.body(row.provider_id as string, readOptions(opts))).value;
-    const email = rows.getEmail(row.id as string);
-    if (email) {
-      db.transaction(() =>
-        rows.saveEmail(
-          {
-            ...email,
-            textBody: body.textBody ?? null,
-            htmlBody: body.htmlBody ?? null,
-            attachments: body.attachments ?? email.attachments,
-          },
-          { labelsFresh: false },
-        ),
-      );
+      return { reader: null, failed: true };
     }
   };
-  /** Revalidates and fills bodies as requested, touches the row and returns it. */
-  const finish = async (row: Row, opts: EmailGetOptions, includeBodies: boolean) => {
-    const resolve = opts.cacheOnly ? null : resolver();
-    if (resolve) {
-      const stale = opts.fresh === true || isStale(row);
-      const wantsBody = opts.includeBodies === true && row.body_fetched_at === null;
-      if (stale || wantsBody) {
-        const reader = await resolve(row.account_id as string);
-        if (reader && stale) {
-          await revalidate(reader, row, opts);
-        }
-        if (reader && wantsBody) {
-          await fetchBody(reader, row, opts);
+  /** Fetches and caches envelopes for uncached provider ids (one call per batch). */
+  const fetchMissing = async (accountId: string, providerIds: string[], opts: EmailGetOptions) => {
+    const { reader } = providerIds.length
+      ? await readerFor(accountId, opts, true)
+      : { reader: null };
+    for (let i = 0; reader && i < providerIds.length; i += ENVELOPE_BATCH) {
+      const chunk = providerIds.slice(i, i + ENVELOPE_BATCH);
+      const found = (await reader.envelopes(chunk, readOptions(opts))).value;
+      for (const providerId of chunk) {
+        const envelope = found.get(providerId);
+        if (envelope && !rows.rowByProvider(accountId, providerId)) {
+          insertEnvelope(accountId, envelope, mailHandle(accountId, "email", providerId));
         }
       }
     }
-    rows.touch(row.id as string);
-    return rows.getEmail(row.id as string, includeBodies);
   };
-  const fetchEnvelope = async (
-    accountId: string,
-    providerId: string,
+  /**
+   * Revalidates labels (when `fresh` or older than the watcher tick) and fills bodies (when asked
+   * and none are cached), batched per account; touches the rows; marks rows served from cache
+   * after a provider failure with `staleAsOf`. `fetched` rows were just read and are not re-read.
+   */
+  const finish = async (
+    targets: Row[],
     opts: EmailGetOptions,
-  ): Promise<Row | undefined> => {
-    const resolve = opts.cacheOnly ? null : resolver();
-    const reader = resolve ? await resolve(accountId) : null;
-    if (!reader) {
-      return undefined;
+    includeBodies: boolean,
+    fetched: Set<string> = new Set(),
+  ): Promise<Map<string, Email | null>> => {
+    const stale = new Set<string>();
+    const byAccount = new Map<string, Row[]>();
+    for (const row of targets) {
+      const group = byAccount.get(row.account_id as string) ?? [];
+      group.push(row);
+      byAccount.set(row.account_id as string, group);
     }
-    const envelope = (await reader.envelopes([providerId], readOptions(opts))).value.get(
-      providerId,
+    for (const [accountId, group] of byAccount) {
+      const labels = group.filter(
+        (row) => !fetched.has(row.id as string) && (opts.fresh === true || isStale(row)),
+      );
+      const bodies =
+        opts.includeBodies === true ? group.filter((row) => row.body_fetched_at === null) : [];
+      if (!labels.length && !bodies.length) {
+        continue;
+      }
+      const { reader, failed } = await readerFor(accountId, opts, false);
+      if (!reader) {
+        // Provider truth was wanted but is unavailable: say so instead of degrading silently.
+        if (failed || (opts.fresh && resolver() !== null && onDemand(accountId))) {
+          for (const row of group) {
+            stale.add(row.id as string);
+          }
+        }
+        continue;
+      }
+      for (const id of await refresh(reader, labels, opts)) {
+        stale.add(id);
+      }
+      for (const row of bodies) {
+        if (!(await fetchBody(reader, row.id as string, opts))) {
+          stale.add(row.id as string);
+        }
+      }
+    }
+    const result = new Map<string, Email | null>();
+    for (const row of targets) {
+      const id = row.id as string;
+      rows.touch(id, true);
+      const email = rows.getEmail(id, includeBodies);
+      if (email && stale.has(id)) {
+        email.staleAsOf = (rows.rowById(id, false)?.labels_fresh_at as string | null) ?? null;
+      }
+      result.set(id, email);
+    }
+    return result;
+  };
+  /** Local row for an id or handle, else (handle misses) fetched in one batch per account. */
+  const many = async (ids: string[], opts: EmailGetOptions): Promise<Map<string, Email | null>> => {
+    const located = new Map<string, Row>();
+    const misses = new Map<string, Array<{ id: string; providerId: string }>>();
+    for (const id of unique(ids)) {
+      const handle = parseMailHandle(id);
+      const row =
+        rows.rowById(id, false) ??
+        (handle?.type === "email"
+          ? rows.rowByProvider(handle.accountId, handle.providerId)
+          : undefined);
+      if (row) {
+        located.set(id, row);
+      } else if (handle?.type === "email") {
+        const wanted = misses.get(handle.accountId) ?? [];
+        wanted.push({ id, providerId: handle.providerId });
+        misses.set(handle.accountId, wanted);
+      }
+    }
+    const fetched = new Set<string>();
+    for (const [accountId, wanted] of misses) {
+      await fetchMissing(
+        accountId,
+        wanted.map((item) => item.providerId),
+        opts,
+      );
+      for (const item of wanted) {
+        const row = rows.rowByProvider(accountId, item.providerId);
+        if (row) {
+          located.set(item.id, row);
+          fetched.add(row.id as string);
+        }
+      }
+    }
+    const distinct = [...new Map([...located.values()].map((row) => [row.id, row])).values()];
+    const emails = await finish(distinct, opts, opts.includeBodies ?? true, fetched);
+    return new Map(
+      ids.map((id) => {
+        const row = located.get(id);
+        return [id, row ? (emails.get(row.id as string) ?? null) : null];
+      }),
     );
-    if (!envelope) {
-      return undefined;
-    }
-    insertEnvelope(accountId, envelope, mailHandle(accountId, "email", providerId));
-    return rows.rowByProvider(accountId, providerId);
   };
-  const get: Store["emails"]["get"] = async (id, opts = {}) => {
-    const includeBodies = opts.includeBodies ?? true;
-    const local = rows.rowById(id, false);
-    if (local) {
-      return finish(local, opts, includeBodies);
-    }
-    const handle = parseMailHandle(id);
-    if (handle?.type !== "email") {
-      return null;
-    }
-    const cached =
-      rows.rowByProvider(handle.accountId, handle.providerId) ??
-      (await fetchEnvelope(handle.accountId, handle.providerId, opts));
-    return cached ? finish(cached, opts, includeBodies) : null;
-  };
+  const get: Store["emails"]["get"] = async (id, opts = {}) =>
+    (await many([id], opts)).get(id) ?? null;
+  const getMany = (ids: string[], opts: EmailGetOptions = {}) => many(ids, opts);
   const getByProviderId: Store["emails"]["getByProviderId"] = async (
     accountId,
     providerId,
     opts = {},
   ) => {
-    const cached =
-      rows.rowByProvider(accountId, providerId) ??
-      (await fetchEnvelope(accountId, providerId, opts));
-    return cached ? finish(cached, opts, opts.includeBodies ?? true) : null;
+    let row = rows.rowByProvider(accountId, providerId);
+    let fetched = false;
+    if (!row) {
+      await fetchMissing(accountId, [providerId], opts);
+      row = rows.rowByProvider(accountId, providerId);
+      fetched = true;
+    }
+    if (!row) {
+      return null;
+    }
+    const emails = await finish(
+      [row],
+      opts,
+      opts.includeBodies ?? true,
+      new Set(fetched ? [row.id as string] : []),
+    );
+    return emails.get(row.id as string) ?? null;
   };
   const touch = async (ids: string[]) =>
     db.transaction(() => {
@@ -217,65 +257,5 @@ export function createEmailCache(
         }
       : null;
   };
-  const dropBodies = (ids: string[]) => {
-    for (const id of ids) {
-      db.run(
-        `UPDATE emails SET textBody = NULL, html_body = NULL, body_fetched_at = NULL,
-        data = json_remove(data, '$.textBody', '$.htmlBody') WHERE id = ?`,
-        [id],
-      );
-    }
-  };
-  const evictBodies = async ({
-    olderThanMs = 7 * DAY_MS,
-    maxBytes = 200 * 1024 * 1024,
-  } = {}): Promise<EvictionResult> =>
-    db.transaction(() => {
-      const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-      const expired = db
-        .all(
-          `SELECT id FROM emails WHERE body_fetched_at IS NOT NULL AND body_fetched_at < ? AND ${NOT_DRAFT}`,
-          [cutoff],
-        )
-        .map((row) => row.id as string);
-      dropBodies(expired);
-      const cached = db.all(
-        `SELECT id, ${BODY_BYTES} AS bytes FROM emails
-        WHERE body_fetched_at IS NOT NULL AND ${NOT_DRAFT}
-        ORDER BY touched_at ASC, id ASC`,
-      );
-      const drafts = Number(
-        db.one(
-          `SELECT COALESCE(SUM(${BODY_BYTES}), 0) AS bytes FROM emails
-          WHERE body_fetched_at IS NOT NULL AND NOT (${NOT_DRAFT})`,
-        )!.bytes,
-      );
-      let total = drafts + cached.reduce((sum, row) => sum + Number(row.bytes), 0);
-      const overflow: string[] = [];
-      for (const row of cached) {
-        if (total <= maxBytes) {
-          break;
-        }
-        overflow.push(row.id as string);
-        total -= Number(row.bytes);
-      }
-      dropBodies(overflow);
-      return { evicted: expired.length + overflow.length, remainingBytes: total };
-    });
-  const evictEnvelopes = async ({ keep = 100_000 } = {}): Promise<EvictionResult> =>
-    db.transaction(() => {
-      const victims = db
-        .all(
-          `SELECT id FROM (
-            SELECT id, matter_id, data FROM emails ORDER BY touched_at DESC, id DESC LIMIT -1 OFFSET ?
-          ) WHERE matter_id IS NULL AND ${NOT_DRAFT}`,
-          [Math.max(0, keep)],
-        )
-        .map((row) => row.id as string);
-      for (const id of victims) {
-        rows.deleteEmail(id);
-      }
-      return { evicted: victims.length, remainingBytes: 0 };
-    });
-  return { get, getByProviderId, touch, freshness, evictBodies, evictEnvelopes };
+  return { get, getMany, getByProviderId, touch, freshness, ...createEviction(db, rows) };
 }
