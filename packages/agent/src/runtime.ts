@@ -1,5 +1,11 @@
 import { createToolRegistry } from "@passport/tools";
-import type { AgentRuntime, AgentTrigger } from "@passport/types";
+import type {
+  AgentRunOptions,
+  AgentRunPriority,
+  AgentRuntime,
+  AgentTrigger,
+  QuotaLane,
+} from "@passport/types";
 import type {
   AgentRunResult,
   AgentRuntimeOptions,
@@ -16,13 +22,15 @@ import type { LlmClient } from "./llm/types.js";
 import { manual } from "./manual.js";
 import { getUserProfile, setUserProfile } from "./profile.js";
 import { systemPrompt } from "./prompts/index.js";
+import { RunQueue } from "./queue.js";
+import { createRunReads } from "./reads.js";
 import { dailyDigest, getJournal, type Journal, reviewMatters } from "./schedules.js";
 import { triage } from "./triage.js";
 
 class PersonalAgentRuntime implements AgentRuntime {
   private readonly llm: LlmClient;
   private readonly now: () => string;
-  private queue: Promise<unknown> = Promise.resolve();
+  private readonly queue: RunQueue;
 
   constructor(private readonly options: AgentRuntimeOptions) {
     if (
@@ -34,6 +42,7 @@ class PersonalAgentRuntime implements AgentRuntime {
     this.llm =
       "complete" in options.llm ? options.llm : createLlmClient(options.llm, { log: options.log });
     this.now = options.now ?? (() => new Date().toISOString());
+    this.queue = new RunQueue(options.log);
   }
 
   getUserProfile(): Promise<string> {
@@ -43,18 +52,20 @@ class PersonalAgentRuntime implements AgentRuntime {
     return setUserProfile(this.options.store, markdown);
   }
 
-  run(trigger: AgentTrigger): Promise<AgentRunResult> {
+  run(trigger: AgentTrigger, options: AgentRunOptions = {}): Promise<AgentRunResult> {
     // Serialize per-runtime inference and KV journals without subscribing to the bus implicitly.
-    const pending = this.queue.then(() => this.runInternal(trigger));
-    this.queue = pending.catch(() => {
-      // Agent queue operation failed; later runs may continue.
-      this.options.log?.("Agent queue operation failed; later runs may continue");
-      return undefined;
-    });
-    return pending;
+    const priority = options.priority ?? (trigger.kind === "manual" ? "interactive" : "background");
+    return this.queue.enqueue(priority, () => this.runInternal(trigger, priority));
   }
 
-  private async runInternal(trigger: AgentTrigger): Promise<AgentRunResult> {
+  queued(): Record<AgentRunPriority, number> {
+    return this.queue.depth();
+  }
+
+  private async runInternal(
+    trigger: AgentTrigger,
+    priority: AgentRunPriority,
+  ): Promise<AgentRunResult> {
     const { store, executor, policy, bus } = this.options;
     const run: AgentRunResult = {
       toolBudget: { callsMade: 0, llmCalls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
@@ -64,8 +75,16 @@ class PersonalAgentRuntime implements AgentRuntime {
       actionIds: [],
       summary: "Started.",
     };
+    const lane: QuotaLane =
+      priority === "interactive"
+        ? "interactive"
+        : trigger.kind === "email.received"
+          ? "arrivals"
+          : "background";
     const ctx: RunContext = {
       run,
+      lane,
+      reads: createRunReads({ readers: this.options.readers, lane, log: this.options.log }),
       store,
       policy,
       now: this.now,
@@ -216,6 +235,9 @@ class PersonalAgentRuntime implements AgentRuntime {
       inputTokens: ctx.usages.reduce((sum, usage) => sum + usage.inputTokens, 0),
       outputTokens: ctx.usages.reduce((sum, usage) => sum + usage.outputTokens, 0),
       totalTokens: ctx.usages.reduce((sum, usage) => sum + usage.totalTokens, 0),
+      ...(ctx.reads.usage.calls || ctx.reads.usage.skipped
+        ? { reads: { ...ctx.reads.usage } }
+        : {}),
     };
     run.finishedAt = this.now();
     run.summary = `${ctx.notes.join(" ") || (failure ? "Run failed." : "Run completed.")} ${ctx.actions.length} actions submitted; ${ctx.usages.length} LLM calls.`;

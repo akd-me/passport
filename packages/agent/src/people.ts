@@ -1,6 +1,15 @@
-import type { Email, EventBus, Person, Relationship, Store } from "@passport/types";
-import { allActions, allEmails, normalizeAddress } from "./data.js";
+import type {
+  Email,
+  EventBus,
+  Person,
+  PersonWithStatsCache,
+  Relationship,
+  Store,
+} from "@passport/types";
+import { normalizeAddress } from "./data.js";
 import { newAgentId } from "./id.js";
+import { type AddressEvidence, readerEvidence, storeEvidence } from "./people-evidence.js";
+import type { AgentReader } from "./reads.js";
 
 export function serviceSender(email: Email): boolean {
   return Boolean(
@@ -18,7 +27,97 @@ export interface PeopleResult {
   downgraded: string[];
 }
 
-/** Projects inferred people for prompts; only the executor may persist them. */
+/** Fields whose change is worth a `person_update` action; `updatedAt` alone is not. */
+function sameProjection(a: PersonWithStatsCache, b: PersonWithStatsCache): boolean {
+  const view = (p: PersonWithStatsCache) =>
+    JSON.stringify([
+      p.displayName,
+      p.emails,
+      p.primaryEmail,
+      p.verification,
+      p.lastSeenBlueAt ?? null,
+      p.relationship,
+      p.stats.sent,
+      p.stats.received,
+      p.stats.lastContactAt,
+      p.statsRefreshedAt ?? null,
+    ]);
+  return view(a) === view(b);
+}
+
+/** The person row this message implies, plus its identity warnings. */
+function projectPerson(input: {
+  email: Email;
+  address: string;
+  name: string | null | undefined;
+  existing: PersonWithStatsCache | null;
+  found: AddressEvidence;
+  isSender: boolean;
+  isSelf: boolean;
+  isService: boolean;
+  sentByOwner: boolean;
+  now: string;
+}): { person: PersonWithStatsCache; downgrade: boolean; forgedSelf: boolean } {
+  const { email, address, existing, found, isSender, isSelf, now } = input;
+  let relationship: Relationship = "stranger";
+  if (isSelf) {
+    relationship = "self";
+  } else if (input.isService) {
+    relationship = "service";
+  } else if (existing?.relationship === "known" || found.established) {
+    relationship = "known";
+  }
+  const wasBlue = existing?.verification === "blue";
+  const blue = isSender && email.verification.passport === "blue";
+  const lastSeenBlueAt = blue
+    ? email.receivedAt
+    : (existing?.lastSeenBlueAt ?? (wasBlue ? existing?.updatedAt : null));
+  const acknowledged =
+    existing?.downgradeAcknowledgedAt &&
+    lastSeenBlueAt &&
+    existing.downgradeAcknowledgedAt >= lastSeenBlueAt;
+  const person: PersonWithStatsCache = {
+    ...existing,
+    id: existing?.id ?? newAgentId(),
+    displayName: existing?.displayName || input.name || address,
+    emails: [...new Set([...(existing?.emails ?? []), address])],
+    primaryEmail: existing?.primaryEmail ?? address,
+    verification: isSender ? (blue ? "blue" : "green") : (existing?.verification ?? "unknown"),
+    lastSeenBlueAt,
+    relationship,
+    stats: {
+      sent: found.sent,
+      received: found.received,
+      lastContactAt:
+        [existing?.stats.lastContactAt, email.receivedAt]
+          .filter((at): at is string => Boolean(at))
+          .sort()
+          .at(-1) ?? null,
+    },
+    ...(found.statsRefreshedAt ? { statsRefreshedAt: found.statsRefreshedAt } : {}),
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  return {
+    person,
+    downgrade: isSender && !blue && Boolean(lastSeenBlueAt) && !acknowledged,
+    forgedSelf:
+      isSender &&
+      isSelf &&
+      !input.sentByOwner &&
+      (email.verification.dmarc === "fail" || email.verification.dkim === "fail"),
+  };
+}
+
+/**
+ * Projects inferred people for prompts; only the executor may persist them.
+ *
+ * With a `reader`, sent/received evidence comes from capped provider counts cached on the person
+ * row (see `readerEvidence`); nothing scans the store. Without one, a bounded store scan is the
+ * fallback (see `storeEvidence`). Verification and `lastSeenBlueAt` always come from this
+ * message's headers. The executor takes one person per `person_update`, so each changed address
+ * is submitted separately and unchanged rows are not resubmitted.
+ */
 export async function resolvePeople(opts: {
   email: Email;
   store: Store;
@@ -26,6 +125,10 @@ export async function resolvePeople(opts: {
   selfAddresses: Set<string>;
   now: string;
   savePerson: (person: Person, reason: string) => Promise<void>;
+  /** The account's metered reader; null or absent selects the bounded store fallback. */
+  reader?: AgentReader | null;
+  /** Recount provider evidence even when the cached counts are fresh. */
+  refreshStats?: boolean;
 }): Promise<PeopleResult> {
   const { email, store, bus, now } = opts;
   const selfAddresses = new Set(
@@ -43,11 +146,6 @@ export async function resolvePeople(opts: {
     ]),
   );
   const senders = new Set(email.from.map((address) => normalizeAddress(address.email)));
-  const stored = [
-    ...new Map(
-      [...(await allEmails(store, { includeDeleted: true })), email].map((item) => [item.id, item]),
-    ).values(),
-  ].filter((item) => item.receivedAt <= email.receivedAt && !item.keywords.$draft);
   const sentBoxes = new Set(
     (
       await Promise.all(
@@ -61,165 +159,51 @@ export async function resolvePeople(opts: {
   const isSent = (item: Email) =>
     !item.keywords.$draft &&
     (item.provenance === "sent" || item.mailboxIds.some((id) => sentBoxes.has(id)));
-  // A From header is never evidence that the owner sent a message.
-  const sent = stored.filter(isSent).map((item) => ({
-    id: `email:${item.id}`,
-    at: item.receivedAt,
-    recipients: [...item.to, ...item.cc, ...item.bcc],
-  }));
-  const sentAliases = new Map<string, string>();
-  for (const action of await allActions(store, { status: ["executed"] })) {
-    if (
-      action.request.type !== "send" ||
-      (action.executedAt ?? action.createdAt) > email.receivedAt
-    ) {
-      continue;
-    }
-    const params = action.request.params as import("@passport/types").ActionParams["send"];
-    const draft =
-      params.draft ?? (action.approvedSnapshot as import("@passport/types").DraftInput | undefined);
-    if (!draft) {
-      continue;
-    }
-    const copy = stored.find(
-      (item) =>
-        isSent(item) &&
-        item.accountId === action.request.accountId &&
-        (item.providerId === action.result?.providerId ||
-          (item.headers.messageId && item.headers.messageId === action.result?.messageId)),
-    );
-    if (copy) {
-      sentAliases.set(`email:${copy.id}`, `action:${action.id}`);
-      continue;
-    }
-    sent.push({
-      id: `action:${action.id}`,
-      at: action.executedAt ?? action.createdAt,
-      recipients: [...draft.to, ...(draft.cc ?? []), ...(draft.bcc ?? [])],
-    });
-  }
+  const evidence = opts.reader
+    ? readerEvidence(opts.reader, now, opts.refreshStats)
+    : await storeEvidence(store, email, isSent);
   const result: PeopleResult = { people: [], persistedIds: [], downgraded: [] };
-  for (const [address, named] of addresses) {
-    const existing = await store.people.getByEmail(address);
+  // Senders first, so a spent read budget falls on recipients rather than the sender.
+  const ordered = [...addresses].sort(
+    ([a], [b]) => Number(senders.has(b)) - Number(senders.has(a)),
+  );
+  for (const [address, named] of ordered) {
+    const existing = (await store.people.getByEmail(address)) as PersonWithStatsCache | null;
+    const isSender = senders.has(address);
+    const isSelf = selfAddresses.has(address);
+    const isService =
+      !isSelf && ((isSender && serviceSender(email)) || existing?.relationship === "service");
     const personAddresses = new Set(
       [address, ...(existing?.emails ?? []), ...(existing ? [existing.primaryEmail] : [])].map(
         normalizeAddress,
       ),
     );
-    let sentIds = new Set(
-      !selfAddresses.has(address)
-        ? sent
-            .filter((item) =>
-              item.recipients.some((a) => personAddresses.has(normalizeAddress(a.email))),
-            )
-            .map((item) => item.id)
-        : [],
-    );
-    let receivedIds = new Set(
-      stored
-        .filter(
-          (item) =>
-            !isSent(item) && item.from.some((a) => personAddresses.has(normalizeAddress(a.email))),
-        )
-        .map((item) => item.id),
-    );
-    const currentSentId = sentAliases.get(`email:${email.id}`) ?? `email:${email.id}`;
-    sentIds = new Set([...sentIds].map((id) => sentAliases.get(id) ?? id));
-    const saved = existing ? await store.kv.get(`person-stats:${existing.id}`) : null;
-    const contributions: {
-      sent: number;
-      received: number;
-      sentIds?: string[];
-      receivedIds?: string[];
-    } = saved
-      ? JSON.parse(saved)
-      : {
-          sent: 0,
-          received: Math.max(
-            0,
-            (existing?.stats.received ?? 0) -
-              receivedIds.size +
-              (receivedIds.has(email.id) ? 1 : 0),
-          ),
-        };
-    // Retain contributions even if an older message leaves the local sync window.
-    sentIds = new Set(
-      [...(contributions.sentIds ?? []), ...sentIds].map((id) => sentAliases.get(id) ?? id),
-    );
-    receivedIds = new Set([...(contributions.receivedIds ?? []), ...receivedIds]);
-    const priorSent = sentIds.size - (sentIds.has(currentSentId) ? 1 : 0);
-    const priorReceived = receivedIds.size - (receivedIds.has(email.id) ? 1 : 0);
-    const baseline = contributions;
-    const isSender = senders.has(address);
-    function inferRelationship() {
-      if (selfAddresses.has(address)) {
-        return "self";
-      }
-      if ((isSender && serviceSender(email)) || existing?.relationship === "service") {
-        return "service";
-      }
-      if (
-        existing?.relationship === "known" ||
-        priorSent > 0 ||
-        priorReceived + baseline.received >= 2
-      ) {
-        return "known";
-      }
-      return "stranger";
-    }
-    const relationship: Relationship = inferRelationship();
-    const wasBlue = existing?.verification === "blue";
-    const blue = isSender && email.verification.passport === "blue";
-    const lastSeenBlueAt = blue
-      ? email.receivedAt
-      : (existing?.lastSeenBlueAt ?? (wasBlue ? existing?.updatedAt : null));
-    const acknowledged =
-      existing?.downgradeAcknowledgedAt &&
-      lastSeenBlueAt &&
-      existing.downgradeAcknowledgedAt >= lastSeenBlueAt;
-    const downgrade = isSender && !blue && Boolean(lastSeenBlueAt) && !acknowledged;
-    const forgedSelf =
-      isSender &&
-      selfAddresses.has(address) &&
-      !isSent(email) &&
-      (email.verification.dmarc === "fail" || email.verification.dkim === "fail");
-    const person: Person = {
-      ...existing,
-      id: existing?.id ?? newAgentId(),
-      displayName: existing?.displayName || named.name || address,
-      emails: [...new Set([...(existing?.emails ?? []), address])],
-      primaryEmail: existing?.primaryEmail ?? address,
-      verification: isSender ? (blue ? "blue" : "green") : (existing?.verification ?? "unknown"),
-      lastSeenBlueAt,
-      relationship,
-      stats: {
-        sent: sentIds.size,
-        received: baseline.received + receivedIds.size,
-        lastContactAt:
-          [existing?.stats.lastContactAt, email.receivedAt]
-            .filter((at): at is string => Boolean(at))
-            .sort()
-            .at(-1) ?? null,
-      },
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    };
-    await opts.savePerson(
-      person,
-      `Resolve ${address} as ${relationship}${forgedSelf ? "; unauthenticated inbound self From is stranger risk" : downgrade ? "; previously blue sender is now green" : ""}`,
-    );
-    result.people.push(person);
-    const persisted = await store.people.get(person.id);
-    if (persisted) {
-      result.persistedIds.push(person.id);
-      if (
-        persisted.stats.sent === person.stats.sent &&
-        persisted.stats.received === person.stats.received
-      ) {
-        await store.kv.set(
-          `person-stats:${person.id}`,
-          JSON.stringify({ ...baseline, sentIds: [...sentIds], receivedIds: [...receivedIds] }),
-        );
+    const found = await evidence({ address, existing, personAddresses, isSelf, isService });
+    const { person, downgrade, forgedSelf } = projectPerson({
+      email,
+      address,
+      name: named.name,
+      existing,
+      found,
+      isSender,
+      isSelf,
+      isService,
+      sentByOwner: isSent(email),
+      now,
+    });
+    if (existing && sameProjection(existing, person)) {
+      result.people.push(existing);
+      result.persistedIds.push(existing.id);
+    } else {
+      await opts.savePerson(
+        person,
+        `Resolve ${address} as ${person.relationship}${forgedSelf ? "; unauthenticated inbound self From is stranger risk" : downgrade ? "; previously blue sender is now green" : ""}`,
+      );
+      result.people.push(person);
+      const persisted = await store.people.get(person.id);
+      if (persisted) {
+        result.persistedIds.push(person.id);
+        await found.persisted?.(person, persisted);
       }
     }
     if (downgrade || forgedSelf) {

@@ -4,26 +4,19 @@ import type {
   Counterparty,
   DraftInput,
   Email,
-  Matter,
   Person,
-  Store,
   TimeRange,
 } from "@passport/types";
 import type { RunContext } from "./context.js";
-import { allEmails, normalizeAddress, overlaps } from "./data.js";
+import { normalizeAddress, overlaps } from "./data.js";
 import { recordDecision } from "./decisions.js";
 import { AgentError } from "./errors.js";
-import type { AgentMatterAttachParams, AgentMatterCreateParams } from "./integration.js";
-import { isObject } from "./llm/json.js";
+import { attachMatter, readThread } from "./matters.js";
 import { resolvePeople, serviceSender } from "./people.js";
 import { formatDraft } from "./profile.js";
-import {
-  classificationPrompt,
-  matterPrompt,
-  replyPrompt,
-  schedulingPrompt,
-} from "./prompts/index.js";
-import { classificationSchema, matterSchema, replySchema, scheduleSchema } from "./schemas.js";
+import { classificationPrompt, replyPrompt, schedulingPrompt } from "./prompts/index.js";
+import type { AgentReader } from "./reads.js";
+import { classificationSchema, replySchema, scheduleSchema } from "./schemas.js";
 
 /** Cheap, deterministic categories; undefined delegates to the fast model. */
 export function heuristicCategory(email: Email): ActionCategory | undefined {
@@ -99,167 +92,6 @@ function emailCounterparty(email: Email, people: Person[], downgraded = false): 
     class: "stranger" as const,
   };
   return downgraded ? { ...counterparty, class: "stranger" } : counterparty;
-}
-
-async function candidates(store: Store, email: Email, personIds: string[]): Promise<Matter[]> {
-  const matters = new Map<string, Matter>();
-  const addId = async (id?: string | null): Promise<void> => {
-    if (id && !matters.has(id)) {
-      const matter = await store.matters.get(id);
-      if (matter) {
-        matters.set(id, matter);
-      }
-    }
-  };
-  await addId(email.matterId);
-  const thread = await store.emails.query({ threadId: email.threadId, limit: 30 });
-  for (const item of thread.items) {
-    await addId(item.matterId);
-  }
-  for (const personId of personIds) {
-    for (const matter of await store.matters.list({
-      personId,
-      status: ["active", "waiting"],
-      limit: 8,
-    })) {
-      matters.set(matter.id, matter);
-    }
-  }
-  // Quote individual tokens, never interpolate a subject as executable FTS syntax.
-  const words = email.subject.match(/[\p{L}\p{N}]{3,}/gu)?.slice(0, 6) ?? [];
-  if (words.length) {
-    const similar = await store.emails.query({
-      text: words.map((word) => `"${word}"`).join(" OR "),
-      limit: 12,
-    });
-    for (const item of similar.items) {
-      await addId(item.matterId);
-    }
-  }
-  return [...matters.values()].slice(0, 12);
-}
-
-async function attachMatter(
-  ctx: RunContext,
-  email: Email,
-  category: ActionCategory,
-  personIds: string[],
-  counterparty: Counterparty,
-): Promise<{ id?: string; summary: string }> {
-  const options = await candidates(ctx.store, email, personIds);
-  const vendor = (email.from[0]?.name || email.from[0]?.email.split("@")[1] || "Unknown vendor")
-    .replace(/[\r\n/\\]/g, " ")
-    .trim();
-  const purchaseTitle = `Purchases/${vendor}`;
-  if (category === "receipts") {
-    for (const matter of await ctx.store.matters.list({ text: purchaseTitle, limit: 10 })) {
-      if (!options.some((m) => m.id === matter.id)) {
-        options.push(matter);
-      }
-    }
-  }
-  const proposal = await ctx.structured(matterSchema, matterPrompt(email, options));
-  const selected =
-    category === "receipts"
-      ? options.find((matter) => matter.title === purchaseTitle)
-      : options.find((matter) => matter.id === proposal.matterId);
-  if (category !== "receipts" && proposal.matterId !== null && !selected) {
-    throw new AgentError("Model selected a matter outside the candidate set", "LLM_MATTER");
-  }
-  const summary = String(proposal.summary);
-  const emailPatch = { category, personIds };
-  if (selected) {
-    const params: AgentMatterAttachParams = {
-      matterId: selected.id,
-      emailIds: [email.id],
-      personIds,
-      emailPatch,
-    };
-    await ctx.callTool(
-      "attach_to_matter",
-      {
-        accountId: email.accountId,
-        matterId: params.matterId,
-        emailIds: params.emailIds,
-        personIds: params.personIds,
-        reason: `Organize “${email.subject}” in ${selected.title}`,
-      },
-      { emailPatch, matterId: selected.id },
-    );
-    return { id: selected.id, summary };
-  }
-  const params: AgentMatterCreateParams = {
-    matter: {
-      title: category === "receipts" ? purchaseTitle : String(proposal.title),
-      kind: category === "receipts" ? "purchase" : String(proposal.kind),
-      summary,
-      nextStep: String(proposal.nextStep),
-      status: "active",
-      personIds,
-      emailIds: [email.id],
-      eventIds: [],
-    },
-    emailPatch,
-  };
-  await ctx.callTool(
-    "create_matter",
-    {
-      accountId: email.accountId,
-      matter: params.matter,
-      reason: `Create matter: ${params.matter.title}. ${summary}`,
-    },
-    { emailPatch },
-  );
-  const record = ctx.actions.at(-1)!;
-  if (record.status !== "executed") {
-    return { summary };
-  }
-  const result = record.result;
-  const resultMatter = isObject(result?.matter) ? result.matter : undefined;
-  function createdMatterId() {
-    if (typeof result?.matterId === "string") {
-      return result.matterId;
-    }
-    if (typeof resultMatter?.id === "string") {
-      return resultMatter.id;
-    }
-    if (typeof result?.id === "string") {
-      return result.id;
-    }
-    return undefined;
-  }
-  const id = createdMatterId();
-  const attached = await ctx.store.emails.get(email.id);
-  const persisted = id
-    ? await ctx.store.matters.get(id)
-    : attached?.matterId
-      ? await ctx.store.matters.get(attached.matterId)
-      : (await ctx.store.matters.list()).find((matter) => matter.emailIds.includes(email.id));
-  if (!persisted) {
-    throw new AgentError(
-      "Executed matter_create did not persist or return a discoverable matter",
-      "EXECUTOR_RESULT",
-    );
-  }
-  return { id: persisted.id, summary };
-}
-
-async function readThread(store: Store, email: Email): Promise<Email[]> {
-  const thread = await store.threads.get(email.threadId);
-  if (thread) {
-    const items = await Promise.all(
-      thread.emailIds.map((id) => store.emails.get(id, { includeBodies: true })),
-    );
-    return items
-      .filter((item): item is Email => item !== null)
-      .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
-  }
-  return allEmails(store, {
-    threadId: email.threadId,
-    includeDeleted: true,
-    includeBodies: true,
-    sort: "receivedAt_asc",
-  });
 }
 
 function replyDraft(ctx: RunContext, email: Email, textBody: string): DraftInput {
@@ -349,16 +181,44 @@ async function scheduling(
   }
 }
 
+/**
+ * The arrival may be an envelope only (v0.3 envelope cache). `store.emails.get` with bodies is
+ * read-through; when it still has no bodies, one reader `body` call fills them. Without either,
+ * triage proceeds on the subject and preview.
+ */
+async function withBodies(
+  ctx: RunContext,
+  email: Email,
+  reader: AgentReader | null,
+): Promise<Email> {
+  if (email.textBody != null || email.htmlBody != null || !reader) {
+    return email;
+  }
+  const body = await reader.call((r, opts) => r.body(email.providerId, opts));
+  if (!body) {
+    ctx.notes.push(`Bodies for ${email.id} were unavailable; triaged from the envelope.`);
+    return email;
+  }
+  return {
+    ...email,
+    textBody: body.value.textBody ?? null,
+    htmlBody: body.value.htmlBody ?? null,
+    attachments: body.value.attachments.length ? body.value.attachments : email.attachments,
+  };
+}
+
 export async function triage(
   ctx: RunContext,
   emailId: string,
   bus: import("@passport/types").EventBus,
 ): Promise<void> {
   const step = ctx.triageStep ?? (async <T>(_name: string, task: () => Promise<T>) => task());
-  const email = await ctx.store.emails.get(emailId, { includeBodies: true });
-  if (!email) {
+  const stored = await ctx.store.emails.get(emailId, { includeBodies: true });
+  if (!stored) {
     throw new AgentError("Received email was not found in the store", "EMAIL_NOT_FOUND");
   }
+  const reader = await ctx.reads.reader(stored.accountId);
+  const email = await withBodies(ctx, stored, reader);
   const resolved = await step("people", () =>
     resolvePeople({
       email,
@@ -366,6 +226,7 @@ export async function triage(
       bus,
       selfAddresses: ctx.selfAddresses,
       now: ctx.now(),
+      reader,
       savePerson: async (person, reason) => {
         await ctx.callTool(
           "update_person",
@@ -418,7 +279,7 @@ export async function triage(
     counterparty.personId = null;
   }
   const matter = await step("matter", () =>
-    attachMatter(ctx, email, category, resolved.persistedIds, counterparty),
+    attachMatter(ctx, email, category, resolved.persistedIds, reader),
   );
   const common = { accountId: email.accountId, emailIds: [email.id] };
   const toolContext = {
@@ -475,7 +336,7 @@ export async function triage(
     } else if (category === "replies_known") {
       const response = await ctx.structured(
         replySchema,
-        replyPrompt(email, await readThread(ctx.store, email)),
+        replyPrompt(email, await readThread(ctx.store, email, reader)),
       );
       await ctx.callTool(
         "create_draft",

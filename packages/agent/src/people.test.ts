@@ -192,16 +192,21 @@ describe("people inference", () => {
     expect(env.bus.events).toEqual([]);
   });
 
-  it("paginates the entire history when counting prior messages", async () => {
-    const history = Array.from({ length: 202 }, (_, i) =>
-      emailFixture({
-        id: `old-${i}`,
-        from: [{ email: i >= 200 ? "alice@example.com" : "other@example.com" }],
-        receivedAt: "2026-10-01T00:00:00.000Z",
-      }),
-    );
-    const env = await resolve(emailFixture(), history);
-    expect(env.sender).toMatchObject({ relationship: "known", stats: { received: 3 } });
+  // v0.3: without a reader the fallback reads one bounded page (PEOPLE_FALLBACK_SCAN) instead of
+  // draining the whole store; contacts beyond the bound need the reader's provider counts.
+  it("bounds the reader-less fallback scan to the newest stored emails", async () => {
+    const history = (aliceAt: string) =>
+      Array.from({ length: 202 }, (_, i) =>
+        emailFixture({
+          id: `old-${i}`,
+          from: [{ email: i >= 200 ? "alice@example.com" : "other@example.com" }],
+          receivedAt: i >= 200 ? aliceAt : "2026-10-01T00:00:00.000Z",
+        }),
+      );
+    const recent = await resolve(emailFixture(), history("2026-10-10T00:00:00.000Z"));
+    expect(recent.sender).toMatchObject({ relationship: "known", stats: { received: 3 } });
+    const old = await resolve(emailFixture(), history("2026-09-01T00:00:00.000Z"));
+    expect(old.sender).toMatchObject({ relationship: "stranger", stats: { received: 1 } });
   });
 });
 
