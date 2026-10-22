@@ -207,7 +207,7 @@ Mail/calendar providers receive the reads and actions you authorize. Beyond thos
 
 ## Status
 
-**0.3.0 is unreleased.** What is verified, and how:
+**0.3.0 was tagged on 2026-10-22** (not yet published to npm or GHCR). What is verified, and how:
 
 | Area | State |
 | --- | --- |

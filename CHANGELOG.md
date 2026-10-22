@@ -3,7 +3,7 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
-## [Unreleased]
+## [0.3.0] — 2026-10-22
 
 ### Added
 
