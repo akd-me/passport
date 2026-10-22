@@ -1,7 +1,8 @@
 import { getEffectiveProfile } from "@passport/types";
-import { labelsAlias, readAlias, searchAlias } from "./aliases.js";
+import { deprecated, labelsAlias, readAlias, searchAlias } from "./aliases.js";
 import { availability } from "./availability.js";
 import type { Context } from "./context.js";
+import { matterRefRows, NOTES_UNTRUSTED_NOTICE, searchNotes } from "./notes.js";
 import {
   actionView,
   emailView,
@@ -152,29 +153,43 @@ export function registerReads(ctx: Context) {
   register(
     ctx,
     "get_matter",
-    "Read a matter with its attached and linked emails, calendar events and people. Email cursor is an ID from this matter; linkedEmailsNextCursor continues search_emails(matterId).",
+    "Read a matter: notes, watch, its provider refs resolved lazily to rows (newest first, envelopes only), plus attached and linked emails, calendar events and people. Email cursor is an ID from this matter; linkedEmailsNextCursor continues search_emails(matterId).",
     { matterId: s.id, full: s.full, limit: s.limit, cursor: s.id.nullable().optional() },
     false,
     async ({ matterId, full, limit, cursor }, ctx) => {
       const bundle = await ctx.matterBundle(matterId, limit, cursor, true);
+      const { refs: _raw, ...matter } = bundle.matter;
       return json({
         ...bundle,
+        matter,
+        ...(await matterRefRows(ctx, bundle.matter, limit)),
         emails: bundle.emails.map((email) => emailView(email, full)),
         events: bundle.events.map((event) => eventView(event, full)),
+        untrusted: NOTES_UNTRUSTED_NOTICE,
       });
     },
   );
   register(
     ctx,
     "list_people",
-    "Find people by relationship or text, including their verification and contact history.",
+    'Deprecated: use notes_search({kind:"person"}) or people_lookup. Find people by relationship or text (names, addresses and notes), including their verification and contact history.',
     {
       relationship: s.relationship.optional(),
       text: z.string().max(2000).optional(),
       limit: s.limit,
     },
     false,
-    async (query, ctx) => json({ items: await store.people.list(query) }),
+    async (query, ctx) => {
+      if (!query.text?.trim() || !store.notes) {
+        return json({ items: await store.people.list(query), ...deprecated("notes_search") });
+      }
+      const hits = await searchNotes(ctx, { text: query.text, kind: "person", limit: 200 });
+      const people = (await Promise.all(hits.map((hit) => store.people.get(hit.id)))).filter(
+        (person) =>
+          person !== null && (!query.relationship || person.relationship === query.relationship),
+      );
+      return json({ items: people.slice(0, query.limit), ...deprecated("notes_search") });
+    },
   );
   register(
     ctx,

@@ -127,6 +127,26 @@ export const actionQuery = {
   limit,
   cursor: z.string().max(2000).nullable().optional(),
 };
+/** A provider-addressed message reference (`MailRef`); see `notes_read` / `get_matter` output. */
+export const mailRef = z.strictObject({
+  account: id,
+  providerId: z.string().trim().min(1).max(1024),
+  rfc822Id: z.string().max(998).nullable().optional(),
+  threadPid: z.string().trim().min(1).max(1024).optional(),
+  date: timestamp,
+  subject: z.string().max(2000),
+});
+export const notes = z
+  .string()
+  .max(64_000)
+  .describe("Markdown knowledge the agent maintains (not policy state).");
+export const watch = z
+  .string()
+  .trim()
+  .max(500)
+  .describe(
+    'Saved portable query triage checks on arrival for this open matter, e.g. "from:dana@acme.com newer_than:30d".',
+  );
 export const matterFields = {
   title: z.string().trim().min(1).max(1000),
   summary: z.string().max(10_000),
@@ -138,6 +158,13 @@ export const matterFields = {
   nextStep: z.string().max(5000).nullable().optional(),
   dueAt: timestamp.nullable().optional(),
   snoozedUntil: timestamp.nullable().optional(),
+  notes: notes.nullable().optional(),
+  refs: z
+    .array(mailRef)
+    .max(500)
+    .optional()
+    .describe("Replaces the matter's references; attach_to_matter adds them from emails instead."),
+  watch: watch.nullable().optional(),
 };
 export const matterPatch = z
   .strictObject(matterFields)
@@ -151,7 +178,7 @@ export const personPatch = z
     primaryEmail: z.email().optional(),
     avatarUrl: z.url().nullable().optional(),
     relationship: relationship.optional(),
-    notes: z.string().max(10_000).nullable().optional(),
+    notes: notes.nullable().optional(),
     downgradeAcknowledgedAt: timestamp.nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, "Provide at least one field");

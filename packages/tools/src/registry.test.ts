@@ -74,6 +74,10 @@ const reads: Array<[string, object]> = [
   ["get_daily_log", { date: "2026-10-20" }],
   ["explain_decision", { actionId: "action-fixture" }],
   ["preview_unsubscribe", { emailId: "email-1" }],
+  ["notes_read", { kind: "person", id: "person-1" }],
+  ["notes_search", { pattern: "Ada" }],
+  // Without readers people_lookup answers from cached state only.
+  ["people_lookup", { query: "Ada" }],
 ];
 /** v0.3 provider-backed reads; covered with a mock reader in ondemand*.test.ts. */
 const onDemandReads = [
@@ -109,6 +113,11 @@ const writes: Array<[string, object, string]> = [
   ["apply_label_by_query", { query: { text: "project" }, label: "Work" }, "label"],
   ["add_standing_rule", { rule: "Archive newsletters." }, "profile_update"],
   ["remove_standing_rule", { rule: "Ask before sending." }, "profile_update"],
+  [
+    "notes_write",
+    { kind: "person", id: "person-1", notes: "Met at a conference" },
+    "person_update",
+  ],
 ];
 
 describe("shared tool catalogue", () => {
@@ -160,7 +169,7 @@ describe("shared tool catalogue", () => {
     });
   });
   it("covers every catalogue entry exactly once and adapters only reshape definitions", () => {
-    expect(tools).toHaveLength(54);
+    expect(tools).toHaveLength(58);
     expect(
       new Set([
         ...reads.map(([name]) => name),
