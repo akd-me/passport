@@ -93,7 +93,7 @@ describe("R4-16 results over the budget are clipped, not refused", () => {
           }),
         }),
     });
-    const account = (await store.accounts.list())[0] as Row;
+    const account = (await store.accounts.list())[0] as unknown as Row;
     await store.accounts.upsert({ ...account, kind: "gmail" } as never);
     const listed = await call("provider_get", { path: "users/me/messages" });
     expect(listed).toMatchObject({

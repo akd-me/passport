@@ -1,4 +1,3 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type {
   Attachment,
@@ -12,6 +11,7 @@ import { MAIL_ATTACHMENT_MAX_BYTES, MAIL_READ_ERROR_CODES } from "@passport/type
 import type { Context } from "../context.js";
 import { neutralize } from "../ondemand-support.js";
 import { ToolError } from "../presentation.js";
+import { privateDir, writeNew } from "../scratch-fs.js";
 
 /** Total attachment bytes one `mail_export` call writes (200 MiB); tests lower it. */
 export const exportLimits = { totalBytes: 200 * 1024 * 1024 };
@@ -53,11 +53,14 @@ export class AttachmentExport {
   readonly skipped: SkippedAttachment[] = [];
   private total = 0;
   private readonly root: string;
+  private ready: Promise<string> | null = null;
 
   constructor(
     private readonly ctx: Context,
-    dir: string,
+    private readonly dir: string,
     private readonly metas: ReadMeta[],
+    /** Real path of the scratch root; `attachments/` must resolve inside it. */
+    private readonly realRoot: string,
   ) {
     this.root = resolve(dir, "attachments");
   }
@@ -70,7 +73,9 @@ export class AttachmentExport {
         continue;
       }
       const reader = await this.ctx.reader(email.accountId);
-      await mkdir(this.root, { recursive: true, mode: 0o700 });
+      // A real 0700 directory, never a planted symlink (R4-2).
+      this.ready ??= privateDir(this.dir, "attachments", this.realRoot);
+      await this.ready;
       for (const [index, attachment] of attachments.entries()) {
         const reason = await this.write(reader, email, attachment, `${tag(email)}-${index}`);
         if (reason) {
@@ -116,8 +121,7 @@ export class AttachmentExport {
       throw new ToolError("INVALID_PATH", "Attachment file name escaped the export directory.");
     }
     // Never write through a pre-existing file or symlink.
-    await rm(path, { force: true });
-    await writeFile(path, value.data, { mode: 0o600, flag: "wx" });
+    await writeNew(path, value.data);
     this.total += value.size;
     this.written.push({
       path,
