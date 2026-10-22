@@ -4,72 +4,37 @@ import type {
   Email,
   Keyword,
   Mailbox,
-  MailboxRole,
   MailChange,
   MailProvider,
   SendResult,
   SyncDelta,
   Timestamp,
 } from "@passport/types";
+import { assertSend, decodeCursor, localId, ProviderError, required } from "./errors.js";
+import { GmailMailReader } from "./gmail-reader.js";
 import {
-  assertSend,
-  decodeCursor,
-  encodeCursor,
-  localId,
-  ProviderError,
-  required,
-} from "./errors.js";
+  flattenParts as flatten,
+  GMAIL_API_BASE,
+  GMAIL_LABEL_ROLES,
+  type GmailLabel,
+  type GmailMessage,
+  hydrateTextParts,
+  normalizeGmail,
+} from "./gmail-reader-normalize.js";
 import { HttpConnection, type ProviderOptions } from "./http.js";
-import {
-  composeMime,
-  generatePreview,
-  htmlToText,
-  normalizeHeaders,
-  normalizeMime,
-  toIso,
-} from "./normalize/index.js";
-import { type PassportVerifier, verifyHeaders } from "./verification.js";
+import { composeMime } from "./normalize/index.js";
 
-interface GmailPart {
-  partId?: string;
-  mimeType?: string;
-  filename?: string;
-  headers?: Array<{ name: string; value: string }>;
-  body?: { size?: number; data?: string; attachmentId?: string };
-  parts?: GmailPart[];
-}
-export interface GmailMessage {
-  id: string;
-  threadId?: string;
-  labelIds?: string[];
-  snippet?: string;
-  internalDate?: string;
-  sizeEstimate?: number;
-  historyId?: string;
-  payload?: GmailPart;
-  raw?: string;
-}
-interface GmailLabel {
-  id: string;
-  name: string;
-  messagesTotal?: number;
-  messagesUnread?: number;
-}
 interface GmailDraft {
   id: string;
   message: GmailMessage;
 }
-const base = "https://gmail.googleapis.com/gmail/v1/users/me";
-const roles: Record<string, MailboxRole> = {
-  INBOX: "inbox",
-  SENT: "sent",
-  DRAFT: "drafts",
-  TRASH: "trash",
-  SPAM: "junk",
-  IMPORTANT: "important",
-  ALL: "all",
-};
+const base = GMAIL_API_BASE;
+const roles = GMAIL_LABEL_ROLES;
 const keywordLabels: Record<string, string> = { $flagged: "STARRED", $junk: "SPAM" };
+/** Label changes on at least this many ids use `messages.batchModify`. */
+const BATCH_MODIFY_MIN_IDS = 10;
+/** `messages.batchModify` accepts at most 1,000 ids per call. */
+const BATCH_MODIFY_MAX_IDS = 1_000;
 export const gmailCapabilities: AccountCapabilities = {
   mail: true,
   calendar: false,
@@ -77,142 +42,41 @@ export const gmailCapabilities: AccountCapabilities = {
   push: false,
   labels: true,
   submit: true,
+  search: true,
+  onDemand: true,
 };
-
-function flatten(part?: GmailPart): GmailPart[] {
-  return part ? [part, ...(part.parts ?? []).flatMap(flatten)] : [];
-}
-function isAttachment(part: GmailPart): boolean {
-  return Boolean(
-    part.filename ||
-      part.mimeType === "text/calendar" ||
-      part.headers?.some(
-        (h) => h.name.toLowerCase() === "content-disposition" && /^attachment/i.test(h.value),
-      ) ||
-      (part.body?.attachmentId && !["text/plain", "text/html"].includes(part.mimeType ?? "")),
-  );
-}
-function partText(part: GmailPart): string {
-  const charset =
-    part.headers
-      ?.find((h) => h.name.toLowerCase() === "content-type")
-      ?.value.match(/charset\s*=\s*"?([^;"\s]+)/i)?.[1] ?? "utf-8";
-  try {
-    return new TextDecoder(charset).decode(Buffer.from(part.body?.data ?? "", "base64url"));
-  } catch {
-    // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
-
-    throw new ProviderError("INVALID_ENCODING", "Gmail returned an unsupported body charset");
-  }
-}
-
-/** Normalize Gmail full/raw payloads, preserving MIME attachment handles and receiver headers. */
-export async function normalizeGmail(
-  message: GmailMessage,
-  accountId: string,
-  verifier?: PassportVerifier,
-): Promise<Email> {
-  const labels = message.labelIds ?? [],
-    keywords: Email["keywords"] = {};
-  if (!labels.includes("UNREAD")) {
-    keywords.$seen = true;
-  }
-  if (labels.includes("STARRED")) {
-    keywords.$flagged = true;
-  }
-  if (labels.includes("DRAFT")) {
-    keywords.$draft = true;
-  }
-  if (labels.includes("SPAM")) {
-    keywords.$junk = true;
-  }
-  for (const l of labels) {
-    if (!roles[l] && !["UNREAD", "STARRED"].includes(l)) {
-      keywords[`label:${l}`] = true;
-    }
-  }
-  const mailboxIds = labels.filter((l) => !["UNREAD", "STARRED"].includes(l));
-  const receivedAt = toIso(message.internalDate ? Number(message.internalDate) : 0);
-  if (message.raw) {
-    return normalizeMime(Buffer.from(message.raw, "base64url"), {
-      accountId,
-      providerId: message.id,
-      threadId: message.threadId,
-      mailboxIds,
-      keywords,
-      receivedAt,
-      verifier,
-    });
-  }
-  const headers = normalizeHeaders(message.payload?.headers ?? []);
-  // Gmail's full format still exposes RFC 5322 encoded words and address syntax in headers.
-  const envelope = await normalizeMime(
-    `${(message.payload?.headers ?? []).map((h) => `${h.name}: ${h.value}`).join("\r\n")}\r\n\r\n`,
-    { accountId, providerId: message.id },
-  );
-  const parts = flatten(message.payload);
-  const attachments = parts.filter(isAttachment);
-  const texts = parts.filter((p) => !attachments.includes(p));
-  const html =
-    texts
-      .filter((p) => p.mimeType === "text/html")
-      .map(partText)
-      .join("\n") || null;
-  const text =
-    texts
-      .filter((p) => p.mimeType === "text/plain")
-      .map(partText)
-      .join("\n") || (html ? htmlToText(html) : "");
-  return {
-    id: localId(accountId, "email", message.id),
-    accountId,
-    providerId: message.id,
-    threadId: localId(accountId, "thread", message.threadId ?? message.id),
-    mailboxIds: mailboxIds.map((id) => localId(accountId, "mailbox", id)),
-    keywords,
-    from: envelope.from,
-    to: envelope.to,
-    cc: envelope.cc,
-    bcc: envelope.bcc,
-    replyTo: envelope.replyTo,
-    subject: envelope.subject,
-    sentAt: envelope.sentAt,
-    receivedAt,
-    preview: generatePreview(text || htmlToText(message.snippet ?? "")),
-    textBody: text,
-    htmlBody: html,
-    attachments: attachments.map((p, i) => ({
-      id: localId(accountId, "attachment", `${message.id}:${p.partId ?? i}`),
-      name: p.filename || (p.mimeType === "text/calendar" ? "invite.ics" : "attachment"),
-      type: p.mimeType ?? "application/octet-stream",
-      size: p.body?.size ?? 0,
-      blobId: `gmail:${encodeCursor([message.id, p.body?.attachmentId ?? null, p.partId ?? "", p.mimeType ?? "application/octet-stream"])}`,
-      disposition: p.headers?.some(
-        (h) => h.name.toLowerCase() === "content-disposition" && /^inline/i.test(h.value),
-      )
-        ? "inline"
-        : "attachment",
-      cid: p.headers?.find((h) => h.name.toLowerCase() === "content-id")?.value ?? null,
-    })),
-    headers,
-    size: message.sizeEstimate ?? 0,
-    verification: await verifyHeaders(headers, verifier),
-    personIds: [],
-  };
-}
+export type { GmailMessage } from "./gmail-reader-normalize.js";
+export { normalizeGmail } from "./gmail-reader-normalize.js";
 
 export class GmailMailProvider extends HttpConnection implements MailProvider {
   readonly kind = "gmail" as const;
   readonly capabilities = gmailCapabilities;
   private draftIds = new Map<string, string>();
   private labels: GmailLabel[] = [];
+  private mailReader: GmailMailReader | undefined;
   constructor(options: ProviderOptions = {}) {
     super(options, "google");
   }
   override async disconnect(): Promise<void> {
     this.draftIds.clear();
     this.labels = [];
+    this.mailReader = undefined;
     await super.disconnect();
+  }
+  /** On-demand reader bound to the connected account (one instance per connection). */
+  reader(): GmailMailReader {
+    this.mailReader ??= new GmailMailReader({
+      accountId: () => {
+        this.check();
+        return this.account.id;
+      },
+      json: (url, init, policy) => this.json(url, init, policy),
+      http: (url, init, policy) => this.http(url, init, policy),
+      report: (signal) => this.options.governor?.report(this.account.id, signal),
+      ...(this.options.verifier ? { verifier: this.options.verifier } : {}),
+      ...(this.options.governor ? { governor: this.options.governor } : {}),
+    });
+    return this.mailReader;
   }
   private async getLabels(): Promise<GmailLabel[]> {
     this.labels = (await this.json<{ labels?: GmailLabel[] }>(`${base}/labels`)).labels ?? [];
@@ -364,18 +228,11 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
       }
       throw e;
     }
-    for (const part of flatten(message.payload)) {
-      if (!isAttachment(part) && part.body?.attachmentId && part.body.data === undefined) {
-        part.body.data = (
-          await this.json<{ data: string }>(
-            `${base}/messages/${encodeURIComponent(providerId)}/attachments/${encodeURIComponent(part.body.attachmentId)}`,
-          )
-        ).data;
-        if (typeof part.body.data !== "string") {
-          throw new ProviderError("INVALID_RESPONSE", "Gmail omitted a referenced text body");
-        }
-      }
-    }
+    await hydrateTextParts(message, (attachmentId) =>
+      this.json<{ data?: unknown }>(
+        `${base}/messages/${encodeURIComponent(providerId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      ),
+    );
     return normalizeGmail(message, this.account.id, this.options.verifier);
   }
   async getBlob(blobId: string): Promise<{ type: string; data: Uint8Array }> {
@@ -460,6 +317,20 @@ export class GmailMailProvider extends HttpConnection implements MailProvider {
         add.add(await this.labelId(c.mailboxProviderId));
       } else if (c.op === "removeFromMailbox") {
         remove.add(await this.labelId(c.mailboxProviderId));
+      }
+      if (c.op !== "delete" && c.op !== "move" && c.providerIds.length >= BATCH_MODIFY_MIN_IDS) {
+        // One batchModify (50 units, ≤1,000 ids) is cheaper than ten or more modifies (5 each).
+        for (let i = 0; i < c.providerIds.length; i += BATCH_MODIFY_MAX_IDS) {
+          await this.http(
+            `${base}/messages/batchModify`,
+            this.body({
+              ids: c.providerIds.slice(i, i + BATCH_MODIFY_MAX_IDS),
+              addLabelIds: [...add],
+              removeLabelIds: [...remove],
+            }),
+          );
+        }
+        continue;
       }
       for (const id of c.providerIds) {
         if (c.op === "delete") {

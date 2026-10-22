@@ -8,6 +8,9 @@ export {
   SubmissionAcceptedError,
 } from "./errors.js";
 export { GmailMailProvider, gmailCapabilities, normalizeGmail } from "./gmail.js";
+export type { GmailCostEntry } from "./gmail-reader.js";
+export { GmailMailReader } from "./gmail-reader.js";
+export { GMAIL_METADATA_HEADERS } from "./gmail-reader-support.js";
 export { GoogleCalendarProvider, normalizeGoogleEvent } from "./google-calendar.js";
 export { GraphMailProvider, graphCapabilities, normalizeGraph } from "./graph.js";
 export { GraphCalendarProvider, normalizeGraphEvent } from "./graph-calendar.js";
