@@ -2552,19 +2552,6 @@ fieldset.field legend {
   font-size: var(--t-s);
   color: var(--muted);
 }
-.backfill summary {
-  margin-top: 6px;
-  font-size: var(--t-s);
-  color: var(--ink);
-  cursor: pointer;
-  width: max-content;
-}
-.backfill-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
 .checks {
   list-style: none;
   margin: 8px 0 0;

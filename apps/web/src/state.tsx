@@ -10,6 +10,7 @@ import {
 import { type DomainEvent, request } from "./api";
 import { checkSession, websocketUrl } from "./auth";
 import { logger } from "./logger";
+import { createRefreshThrottle } from "./refresh-throttle";
 
 /** Frames on /ws: domain events plus setup-task updates from the onboarding service. */
 type WorkspaceEvent = DomainEvent | { type: "setup.task.updated"; task: unknown };
@@ -43,9 +44,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let socket: WebSocket | undefined,
       reconnect: ReturnType<typeof setTimeout>,
-      debounce: ReturnType<typeof setTimeout>,
       stopped = false,
       attempts = 0;
+    const throttle = createRefreshThrottle(refresh);
     const connect = () => {
       if (stopped) {
         return;
@@ -65,8 +66,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           for (const listener of listeners.current) {
             listener(event);
           }
-          clearTimeout(debounce);
-          debounce = setTimeout(refresh, 120);
+          throttle.push(event as { type: string });
         } catch {
           // Workspace event frame could not be processed.
           logger.warn("Workspace event frame could not be processed");
@@ -89,7 +89,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => {
       stopped = true;
       clearTimeout(reconnect);
-      clearTimeout(debounce);
+      throttle.cancel();
       socket?.close();
       window.removeEventListener("focus", onFocus);
     };

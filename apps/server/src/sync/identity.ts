@@ -9,7 +9,7 @@ import {
 import { key } from "./state.js";
 
 export function createSyncIdentity(store: Store) {
-  /** v0.2 rows keep their mapped ULIDs; new mail rows use the adapter's handle (`fallback`). */
+  /** Calendar ids and events keep mapped ULIDs (`fallback` reuses the adapter id instead). */
   async function reference(
     accountId: string,
     kind: string,
@@ -24,6 +24,19 @@ export function createSyncIdentity(store: Store) {
     }
     return id;
   }
+  /** A v0.2 alias when one exists, else the adapter id itself; never writes (no per-row kv). */
+  async function lookup(accountId: string, kind: string, nativeId: string): Promise<string> {
+    return (await store.kv.get(key("sync-id", accountId, kind, nativeId))) ?? nativeId;
+  }
+  /** v0.2 rows keep their ULID; new rows use the handle with no alias bookkeeping. */
+  async function emailId(accountId: string, email: Email, existing: Email | null) {
+    return (
+      existing?.id ??
+      (await store.kv.get(key("sync-provider", accountId, "email", email.providerId))) ??
+      (await store.kv.get(key("sync-id", accountId, "email", email.id))) ??
+      mailHandle(accountId, "email", email.providerId)
+    );
+  }
   async function identity(
     accountId: string,
     kind: string,
@@ -33,32 +46,28 @@ export function createSyncIdentity(store: Store) {
   ): Promise<string> {
     const canonical = key("sync-provider", accountId, kind, providerId);
     const id =
-      existingId ??
-      (await store.kv.get(canonical)) ??
-      (await reference(
-        accountId,
-        kind,
-        nativeId,
-        kind === "email" ? mailHandle(accountId, "email", providerId) : undefined,
-      ));
+      existingId ?? (await store.kv.get(canonical)) ?? (await reference(accountId, kind, nativeId));
     await store.kv.set(canonical, id);
     await store.kv.set(key("sync-id", accountId, kind, nativeId), id);
     return id;
   }
   async function email(accountId: string, email: Email): Promise<Email> {
-    const existing = await store.emails.getByProviderId(accountId, email.providerId);
+    // Cache only: normalizing a provider envelope must never cost another provider read.
+    const existing = await store.emails.getByProviderId(accountId, email.providerId, {
+      cacheOnly: true,
+    });
     const boxes = await store.mailboxes.list(accountId);
     return {
       // Only provider-owned fields may replace an existing record. In particular,
       // providers cannot reset annotations made by local agents or humans.
       ...(existing ?? { personIds: [], category: null, matterId: null }),
       accountId,
-      id: await identity(accountId, "email", email.providerId, email.id, existing?.id),
+      id: await emailId(accountId, email, existing),
       providerId: email.providerId,
-      threadId: await reference(accountId, "thread", email.threadId, email.threadId),
+      threadId: await lookup(accountId, "thread", email.threadId),
       mailboxIds: await Promise.all(
         email.mailboxIds.map((id) =>
-          boxes.some((box) => box.id === id) ? id : reference(accountId, "mailbox", id, id),
+          boxes.some((box) => box.id === id) ? id : lookup(accountId, "mailbox", id),
         ),
       ),
       keywords: email.keywords,
@@ -113,5 +122,5 @@ export function createSyncIdentity(store: Store) {
       id: await identity(accountId, "calendar", calendar.providerId, calendar.id, existing?.id),
     };
   }
-  return { reference, identity, email, event, calendar };
+  return { reference, lookup, identity, email, event, calendar };
 }

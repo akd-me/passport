@@ -1,9 +1,24 @@
 import type { Account } from "@passport/types";
 import { request } from "../api";
 
+/** First-run copy shown once an account is connected (wizard and OAuth return). */
+export const FIRST_RUN_CONNECTED =
+  "Connected. Passport reads your mail on demand and watches for new mail.";
+
+/** `GET /api/accounts` → `watch`: new-mail watcher health. Times are ISO UTC. */
+export interface WatchStatus {
+  since: string | null;
+  lastTickAt: string | null;
+  cursorAgeSeconds: number | null;
+  status: "starting" | "watching" | "backoff" | "stale" | "error" | "unsupported" | "needs-sign-in";
+  error?: string;
+  retryAt?: string;
+}
 export type ConnectedAccount = Account & {
-  messageCount?: number;
-  syncing?: boolean;
+  /** Provider Inbox total from the last label refresh; null until known. */
+  messageCount?: number | null;
+  /** Null for calendar-only accounts. */
+  watch?: WatchStatus | null;
 };
 export interface ConnectionAttempt {
   authUrl: string;
@@ -45,7 +60,5 @@ export const accountApi = {
     request<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
-  backfill: (id: string, days: number) =>
-    post<{ ok: boolean }>(`/accounts/${encodeURIComponent(id)}/backfill?days=${days}`),
   doctor: () => request<DoctorReport>("/doctor"),
 };

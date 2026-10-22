@@ -9,6 +9,7 @@ import {
   type ConnectedAccount,
   type ConnectionAttempt,
   type ConnectionStatus,
+  FIRST_RUN_CONNECTED,
 } from "./api";
 
 export function AccountWizard({
@@ -114,12 +115,9 @@ export function AccountWizard({
   function connectionMessage() {
     if (status?.status === "connected") {
       if (linked?.lastSyncError) {
-        return `Connected. Sync needs attention: ${linked.lastSyncError}`;
+        return `Connected. Watching needs attention: ${linked.lastSyncError}`;
       }
-      if (linked?.lastSyncAt && !linked.syncing) {
-        return `Connected and synced ${linked.messageCount ?? 0} messages.`;
-      }
-      return "Connected. Initial sync is running…";
+      return FIRST_RUN_CONNECTED;
     }
     if (status?.status === "failed") {
       return "Connection was not completed.";
