@@ -123,6 +123,10 @@ export class FakeGraph {
       return response({ responses });
     }
     const reply = this.reply(url, request);
+    if (reply.body instanceof Uint8Array) {
+      // Binary bodies (attachment `$value`) are sent as-is.
+      return new Response(reply.body, { status: reply.status, headers: reply.headers });
+    }
     return response(reply.body ?? {}, reply.status, reply.headers);
   }
 
