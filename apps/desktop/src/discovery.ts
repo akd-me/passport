@@ -10,6 +10,10 @@ export interface OwnerLease {
   startedAt: string;
   heartbeatAt: string;
   id: string;
+  /** Recorded by servers from v0.3 on: where the owner actually listens. */
+  host?: string;
+  port?: number;
+  mode?: "real" | "demo";
 }
 
 export interface ServerAddress {
@@ -56,14 +60,24 @@ export function activeOwner(dataDir: string): OwnerLease | null {
   return owner;
 }
 
-/** Same precedence as loadConfig: environment, then passport.config.json, then defaults. */
+/**
+ * A live owner's recorded address wins (it may run with a PASSPORT_PORT this app never saw);
+ * otherwise the same precedence as loadConfig: environment, passport.config.json, defaults.
+ */
 export function serverAddress(
   dataDir: string,
   env: NodeJS.ProcessEnv = process.env,
+  owner?: OwnerLease | null,
 ): ServerAddress {
   const saved = readJson<{ host?: unknown; port?: unknown }>(join(dataDir, "passport.config.json"));
-  const configuredHost = env.PASSPORT_HOST || (typeof saved?.host === "string" ? saved.host : "");
-  const port = Number(env.PASSPORT_PORT || (typeof saved?.port === "number" ? saved.port : 3000));
+  const recorded = Number.isInteger(owner?.port) && (owner?.port ?? 0) > 0;
+  const configuredHost =
+    (recorded && typeof owner?.host === "string" ? owner.host : "") ||
+    env.PASSPORT_HOST ||
+    (typeof saved?.host === "string" ? saved.host : "");
+  const port = recorded
+    ? (owner?.port as number)
+    : Number(env.PASSPORT_PORT || (typeof saved?.port === "number" ? saved.port : 3000));
   // Wildcard binds are reachable on loopback; anything else is used as configured.
   let host =
     !configuredHost || ["0.0.0.0", "::"].includes(configuredHost) ? "127.0.0.1" : configuredHost;

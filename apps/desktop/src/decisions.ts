@@ -57,15 +57,27 @@ export class DecisionWatcher extends EventEmitter<{
   private reconnectTimer: NodeJS.Timeout | undefined;
   private attempt = 0;
 
+  /**
+   * Keeps the last snapshot across reconnects (the app serves one data directory), so a
+   * proposal that arrived while the server was away is still announced.
+   */
   connect(origin: string, token: string): void {
-    this.disconnect();
+    this.teardown();
     this.target = { origin, token };
-    this.known = null;
     this.open();
     this.scheduleRefresh(0);
   }
 
+  /** While no server answers there is no count to show, so the badge clears instead of going stale. */
   disconnect(): void {
+    this.teardown();
+    if (this.count !== 0) {
+      this.count = 0;
+      this.emit("count", 0);
+    }
+  }
+
+  private teardown(): void {
     this.target = null;
     clearTimeout(this.refreshTimer);
     clearTimeout(this.reconnectTimer);

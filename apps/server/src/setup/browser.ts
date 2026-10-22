@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 import type { HostAgentMcpServer } from "@passport/types";
 import { logger } from "../logger.js";
 
@@ -104,6 +104,21 @@ export function detectSetupBrowser(options: BrowserDetectOptions = {}): SetupBro
 }
 
 export const NO_BROWSER_MESSAGE = `No supported browser found. Install Google Chrome or Microsoft Edge, or run \`npx -y ${PLAYWRIGHT_MCP_PACKAGE} install-browser chrome-for-testing\` (Playwright's Chromium), then start setup again.`;
+
+export const NO_NPX_MESSAGE =
+  "Agent-driven setup needs Node.js for its browser helper, and npx was not found. Install Node.js from nodejs.org (Passport.app does not include npm), or connect with your own OAuth client from Accounts.";
+
+/** True when `npx` is next to the running Node or on PATH (Passport.app's own binary has none). */
+export function npxAvailable(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  execPath = process.execPath,
+): boolean {
+  const name = platform === "win32" ? "npx.cmd" : "npx";
+  return [dirname(execPath), ...(env.PATH ?? "").split(delimiter)]
+    .filter((dir) => isAbsolute(dir))
+    .some((dir) => existsSync(join(dir, name)));
+}
 
 /** `npx` next to the running Node, so the CLI's MCP launcher does not depend on its own PATH. */
 function npxCommand(

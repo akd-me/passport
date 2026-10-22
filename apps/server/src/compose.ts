@@ -1,6 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomBytes } from "node:crypto";
-import { chmod, link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createAgentRuntime,
@@ -26,6 +25,7 @@ import { calendarSafeStore } from "./calendar-safety.js";
 import { llmConfigured, type PassportConfig, saveConfig, validateConfig } from "./config.js";
 import { ApiError } from "./errors.js";
 import { logger } from "./logger.js";
+import { checkMasterKey, resolveMasterKey } from "./master-key.js";
 import { persistOAuthCredentials } from "./onboarding/oauth.js";
 import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
 import { withMcpReaders } from "./ondemand-wiring.js";
@@ -39,6 +39,8 @@ import { createOnDemandWiring } from "./watch/wiring.js";
 export interface RealBackendOptions {
   /** Client processes may submit Actions, but never run automatic arrivals/jobs. */
   clientMode?: boolean;
+  /** Opens without a master key when none can be had (credentials stay sealed). */
+  readOnly?: boolean;
   /** Isolated SQLite and dependency injection for offline integration tests. */
   storePath?: string;
   providers?: ProviderRegistry;
@@ -51,46 +53,6 @@ export interface RealBackend extends Backend {
   drainAgentQueue(): Promise<void>;
 }
 
-async function masterKey(dataDir: string): Promise<string> {
-  if (process.env.PASSPORT_MASTER_KEY) {
-    return process.env.PASSPORT_MASTER_KEY;
-  }
-  const path = join(dataDir, "master.key");
-  try {
-    await readFile(path);
-  } catch (error) {
-    // An absent master key is initialized atomically; other filesystem errors propagate.
-
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-    const temp = `${path}.${crypto.randomUUID()}.tmp`;
-    try {
-      await writeFile(temp, randomBytes(32).toString("base64url") + "\n", {
-        flag: "wx",
-        mode: 0o600,
-      });
-      try {
-        await link(temp, path);
-      } catch (error) {
-        // Another process installed the key first; keep its existing key.
-
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-          throw error;
-        }
-      }
-    } finally {
-      await rm(temp, { force: true });
-    }
-  }
-  await chmod(path, 0o600);
-  const key = (await readFile(path, "utf8")).trim();
-  if (!key) {
-    throw new ApiError("INVALID_MASTER_KEY", "Master key file is empty");
-  }
-  return key;
-}
-
 /** The sole composition root: providers, persistence, policy, agent and MCP share one gate. */
 export async function createRealBackend(
   config: PassportConfig,
@@ -101,12 +63,18 @@ export async function createRealBackend(
   if (!memory) {
     await mkdir(config.dataDir, { recursive: true, mode: 0o700 });
   }
+  const master = memory
+    ? undefined
+    : await resolveMasterKey(config.dataDir, { readOnly: options.readOnly });
   const store = openStore({
     path: options.storePath ?? join(config.dataDir, "passport.sqlite"),
-    ...(memory ? {} : { masterKey: await masterKey(config.dataDir) }),
+    ...(master ? { masterKey: master.key } : {}),
   });
   try {
     await store.migrate();
+    if (master) {
+      await checkMasterKey(store, master);
+    }
     if ((await store.kv.get("user_profile")) === null) {
       await store.kv.set("user_profile", DEFAULT_USER_PROFILE);
     }

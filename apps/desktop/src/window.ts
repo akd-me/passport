@@ -1,12 +1,28 @@
 // The single app window. It only ever shows the local server's origin; every other http(s)
 // link, including OAuth consent pages, opens in the system browser.
 import { join } from "node:path";
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, type Session, shell } from "electron";
 import { loginUrl } from "./discovery";
 import { log } from "./paths";
 import type { ServerState } from "./server";
 
 const LOGIN_TTL_MS = 23 * 60 * 60 * 1000; // The server's cookie session lasts 24 h.
+const REAUTH_INTERVAL_MS = 10_000;
+/** Permissions the Passport UI may use; everything else (camera, location, …) is denied. */
+const PERMISSIONS = new Set(["notifications", "clipboard-sanitized-write"]);
+
+/** True when `url` (http or WebSocket) goes to the server at `origin`. */
+export function toServer(url: string, origin: string): boolean {
+  try {
+    const target = new URL(url);
+    const server = new URL(origin);
+    const ws = server.protocol === "https:" ? "wss:" : "ws:";
+    return target.host === server.host && [server.protocol, ws].includes(target.protocol);
+  } catch {
+    // Not a URL: never ours.
+    return false;
+  }
+}
 
 function openExternal(url: string): void {
   try {
@@ -42,7 +58,13 @@ export class MainWindow {
   /** Each render takes a ticket so a slow login cannot navigate over a newer render. */
   private renders = 0;
 
-  constructor(private readonly onVisibilityChange: () => void) {}
+  private lastReauth = 0;
+
+  constructor(
+    private readonly onVisibilityChange: () => void,
+    /** The server answered 401 although the window sends the token: it may have rotated. */
+    private readonly onUnauthorized: () => void = () => {},
+  ) {}
 
   get isOpen(): boolean {
     return !!this.window && !this.window.isDestroyed();
@@ -61,6 +83,10 @@ export class MainWindow {
     if (route !== undefined || created) {
       this.pendingRoute = route ?? "/";
       void this.render();
+    } else if (this.server.status === "ready" && !this.fresh(this.server.generation)) {
+      // A window left open past its cookie session: sign in again where it was.
+      this.pendingRoute = this.currentRoute(this.server) ?? this.pendingRoute;
+      void this.render();
     }
   }
 
@@ -76,13 +102,18 @@ export class MainWindow {
       state.status === "ready" &&
       previous.generation === state.generation;
     if (!sameServer) {
-      this.pendingRoute = this.currentRoute() ?? this.pendingRoute;
+      // The page shown belongs to the previous state, so read its route against that.
+      this.pendingRoute = this.currentRoute(previous) ?? this.pendingRoute;
       void this.render();
     }
   }
 
-  private currentRoute(): string | null {
-    if (this.server.status !== "ready" || !this.window) {
+  private fresh(generation: number): boolean {
+    return this.loggedIn?.generation === generation && Date.now() - this.loggedIn.at < LOGIN_TTL_MS;
+  }
+
+  private currentRoute(shown: ServerState): string | null {
+    if (shown.status !== "ready" || !this.window) {
       return null;
     }
     try {
@@ -123,10 +154,7 @@ export class MainWindow {
       return;
     }
     const target = `${state.origin}${this.pendingRoute}`;
-    const fresh =
-      this.loggedIn?.generation === state.generation &&
-      Date.now() - this.loggedIn.at < LOGIN_TTL_MS;
-    if (!fresh) {
+    if (!this.fresh(state.generation)) {
       // The login URL sets the HttpOnly session cookie in this window's session and redirects to /.
       const ok = await this.load(window, loginUrl(state.origin, state.token));
       if (!ok || ticket !== this.renders || window.isDestroyed()) {
@@ -138,6 +166,47 @@ export class MainWindow {
       }
     }
     await this.load(window, target);
+  }
+
+  /**
+   * The window authenticates every request to the server with its token, so an expired cookie
+   * session or a restarted server never strands it on the token prompt. A 401 despite that means
+   * the token changed: re-read it and sign in again, at most every 10 s.
+   */
+  private guardSession(session: Session): void {
+    const server = () => (this.server.status === "ready" ? this.server : null);
+    session.webRequest.onBeforeSendHeaders((details, callback) => {
+      const ready = server();
+      if (ready && toServer(details.url, ready.origin)) {
+        details.requestHeaders.Authorization = `Bearer ${ready.token}`;
+      }
+      callback({ requestHeaders: details.requestHeaders });
+    });
+    session.webRequest.onCompleted((details) => {
+      const ready = server();
+      if (!ready || details.statusCode !== 401 || !toServer(details.url, ready.origin)) {
+        return;
+      }
+      if (Date.now() - this.lastReauth < REAUTH_INTERVAL_MS) {
+        return;
+      }
+      this.lastReauth = Date.now();
+      log("warn", "The server rejected the window's session; signing in again");
+      this.loggedIn = null;
+      this.onUnauthorized();
+      this.pendingRoute = this.currentRoute(this.server) ?? this.pendingRoute;
+      void this.render();
+    });
+    const allowed = (permission: string, url: string) => {
+      const ready = server();
+      return PERMISSIONS.has(permission) && !!ready && toServer(url, ready.origin);
+    };
+    session.setPermissionRequestHandler((contents, permission, callback) =>
+      callback(allowed(permission, contents.getURL())),
+    );
+    session.setPermissionCheckHandler((_contents, permission, origin) =>
+      allowed(permission, origin),
+    );
   }
 
   private create(): BrowserWindow {
@@ -167,12 +236,21 @@ export class MainWindow {
       openExternal(url);
       return { action: "deny" };
     });
-    window.webContents.on("will-navigate", (event, url) => {
-      if (!sameOrigin(url)) {
+    // will-navigate misses server redirects and subframes, so guard those routes off the origin too.
+    const leave = (event: Electron.Event & { url: string }) => {
+      if (!sameOrigin(event.url)) {
         event.preventDefault();
-        openExternal(url);
+        openExternal(event.url);
+      }
+    };
+    window.webContents.on("will-navigate", leave);
+    window.webContents.on("will-redirect", leave);
+    window.webContents.on("will-frame-navigate", (event) => {
+      if (!event.isMainFrame && !sameOrigin(event.url)) {
+        event.preventDefault();
       }
     });
+    this.guardSession(window.webContents.session);
     window.on("closed", () => {
       this.window = null;
       this.onVisibilityChange();

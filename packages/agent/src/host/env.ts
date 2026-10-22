@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 
 /**
  * Variables a host CLI needs to find its login (keychain, config dir), the network, and
@@ -123,7 +123,7 @@ export function hostAgentEnv(
       env[key] = value;
     }
   }
-  const path = (source.PATH ?? source.Path ?? "").split(delimiter).filter(Boolean);
+  const path = (source.PATH ?? source.Path ?? "").split(delimiter).filter((dir) => isAbsolute(dir));
   for (const dir of [...(binaryPath ? [dirname(binaryPath)] : []), ...extraBinDirs(source)]) {
     if (!path.includes(dir)) {
       path.push(dir);

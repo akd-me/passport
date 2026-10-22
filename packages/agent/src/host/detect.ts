@@ -1,6 +1,6 @@
 import { accessSync, constants, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import type { HostAgentKind, HostAgentStatus } from "@passport/types";
 import { extraBinDirs, hostAgentEnv, redact } from "./env.js";
 import { runCli } from "./process.js";
@@ -56,7 +56,8 @@ export function resolveHostAgentBinary(
       ? (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").map((ext) => BINARY[kind] + ext.toLowerCase())
       : [BINARY[kind]];
   const dirs = [
-    ...(env.PATH ?? env.Path ?? "").split(delimiter).filter(Boolean),
+    // Only absolute entries: a relative one would be checked here and run from another cwd.
+    ...(env.PATH ?? env.Path ?? "").split(delimiter).filter((dir) => isAbsolute(dir)),
     ...extraBinDirs(env),
   ];
   for (const dir of dirs) {

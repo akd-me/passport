@@ -61,7 +61,8 @@ export class MenuBar {
       ...(server.status === "failed" ? [{ label: server.detail, enabled: false }] : []),
       {
         label: "Restart Server",
-        enabled: !(server.status === "ready" && server.attached),
+        // Not while starting: the start in flight finishes or fails first (and then retries).
+        enabled: server.status === "failed" || (server.status === "ready" && !server.attached),
         click: () => a.restartServer(),
       },
       { label: "Show Logs in Finder", click: () => a.openLogs() },

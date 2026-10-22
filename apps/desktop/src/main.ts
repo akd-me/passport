@@ -1,11 +1,11 @@
 // Passport.app main process: one instance, a server child (or an attached `passport serve`),
 // one window onto its UI, and a menu-bar item that keeps working with the window closed.
 import { join, resolve } from "node:path";
-import { app, BrowserWindow, dialog, Notification, shell } from "electron";
+import { app, BrowserWindow, dialog, Notification, safeStorage, shell } from "electron";
 import { installShim } from "./cli-shim";
 import { DecisionWatcher, type NewDecision } from "./decisions";
 import { decisionLink, linkFromArgv, routeFor, SCHEME } from "./deep-links";
-import { desktopMasterKey } from "./master-key";
+import { desktopMasterKey, MasterKeyError } from "./master-key";
 import { dataDir, log, logDir } from "./paths";
 import { ServerSupervisor } from "./server";
 import { loadSettings, saveSettings } from "./settings";
@@ -49,26 +49,30 @@ async function start(): Promise<void> {
   }
 
   let masterKey: string | null = null;
-  const childEnv = (): NodeJS.ProcessEnv => ({
-    PASSPORT_DATA_DIR: dir,
-    ...(masterKey ? { PASSPORT_MASTER_KEY: masterKey } : {}),
+  const supervisor = new ServerSupervisor(dir, {
+    masterKey: () => masterKey,
+    spawnMarker: join(app.getPath("userData"), "server-child.json"),
   });
-  const supervisor = new ServerSupervisor(dir, childEnv);
   const watcher = new DecisionWatcher();
-  const window = new MainWindow(() => {
-    updateDock();
-    refreshTray();
-  });
+  const window = new MainWindow(
+    () => {
+      updateDock();
+      refreshTray();
+    },
+    () => supervisor.refreshToken(),
+  );
   let started = false;
 
   const startServer = () => {
     try {
-      masterKey = desktopMasterKey(dir)?.key ?? null;
+      masterKey = desktopMasterKey(dir, safeStorage, app.getPath("userData"))?.key ?? null;
     } catch (error) {
-      // Without the sealed key, starting the server would mint a new key and strand credentials.
-      log("error", `Keychain access failed (${(error as Error).name}); not starting the server`);
+      // Without the right key, starting the server would fail or strand credentials.
       const detail =
-        "macOS did not release Passport's encryption key from the Keychain. Allow access when asked, then choose Restart Server from the menu bar.";
+        error instanceof MasterKeyError
+          ? error.message
+          : `Passport could not prepare its encryption key (${(error as NodeJS.ErrnoException).code ?? (error as Error).name}: ${(error as Error).message}). Fix that, then choose Restart Server from the menu bar.`;
+      log("error", `Not starting the server: ${detail}`);
       supervisor.state = { status: "failed", detail };
       window.setServer(supervisor.state);
       refreshTray();

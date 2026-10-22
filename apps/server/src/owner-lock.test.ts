@@ -52,3 +52,10 @@ it("R9: a replaced owner stops work and cannot overwrite or unlink its successor
   owner.release();
   expect(activeOwner(dataDir)?.id).toBe("successor");
 });
+it("R3-10: the lease records where its owner listens, so Passport.app attaches to that port", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "passport-owner-"));
+  directories.push(dataDir);
+  owners.push(acquireOwner(dataDir, () => {}, { host: "127.0.0.1", port: 4000, mode: "demo" }));
+  const lease = JSON.parse(await readFile(join(dataDir, "owner.lock"), "utf8"));
+  expect(lease).toMatchObject({ pid: process.pid, host: "127.0.0.1", port: 4000, mode: "demo" });
+});

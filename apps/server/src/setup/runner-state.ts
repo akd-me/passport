@@ -56,6 +56,8 @@ interface SetupOAuth {
 }
 export interface SetupBrowserControl {
   detect(): SetupBrowser | null;
+  /** Whether `npx` (which launches the browser helper) can be found. */
+  npx?(): boolean;
   prepare(signal: AbortSignal): Promise<void>;
   server(options: BrowserMcpOptions): HostAgentMcpServer;
   close(profileDir: string): Promise<void>;

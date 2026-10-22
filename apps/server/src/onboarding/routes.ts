@@ -41,6 +41,23 @@ export function registerOnboarding(
     const { nonce: _nonce, ...safe } = result;
     return c.json(safe);
   });
+  // Opened in the system browser by Passport.app (or any browser without the starting tab's
+  // cookies): binds that browser to the attempt as `start` did, then forwards to consent.
+  app.get("/oauth/launch/:ticket", (c) => {
+    c.header("Cache-Control", "no-store");
+    c.header("Referrer-Policy", "no-referrer");
+    const launch = oauth.launch(c.req.param("ticket"));
+    if (!launch) {
+      return c.text("This sign-in link has expired or was already used. Return to Passport.", 404);
+    }
+    setCookie(c, oauthCookie(launch.state), launch.nonce, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax",
+      maxAge: 600,
+    });
+    return c.redirect(launch.authUrl, 302);
+  });
   app.get("/api/accounts/oauth/status/:state", (c) =>
     c.json(oauth.status(c.req.param("state"), getCookie(c, oauthCookie(c.req.param("state"))))),
   );

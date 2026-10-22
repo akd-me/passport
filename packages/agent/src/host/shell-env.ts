@@ -86,7 +86,10 @@ export function loginShellCandidates(
   return [...seen];
 }
 
-/** Join PATH values, keeping the first occurrence of each entry. */
+/**
+ * Join PATH values, keeping the first occurrence of each absolute entry. Relative entries
+ * (`.`, `bin`) would resolve against whatever the current directory is, so they are dropped.
+ */
 export function mergePathValues(
   values: readonly (string | undefined)[],
   delimiter: string = platformDelimiter,
@@ -95,7 +98,7 @@ export function mergePathValues(
   for (const value of values) {
     for (const raw of value?.split(delimiter) ?? []) {
       const entry = raw.trim();
-      if (entry && !entries.includes(entry)) {
+      if (entry && isAbsolute(entry) && !entries.includes(entry)) {
         entries.push(entry);
       }
     }
@@ -201,9 +204,16 @@ function capture(
   });
 }
 
-/** The inherited environment minus Passport's own settings and secrets. */
+/**
+ * The inherited environment minus Passport's own settings and secrets, and Electron's (under
+ * Passport.app, ELECTRON_RUN_AS_NODE would turn Electron-based tools in rc files into Node).
+ */
 function shellEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("PASSPORT_")));
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      ([key]) => !key.startsWith("PASSPORT_") && !key.startsWith("ELECTRON_"),
+    ),
+  );
 }
 
 /**

@@ -53,10 +53,11 @@ describe("account wizard", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
   it("shows the desktop guide, enables PKCE browser setup and honors optional calendar access", async () => {
-    vi.spyOn(window, "open").mockReturnValue(null);
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
     const add = vi.spyOn(api, "addAccount");
     const start = vi.spyOn(accountApi, "start").mockResolvedValue({
       authUrl: "https://accounts.google.com/authorize",
+      launchUrl: "http://127.0.0.1:3000/oauth/launch/ticket",
       attemptId: "pending",
       redirectUri: "http://127.0.0.1:3000/oauth/callback",
     });
@@ -78,6 +79,12 @@ describe("account wizard", () => {
       }),
     );
     expect(await screen.findByText(/Waiting for authorization/)).toBeInTheDocument();
+    // R3-1: with no tab of its own (the Mac app), consent goes through the binding launch URL.
+    expect(open).toHaveBeenLastCalledWith(
+      "http://127.0.0.1:3000/oauth/launch/ticket",
+      "_blank",
+      "noopener",
+    );
     expect(screen.getByRole("link", { name: "Open authorization tab" })).toHaveAttribute(
       "target",
       "_blank",

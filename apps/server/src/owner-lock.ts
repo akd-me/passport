@@ -11,6 +11,10 @@ export interface OwnerRecord {
   startedAt: string;
   heartbeatAt: string;
   id: string;
+  /** Where the owner listens, so Passport.app attaches to the right port (absent before v0.3). */
+  host?: string;
+  port?: number;
+  mode?: "real" | "demo";
 }
 
 function readOwner(dataDir: string): OwnerRecord | null {
@@ -84,13 +88,18 @@ function publish(dataDir: string, owner: OwnerRecord) {
 }
 
 /** Only serve/demo acquire this lease. Clients never heartbeat or remove it. */
-export function acquireOwner(dataDir: string, onLost: () => void = () => {}) {
+export function acquireOwner(
+  dataDir: string,
+  onLost: () => void = () => {},
+  listen: Pick<OwnerRecord, "host" | "port" | "mode"> = {},
+) {
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const owner: OwnerRecord = {
     pid: process.pid,
     id: randomUUID(),
     startedAt: new Date().toISOString(),
     heartbeatAt: new Date().toISOString(),
+    ...listen,
   };
   guarded(dataDir, () => {
     const existing = activeOwner(dataDir);
