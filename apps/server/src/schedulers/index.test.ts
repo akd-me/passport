@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Backend } from "../backend.js";
 import { createDemoBackend } from "../demo/index.js";
+import type { WatchTickResult } from "../watch/watcher.js";
+
+const tick: WatchTickResult = { status: "ok", added: 0, arrivals: 0, summary: "0 new arrivals" };
 import { type SchedulerHandle, startSchedulers } from "./index.js";
 
 describe("backend schedulers", () => {
@@ -117,13 +120,14 @@ describe("backend schedulers", () => {
     await stopping;
     expect(stopped).toBe(true);
   });
-  it("consumes optional push notifications and aborts waitForChanges on shutdown", async () => {
+  it("consumes optional push notifications as immediate watcher ticks and aborts waitForChanges on shutdown", async () => {
     const account = (await backend.store.accounts.list())[0]!;
     await backend.store.accounts.upsert({
       ...account,
       capabilities: { ...account.capabilities, push: true },
     });
-    const sync = vi.spyOn(backend, "syncAccount").mockResolvedValue();
+    const watch = vi.fn(async () => tick);
+    backend.watchAccount = watch;
     let change!: () => void;
     const wait = vi.fn(
       (_id: string, signal: AbortSignal) =>
@@ -137,16 +141,17 @@ describe("backend schedulers", () => {
     await handle.ready;
     await vi.advanceTimersByTimeAsync(0);
     expect(wait).toHaveBeenCalledTimes(1);
+    expect(watch).toHaveBeenCalledTimes(1);
     change();
     await vi.advanceTimersByTimeAsync(0);
-    expect(sync).toHaveBeenCalledTimes(2);
+    expect(watch).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1000);
     expect(wait).toHaveBeenCalledTimes(2);
     await handle.stop();
     expect(wait.mock.calls[1]?.[1].aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
-  it("keeps automatic push notifications from running a paused sync job", async () => {
+  it("keeps automatic push notifications from running a paused watch job", async () => {
     const account = (await backend.store.accounts.list())[0]!;
     await backend.store.accounts.upsert({
       ...account,
@@ -158,15 +163,16 @@ describe("backend schedulers", () => {
         change = resolve;
         signal.addEventListener("abort", () => resolve(), { once: true });
       });
-    const sync = vi.spyOn(backend, "syncAccount").mockResolvedValue();
+    const watch = vi.fn(async () => tick);
+    backend.watchAccount = watch;
     handle = startSchedulers(backend);
     await handle.ready;
     await vi.advanceTimersByTimeAsync(0);
-    expect(sync).toHaveBeenCalledTimes(1);
-    await handle.scheduler.pause(`sync:${account.id}`);
+    expect(watch).toHaveBeenCalledTimes(1);
+    await handle.scheduler.pause(`watch:${account.id}`);
     change();
     await vi.advanceTimersByTimeAsync(0);
-    expect(sync).toHaveBeenCalledTimes(1);
+    expect(watch).toHaveBeenCalledTimes(1);
   });
   it("recovers from a failed scheduled operation on the next interval", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});

@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { watcherTickKey } from "@passport/types";
 import { afterEach, describe, expect, it } from "vitest";
 import { addAccount } from "./accounts.js";
 import { createApp } from "./auth.test-client.js";
@@ -110,7 +111,9 @@ describe("configuration and composition", () => {
       expect(await restarted.store.accounts.getCredentials(accountId!)).toEqual({
         token: "test-credential",
       });
-      expect((await restarted.store.emails.query({ limit: 100 })).items).toHaveLength(40);
+      // No mirror: nothing is copied locally, but the watcher's cursor and last tick persist.
+      expect((await restarted.store.emails.query({ limit: 100 })).items).toHaveLength(0);
+      expect(await restarted.store.kv.get(watcherTickKey(accountId!))).toBeTruthy();
     } finally {
       await restarted.close();
     }

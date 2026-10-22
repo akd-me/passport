@@ -23,7 +23,8 @@ describe("passport init", () => {
     const config = JSON.parse(await readFile(join(dataDir, "passport.config.json"), "utf8"));
     expect(config.accounts).toEqual([]);
     expect(config.llm.apiKey).toBeUndefined();
-    expect(config.sync.initialDays).toBe(30);
+    expect(config.watch.intervalSeconds).toBe(30);
+    expect(config.sync).toBeUndefined();
     expect((await stat(join(dataDir, "master.key"))).mode & 0o777).toBe(0o600);
     expect((await stat(join(dataDir, "passport.config.json"))).mode & 0o777).toBe(0o600);
     expect(close).toHaveBeenCalledOnce();
