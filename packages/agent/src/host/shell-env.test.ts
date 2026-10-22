@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveHostAgentBinary } from "./detect.js";
 import { extraBinDirs, hostAgentEnv, isForwardedEnv } from "./env.js";
 import {
   applyShellEnvironment,
@@ -237,5 +238,39 @@ describe("probeShellEnvironment on this machine", () => {
     const result = await probeShellEnvironment();
     expect(["login-shell", "launchctl", "fallback"]).toContain(result.source);
     expect(result.PATH.length).toBeGreaterThan(0);
+  });
+});
+
+describe("R3-15: relative PATH entries and Electron's environment", () => {
+  it("R3-15: drops relative PATH entries everywhere a binary could be resolved", async () => {
+    expect(mergePathValues([".:/a:bin", "/b:./tools"], ":")).toBe("/a:/b");
+    expect(hostAgentEnv({ PATH: ".:bin:/usr/bin" }).PATH?.split(":")).not.toContain(".");
+    expect(hostAgentEnv({ PATH: ".:bin:/usr/bin" }).PATH?.split(":")).not.toContain("bin");
+    const dir = await temp();
+    await mkdir(join(dir, "bin"));
+    await writeFile(join(dir, "bin", "claude"), "#!/bin/sh\nexit 0\n");
+    await chmod(join(dir, "bin", "claude"), 0o755);
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(resolveHostAgentBinary("claude-code", { PATH: "bin", HOME: dir })).toBeNull();
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it("R3-15: the login-shell probe does not inherit ELECTRON_RUN_AS_NODE", async () => {
+    const dir = await temp();
+    const zsh = await fakeShell(
+      dir,
+      "zsh",
+      ['test -z "$ELECTRON_RUN_AS_NODE" || exit 7', "export PATH=/usr/bin", runCommand].join("\n"),
+    );
+    const result = await probeShellEnvironment({
+      shells: [zsh],
+      env: { PATH: "/usr/bin", ELECTRON_RUN_AS_NODE: "1" },
+      platform: "darwin",
+    });
+    expect(result.source).toBe("login-shell");
   });
 });
