@@ -323,11 +323,9 @@ Errors use stable codes: `ON_DEMAND_UNSUPPORTED`, `RATE_LIMITED`, `WOULD_EXCEED_
 
 ### Known limitations (review R4)
 
-- **R4-6 (notes_search):** with `regex: true` the pattern runs inside the store on the main
-  thread. The lint above refuses exponential shapes, but polynomial patterns (`x.*y`, `\w*y`)
-  over a very long note (notes hold up to 64 KB) can still take seconds per field. A full fix
-  needs store-side matching in a worker or a linear-time engine; `mail_grep` already has the
-  worker bound.
+- **R4-6 (notes_search):** resolved. With `regex: true` the store applies the same pattern
+  lint as `mail_grep` (≤ 200 characters, no backreferences, no nested quantifiers) and matches
+  in a worker thread with a 2 s limit (`PATTERN_TIMEOUT`). Plain-text search stays inline.
 - **R4-2 (mail_export):** directories are checked with `lstat` before files are created by
   path; Node has no `openat`, so a process that swaps a checked directory for a symlink in the
   instant between the check and the write is not stopped. Files themselves are never written
