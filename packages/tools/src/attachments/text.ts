@@ -94,6 +94,49 @@ function icalDate({ value, params }: Property): string {
   return params.TZID && !z ? `${time} (${params.TZID})` : time;
 }
 
+/** Copies one VEVENT property into the summary. */
+function assign(event: CalendarEventSummary, prop: Property): void {
+  switch (prop.name) {
+    case "SUMMARY":
+      event.summary = unescapeText(prop.value);
+      break;
+    case "DTSTART":
+      event.start = icalDate(prop);
+      break;
+    case "DTEND":
+      event.end = icalDate(prop);
+      break;
+    case "LOCATION":
+      event.location = unescapeText(prop.value);
+      break;
+    case "DESCRIPTION":
+      event.description = unescapeText(prop.value).slice(0, 4000);
+      break;
+    case "ORGANIZER":
+      event.organizer = prop.params.CN
+        ? `${prop.params.CN} <${address(prop.value)}>`
+        : address(prop.value);
+      break;
+    case "ATTENDEE":
+      if (event.attendees.length < 100) {
+        event.attendees.push({
+          address: address(prop.value),
+          status: prop.params.PARTSTAT ?? null,
+        });
+      }
+      break;
+    case "STATUS":
+      event.status = prop.value;
+      break;
+    case "RRULE":
+      event.recurrence = prop.value;
+      break;
+    case "UID":
+      event.uid = prop.value;
+      break;
+  }
+}
+
 /** Events of an iCalendar file (VEVENTs only) and its METHOD. */
 export function parseCalendar(text: string): {
   method: string | null;
@@ -145,45 +188,7 @@ export function parseCalendar(text: string): {
     if (depth > 0) {
       continue; // VALARM and other nested components.
     }
-    switch (prop.name) {
-      case "SUMMARY":
-        event.summary = unescapeText(prop.value);
-        break;
-      case "DTSTART":
-        event.start = icalDate(prop);
-        break;
-      case "DTEND":
-        event.end = icalDate(prop);
-        break;
-      case "LOCATION":
-        event.location = unescapeText(prop.value);
-        break;
-      case "DESCRIPTION":
-        event.description = unescapeText(prop.value).slice(0, 4000);
-        break;
-      case "ORGANIZER":
-        event.organizer = prop.params.CN
-          ? `${prop.params.CN} <${address(prop.value)}>`
-          : address(prop.value);
-        break;
-      case "ATTENDEE":
-        if (event.attendees.length < 100) {
-          event.attendees.push({
-            address: address(prop.value),
-            status: prop.params.PARTSTAT ?? null,
-          });
-        }
-        break;
-      case "STATUS":
-        event.status = prop.value;
-        break;
-      case "RRULE":
-        event.recurrence = prop.value;
-        break;
-      case "UID":
-        event.uid = prop.value;
-        break;
-    }
+    assign(event, prop);
     if (events.length >= 200) {
       break;
     }

@@ -28,11 +28,12 @@ returned. Every on-demand result reports what it actually spent in `cost`.
 | `mail_search` | R | 5 +20/row / 1 / 2 (per account) | `grep`: portable `query` or native `rawQuery`; `account:"all"` fans out and merges by date |
 | `mail_count` | R | 5 per 500 ids; facets +20/row / 1–2 / 1–2 | `wc`/`uniq -c`: exact count to `cap`, top-10 facets over a sample |
 | `mail_read` | R | 120 thread, 80 message / 1–2 / 2–6 | `Read`: thread or message as clean text, quotes collapsed, windows |
+| `mail_attachment_read` | R | 20 / 1–2 / 1 | Read one attachment as text (PDF, Office, sheets, invites, emails) or as an image |
 | `mail_grep` | R | ≤60/message / 1–2 / 1–2 | `grep -C`: regex over a bounded set's bodies, with context lines |
 | `mail_changes` | R | 2 +20/added / 1 per folder / 1–2 | `git status`: arrivals, label changes and deletions since a cursor |
 | `people_history` | R | as `mail_search` | Mail with, from or to an address or a known person |
 | `provider_get` | R | per method | Read-only, allowlisted raw GET (needs `MailReader.rawGet`) |
-| `mail_export` | R (writes local files) | ~120/thread | MCP only, with `scratchDir`: threads as `.md` / `.eml` for the host's shell |
+| `mail_export` | R (writes local files) | ~120/thread (+20/attachment) | MCP only, with `scratchDir`: threads as `.md` / `.eml` (and attachments) for the host's shell |
 
 Input shapes (all limits are enforced):
 
@@ -41,11 +42,12 @@ Input shapes (all limits are enforced):
 - `mail_search({account?: id|"all", query? | rawQuery?, container?, limit≤100=25, pageToken?, includeSpamTrash?=false, threads?=false})`
 - `mail_count({account?, query? | rawQuery?, cap≤10000=2000, facets?: ("from"|"fromDomain"|"label"|"month")[], sample≤500=200, confirmCost?=false})`
 - `mail_read({id, view?: "thread"|"message"="thread", format?: "text"|"html"|"headers"="text", quoted?: "collapse"|"full"="collapse", offset?=0, length≤60000=16000, messagesFrom?})`
+- `mail_attachment_read({id, attachment: {attachmentId? | index? | name?}, pages?: "1-5", rows?: "1-500", sheet?, maxChars≤100000=20000, offset?=0, asImage?=false})`
 - `mail_grep({ids?≤100 | query? | rawQuery?, account?, maxMessages≤100=30, pattern, flags?: ""|"i"|"m"|"im"="i", context 0–5=1, maxMatches≤200=50, confirmCost?=false})`
 - `mail_changes({account?, cursor?, limit≤200=50, kinds?: ("added"|"labelChanged"|"deleted")[]})`
 - `people_history({email | personId, account?: id|"all", direction?: "both"|"from"|"to"="both", limit≤100=25, pageToken?})`
 - `provider_get({account?, path, query?: Record<string,string>})`
-- `mail_export({ids? | query?, account?, max≤200=50, format?: "md"|"eml"="md"})` → `{dir, files[]}`
+- `mail_export({ids? | query?, account?, max≤200=50, format?: "md"|"eml"="md", includeAttachments?=false})` → `{dir, files[], attachmentsDir?, attachments?, skippedAttachments?}`
 
 `account` may be omitted when exactly one account is connected; `mail_search`,
 `mail_labels` and `people_history` then fan out to every account with a reader.
@@ -216,7 +218,44 @@ dropped. `offset`/`length` window the concatenated bodies of the full messages (
 each shown message has its stream `offset`, cut messages carry `truncated`/`continueFrom`, and
 the top-level `continueFrom` is where to resume. `format:"html"` returns sanitized `htmlBody`
 (remote images and beacons stripped); `format:"headers"` returns threading and authentication
-headers without bodies. Attachments are listed with `index`, `name`, `type` and `size`.
+headers without bodies. Attachments are listed with `index`, `attachmentId`, `name`, `type` and
+`size`; inline parts (embedded images) follow with `inline: true` and no `index`. Pass any of
+`index`, `attachmentId` or `name` to `mail_attachment_read`.
+
+**`mail_attachment_read`** downloads one attachment of a message (`id` is a message handle,
+`messages[].id` from `mail_read`) and extracts it in a `worker_threads` worker (512 MB heap,
+20 s wall clock; past it the worker is terminated and the call fails with
+`EXTRACTION_TIMEOUT`). The type comes from the declared MIME type, then the file extension,
+then magic bytes:
+
+| Type | Library (pure JS) | Result |
+| --- | --- | --- |
+| `text/*`, `.csv`, `.json`, `.md`, `.xml`, `.html` | built in (BOM, UTF-8, else Windows-1252; HTML to text) | `text` |
+| PDF | `pdfjs-dist` text layer | `--- page N ---` blocks; `pages` range (≤200 pages per call, `pageLimit` when cut); `pages: {from, to, total}`; `scanned: true` and `scannedPages` when a page has no text layer (no OCR) |
+| `.docx` | `mammoth` raw text | `text` |
+| `.xlsx` / `.xls` / `.ods` | `xlsx` (SheetJS) | CSV per sheet (`# Sheet: name` headed) or one `sheet`; `rows` window per sheet, ≤50,000 rows per call (`rowLimit` when cut); `sheets: [{name, rows}]`, `rows: {from, to, total}` |
+| `.pptx` | `fflate` + slide XML | `--- slide N ---` blocks with speaker notes; `slides` |
+| `text/calendar` (`.ics`) | built in | `calendar: {method, events: [{summary, start, end, location, organizer, attendees, description, status, recurrence, uid}]}` and a readable `text` |
+| `message/rfc822` (`.eml`) | built in (minimal MIME) | `message: {from, to, cc, subject, date, rfc822Id, attachments}` and the text part |
+| PNG / JPEG / GIF / WebP ≤ 2 MB | none | MCP: an `image` content block next to the JSON (`kind: "image"`, `bytes`, `mimeType`). Other hosts get `{kind: "image", bytes, note}` unless `asImage: true` |
+
+`maxChars`/`offset` window the extracted (neutralised) text: the result has `offset`,
+`totalChars`, `truncated` and `continueFrom`. Extracted text and every string field are
+untrusted data, neutralised like bodies. Results carry `account`, `message`, `attachment:
+{name, type, size, inline}`, `kind`, `source` and `cost`. Errors: `ATTACHMENT_TOO_LARGE`
+(`size`, `limit`: 25 MB), `NOT_DOWNLOADABLE` (Graph reference attachments; `cloudLink` is
+the host only), `INVALID_ATTACHMENT_REF`, `UNSUPPORTED_TYPE` (metadata plus `head`: magic
+type, printable ratio and printable runs of the first 512 bytes, never a hexdump),
+`SHEET_NOT_FOUND`, `EXTRACTION_FAILED` (corrupt or password-protected files),
+`EXTRACTION_TIMEOUT` and `NOT_IMPLEMENTED` (provider without `MailReader.attachment`).
+
+Bundle impact: the four libraries are bundled only into the published package's
+`dist/server/attachment-worker.js` (≈2.8 MB minified; `cli.js` is unchanged), so they are not
+runtime dependencies of `@akd-me/passport`. Installed in the workspace they take about
+35 MB (`pdfjs-dist`, mostly fonts, CMaps and source maps), 7.8 MB (`xlsx`), 1.9 MB
+(`mammoth`, plus `jszip`, `@xmldom/xmldom` and smaller dependencies) and 0.8 MB (`fflate`). `xlsx` comes from the SheetJS CDN
+tarball (0.20.3; the npm release is stale and has known advisories), and pdf.js's optional
+native `@napi-rs/canvas` (rendering only) is excluded with `ignoredOptionalDependencies`.
 
 **`mail_grep`** resolves its set from `ids` (messages or whole threads) or a query
 (`maxMessages` rows), fetches bodies four at a time per account and matches the pattern per
@@ -234,11 +273,17 @@ optional `MailReader.rawGet(path, query)`; until they do the tool returns
 `ON_DEMAND_UNSUPPORTED`.
 
 **`mail_export`** writes under `<scratchDir>/<session>/` (directory 0700, files 0600): one
-Markdown file per thread (headed by an untrusted-content note) or one `.eml` per message. The
-host removes sessions older than 24 h with `sweepScratchDir(scratchDir)`.
+Markdown file per thread (headed by an untrusted-content note) or one `.eml` per message. With
+`includeAttachments`, each non-inline attachment's raw bytes go to `attachments/` as
+`<thread>-<message>-<index>-<name>`: names are reduced to a single safe path component
+(no `/`, `\`, control characters or leading dots), each file is at most 25 MB and one call
+writes at most 200 MB; anything skipped is listed in `skippedAttachments` with a reason
+(`ATTACHMENT_TOO_LARGE`, `TOTAL_LIMIT`, `NOT_DOWNLOADABLE`, …). The host removes sessions
+older than 24 h with `sweepScratchDir(scratchDir)`.
 
 Errors use stable codes: `ON_DEMAND_UNSUPPORTED`, `RATE_LIMITED`, `WOULD_EXCEED_BUDGET`,
-`NOT_FOUND`, `STALE_ID`, `INVALID_QUERY`, `INVALID_CURSOR`, `INVALID_INPUT`, `PATH_NOT_ALLOWED`.
+`NOT_FOUND`, `STALE_ID`, `INVALID_QUERY`, `INVALID_CURSOR`, `INVALID_INPUT`, `PATH_NOT_ALLOWED`,
+plus the attachment codes above.
 
 ## Results and write behavior
 
@@ -539,7 +584,10 @@ Configuration references: [Claude Code](https://code.claude.com/docs/en/mcp),
 and `createToolRegistry({...,readers?,scratchDir?,scratchSession?})` take the on-demand
 seams: `readers` is a `MailReaderResolver` (`accountId → MailReader | null`); `scratchDir`
 (for example `<dataDir>/scratch`) enables `mail_export`, with one random session directory
-per MCP server; the host calls `sweepScratchDir(scratchDir)` periodically. The built-in agent
+per MCP server; the host calls `sweepScratchDir(scratchDir)` periodically. `imageContent: true`
+(set by the MCP server) tells the registry the host renders `IMAGE_CONTENT` (a symbol-keyed
+`{data, mimeType}` on a result) as image content, so `mail_attachment_read` returns images
+without `asImage`. The built-in agent
 passes `readers` and no `scratchDir`. A trusted per-call `ToolContext.readers` (second
 `handler` argument, never model-supplied) overrides the registry's resolver for that call. `createMailboxMcpServer(...)`,
 `createAgentRuntime(...)`, and `createToolRegistry(...)` accept an optional

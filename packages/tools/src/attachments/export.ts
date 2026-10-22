@@ -1,6 +1,13 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import type { Email, MailAttachmentData, ReadMeta, ReadValue } from "@passport/types";
+import type {
+  Attachment,
+  Email,
+  MailAttachmentData,
+  MailReader,
+  ReadMeta,
+  ReadValue,
+} from "@passport/types";
 import { MAIL_ATTACHMENT_MAX_BYTES, MAIL_READ_ERROR_CODES } from "@passport/types";
 import type { Context } from "../context.js";
 import { neutralize } from "../ondemand-support.js";
@@ -65,54 +72,61 @@ export class AttachmentExport {
       const reader = await this.ctx.reader(email.accountId);
       await mkdir(this.root, { recursive: true, mode: 0o700 });
       for (const [index, attachment] of attachments.entries()) {
-        const skip = (reason: string) =>
+        const reason = await this.write(reader, email, attachment, `${tag(email)}-${index}`);
+        if (reason) {
           this.skipped.push({ messageId: email.id, name: neutralize(attachment.name), reason });
-        if (!reader.attachment) {
-          skip("NOT_IMPLEMENTED");
-          continue;
         }
-        if (attachment.size > MAIL_ATTACHMENT_MAX_BYTES) {
-          skip("ATTACHMENT_TOO_LARGE");
-          continue;
-        }
-        if (this.total + attachment.size > exportLimits.totalBytes) {
-          skip("TOTAL_LIMIT");
-          continue;
-        }
-        let read: ReadValue<MailAttachmentData>;
-        try {
-          read = await reader.attachment(email.providerId, { attachmentId: attachment.id });
-        } catch (error) {
-          const code = (error as { code?: unknown } | null)?.code;
-          if (code === MAIL_READ_ERROR_CODES.RATE_LIMITED) {
-            throw error;
-          }
-          skip(typeof code === "string" && /^[A-Z_]{1,40}$/.test(code) ? code : "DOWNLOAD_FAILED");
-          continue;
-        }
-        this.metas.push(read);
-        const { value } = read;
-        if (this.total + value.size > exportLimits.totalBytes) {
-          skip("TOTAL_LIMIT");
-          continue;
-        }
-        const path = resolve(this.root, `${tag(email)}-${index}-${safeFileName(value.name)}`);
-        if (dirname(path) !== this.root) {
-          throw new ToolError("INVALID_PATH", "Attachment file name escaped the export directory.");
-        }
-        // Never write through a pre-existing file or symlink.
-        await rm(path, { force: true });
-        await writeFile(path, value.data, { mode: 0o600, flag: "wx" });
-        this.total += value.size;
-        this.written.push({
-          path,
-          messageId: email.id,
-          name: neutralize(value.name),
-          type: value.type,
-          size: value.size,
-        });
       }
     }
+  }
+
+  /** Downloads and writes one attachment; returns the reason it was skipped, if it was. */
+  private async write(
+    reader: MailReader,
+    email: Email,
+    attachment: Attachment,
+    prefix: string,
+  ): Promise<string | null> {
+    if (!reader.attachment) {
+      return "NOT_IMPLEMENTED";
+    }
+    if (attachment.size > MAIL_ATTACHMENT_MAX_BYTES) {
+      return "ATTACHMENT_TOO_LARGE";
+    }
+    if (this.total + attachment.size > exportLimits.totalBytes) {
+      return "TOTAL_LIMIT";
+    }
+    let read: ReadValue<MailAttachmentData>;
+    try {
+      read = await reader.attachment(email.providerId, { attachmentId: attachment.id });
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code === MAIL_READ_ERROR_CODES.RATE_LIMITED) {
+        throw error;
+      }
+      return typeof code === "string" && /^[A-Z_]{1,40}$/.test(code) ? code : "DOWNLOAD_FAILED";
+    }
+    this.metas.push(read);
+    const { value } = read;
+    if (this.total + value.size > exportLimits.totalBytes) {
+      return "TOTAL_LIMIT";
+    }
+    const path = resolve(this.root, `${prefix}-${safeFileName(value.name)}`);
+    if (dirname(path) !== this.root) {
+      throw new ToolError("INVALID_PATH", "Attachment file name escaped the export directory.");
+    }
+    // Never write through a pre-existing file or symlink.
+    await rm(path, { force: true });
+    await writeFile(path, value.data, { mode: 0o600, flag: "wx" });
+    this.total += value.size;
+    this.written.push({
+      path,
+      messageId: email.id,
+      name: neutralize(value.name),
+      type: value.type,
+      size: value.size,
+    });
+    return null;
   }
 
   /** Result fields for `mail_export`. */

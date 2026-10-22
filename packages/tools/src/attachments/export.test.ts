@@ -11,7 +11,9 @@ afterEach(() => {
   exportLimits.totalBytes = LIMIT;
 });
 
-async function exportHarness(files: Array<{ name: string; data: Uint8Array; size?: number; inline?: boolean }>) {
+async function exportHarness(
+  files: Array<{ name: string; data: Uint8Array; size?: number; inline?: boolean }>,
+) {
   const scratchDir = await mkdtemp(join(tmpdir(), "passport-export-att-"));
   const harness = await onDemandHarness({ scratchDir, scratchSession: "s1" });
   const provider = harness.provider();
