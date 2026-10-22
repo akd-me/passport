@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type {
   Email,
+  MailAttachmentData,
+  MailAttachmentRef,
   MailBody,
   MailChanges,
   MailCountOptions,
@@ -12,10 +14,16 @@ import type {
   MailRow,
   MailSearchInput,
   QuotaLane,
+  RawGetResponse,
   ReadResult,
   ReadValue,
 } from "@passport/types";
 import { ProviderError } from "./errors.js";
+import {
+  GraphManifestCache,
+  graphRawGet,
+  readGraphAttachment,
+} from "./graph-reader-attachments.js";
 import { fetchBody, fetchThread } from "./graph-reader-bodies.js";
 import { readChanges } from "./graph-reader-changes.js";
 import { readCount } from "./graph-reader-count.js";
@@ -80,6 +88,7 @@ const hash = (value: string) => createHash("sha1").update(value).digest("base64u
 export class GraphMailReader implements MailReader {
   private readonly costs: GraphCostEntry[] = [];
   private readonly folders: GraphFolderCache;
+  private readonly manifests = new GraphManifestCache();
   constructor(
     private readonly transport: GraphReaderTransport,
     private readonly options: GraphReaderOptions = {},
@@ -267,6 +276,27 @@ export class GraphMailReader implements MailReader {
       value = [...found].sort((a, b) => rank(a) - rank(b))[0]?.id ?? null;
     }
     return { value, ...this.done("findByRfc822", call) };
+  }
+
+  async attachment(
+    providerId: string,
+    attachmentRef: MailAttachmentRef,
+    opts: MailReadOptions = {},
+  ): Promise<ReadValue<MailAttachmentData>> {
+    const call = this.call(opts);
+    const value = await readGraphAttachment(call, this.manifests, providerId, attachmentRef);
+    return { value, ...this.done("attachment", call) };
+  }
+
+  /** `provider_get`: one allowlisted GET, 1 request. */
+  async rawGet(
+    path: string,
+    query: Record<string, string>,
+    opts: MailReadOptions = {},
+  ): Promise<ReadValue<RawGetResponse>> {
+    const call = this.call(opts);
+    const value = await graphRawGet(call, path, query);
+    return { value, ...this.done("rawGet", call) };
   }
 
   // -------------------------------------------------------------------------

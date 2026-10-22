@@ -1,5 +1,12 @@
 import type { MailChanges } from "@passport/types";
-import type { GmailCall } from "./gmail-reader-support.js";
+import { required } from "./errors.js";
+import { clampLimit } from "./gmail-reader-query.js";
+import {
+  decodeChangeCursor,
+  encodeChangeCursor,
+  type GmailCall,
+  isNotFound,
+} from "./gmail-reader-support.js";
 import { GMAIL_UNIT_COSTS } from "./quota-presets.js";
 
 const HISTORY_TYPES = ["messageAdded", "labelAdded", "labelRemoved", "messageDeleted"];
@@ -114,4 +121,44 @@ export async function readHistory(
       return { ...collector.result(true), next };
     }
   }
+}
+
+/**
+ * `MailReader.changes` for Gmail: `null` starts at the current `historyId` ("now", never a
+ * backfill); a cursor Gmail no longer has (404, about a week old) restarts at now with
+ * `expired: true`.
+ */
+export async function gmailChanges(
+  call: GmailCall,
+  account: string,
+  cursor: string | null,
+  limit: number,
+): Promise<MailChanges> {
+  const now = async (): Promise<MailChanges> => ({
+    added: [],
+    labelChanged: [],
+    deleted: [],
+    cursor: encodeChangeCursor(
+      account,
+      required(
+        (await call.get<{ historyId?: string }>("profile", GMAIL_UNIT_COSTS.getProfile)).historyId,
+        "Gmail historyId",
+      ),
+    ),
+  });
+  if (cursor === null) {
+    return now();
+  }
+  const start = decodeChangeCursor(account, cursor);
+  let changes: Omit<MailChanges, "cursor"> & { next: string };
+  try {
+    changes = await readHistory(call, start, clampLimit(limit, Number.MAX_SAFE_INTEGER));
+  } catch (e) {
+    if (!isNotFound(e)) {
+      throw e;
+    }
+    return { ...(await now()), expired: true };
+  }
+  const { next, ...lists } = changes;
+  return { ...lists, cursor: encodeChangeCursor(account, next) };
 }

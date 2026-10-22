@@ -88,3 +88,22 @@ declare module "./ondemand.js" {
     ): Promise<ReadValue<MailAttachmentData>>;
   }
 }
+
+// ---------------------------------------------------------------------------
+// provider_get response budget (kept here so `tools-ondemand.ts` stays untouched)
+// ---------------------------------------------------------------------------
+
+/** `MailReader.rawGet` clips response bodies to this many serialized bytes (256 KiB). */
+export const RAW_GET_MAX_BYTES = 256 * 1024;
+
+declare module "./tools-ondemand.js" {
+  interface RawGetResponse {
+    /**
+     * Set when the body exceeded `RAW_GET_MAX_BYTES`: trailing items of its largest arrays were
+     * dropped (or, failing that, `body` is the first `RAW_GET_MAX_BYTES` of the text).
+     */
+    truncated?: boolean;
+    /** Size of the unclipped response body in bytes, present when `truncated`. */
+    totalBytes?: number;
+  }
+}
