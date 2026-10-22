@@ -15,6 +15,7 @@ import { persistArrival } from "../arrivals.js";
 import { cachedEmail, refreshLabelCache } from "../ondemand-wiring.js";
 import { readCursors, updateCursors } from "../sync/state.js";
 import { type ArrivalContext, alreadyHandled, arrivalContext, isInboxArrival } from "./arrival.js";
+import { backoffMs, needsReauthorization, rateLimited, safeCode } from "./errors.js";
 import { labelsKey, stateKey, summarizeLabels, type WatchState, watcherTickKey } from "./status.js";
 
 export interface MailWatcherOptions {
@@ -40,25 +41,6 @@ export interface WatchTickResult {
 
 /** Recent inbox mail checked once after a provider expires the cursor (research 03 §3.3). */
 export const EXPIRY_SWEEP = { query: "in:inbox newer_than:2d", limit: 100 } as const;
-const REAUTHORIZE = [
-  "AUTH_FAILED",
-  "OAUTH_REFRESH_FAILED",
-  "TOKEN_EXPIRED",
-  "REAUTHORIZE_REQUIRED",
-];
-const MAX_BACKOFF_MS = 15 * 60_000;
-const safeCode = (error: unknown) => {
-  const code = (error as { code?: unknown })?.code;
-  return typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : "WATCH_FAILED";
-};
-const rateLimited = (error: unknown) => {
-  const failure = error as { code?: string; status?: number };
-  return (
-    [429, 503].includes(failure.status ?? 0) ||
-    ["RATE_LIMITED", "HTTP_429", "HTTP_503"].includes(failure.code ?? "")
-  );
-};
-
 /**
  * Follows new mail per account with `MailReader.changes` in the `arrivals` lane. The first tick
  * takes a cursor at "now" and never backfills. Added inbox mail becomes a durable arrival; label
@@ -353,11 +335,7 @@ export class MailWatcher {
       // Back off the tick and never fail the account; the governor's hint wins when larger.
       const previous = this.backoff.get(account.id);
       const attempt = (previous?.attempt ?? 0) + 1;
-      const hinted = Number((error as { retryAfterSeconds?: number }).retryAfterSeconds ?? 0);
-      const delayMs = Math.min(
-        MAX_BACKOFF_MS,
-        Math.max(hinted * 1000, 30_000 * 2 ** (attempt - 1)),
-      );
+      const delayMs = backoffMs(error, attempt);
       const until = this.now() + delayMs;
       this.backoff.set(account.id, { until, attempt });
       await this.setState(account.id, {
@@ -376,7 +354,7 @@ export class MailWatcher {
     }
     const code = safeCode(error);
     const fresh = (await store.accounts.get(account.id)) ?? account;
-    if (REAUTHORIZE.includes(code)) {
+    if (needsReauthorization(code)) {
       // Revoked tokens need human consent, not another scheduled attempt.
       await store.accounts.upsert({
         ...fresh,

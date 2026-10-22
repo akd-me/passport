@@ -6,6 +6,7 @@ import type { Backend } from "../backend.js";
 import { createRealBackend } from "../compose.js";
 import { defaultConfig, validateConfig } from "../config.js";
 import { createDemoBackend } from "../demo/index.js";
+import { resetDeprecationWarnings } from "./config.js";
 
 describe("account onboarding API", () => {
   let backend: Backend | undefined;
@@ -57,7 +58,7 @@ describe("account onboarding API", () => {
     expect(await response.text()).not.toContain("private");
     expect(await backend.store.accounts.list()).toHaveLength(0);
   });
-  it("shows message counts and removes local mail and credentials durably", async () => {
+  it("shows inbox counts and watcher state, has no backfill, and removes local data durably", async () => {
     backend = await createRealBackend(defaultConfig(), {
       storePath: ":memory:",
     });
@@ -69,24 +70,21 @@ describe("account onboarding API", () => {
     await backend.syncAccount(account.id);
     const app = createApp(backend),
       data = (await (await app.request("/api/accounts")).json()) as {
-        accounts: Array<{ messageCount: number; syncing: boolean }>;
+        accounts: Array<Record<string, unknown>>;
       };
-    expect(data.accounts[0]!.messageCount).toBe(40);
-    expect(data.accounts[0]!.syncing).toBe(false);
+    // The provider's inbox total from label counts, not a local row count.
+    expect(data.accounts[0]!.messageCount).toBe(22);
+    expect(data.accounts[0]).not.toHaveProperty("syncing");
+    expect(data.accounts[0]!.watch).toEqual({
+      since: expect.any(String),
+      lastTickAt: expect.any(String),
+      cursorAgeSeconds: expect.any(Number),
+      status: "watching",
+    });
     expect(
-      (
-        await app.request(`/api/accounts/${account.id}/backfill?days=90`, {
-          method: "POST",
-        })
-      ).status,
-    ).toBe(200);
-    expect(
-      (
-        await app.request(`/api/accounts/${account.id}/backfill?days=-1`, {
-          method: "POST",
-        })
-      ).status,
-    ).toBe(400);
+      (await app.request(`/api/accounts/${account.id}/backfill?days=90`, { method: "POST" }))
+        .status,
+    ).toBe(404);
     expect((await app.request(`/api/accounts/${account.id}`, { method: "DELETE" })).status).toBe(
       200,
     );
@@ -94,6 +92,8 @@ describe("account onboarding API", () => {
     expect(await backend.store.accounts.getCredentials(account.id)).toBeNull();
     expect((await backend.store.emails.query({ accountId: account.id })).items).toHaveLength(0);
     expect(backend.config.accounts).toHaveLength(0);
+    expect(await backend.store.kv.get(`watcher-tick:${account.id}`)).toBeNull();
+    expect(await backend.store.syncState.get(account.id)).toBeNull();
   });
   it("filters actions before pagination and adds account IDs to matters", async () => {
     backend = await createDemoBackend();
@@ -117,10 +117,20 @@ describe("account onboarding API", () => {
     ).json()) as Array<Matter & { accountIds: string[] }>;
     expect(matters.every((m: { accountIds: string[] }) => m.accountIds.includes(id))).toBe(true);
   });
-  it("validates the initial sync window", () => {
-    expect(defaultConfig().sync?.initialDays).toBe(30);
-    expect(() => validateConfig({ ...defaultConfig(), sync: { initialDays: 0 } })).toThrow(
-      "initialDays",
+  it("accepts the deprecated sync.initialDays once with a warning and validates the watch interval", () => {
+    resetDeprecationWarnings();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(defaultConfig().sync).toBeUndefined();
+    expect(defaultConfig().watch?.intervalSeconds).toBe(30);
+    // Any value is ignored, even one v0.2 rejected.
+    expect(() => validateConfig({ ...defaultConfig(), sync: { initialDays: 0 } })).not.toThrow();
+    validateConfig({ ...defaultConfig(), sync: { initialDays: 365 } });
+    const warnings = warn.mock.calls.filter((call) =>
+      String(call.join(" ")).includes("initialDays"),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(() => validateConfig({ ...defaultConfig(), watch: { intervalSeconds: 1 } })).toThrow(
+      "watch.intervalSeconds",
     );
   });
 });

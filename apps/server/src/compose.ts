@@ -25,12 +25,12 @@ import { calendarSafeStore } from "./calendar-safety.js";
 import { llmConfigured, type PassportConfig, saveConfig, validateConfig } from "./config.js";
 import { ApiError } from "./errors.js";
 import { logger } from "./logger.js";
-import { backendWatchHooks } from "./watch/backend.js";
-import { agentReaderOptions, mcpReaderOptions } from "./ondemand-wiring.js";
 import { persistOAuthCredentials } from "./onboarding/oauth.js";
 import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
+import { agentReaderOptions, mcpReaderOptions } from "./ondemand-wiring.js";
 import { attachSetupTasks } from "./setup/routes.js";
 import { ProviderConnections } from "./sync/connections.js";
+import { backendWatchHooks } from "./watch/backend.js";
 import { attachMailWatcher } from "./watch/watcher.js";
 import { createOnDemandWiring } from "./watch/wiring.js";
 

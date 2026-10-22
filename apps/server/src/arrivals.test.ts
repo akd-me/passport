@@ -48,7 +48,8 @@ describe("durable email arrivals", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
-  async function fixture(dataDir?: string, enabled = true) {
+  /** `baseline` runs the first watcher tick, which takes the cursor at "now" (no backfill). */
+  async function fixture(dataDir?: string, enabled = true, baseline = true) {
     const providers = createProviderRegistry();
     const mail = new MockMailProvider({
       fixtures: false,
@@ -76,6 +77,9 @@ describe("durable email arrivals", () => {
     const run = vi.spyOn(backend.agent, "run").mockResolvedValue(successfulRun);
     const scheduler = getSchedulerService(backend);
     await scheduler.ready;
+    if (baseline) {
+      await backend.syncAccount(account.id);
+    }
     return { backend, mail, run, scheduler };
   }
   async function arrival(backend: RealBackend, providerId = "new"): Promise<Email> {
@@ -210,7 +214,7 @@ describe("durable email arrivals", () => {
     const first = await fixture(directory, false);
     first.mail.injectEmail({ providerId: "new" });
     await first.backend.syncAccount(account.id);
-    const second = await fixture(directory, false);
+    const second = await fixture(directory, false, false);
     let finish!: (run: AgentRun) => void;
     first.run.mockImplementationOnce(
       () =>
@@ -241,7 +245,7 @@ describe("durable email arrivals", () => {
     await work;
   });
 
-  it("R5: defers unsynced companion calendars without consuming retries, then marks availability unverified after ten minutes", async () => {
+  it("R5: defers unsynced companion calendars without consuming retries, then marks availability unverified after one minute", async () => {
     const { backend, mail, run } = await fixture();
     await backend.store.accounts.upsert({
       ...account,
@@ -255,7 +259,7 @@ describe("durable email arrivals", () => {
     expect(run).not.toHaveBeenCalled();
     const email = await arrival(backend);
     expect(await entry(backend, email)).toMatchObject({ attempts: 0, calendarWaitStartedAt: at });
-    await vi.advanceTimersByTimeAsync(599999);
+    await vi.advanceTimersByTimeAsync(59999);
     await backend.processArrivals!();
     expect(run).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -370,7 +374,7 @@ describe("durable email arrivals", () => {
     await first.backend.close();
     backends.splice(backends.indexOf(first.backend), 1);
     await vi.advanceTimersByTimeAsync(60000);
-    const second = await fixture(directory);
+    const second = await fixture(directory, undefined, false);
     expect(await entry(second.backend, email)).toMatchObject({ attempts: 1 });
     await second.scheduler.scheduler.runNow("agent.arrivals");
     expect(second.run).toHaveBeenCalledExactlyOnceWith({

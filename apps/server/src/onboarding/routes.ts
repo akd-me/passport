@@ -7,10 +7,10 @@ import { probeAccount, runDoctor } from "../doctor.js";
 import { ApiError, required } from "../errors.js";
 import { publicLlm } from "../llm-selection.js";
 import { object } from "../validation.js";
-import { registerAccountFilters } from "./filters.js";
-import { type BrowserOAuth, browserOAuth, oauthCookie } from "./oauth.js";
 import { inboxCount } from "../watch/status.js";
 import { mailWatcher } from "../watch/watcher.js";
+import { registerAccountFilters } from "./filters.js";
+import { type BrowserOAuth, browserOAuth, oauthCookie } from "./oauth.js";
 import { accountSync } from "./sync.js";
 
 async function body(request: Request) {

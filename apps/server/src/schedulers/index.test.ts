@@ -5,6 +5,7 @@ import { type SchedulerHandle, startSchedulers } from "./index.js";
 
 describe("backend schedulers", () => {
   let backend: Backend, handle: SchedulerHandle | undefined;
+  const tick = { status: "ok" as const, added: 0, arrivals: 0, summary: "0 new arrivals" };
   beforeEach(async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 9, 20, 7, 59, 59));
@@ -123,7 +124,8 @@ describe("backend schedulers", () => {
       ...account,
       capabilities: { ...account.capabilities, push: true },
     });
-    const sync = vi.spyOn(backend, "syncAccount").mockResolvedValue();
+    const watch = vi.fn().mockResolvedValue(tick);
+    backend.watchAccount = watch;
     let change!: () => void;
     const wait = vi.fn(
       (_id: string, signal: AbortSignal) =>
@@ -137,16 +139,18 @@ describe("backend schedulers", () => {
     await handle.ready;
     await vi.advanceTimersByTimeAsync(0);
     expect(wait).toHaveBeenCalledTimes(1);
+    expect(watch).toHaveBeenCalledTimes(1);
     change();
     await vi.advanceTimersByTimeAsync(0);
-    expect(sync).toHaveBeenCalledTimes(2);
+    // IMAP IDLE / push triggers an immediate watcher tick.
+    expect(watch).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1000);
     expect(wait).toHaveBeenCalledTimes(2);
     await handle.stop();
     expect(wait.mock.calls[1]?.[1].aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
-  it("keeps automatic push notifications from running a paused sync job", async () => {
+  it("keeps automatic push notifications from running a paused watch job", async () => {
     const account = (await backend.store.accounts.list())[0]!;
     await backend.store.accounts.upsert({
       ...account,
@@ -158,15 +162,39 @@ describe("backend schedulers", () => {
         change = resolve;
         signal.addEventListener("abort", () => resolve(), { once: true });
       });
+    const watch = vi.fn().mockResolvedValue(tick);
+    backend.watchAccount = watch;
+    handle = startSchedulers(backend);
+    await handle.ready;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watch).toHaveBeenCalledTimes(1);
+    await handle.scheduler.pause(`watch:${account.id}`);
+    change();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watch).toHaveBeenCalledTimes(1);
+  });
+  it("watches mail every 30 seconds and syncs only calendars on the sync interval", async () => {
+    const account = (await backend.store.accounts.list())[0]!;
+    await backend.store.accounts.upsert({
+      ...account,
+      id: "mail-only",
+      capabilities: { ...account.capabilities, calendar: false, push: false },
+    });
+    const watch = vi.fn().mockResolvedValue(tick);
+    backend.watchAccount = watch;
     const sync = vi.spyOn(backend, "syncAccount").mockResolvedValue();
     handle = startSchedulers(backend);
     await handle.ready;
     await vi.advanceTimersByTimeAsync(0);
-    expect(sync).toHaveBeenCalledTimes(1);
-    await handle.scheduler.pause(`sync:${account.id}`);
-    change();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(sync).toHaveBeenCalledTimes(1);
+    expect(handle.scheduler.get("watch:mail-only")).toMatchObject({
+      schedule: { type: "interval", everyMs: 30000 },
+    });
+    expect(handle.scheduler.get("sync:mail-only")).toBeUndefined();
+    expect(watch).toHaveBeenCalledWith("mail-only");
+    const before = watch.mock.calls.filter(([id]) => id === "mail-only").length;
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(watch.mock.calls.filter(([id]) => id === "mail-only").length).toBe(before + 1);
+    expect(sync).not.toHaveBeenCalledWith("mail-only");
   });
   it("recovers from a failed scheduled operation on the next interval", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});

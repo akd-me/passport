@@ -2,11 +2,17 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CompleteOptions, LlmClient, LlmCompletion } from "@passport/agent";
 import {
+  createMockEmails,
   createProviderRegistry,
   MockCalendarProvider,
   MockMailProvider,
 } from "@passport/providers";
-import type { ActionRecord, ActionRequest, DomainEvent } from "@passport/types";
+import {
+  type ActionRecord,
+  type ActionRequest,
+  type DomainEvent,
+  mailHandle,
+} from "@passport/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { addAccount } from "./accounts.js";
 import { createApp } from "./auth.test-client.js";
@@ -74,8 +80,13 @@ describe("real backend end to end", () => {
     await Promise.all(backends.splice(0).map((backend) => backend.close()));
     vi.restoreAllMocks();
   });
-  async function fixture(triage = false) {
-    const mail = new MockMailProvider(),
+  /**
+   * `seed` (default): the first watcher tick takes the cursor at "now", then the 40 fixture
+   * messages are delivered to the Inbox so the next `syncAccount` sees them as new mail.
+   * Without `seed` the provider already holds the fixtures before Passport connects.
+   */
+  async function fixture(triage = false, seed = true) {
+    const mail = new MockMailProvider({ fixtures: !seed }),
       calendar = new MockCalendarProvider();
     const providers = createProviderRegistry();
     vi.spyOn(providers, "mail").mockReturnValue(mail);
@@ -92,31 +103,40 @@ describe("real backend end to end", () => {
       displayName: "Alex",
       fields: {},
     });
+    if (seed) {
+      await backend.syncAccount(account.id);
+      const inbox = `${account.id}:mailbox:Inbox`;
+      for (const email of createMockEmails(account.id, account.emailAddress)) {
+        mail.injectEmail({ ...email, mailboxIds: [...new Set([...email.mailboxIds, inbox])] });
+      }
+    }
     return { backend, account, mail, calendar, app: createApp(backend) };
   }
-  it("syncs real fixtures, delivers each arrival once, drains triage and serves a deterministic digest", async () => {
+  it("watches from connect time: existing mail is never backfilled, new mail arrives once", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { backend, account, app } = await fixture(true);
+    const { backend, account, mail, app } = await fixture(true, false);
     const events: DomainEvent[] = [];
     backend.bus.onAny((event) => events.push(event));
     await backend.syncAccount(account.id);
     await backend.drainAgentQueue();
-    const emails = await backend.store.emails.query({
-      accountId: account.id,
-      limit: 100,
-    });
-    expect(emails.items).toHaveLength(40);
+    // 40 fixtures exist at the provider; the first tick emits 0 arrivals and caches nothing.
+    expect(events.filter((event) => event.type === "email.received")).toHaveLength(0);
+    expect(
+      (await backend.store.emails.query({ accountId: account.id, limit: 100 })).items,
+    ).toHaveLength(0);
     expect(await backend.store.mailboxes.list(account.id)).toHaveLength(8);
     expect(await backend.store.calendars.list(account.id)).toHaveLength(1);
     expect(await backend.store.events.query({ accountId: account.id })).toHaveLength(6);
-    for (const email of emails.items) {
-      expect((await backend.store.threads.get(email.threadId))!.emailIds).toContain(email.id);
-    }
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(40);
-    expect(events.filter((event) => event.type === "agent.run.finished")).toHaveLength(40);
+    mail.injectEmail({ providerId: "fresh", from: [{ email: "pat@unknown.example" }] });
     await backend.syncAccount(account.id);
     await backend.drainAgentQueue();
-    expect(events.filter((event) => event.type === "email.received")).toHaveLength(40);
+    const email = (await backend.store.emails.get(mailHandle(account.id, "email", "fresh")))!;
+    expect((await backend.store.threads.get(email.threadId))!.emailIds).toContain(email.id);
+    expect(events.filter((event) => event.type === "email.received")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "agent.run.finished")).toHaveLength(1);
+    await backend.syncAccount(account.id);
+    await backend.drainAgentQueue();
+    expect(events.filter((event) => event.type === "email.received")).toHaveLength(1);
     await backend.agent.run({ kind: "schedule", name: "daily_digest" });
     const response = await app.request(`/api/digest/${new Date().toISOString().slice(0, 10)}`);
     expect(response.status).toBe(200);
@@ -320,7 +340,7 @@ describe("real backend end to end", () => {
       fields: {},
     });
     await backend.syncAccount(account.id);
-    const email = (await backend.store.emails.query({ limit: 1 })).items[0]!;
+    const email = createMockEmails(account.id, account.emailAddress)[0]!;
     await backend.store.emails.upsertMany([
       {
         ...email,
@@ -452,21 +472,12 @@ describe("real backend end to end", () => {
     });
     expect(action.status).toBe("proposed");
   });
-  it("creates an MCP reply draft through the default registry using remapped store IDs and the original thread", async () => {
-    const backend = await createRealBackend(defaultConfig(), {
-      storePath: ":memory:",
-    });
-    backends.push(backend);
-    const account = await addAccount(backend, {
-      kind: "mock",
-      emailAddress: "alex@example.com",
-      displayName: "Alex",
-      fields: {},
-    });
+  it("creates an MCP reply draft using handle ids and the original thread", async () => {
+    const { backend, account } = await fixture();
     await backend.syncAccount(account.id);
     const original = (await backend.store.emails.getByProviderId(account.id, "fixture-19"))!;
-    expect(original.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
-    expect(original.threadId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(original.id).toBe(mailHandle(account.id, "email", "fixture-19"));
+    expect(original.threadId).toBe(mailHandle(account.id, "thread", "garden"));
     const client = new Client({
       name: "passport-reply-integration",
       version: "1",
