@@ -21,6 +21,9 @@ export function serviceSender(email: Email): boolean {
   );
 }
 
+/** Distinct non-owner addresses (From first, then To, then Cc) resolved per message. */
+export const PEOPLE_PER_ARRIVAL = 8;
+
 export interface PeopleResult {
   people: Person[];
   persistedIds: string[];
@@ -69,9 +72,15 @@ function projectPerson(input: {
   }
   const wasBlue = existing?.verification === "blue";
   const blue = isSender && email.verification.passport === "blue";
+  // A replayed or retried older message never overrides the verification of newer mail.
+  const latest = !existing?.stats.lastContactAt || email.receivedAt >= existing.stats.lastContactAt;
+  const previousBlueAt = existing?.lastSeenBlueAt ?? (wasBlue ? existing?.updatedAt : null);
   const lastSeenBlueAt = blue
-    ? email.receivedAt
-    : (existing?.lastSeenBlueAt ?? (wasBlue ? existing?.updatedAt : null));
+    ? [previousBlueAt, email.receivedAt]
+        .filter((at): at is string => !!at)
+        .sort()
+        .at(-1)!
+    : previousBlueAt;
   const acknowledged =
     existing?.downgradeAcknowledgedAt &&
     lastSeenBlueAt &&
@@ -82,7 +91,8 @@ function projectPerson(input: {
     displayName: existing?.displayName || input.name || address,
     emails: [...new Set([...(existing?.emails ?? []), address])],
     primaryEmail: existing?.primaryEmail ?? address,
-    verification: isSender ? (blue ? "blue" : "green") : (existing?.verification ?? "unknown"),
+    verification:
+      isSender && latest ? (blue ? "blue" : "green") : (existing?.verification ?? "unknown"),
     lastSeenBlueAt,
     relationship,
     stats: {
@@ -100,7 +110,7 @@ function projectPerson(input: {
   };
   return {
     person,
-    downgrade: isSender && !blue && Boolean(lastSeenBlueAt) && !acknowledged,
+    downgrade: isSender && latest && !blue && Boolean(lastSeenBlueAt) && !acknowledged,
     forgedSelf:
       isSender &&
       isSelf &&
@@ -139,12 +149,23 @@ export async function resolvePeople(opts: {
         .flatMap((person) => person.emails),
     ].map(normalizeAddress),
   );
-  const addresses = new Map(
-    [...email.from, ...email.to, ...email.cc].map((address) => [
-      normalizeAddress(address.email),
-      address,
-    ]),
-  );
+  // From, then To, then Cc, keeping the first occurrence; at most `PEOPLE_PER_ARRIVAL` addresses
+  // other than the owner's, so a sender-chosen recipient list cannot fan out into provider reads.
+  const addresses = new Map<string, Email["from"][number]>();
+  let others = 0;
+  for (const address of [...email.from, ...email.to, ...email.cc]) {
+    const key = normalizeAddress(address.email);
+    if (addresses.has(key)) {
+      continue;
+    }
+    if (!selfAddresses.has(key)) {
+      if (others >= PEOPLE_PER_ARRIVAL) {
+        continue;
+      }
+      others++;
+    }
+    addresses.set(key, address);
+  }
   const senders = new Set(email.from.map((address) => normalizeAddress(address.email)));
   const sentBoxes = new Set(
     (

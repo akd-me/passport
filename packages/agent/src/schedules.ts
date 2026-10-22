@@ -99,17 +99,28 @@ export async function dailyDigest(ctx: RunContext, policy: PolicyEngine): Promis
 
 /** Referenced emails fetched per matter review: the newest ids the matter lists. */
 export const MATTER_REVIEW_EMAILS = 20;
+/** LLM reviews per run; the least recently updated matters go first. */
+export const MATTER_REVIEWS_PER_RUN = 10;
 
 export async function reviewMatters(ctx: RunContext, days: number): Promise<void> {
   const cutoff = Date.parse(ctx.now()) - days * 86_400_000;
   let reviewed = 0;
-  for (const matter of await ctx.store.matters.list({ status: ["active"] })) {
+  // Every active matter, oldest first: the stale ones are exactly those beyond a default page.
+  const active = (await ctx.store.matters.list({ status: ["active"], limit: 2_147_483_647 })).sort(
+    (a, b) => a.updatedAt.localeCompare(b.updatedAt),
+  );
+  for (const matter of active) {
+    if (reviewed >= MATTER_REVIEWS_PER_RUN || Date.parse(matter.updatedAt) > cutoff) {
+      // Sorted by updatedAt: every later matter moved recently too.
+      break;
+    }
     // Only the matter's own references, newest last in `emailIds`; never a store scan by matter.
+    // Matter-linked rows are never evicted, and only received dates and envelopes are needed.
     const emails = (
       await Promise.all(
         [...new Set(matter.emailIds)]
           .slice(-MATTER_REVIEW_EMAILS)
-          .map((id) => ctx.store.emails.get(id)),
+          .map((id) => ctx.store.emails.get(id, { cacheOnly: true })),
       )
     ).filter((email): email is Email => email !== null);
     const events = await ctx.store.events.query({ matterId: matter.id });

@@ -213,12 +213,14 @@ export async function triage(
   bus: import("@passport/types").EventBus,
 ): Promise<void> {
   const step = ctx.triageStep ?? (async <T>(_name: string, task: () => Promise<T>) => task());
-  const stored = await ctx.store.emails.get(emailId, { includeBodies: true });
+  const stored = await ctx.store.emails.get(emailId, ctx.reads.storeRead({ includeBodies: true }));
   if (!stored) {
     throw new AgentError("Received email was not found in the store", "EMAIL_NOT_FOUND");
   }
   const reader = await ctx.reads.reader(stored.accountId);
   const email = await withBodies(ctx, stored, reader);
+  // Relationship evidence draws from its own budget (bounded per arrival).
+  const peopleReader = await ctx.reads.reader(stored.accountId, "people");
   const resolved = await step("people", () =>
     resolvePeople({
       email,
@@ -226,7 +228,7 @@ export async function triage(
       bus,
       selfAddresses: ctx.selfAddresses,
       now: ctx.now(),
-      reader,
+      reader: peopleReader,
       savePerson: async (person, reason) => {
         await ctx.callTool(
           "update_person",
@@ -336,7 +338,7 @@ export async function triage(
     } else if (category === "replies_known") {
       const response = await ctx.structured(
         replySchema,
-        replyPrompt(email, await readThread(ctx.store, email, reader)),
+        replyPrompt(email, await readThread(ctx.store, email, reader, ctx.reads.storeRead)),
       );
       await ctx.callTool(
         "create_draft",

@@ -1,7 +1,9 @@
 import {
   type ActionCategory,
   type Email,
+  type EmailGetOptions,
   type Matter,
+  mailHandle,
   parseMailHandle,
   type Store,
 } from "@passport/types";
@@ -42,7 +44,24 @@ export async function matterCandidates(
   };
   await addId(email.matterId);
   const refs = new Set((await store.threads.get(email.threadId))?.emailIds ?? []);
+  // One bounded page of this thread's stored rows (v0.2 matters list their ULIDs).
+  const thread = await store.emails.query({ threadId: email.threadId, limit: 30 });
+  for (const item of thread.items) {
+    await addId(item.matterId);
+  }
   if (reader) {
+    /** A provider handle and, when cached, its local row (a v0.2 row keeps its ULID). */
+    const reference = async (providerId: string) => {
+      const local = await store.emails.getByProviderId(email.accountId, providerId, {
+        cacheOnly: true,
+        includeBodies: false,
+      });
+      refs.add(mailHandle(email.accountId, "email", providerId));
+      if (local) {
+        refs.add(local.id);
+        await addId(local.matterId);
+      }
+    };
     const sender = email.from
       .map((address) => normalizeAddress(address.email))
       .find((address) => !ctx.selfAddresses.has(address));
@@ -53,13 +72,20 @@ export async function matterCandidates(
         )
       : null;
     for (const row of rows?.items ?? []) {
-      refs.add(row.id);
+      const handle = parseMailHandle(row.id);
+      if (handle?.type === "email" && handle.accountId === email.accountId) {
+        await reference(handle.providerId);
+      } else {
+        refs.add(row.id);
+      }
     }
-  } else {
-    // Reader-less fallback: one bounded page of this thread's stored rows.
-    const thread = await store.emails.query({ threadId: email.threadId, limit: 30 });
-    for (const item of thread.items) {
-      await addId(item.matterId);
+    // The message this one replies to, re-found by Message-ID when the thread ids differ.
+    const parent = email.headers.inReplyTo;
+    if (parent && !thread.items.some((item) => item.headers.messageId === parent)) {
+      const found = await reader.call((r, opts) => r.findByRfc822(parent, opts));
+      if (found?.value) {
+        await reference(found.value);
+      }
     }
   }
   refs.delete(email.id);
@@ -175,7 +201,8 @@ export async function attachMatter(
     return { summary };
   }
   const id = createdMatterId(record.result);
-  const attached = await ctx.store.emails.get(email.id);
+  // Only the local matter link is needed: never a provider read.
+  const attached = await ctx.store.emails.get(email.id, { cacheOnly: true, includeBodies: false });
   const persisted = id
     ? await ctx.store.matters.get(id)
     : attached?.matterId
@@ -204,14 +231,19 @@ function createdMatterId(result: Record<string, unknown> | null | undefined): st
   return undefined;
 }
 
+/** Stored thread members read (with bodies) when the provider thread call is unavailable. */
+export const THREAD_FALLBACK_EMAILS = 10;
+
 /**
  * The thread for reply drafting, oldest first. With a reader this is one provider `thread` call
- * (text bodies); otherwise the stored thread record, or the newest 50 stored rows of the thread.
+ * (text bodies); otherwise the newest `THREAD_FALLBACK_EMAILS` members of the stored thread
+ * record (each read through `storeRead`, the run's lane and budget), or the newest 50 stored rows.
  */
 export async function readThread(
   store: Store,
   email: Email,
   reader?: AgentReader | null,
+  storeRead: (opts: EmailGetOptions) => EmailGetOptions = (opts) => opts,
 ): Promise<Email[]> {
   const handle = parseMailHandle(email.threadId);
   if (reader && handle?.type === "thread" && handle.accountId === email.accountId) {
@@ -225,7 +257,9 @@ export async function readThread(
   const thread = await store.threads.get(email.threadId);
   if (thread) {
     const items = await Promise.all(
-      thread.emailIds.map((id) => store.emails.get(id, { includeBodies: true })),
+      thread.emailIds
+        .slice(-THREAD_FALLBACK_EMAILS)
+        .map((id) => store.emails.get(id, storeRead({ includeBodies: true }))),
     );
     return items
       .filter((item): item is Email => item !== null)

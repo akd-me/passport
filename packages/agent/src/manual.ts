@@ -12,7 +12,7 @@ export async function manual(
   trigger: Extract<AgentTrigger, { kind: "manual" }>,
 ): Promise<void> {
   const selected = await Promise.all(
-    (trigger.emailIds ?? []).map((id) => ctx.store.emails.get(id)),
+    (trigger.emailIds ?? []).map((id) => ctx.store.emails.get(id, ctx.reads.storeRead())),
   );
   const matter = trigger.matterId ? await ctx.store.matters.get(trigger.matterId) : undefined;
   const messages: LlmMessage[] = [
