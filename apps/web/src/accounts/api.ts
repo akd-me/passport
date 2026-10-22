@@ -19,6 +19,8 @@ export type ConnectedAccount = Account & {
 };
 export interface ConnectionAttempt {
   authUrl: string;
+  /** Same-origin URL that binds another browser (the Mac app's system browser) to the attempt. */
+  launchUrl: string;
   attemptId: string;
   redirectUri: string;
 }

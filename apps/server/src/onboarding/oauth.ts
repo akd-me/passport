@@ -28,6 +28,7 @@ interface Pending {
   expiresAt: number;
   redirectUri: string;
   codeVerifier: string;
+  authUrl?: string;
   /** Set for setup-task attempts: false once the task has ended. */
   active?: () => boolean;
 }
@@ -35,6 +36,8 @@ interface Pending {
 /** In-memory, single-use attempts expire after ten minutes, including any client secret. */
 export class BrowserOAuth {
   private pending = new Map<string, Pending>();
+  /** Launch ticket → state; a ticket lives exactly as long as its pending attempt. */
+  private launches = new Map<string, string>();
   private statuses = new Map<
     string,
     {
@@ -57,6 +60,11 @@ export class BrowserOAuth {
     for (const [state, entry] of this.pending) {
       if (entry.expiresAt <= this.now()) {
         this.pending.delete(state);
+      }
+    }
+    for (const [ticket, state] of this.launches) {
+      if (!this.pending.has(state)) {
+        this.launches.delete(ticket);
       }
     }
     for (const [state, entry] of this.statuses) {
@@ -130,12 +138,28 @@ export class BrowserOAuth {
       entry.redirectUri,
       state,
     );
+    entry.authUrl = authUrl;
+    const ticket = randomBytes(24).toString("base64url");
+    this.launches.set(ticket, state);
     return {
       authUrl,
+      // For a browser that does not share the caller's cookies (Passport.app hands consent to
+      // the system browser): opening it binds that browser to the attempt, then redirects.
+      launchUrl: `${url.origin}/oauth/launch/${ticket}`,
       attemptId: state,
       redirectUri: entry.redirectUri,
       nonce: entry.nonce,
     };
+  }
+  /** The binding a launch URL hands its browser, or undefined once the attempt is over. */
+  launch(ticket: string): { state: string; nonce: string; authUrl: string } | undefined {
+    this.prune();
+    const state = this.launches.get(ticket);
+    const entry = state === undefined ? undefined : this.pending.get(state);
+    if (!state || !entry?.authUrl || (entry.active && !entry.active())) {
+      return;
+    }
+    return { state, nonce: entry.nonce, authUrl: entry.authUrl };
   }
   status(state: string, nonce?: string) {
     this.prune();

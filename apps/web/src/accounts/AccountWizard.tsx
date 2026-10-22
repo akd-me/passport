@@ -151,8 +151,9 @@ export function AccountWizard({
             if (tab) {
               tab.location.href = result.authUrl;
             } else {
-              // The Mac app refuses blank popups and hands http(s) URLs to the system browser.
-              window.open(result.authUrl, "_blank", "noopener");
+              // The Mac app refuses blank popups and hands http(s) URLs to the system browser,
+              // which lacks this window's cookies: the launch URL binds it to the attempt first.
+              window.open(result.launchUrl, "_blank", "noopener");
             }
           }, "Authorization opened. Return here after granting access.");
           if (!ok) {
@@ -343,7 +344,7 @@ export function AccountWizard({
           {status?.status === "authorizing" && <Icon name="spinner" size={14} />}
           <span>{connectionMessage()}</span>
           {status?.status === "authorizing" && (
-            <a href={attempt.authUrl} target="_blank" rel="noopener noreferrer">
+            <a href={attempt.launchUrl} target="_blank" rel="noopener noreferrer">
               Open authorization tab
             </a>
           )}
