@@ -41,6 +41,15 @@ export function createTasksRepository(db: StoreDatabase): StoreTasks {
       );
       return row ? db.parse<TaskRun>(row) : null;
     },
+    byActionId: async (actionId, agentRunId) => {
+      const row = db.one(
+        `SELECT data FROM task_runs WHERE ${agentRunId === undefined ? "" : "agent_run_id = ? AND "}
+        EXISTS (SELECT 1 FROM json_each(task_runs.data, '$.actionIds') WHERE value = ?)
+        ORDER BY created_at DESC, id DESC LIMIT 1`,
+        agentRunId === undefined ? [actionId] : [agentRunId, actionId],
+      );
+      return row ? db.parse<TaskRun>(row) : null;
+    },
     list: async (taskId, limit = 50) =>
       db.rows<TaskRun>(
         "SELECT data FROM task_runs WHERE task_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",

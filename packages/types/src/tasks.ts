@@ -10,7 +10,18 @@
  */
 
 import type { AgentRunOptions, AgentRunPriority } from "./agent-ondemand.js";
-import type { AgentRun, AgentTrigger, Id, MailRow, Page, Timestamp, TrustLevel } from "./index.js";
+import type {
+  ActionCategory,
+  AgentRun,
+  AgentTrigger,
+  Id,
+  MailRow,
+  Page,
+  Reversibility,
+  RiskLevel,
+  Timestamp,
+  TrustLevel,
+} from "./index.js";
 
 // ---------------------------------------------------------------------------
 // Task
@@ -76,6 +87,12 @@ export interface Task {
   jobId?: string | null;
   /** Monotonic, incremented on every persisted change. */
   revision?: number;
+  /**
+   * "Approve for this task" grants (`POST /api/actions/:id/approve` with `scope: "task"`): later
+   * proposals of the same category in this task are approved without asking, within the bounds
+   * the grant recorded. Append-only.
+   */
+  approvalGrants?: TaskApprovalGrant[];
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +262,11 @@ export interface StoreTasks {
     list(taskId: Id, limit?: number): Promise<TaskRun[]>;
     /** Runs left `queued`/`running`/`waiting` (e.g. by a restart). */
     unfinished(): Promise<TaskRun[]>;
+    /**
+     * The newest run whose `actionIds` lists the action; with `agentRunId`, only that agent
+     * run's TaskRuns are searched (indexed). Optional so other stores still conform.
+     */
+    byActionId?(actionId: Id, agentRunId?: Id): Promise<TaskRun | null>;
     insert(run: TaskRun): Promise<TaskRun>;
     update(
       id: Id,
@@ -342,4 +364,50 @@ export function taskTitleFrom(text: string): string {
     return flat || "Untitled task";
   }
   return `${flat.slice(0, TASK_LIMITS.titleMax - 1).trimEnd()}…`;
+}
+
+// ---------------------------------------------------------------------------
+// Approval scopes (v0.3: "approve for this task" / "always")
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /api/actions/:id/approve` `{ scope }`. `once` (default) approves this action only.
+ * `task` also approves later proposals of the same category in the same task. `always` pins the
+ * category's trust level when the trust ladder can express it, and otherwise acts as `task`.
+ */
+export type ApprovalScope = "once" | "task" | "always";
+export const APPROVAL_SCOPES: readonly ApprovalScope[] = ["once", "task", "always"];
+
+/**
+ * One "approve for this task" grant. A later proposal is approved automatically only when it is
+ * no riskier and no less reversible than the approved one, and when its effective trust level
+ * (global dial, ladder, task mode) is at least `trustLevel`: lowering any of them voids the grant.
+ */
+export interface TaskApprovalGrant {
+  category: ActionCategory;
+  /** The approved action that created the grant. */
+  actionId: Id;
+  /** `decision.trustLevel` of that action. */
+  trustLevel: TrustLevel;
+  risk: RiskLevel;
+  reversibility: Reversibility;
+  grantedAt: Timestamp;
+}
+
+/** What `scope` did, returned with the approved `ActionRecord` as `approvalScope`. */
+export interface ApprovalScopeResult {
+  requested: ApprovalScope;
+  /** `always` falls back to `task` when no trust pin can express it. */
+  applied: ApprovalScope;
+  taskId?: Id;
+  /** The level `always` pinned for the category, when it pinned one. */
+  pinnedLevel?: TrustLevel;
+  /** Stable code when `always` fell back: `ALWAYS_UNAVAILABLE`. */
+  code?: string;
+}
+
+/** `GET /api/tasks/by-action/:actionId` */
+export interface TaskByAction {
+  taskId: Id;
+  runId: Id;
 }

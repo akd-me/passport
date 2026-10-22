@@ -1,7 +1,7 @@
 import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import { nowIso } from "@passport/types";
 import { StoreError } from "./errors.js";
-import { migrations } from "./migrations.js";
+import { migrations, REQUIRED_TABLES } from "./migrations.js";
 import { type Row, unique } from "./store-query.js";
 
 export class StoreDatabase {
@@ -83,6 +83,16 @@ export class StoreDatabase {
           i + 1,
           nowIso(),
         ]);
+      }
+      // Versions are counted by position: a reordered list would skip a migration silently.
+      const missing = REQUIRED_TABLES.filter(
+        (name) => !this.one("SELECT 1 AS found FROM sqlite_master WHERE name = ?", [name]),
+      );
+      if (missing.length) {
+        throw new StoreError(
+          "SCHEMA_VERSION",
+          `Database migrations are incomplete (missing ${missing.join(", ")})`,
+        );
       }
     });
   }

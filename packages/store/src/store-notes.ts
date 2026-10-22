@@ -9,31 +9,36 @@ import type {
 } from "@passport/types";
 import { NOTES_SNIPPET_MAX } from "@passport/types";
 import { StoreError } from "./errors.js";
+import { checkNotesPattern, type FieldMatch, matchInWorker } from "./notes-regex.js";
 import type { StoreDatabase } from "./store-database.js";
 import { like, type Row } from "./store-query.js";
 
 /** Rows per kind a `pattern` search inspects (newest first); notes are local and small. */
 export const NOTES_PATTERN_SCAN = 10_000;
 const MAX_LIMIT = 200;
+/** Patterns are case-insensitive and multiline (`^`/`$` match lines). */
+const FLAGS = "imu";
 
-type Matcher = (value: string) => number;
-
-function matcherOf(input: NotesSearchInput): Matcher {
-  if (input.pattern !== undefined) {
-    let regex: RegExp;
-    try {
-      regex = new RegExp(input.pattern, "imu");
-    } catch {
-      // The caller's own pattern is invalid; report it without echoing engine internals.
-      throw new StoreError("INVALID_QUERY", "pattern is not a valid regular expression");
-    }
-    return (value) => value.search(regex);
-  }
+/** Inline case-insensitive substring search; patterns run in a worker (`matchInWorker`). */
+function textMatches(input: NotesSearchInput, records: NoteRecord[]): FieldMatch[] {
   const needle = (input.text ?? "").trim().toLowerCase();
-  if (!needle) {
-    throw new StoreError("INVALID_QUERY", "Provide text or pattern");
-  }
-  return (value) => value.toLowerCase().indexOf(needle);
+  return records.map(({ fields }) => {
+    for (const [field, [, value]] of fields.entries()) {
+      const index = value ? value.toLowerCase().indexOf(needle) : -1;
+      if (index >= 0) {
+        return [field, index];
+      }
+    }
+    return null;
+  });
+}
+
+interface NoteRecord {
+  kind: NoteKind;
+  id: string;
+  name: string;
+  updatedAt: string;
+  fields: Array<[NotesSearchHit["field"], string | null | undefined]>;
 }
 
 /** The matching line of `value` around `index`, clipped to `NOTES_SNIPPET_MAX`. */
@@ -46,26 +51,6 @@ function snippetAt(value: string, index: number): string {
   }
   const from = Math.max(0, Math.min(index - start - 60, line.length - NOTES_SNIPPET_MAX));
   return line.slice(from, from + NOTES_SNIPPET_MAX);
-}
-
-function hitOf(
-  kind: NoteKind,
-  id: string,
-  name: string,
-  updatedAt: string,
-  fields: Array<[NotesSearchHit["field"], string | null | undefined]>,
-  match: Matcher,
-): NotesSearchHit | null {
-  for (const [field, value] of fields) {
-    if (!value) {
-      continue;
-    }
-    const index = match(value);
-    if (index >= 0) {
-      return { kind, id, name, field, snippet: snippetAt(value, index), updatedAt };
-    }
-  }
-  return null;
 }
 
 export function createNotesRepository(
@@ -106,48 +91,61 @@ export function createNotesRepository(
   return {
     search: async (input) => {
       const limit = Math.min(MAX_LIMIT, Math.max(1, Math.floor(input.limit ?? 25)));
-      const match = matcherOf(input);
-      const hits: NotesSearchHit[] = [];
+      if (input.pattern !== undefined) {
+        checkNotesPattern(input.pattern, FLAGS);
+      } else if (!(input.text ?? "").trim()) {
+        throw new StoreError("INVALID_QUERY", "Provide text or pattern");
+      }
+      const records: NoteRecord[] = [];
       if (input.kind !== "matter") {
         for (const row of people(input, limit)) {
           const person = db.parse<Person>(row);
-          const hit = hitOf(
-            "person",
-            person.id,
-            person.displayName,
-            person.updatedAt,
-            [
+          records.push({
+            kind: "person",
+            id: person.id,
+            name: person.displayName,
+            updatedAt: person.updatedAt,
+            fields: [
               ["name", person.displayName],
               ["email", [person.primaryEmail, ...person.emails].join("\n")],
               ["notes", person.notes],
             ],
-            match,
-          );
-          if (hit) {
-            hits.push(hit);
-          }
+          });
         }
       }
       if (input.kind !== "person") {
         for (const row of matters(input, limit)) {
           const matter = db.parse<Matter>(row);
-          const hit = hitOf(
-            "matter",
-            matter.id,
-            matter.title,
-            matter.updatedAt,
-            [
+          records.push({
+            kind: "matter",
+            id: matter.id,
+            name: matter.title,
+            updatedAt: matter.updatedAt,
+            fields: [
               ["name", matter.title],
               ["summary", matter.summary],
               ["notes", matter.notes],
             ],
-            match,
-          );
-          if (hit) {
-            hits.push(hit);
-          }
+          });
         }
       }
+      const matches =
+        input.pattern === undefined
+          ? textMatches(input, records)
+          : await matchInWorker(
+              input.pattern,
+              FLAGS,
+              records.map(({ fields }) => fields.map(([, value]) => value ?? "")),
+            );
+      const hits = records.flatMap((record, index): NotesSearchHit[] => {
+        const match = matches[index];
+        if (!match) {
+          return [];
+        }
+        const [field, value] = record.fields[match[0]]!;
+        const { kind, id, name, updatedAt } = record;
+        return [{ kind, id, name, field, snippet: snippetAt(value ?? "", match[1]), updatedAt }];
+      });
       return hits
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
         .slice(0, limit);
