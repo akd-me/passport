@@ -162,7 +162,8 @@ describe("GmailMailReader.search", () => {
     const result = await reader.search({ query: "x", limit: 3 });
     expect(result.items.map((r) => r.subject)).toEqual(["Subject m1", "Subject m2", "Subject m3"]);
     expect(calls.filter((c) => c.startsWith("GET messages/m2"))).toHaveLength(2);
-    expect(result.cost.gmailUnits).toBe(5 + 3 * 20 + 20);
+    // R1-2: the throttled part is charged once, by its retry.
+    expect(result.cost.gmailUnits).toBe(5 + 3 * 20);
 
     const broken = await connectedReader((url) =>
       url.pathname.endsWith("/messages")
@@ -188,7 +189,15 @@ describe("GmailMailReader.search", () => {
             : response(meta("m1")),
       { sleep: async (ms) => void waits.push(ms) },
     );
-    const error = await reader.search({ query: "x", limit: 2 }).catch((e: unknown) => e);
+    // R1-1: the hydrated row is kept; the page token resumes at the throttled id.
+    const partial = await reader.search({ query: "x", limit: 2 });
+    expect(partial.items.map((r) => r.subject)).toEqual(["Subject m1"]);
+    expect(partial.translation).toMatch(/^gmail:partial .*1 of 2 rows.*~30s/);
+    expect(partial.nextPageToken).toBeDefined();
+    expect(waits).toEqual([]);
+    const error = await reader
+      .search({ query: "x", limit: 2, pageToken: partial.nextPageToken })
+      .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(RateLimitedError);
     expect(error).toMatchObject({ retryAfterSeconds: 30, scope: "gmail:user-quota" });
     expect(waits).toEqual([]);

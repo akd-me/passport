@@ -100,52 +100,96 @@ export function isThrottledPart(part: BatchPart): boolean {
   );
 }
 
+/**
+ * Units one batch request may declare. The Gmail bucket holds 1,500; a larger request runs the
+ * governor into debt and blocks every lane, so 50 `threads.get` (2,000) are split (R1-1).
+ */
+export const GMAIL_BATCH_MAX_UNITS = 1_000;
+
 async function getOrNull<T>(call: GmailCall, path: string, cost: number): Promise<T | null> {
   try {
     return await call.get<T>(path, cost);
   } catch (e) {
-    // A provider 404 means the requested resource no longer exists.
+    // A provider 404 means the requested resource no longer exists; a 400 is a malformed or
+    // foreign id (R1-20). Either way the id resolves to nothing.
 
-    if (e instanceof ProviderError && e.status === 404) {
+    if (e instanceof ProviderError && (e.status === 404 || e.status === 400)) {
       return null;
     }
     throw e;
   }
 }
 
+/** `batchGetSome` result: `undefined` marks paths not fetched because quota ran out. */
+export interface BatchSome<T> {
+  results: Array<T | null | undefined>;
+  /** Set when the call stopped early; every later path is `undefined`. */
+  limited?: RateLimitedError;
+}
+
 /**
- * GETs `users/me/<path>` for every path, `GMAIL_BATCH_MAX` per batch request, each declaring
- * `cost` units. Results keep input order; `null` marks a 404. Throttled or missing parts are
- * retried one by one as plain GETs, which carry the lane's retry policy (the interactive lane
- * throws `RateLimitedError` rather than waiting). Other part failures throw `HTTP_<status>`.
+ * GETs `users/me/<path>` for every path, in batch requests of at most `GMAIL_BATCH_MAX` calls
+ * and `GMAIL_BATCH_MAX_UNITS` units, each path declaring `cost` units. Results keep input order;
+ * `null` marks a 404 (or a malformed id). Throttled or missing parts are retried one by one as
+ * plain GETs, which draw on the call's wait budget, and are counted once. When the governor or
+ * the provider refuses within the budget (`RateLimitedError`), the call stops and returns what
+ * it has; other part failures throw `HTTP_<status>`.
  */
+export async function batchGetSome<T>(
+  call: GmailCall,
+  paths: readonly string[],
+  cost: number,
+): Promise<BatchSome<T>> {
+  const results = new Array<T | null | undefined>(paths.length).fill(undefined);
+  const size = Math.max(1, Math.min(GMAIL_BATCH_MAX, Math.floor(GMAIL_BATCH_MAX_UNITS / cost)));
+  try {
+    for (let start = 0; start < paths.length; start += size) {
+      const chunk = paths.slice(start, start + size);
+      // A batch of one costs a multipart round trip for nothing.
+      const parts = chunk.length > 1 ? await sendBatch(call, chunk, cost) : [undefined];
+      const retry: number[] = [];
+      for (const i of chunk.keys()) {
+        const settled = settlePart<T>(call, parts[i]);
+        if (settled === RETRY) {
+          retry.push(i);
+        } else {
+          results[start + i] = settled;
+        }
+      }
+      for (const i of retry) {
+        results[start + i] = await getOrNull<T>(call, chunk[i] as string, cost);
+      }
+    }
+  } catch (e) {
+    if (e instanceof RateLimitedError) {
+      return { results, limited: e };
+    }
+    throw e;
+  }
+  return { results };
+}
+
+/** `batchGetSome` that fails with `RateLimitedError` instead of returning a partial result. */
 export async function batchGet<T>(
   call: GmailCall,
   paths: readonly string[],
   cost: number,
 ): Promise<Array<T | null>> {
-  const out: Array<T | null> = [];
-  for (let start = 0; start < paths.length; start += GMAIL_BATCH_MAX) {
-    const chunk = paths.slice(start, start + GMAIL_BATCH_MAX);
-    // A batch of one costs a multipart round trip for nothing.
-    const parts = chunk.length > 1 ? await sendBatch(call, chunk, cost) : [undefined];
-    for (const [i, path] of chunk.entries()) {
-      out.push(await settlePart<T>(call, parts[i], path, cost));
-    }
+  const { results, limited } = await batchGetSome<T>(call, paths, cost);
+  if (limited) {
+    throw limited;
   }
-  return out;
+  return results as Array<T | null>;
 }
 
-async function settlePart<T>(
-  call: GmailCall,
-  part: BatchPart | undefined,
-  path: string,
-  cost: number,
-): Promise<T | null> {
+const RETRY = Symbol("retry");
+
+/** The part's value, `null` when gone, or `RETRY` for a throttled / missing part. */
+function settlePart<T>(call: GmailCall, part: BatchPart | undefined): T | null | typeof RETRY {
   if (part && part.status >= 200 && part.status < 300) {
     return part.body as T;
   }
-  if (part?.status === 404) {
+  if (part?.status === 404 || part?.status === 400) {
     return null;
   }
   if (part && !isThrottledPart(part)) {
@@ -159,7 +203,7 @@ async function settlePart<T>(
   if (Number.isFinite(retryAfter) && retryAfter > 0) {
     call.report({ retryAfterSeconds: retryAfter });
   }
-  return getOrNull<T>(call, path, cost);
+  return RETRY;
 }
 
 async function sendBatch(
@@ -168,6 +212,7 @@ async function sendBatch(
   cost: number,
 ): Promise<Array<BatchPart | undefined>> {
   const boundary = `passport_${randomUUID()}`;
+  let parts: Array<BatchPart | undefined>;
   try {
     const response = await call.send(
       GMAIL_BATCH_URL,
@@ -177,23 +222,30 @@ async function sendBatch(
         body: buildBatchBody(chunk, boundary),
       },
       cost * chunk.length,
+      // A batch of GETs is safe to replay after an outer 429 (R1-14).
+      { idempotent: true },
     );
-    return parseBatchResponse(
+    parts = parseBatchResponse(
       await response.text(),
       response.headers.get("content-type"),
       chunk.length,
     );
   } catch (e) {
-    // Batch POSTs are never replayed by the transport. Outside the interactive lane a throttled
-    // batch falls back to single GETs, which back off; RateLimitedError always propagates.
+    // Outside the interactive lane a batch still throttled after its retries falls back to
+    // single GETs, which back off; RateLimitedError always propagates.
 
     if (
       e instanceof ProviderError &&
       !(e instanceof RateLimitedError) &&
       e.code === "RATE_LIMITED"
     ) {
-      return chunk.map(() => undefined);
+      parts = chunk.map(() => undefined);
+    } else {
+      throw e;
     }
-    throw e;
   }
+  // Parts that were not served are charged again by their retry; report each row once (R1-2).
+  const unserved = parts.filter((p) => !p || isThrottledPart(p)).length;
+  call.uncount(unserved * cost);
+  return parts;
 }

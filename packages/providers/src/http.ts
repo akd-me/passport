@@ -6,7 +6,7 @@ import type {
   RateLimitScope,
 } from "@passport/types";
 import { ProviderError, required } from "./errors.js";
-import { type RetryOptions, request } from "./http-request.js";
+import { type RetryOptions, request, type WaitBudget } from "./http-request.js";
 import type { QuotaGovernor } from "./quota.js";
 import { resolveReplyEmail } from "./reply.js";
 import type { PassportVerifier } from "./verification.js";
@@ -40,6 +40,13 @@ export interface RequestPolicy {
   lane?: QuotaLane;
   /** Units to acquire from `ProviderOptions.governor` (Gmail units, Graph requests). */
   cost?: number;
+  /**
+   * The reader call's shared wait budget: the governor queue and throttle backoff of every
+   * request in the call draw from it, so the interactive ceiling covers the whole call.
+   */
+  budget?: WaitBudget | undefined;
+  /** A read-only POST (batch of GETs) that may be retried after a 429 like a GET. */
+  idempotent?: boolean;
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -216,8 +223,12 @@ export class HttpConnection {
       policy.cost,
       {
         ...(init.signal ? { signal: init.signal } : {}),
+        ...(policy.budget ? { maxWaitMs: Math.max(0, policy.budget.remainingMs) } : {}),
       },
     );
+    if (policy.budget) {
+      policy.budget.remainingMs -= lease.waitedMs;
+    }
     try {
       return await this.authorized(url, init, policy);
     } finally {
@@ -254,6 +265,8 @@ export class HttpConnection {
       scope: this.rateLimitScope,
       onThrottle: (signal) => this.options.governor?.report(accountId, signal),
       ...(policy.lane ? { lane: policy.lane } : {}),
+      ...(policy.budget ? { budget: policy.budget } : {}),
+      ...(policy.idempotent ? { idempotent: true } : {}),
     };
     try {
       return await request(this.fetcher, url, { ...init, headers }, this.sleep, retry);

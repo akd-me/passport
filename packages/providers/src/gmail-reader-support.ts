@@ -1,8 +1,9 @@
 import type { Email, MailEnvelope, MailRow, QuotaLane, ReadCost } from "@passport/types";
 import { toMailRow } from "@passport/types";
-import { decodeCursor, encodeCursor, ProviderError } from "./errors.js";
+import { decodeCursor, encodeCursor, ProviderError, RateLimitedError } from "./errors.js";
 import { GMAIL_API_BASE } from "./gmail-reader-normalize.js";
 import type { RequestPolicy } from "./http.js";
+import { type WaitBudget, waitBudget } from "./http-request.js";
 import type { QuotaGovernor } from "./quota.js";
 import type { ThrottleSignal } from "./quota-presets.js";
 import type { PassportVerifier } from "./verification.js";
@@ -54,20 +55,38 @@ export const isNotFound = (e: unknown): boolean => e instanceof ProviderError &&
  */
 export class GmailCall {
   units = 0;
+  /** Queue and backoff time left for the whole call (interactive lane only). */
+  readonly budget: WaitBudget | undefined;
   constructor(
     private readonly transport: GmailTransport,
     readonly lane: QuotaLane,
     private readonly signal?: AbortSignal,
-  ) {}
+  ) {
+    this.budget = waitBudget(lane);
+  }
 
   /** GET `users/me/<path>` as JSON, declaring `cost` units. */
   async get<T>(path: string, cost: number): Promise<T> {
-    return this.transport.json<T>(`${GMAIL_API_BASE}/${path}`, this.init({}), this.policy(cost));
+    return this.counted(cost, () =>
+      this.transport.json<T>(`${GMAIL_API_BASE}/${path}`, this.init({}), this.policy(cost)),
+    );
   }
 
   /** Any governed request (batch endpoint, batchModify) declaring `cost` units. */
-  async send(url: string, init: RequestInit, cost: number): Promise<Response> {
-    return this.transport.http(url, this.init(init), this.policy(cost));
+  async send(
+    url: string,
+    init: RequestInit,
+    cost: number,
+    extra: Pick<RequestPolicy, "idempotent"> = {},
+  ): Promise<Response> {
+    return this.counted(cost, () =>
+      this.transport.http(url, this.init(init), { ...this.policy(cost), ...extra }),
+    );
+  }
+
+  /** Takes back reported units for batch parts that were throttled and not served. */
+  uncount(units: number): void {
+    this.units = Math.max(0, this.units - units);
   }
 
   report(signal: ThrottleSignal): void {
@@ -79,19 +98,29 @@ export class GmailCall {
     return { source: "provider", cost: { gmailUnits: this.units, ...snapshot } };
   }
 
+  /** Runs a request; units refused by the governor or a still-throttled provider are not spent. */
+  private async counted<T>(cost: number, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (e) {
+      if (e instanceof RateLimitedError) {
+        this.uncount(cost);
+      }
+      throw e;
+    }
+  }
+
   private policy(cost: number): RequestPolicy {
     if (this.signal?.aborted) {
       throw new ProviderError("ABORTED", "The read was cancelled");
     }
     this.units += cost;
-    return { lane: this.lane, cost };
+    return { lane: this.lane, cost, ...(this.budget ? { budget: this.budget } : {}) };
   }
 
   private init(init: RequestInit): RequestInit {
-    // Keep the transport's 30 s timeout when the caller also supplies a cancellation signal.
-    return this.signal
-      ? { ...init, signal: AbortSignal.any([this.signal, AbortSignal.timeout(30_000)]) }
-      : init;
+    // The transport adds its per-attempt network timeout after the quota wait (R1-8).
+    return this.signal ? { ...init, signal: this.signal } : init;
   }
 }
 
@@ -99,21 +128,43 @@ export class GmailCall {
 // Page tokens and change cursors
 // ---------------------------------------------------------------------------
 
-interface PageCursor {
+interface PageCursor extends GmailPageState {
   account: string;
   kind: "search" | "list";
   key: string;
-  token: string;
 }
+
+/**
+ * Where the next page starts: Gmail's `nextPageToken`, and the ids of the current list page that
+ * were not hydrated yet (a page cut short by quota, R1-1).
+ */
+export interface GmailPageState {
+  token?: string;
+  ids?: string[];
+}
+
+/** Ids kept in a page token: at most one list page of plain Gmail ids. */
+const MAX_TOKEN_IDS = 100;
+const GMAIL_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** Wraps a Gmail `nextPageToken` so it only resumes the same query on the same account. */
 export function encodePageToken(
   account: string,
   kind: PageCursor["kind"],
   key: string,
-  token: string | undefined,
+  state: GmailPageState | undefined,
 ): string | undefined {
-  return token ? encodeCursor({ account, kind, key, token } satisfies PageCursor) : undefined;
+  const ids = state?.ids?.length ? state.ids.slice(0, MAX_TOKEN_IDS) : undefined;
+  if (!state || (!state.token && !ids)) {
+    return undefined;
+  }
+  return encodeCursor({
+    account,
+    kind,
+    key,
+    ...(state.token ? { token: state.token } : {}),
+    ...(ids ? { ids } : {}),
+  } satisfies PageCursor);
 }
 
 /** Inverse of `encodePageToken`; throws `INVALID_CURSOR` for a token from another query. */
@@ -122,15 +173,26 @@ export function decodePageToken(
   kind: PageCursor["kind"],
   key: string,
   pageToken: string | undefined,
-): string | undefined {
+): GmailPageState | undefined {
   if (!pageToken) {
     return undefined;
   }
   const c = decodeCursor<PageCursor>(pageToken);
-  if (c.account !== account || c.kind !== kind || c.key !== key || typeof c.token !== "string") {
+  const ids = c.ids;
+  if (
+    c.account !== account ||
+    c.kind !== kind ||
+    c.key !== key ||
+    (c.token !== undefined && typeof c.token !== "string") ||
+    (ids !== undefined &&
+      (!Array.isArray(ids) ||
+        ids.length > MAX_TOKEN_IDS ||
+        !ids.every((id) => typeof id === "string" && GMAIL_ID.test(id)))) ||
+    (c.token === undefined && !ids?.length)
+  ) {
     throw new ProviderError("INVALID_CURSOR", "Page token belongs to a different query");
   }
-  return c.token;
+  return { ...(c.token ? { token: c.token } : {}), ...(ids?.length ? { ids } : {}) };
 }
 
 interface ChangeCursor {

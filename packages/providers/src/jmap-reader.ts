@@ -19,6 +19,7 @@ import type {
   ReadValue,
 } from "@passport/types";
 import { decodeCursor, encodeCursor, ProviderError } from "./errors.js";
+import { type WaitBudget, waitBudget } from "./http-request.js";
 import { type JmapEmail, normalizeJmap } from "./jmap.js";
 import { fetchJmapAttachment, type JmapDownload } from "./jmap-reader-attachments.js";
 import {
@@ -46,20 +47,24 @@ import type { PassportVerifier } from "./verification.js";
 
 export type { JmapInvocation } from "./jmap-reader-query.js";
 
+/** Lane, cancellation and the call's shared wait budget (R1-2) for one JMAP request. */
+export interface JmapCallPolicy {
+  lane?: QuotaLane;
+  signal?: AbortSignal;
+  budget?: WaitBudget | undefined;
+}
+
 /** What the reader needs from `JmapMailProvider`. */
 export interface JmapReaderHost {
   /** The connected account; throws `NOT_CONNECTED` otherwise. */
   account(): Account;
   /** One JMAP HTTP request carrying `calls` (back-references allowed). */
-  invoke(
-    calls: JmapInvocation[],
-    policy: { lane?: QuotaLane; signal?: AbortSignal },
-  ): Promise<JmapInvocation[]>;
+  invoke(calls: JmapInvocation[], policy: JmapCallPolicy): Promise<JmapInvocation[]>;
   /** One governed blob download through the session's `downloadUrl` template. */
   download(
     blobId: string,
     meta: { name: string; type: string },
-    policy: { lane?: QuotaLane; signal?: AbortSignal },
+    policy: JmapCallPolicy,
   ): Promise<Response>;
   governor?: QuotaGovernor;
   verifier?: PassportVerifier;
@@ -381,8 +386,10 @@ export class JmapMailReader implements MailReader {
       throw new ProviderError("ABORTED", "The read was cancelled");
     }
     let requests = 0;
-    const policy = {
-      lane: opts.lane ?? "interactive",
+    const lane = opts.lane ?? "interactive";
+    const policy: JmapCallPolicy = {
+      lane,
+      budget: waitBudget(lane),
       ...(opts.signal ? { signal: opts.signal } : {}),
     };
     const result = await fn(
