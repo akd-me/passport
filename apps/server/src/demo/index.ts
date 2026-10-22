@@ -249,6 +249,16 @@ export async function createDemoBackend(
         emailsUpserted: 0,
       });
     },
+    // Demo mail is static: report a healthy watcher so the UI shows its steady state.
+    watchStatus: async (account) =>
+      account.capabilities.mail
+        ? {
+            since: account.createdAt,
+            lastTickAt: account.lastSyncAt ?? account.createdAt,
+            cursorAgeSeconds: 0,
+            status: "watching" as const,
+          }
+        : null,
     close: () => store.close(),
   };
   return backend;

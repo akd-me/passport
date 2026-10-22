@@ -4,7 +4,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { HOST_AGENT_DEFAULT_MODELS } from "@passport/agent";
 import type { Account, LlmConfig, LlmSelection } from "@passport/types";
 import { ApiError } from "./errors.js";
-import { initialDays } from "./onboarding/config.js";
+import { warnDeprecatedSyncConfig, watchIntervalSeconds } from "./onboarding/config.js";
 
 export interface PassportConfig {
   dataDir: string;
@@ -13,7 +13,10 @@ export interface PassportConfig {
   mcpPort?: number;
   syncIntervalSeconds: number;
   calendarMaxSyncAgeMinutes?: number;
+  /** Deprecated and ignored (v0.3 never backfills); accepted with a one-time warning. */
   sync?: { initialDays?: number };
+  /** New-mail watcher. `intervalSeconds` defaults to 30. */
+  watch?: { intervalSeconds?: number };
   dailyDigestHour: number;
   llm: LlmConfig;
   /**
@@ -53,7 +56,7 @@ export function defaultConfig(
     mcpPort: 4318,
     syncIntervalSeconds: 120,
     calendarMaxSyncAgeMinutes: 10,
-    sync: { initialDays: 30 },
+    watch: { intervalSeconds: 30 },
     dailyDigestHour: 8,
     llm: {
       provider: "anthropic",
@@ -64,7 +67,8 @@ export function defaultConfig(
 }
 
 export function validateConfig(config: PassportConfig): PassportConfig {
-  initialDays(config);
+  warnDeprecatedSyncConfig(config);
+  watchIntervalSeconds(config);
   if (
     config.calendarMaxSyncAgeMinutes !== undefined &&
     (!Number.isFinite(config.calendarMaxSyncAgeMinutes) || config.calendarMaxSyncAgeMinutes <= 0)
@@ -169,6 +173,12 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
   }
   if (env.PASSPORT_SYNC_INTERVAL_SECONDS) {
     config.syncIntervalSeconds = Number(env.PASSPORT_SYNC_INTERVAL_SECONDS);
+  }
+  if (env.PASSPORT_WATCH_INTERVAL_SECONDS) {
+    config.watch = {
+      ...config.watch,
+      intervalSeconds: Number(env.PASSPORT_WATCH_INTERVAL_SECONDS),
+    };
   }
   if (env.PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES) {
     config.calendarMaxSyncAgeMinutes = Number(env.PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES);

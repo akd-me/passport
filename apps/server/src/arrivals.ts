@@ -223,7 +223,8 @@ export class ArrivalQueue {
     const ready = await calendarsReady(this.store, email.accountId);
     if (!ready) {
       entry.calendarWaitStartedAt ??= new Date().toISOString();
-      const deadline = Date.parse(entry.calendarWaitStartedAt) + 600000;
+      // New mail is triaged within a minute even while a companion calendar is still syncing.
+      const deadline = Date.parse(entry.calendarWaitStartedAt) + 60000;
       if (Date.now() < deadline) {
         entry.nextAttemptAt = new Date(Math.min(Date.now() + 30000, deadline)).toISOString();
         await this.save(emailId, entry);
