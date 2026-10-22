@@ -6,7 +6,8 @@
  *  - `emails.get(id)` / `getByProviderId` read the local row first. Its mutable state (keywords,
  *    mailboxIds) is revalidated through `MailReader.envelopes` when `fresh` is set or when the
  *    row's labels are older than the account's last watcher tick (kv `watcher-tick:<accountId>`,
- *    an ISO timestamp the server maintains; see `watcherTickKey`).
+ *    an ISO timestamp the server writes only when a change cursor expired or was rejected, i.e.
+ *    when label changes may have been lost; see `watcherTickKey`).
  *  - A miss whose id is a mail handle (`mailHandle(account, "email", providerId)`) is looked up
  *    by `(account, providerId)`, then fetched with `MailReader.envelopes` and cached. Rows created
  *    this way use the handle as their `Email.id` and the provider's thread handle as `threadId`;

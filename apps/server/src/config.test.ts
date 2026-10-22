@@ -1,13 +1,13 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { watcherTickKey } from "@passport/types";
 import { afterEach, describe, expect, it } from "vitest";
 import { addAccount } from "./accounts.js";
 import { createApp } from "./auth.test-client.js";
 import { createRealBackend } from "./compose.js";
 import { defaultConfig, loadConfig, saveConfig } from "./config.js";
 import { createDemoBackend } from "./demo/index.js";
+import { lastTickKey } from "./watch/status.js";
 
 describe("configuration and composition", () => {
   const paths: string[] = [];
@@ -113,7 +113,7 @@ describe("configuration and composition", () => {
       });
       // No mirror: nothing is copied locally, but the watcher's cursor and last tick persist.
       expect((await restarted.store.emails.query({ limit: 100 })).items).toHaveLength(0);
-      expect(await restarted.store.kv.get(watcherTickKey(accountId!))).toBeTruthy();
+      expect(await restarted.store.kv.get(lastTickKey(accountId!))).toBeTruthy();
     } finally {
       await restarted.close();
     }

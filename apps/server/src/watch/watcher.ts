@@ -16,7 +16,14 @@ import { cachedEmail, refreshLabelCache } from "../ondemand-wiring.js";
 import { readCursors, updateCursors } from "../sync/state.js";
 import { type ArrivalContext, alreadyHandled, arrivalContext, isInboxArrival } from "./arrival.js";
 import { backoffDelayMs, INVALID_CURSOR, REAUTHORIZE, rateLimited, safeCode } from "./failure.js";
-import { labelsKey, stateKey, summarizeLabels, type WatchState, watcherTickKey } from "./status.js";
+import {
+  labelsKey,
+  lastTickKey,
+  stateKey,
+  summarizeLabels,
+  type WatchState,
+  watcherTickKey,
+} from "./status.js";
 
 export interface MailWatcherOptions {
   store: Store;
@@ -86,7 +93,7 @@ export class MailWatcher {
   async remove(accountId: string): Promise<void> {
     this.retired.add(accountId);
     await this.active.get(accountId)?.catch(() => undefined);
-    for (const key of [watcherTickKey, labelsKey, stateKey]) {
+    for (const key of [watcherTickKey, lastTickKey, labelsKey, stateKey]) {
       await this.options.store.kv.delete(key(accountId));
     }
     this.backoff.delete(accountId);
@@ -326,7 +333,7 @@ export class MailWatcher {
 
   private async succeed(account: Account) {
     const { store } = this.options;
-    await store.kv.set(watcherTickKey(account.id), this.iso());
+    await store.kv.set(lastTickKey(account.id), this.iso());
     this.backoff.delete(account.id);
     if (this.unhealthy.delete(account.id) || (await store.kv.get(stateKey(account.id)))) {
       await store.kv.delete(stateKey(account.id));

@@ -15,7 +15,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import { createSyncIdentity } from "../sync/identity.js";
 import { readCursors, updateCursors } from "../sync/state.js";
-import { inboxCount, readWatchStatus, stateKey, watcherTickKey } from "./status.js";
+import { inboxCount, lastTickKey, readWatchStatus, stateKey, watcherTickKey } from "./status.js";
 import { MailWatcher } from "./watcher.js";
 
 const start = Date.parse("2026-10-20T12:00:00.000Z");
@@ -101,7 +101,9 @@ describe("MailWatcher", () => {
     const stored = (await store.syncState.get(account.id))?.cursor;
     expect(stored?.startsWith("passport-watch-v1:")).toBe(true);
     expect((await readCursors(store, account.id)).since).toBe(new Date(start).toISOString());
-    expect(await store.kv.get(watcherTickKey(account.id))).toBe(new Date(start).toISOString());
+    expect(await store.kv.get(lastTickKey(account.id))).toBe(new Date(start).toISOString());
+    // A normal tick never marks cached labels stale.
+    expect(await store.kv.get(watcherTickKey(account.id))).toBeNull();
     expect(await inboxCount(store, account.id)).toBe(22);
     expect(events.map((e) => e.type)).toContain("account.watch.started");
   });
@@ -120,9 +122,10 @@ describe("MailWatcher", () => {
     expect(JSON.parse((await store.kv.get("arrival:pending"))!)).toEqual({
       [handle("new-1")]: account.id,
     });
-    expect(await store.kv.get(watcherTickKey(account.id))).toBe(
+    expect(await store.kv.get(lastTickKey(account.id))).toBe(
       new Date(start + 30_000).toISOString(),
     );
+    expect(await store.kv.get(watcherTickKey(account.id))).toBeNull();
     // Replaying the same changes never triages twice.
     await watcher.tick(account.id);
     expect(arrivals()).toHaveLength(1);

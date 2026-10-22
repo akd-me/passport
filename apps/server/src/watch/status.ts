@@ -1,8 +1,14 @@
 import { type Account, type MailLabel, type Store, watcherTickKey } from "@passport/types";
 import { readCursors } from "../sync/state.js";
 
-/** ISO time of the last successful tick. The store reads it to decide cached-label staleness. */
+/**
+ * Label-staleness watermark: written only when a change cursor expires or is rejected, because
+ * that is the only time label changes may have been lost. The store revalidates cached rows whose
+ * labels are older than it. A normal tick patches changed labels itself and must NOT move this.
+ */
 export { watcherTickKey };
+/** ISO time of the last successful tick (status display and doctor only). */
+export const lastTickKey = (accountId: string) => `watch-last-tick:${accountId}`;
 /** `LabelSummary` from the last `labels(counts)` refresh. */
 export const labelsKey = (accountId: string) => `watch-labels:${accountId}`;
 /** `WatchState` while the watcher is backing off, failing, or unsupported. Absent when healthy. */
@@ -61,7 +67,7 @@ export async function readWatchStatus(
     return null;
   }
   const cursors = await readCursors(store, account.id);
-  const lastTickAt = await store.kv.get(watcherTickKey(account.id));
+  const lastTickAt = await store.kv.get(lastTickKey(account.id));
   const saved = await store.kv.get(stateKey(account.id));
   const state: WatchState | null = saved ? JSON.parse(saved) : null;
   const cursorAt = cursors.mail ? (cursors.cursorAt ?? cursors.since ?? null) : null;
