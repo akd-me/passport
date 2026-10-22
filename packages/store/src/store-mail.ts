@@ -1,17 +1,16 @@
 import type { SQLInputValue } from "node:sqlite";
-import type { Account, Email, Store } from "@passport/types";
+import type { Account, MailReaderResolver, Store } from "@passport/types";
 import { decryptCredentials, encryptCredentials } from "./credentials.js";
 import type { StoreDatabase } from "./store-database.js";
-import {
-  decodeCursor,
-  definedPatch,
-  limitOf,
-  nextCursor,
-  type Row,
-  unique,
-} from "./store-query.js";
+import { createEmailCache } from "./store-email-cache.js";
+import { createEmailRows } from "./store-email-rows.js";
+import { refreshFromLabels } from "./store-mailbox-labels.js";
+import { decodeCursor, definedPatch, limitOf, nextCursor, unique } from "./store-query.js";
 
-export function createMailRepositories(db: StoreDatabase) {
+export function createMailRepositories(
+  db: StoreDatabase,
+  resolver: () => MailReaderResolver | null = () => null,
+) {
   const accounts: Store["accounts"] = {
     list: async () => db.rows<Account>("SELECT data FROM accounts ORDER BY id"),
     get: async (id) => db.get("accounts", id),
@@ -85,94 +84,19 @@ export function createMailRepositories(db: StoreDatabase) {
           db.run("DELETE FROM mailboxes WHERE id = ?", [id]);
         }
       }),
+    refreshFromLabels: async (accountId, labels, opts) =>
+      refreshFromLabels(db, accountId, labels, opts),
   };
-  function readEmail(row: Row, includeBodies = true): Email {
-    const email = db.parse<Email>(row);
-    email.mailboxIds = db.ids("email_mailboxes", "email_id", email.id, "mailbox_id");
-    email.personIds = db.ids("email_people", "email_id", email.id, "person_id");
-    if (row.matter_id !== null || email.matterId !== undefined) {
-      email.matterId = row.matter_id as string | null;
-    }
-    if (includeBodies) {
-      if (row.textBody !== null) {
-        email.textBody = row.textBody as string;
-      }
-      if (row.html_body !== null) {
-        email.htmlBody = row.html_body as string;
-      }
-    } else {
-      delete email.textBody;
-      delete email.htmlBody;
-    }
-    return email;
-  }
-  function getEmail(id: string, includeBodies = true): Email | null {
-    const row = db.one(
-      `SELECT data, matter_id${includeBodies ? ", textBody, html_body" : ""} FROM emails WHERE id = ?`,
-      [id],
-    );
-    return row ? readEmail(row, includeBodies) : null;
-  }
-  function saveEmail(input: Email): void {
-    const previous = getEmail(input.id);
-    const pending = db.one("SELECT matter_id FROM matter_emails WHERE email_id = ?", [input.id]);
-    const email = { ...input };
-    if (email.textBody === undefined && previous?.textBody !== undefined) {
-      email.textBody = previous.textBody;
-    }
-    if (email.htmlBody === undefined && previous?.htmlBody !== undefined) {
-      email.htmlBody = previous.htmlBody;
-    }
-    const matterId =
-      email.matterId === undefined
-        ? ((pending?.matter_id as string | undefined) ?? previous?.matterId ?? null)
-        : email.matterId;
-    const data = { ...email };
-    // Store only presence markers in JSON; bodies live in separately selectable columns.
-    if (data.textBody !== undefined) {
-      data.textBody = null;
-    }
-    if (data.htmlBody !== undefined) {
-      data.htmlBody = null;
-    }
-    db.put("emails", email.id, data, {
-      account_id: email.accountId,
-      provider_id: email.providerId,
-      thread_id: email.threadId,
-      matter_id: matterId,
-      category: email.category ?? null,
-      received_at: email.receivedAt,
-      subject: email.subject,
-      '"from"': email.from.map((from) => `${from.name ?? ""} ${from.email}`).join(" "),
-      preview: email.preview,
-      textBody: email.textBody ?? null,
-      html_body: email.htmlBody ?? null,
-    });
-    db.replaceIds("email_mailboxes", "email_id", email.id, "mailbox_id", email.mailboxIds);
-    db.replaceIds("email_people", "email_id", email.id, "person_id", email.personIds);
-    db.setMatterLink("emails", email.id, matterId);
-  }
-  function deleteEmail(id: string): void {
-    db.run("DELETE FROM matter_emails WHERE email_id = ?", [id]);
-    db.run("DELETE FROM emails WHERE id = ?", [id]);
-    for (const row of db.all(
-      "SELECT id, data FROM threads WHERE EXISTS (SELECT 1 FROM json_each(data, '$.emailIds') WHERE value = ?)",
-      [id],
-    )) {
-      const thread = db.parse<{ id: string; accountId: string; emailIds: string[] }>(row);
-      thread.emailIds = thread.emailIds.filter((emailId) => emailId !== id);
-      db.put("threads", thread.id, thread, { account_id: thread.accountId });
-    }
-  }
+  const rows = createEmailRows(db);
+  const { readEmail, getEmail, saveEmail, deleteEmail } = rows;
+  const cache = createEmailCache(db, rows, resolver);
   const emails: Store["emails"] = {
-    get: async (id, opts) => getEmail(id, opts?.includeBodies ?? true),
-    getByProviderId: async (accountId, providerId) => {
-      const row = db.one(
-        "SELECT data, matter_id, textBody, html_body FROM emails WHERE account_id = ? AND provider_id = ?",
-        [accountId, providerId],
-      );
-      return row ? readEmail(row) : null;
-    },
+    get: cache.get,
+    getByProviderId: cache.getByProviderId,
+    touch: cache.touch,
+    freshness: cache.freshness,
+    evictBodies: cache.evictBodies,
+    evictEnvelopes: cache.evictEnvelopes,
     query: async (q) => {
       const where: string[] = [];
       const params: SQLInputValue[] = [];
@@ -257,7 +181,7 @@ export function createMailRepositories(db: StoreDatabase) {
     upsertMany: async (emails) =>
       db.transaction(() => {
         for (const email of emails) {
-          saveEmail(email);
+          saveEmail(email, { labelsFresh: true });
         }
       }),
     patchMany: async (ids, patch) =>
@@ -268,7 +192,7 @@ export function createMailRepositories(db: StoreDatabase) {
             continue;
           }
           // Like other top-level patches, keywords and membership arrays replace their fields.
-          saveEmail({ ...email, ...definedPatch(patch) });
+          saveEmail({ ...email, ...definedPatch(patch) }, { labelsFresh: false });
         }
       }),
     deleteMany: async (ids) =>
