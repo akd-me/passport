@@ -9,6 +9,8 @@
  *  - Changing a type here is a cross-package change. Add, don't rename, during parallel work.
  */
 
+import type { MailReader } from "./ondemand.js";
+
 // ---------------------------------------------------------------------------
 // Primitives
 // ---------------------------------------------------------------------------
@@ -46,6 +48,10 @@ export interface AccountCapabilities {
   labels: boolean;
   /** Can the provider itself submit mail, or do we need a separate SMTP transport? */
   submit: boolean;
+  /** Provider has server-side search usable by `MailReader.search` (v0.3, additive). */
+  search?: boolean;
+  /** Adapter implements `MailProvider.reader()` for on-demand reads (v0.3, additive). */
+  onDemand?: boolean;
 }
 
 /**
@@ -783,6 +789,11 @@ export interface MailProvider {
   waitForChanges?(signal: AbortSignal): Promise<void>;
   /** Create a provider label/mailbox; executor retains it when undoing its first label action. */
   createMailbox?(name: string): Promise<Mailbox>;
+  /**
+   * On-demand reads (v0.3, additive). Returns the reader bound to the connected account; call it
+   * after `connect`. Adapters that implement it set `capabilities.onDemand`.
+   */
+  reader?(): MailReader;
 }
 
 export interface CalendarProvider {
@@ -1225,3 +1236,9 @@ export interface SetupTask {
   /** Monotonic per-task counter, incremented on every published change (added in 0.2.0). */
   revision?: number;
 }
+
+// ---------------------------------------------------------------------------
+// On-demand mail (additive, v0.3): MailReader, MailRow, ReadResult, quota lanes.
+// ---------------------------------------------------------------------------
+
+export * from "./ondemand.js";
