@@ -10,10 +10,11 @@ import {
   readerTargets,
   safeRow,
   UNTRUSTED_NOTICE,
+  withReadMeta,
   wouldExceed,
 } from "./ondemand-support.js";
-import { json, required, ToolError } from "./presentation.js";
-import { searchMail } from "./reads-ondemand-search.js";
+import { required, ToolError } from "./presentation.js";
+import { pageMeta, searchMail } from "./reads-ondemand-search.js";
 import { register } from "./register.js";
 import { schema as z } from "./schema.js";
 import * as s from "./schemas.js";
@@ -170,7 +171,7 @@ export function registerOnDemandReads(ctx: Context) {
     false,
     async (_input, call) => {
       const accounts = await store.accounts.list();
-      return json({
+      return withReadMeta({
         items: await Promise.all(
           accounts.map(async (account) => ({
             id: account.id,
@@ -217,8 +218,7 @@ export function registerOnDemandReads(ctx: Context) {
         return {
           account: target.account.id,
           items: page.items.map(safeRow),
-          ...(page.nextPageToken ? { nextPageToken: page.nextPageToken } : {}),
-          ...(page.approxTotal !== undefined ? { approxTotal: page.approxTotal } : {}),
+          ...pageMeta(page),
           ...mergeMeta([page]),
           untrusted: UNTRUSTED_NOTICE,
         };

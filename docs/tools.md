@@ -132,10 +132,12 @@ Write tools accept mail handles (`acc:email:…`) as well as local ids.
 
 Every on-demand result carries `source` (`provider`, `cache` or `mixed`) and `cost`
 (`gmailUnits` / `graphRequests` / `imapCommands`, `budgetRemaining`, `windowResetsAt`);
-fan-out results sum the units and report the lowest `budgetRemaining`. Collections add
-`nextPageToken` (opaque, bound to the query; a fan-out token encodes each account's
-position) and `approxTotal`, which is a provider estimate: use `mail_count` for exact
-numbers. `translation` explains a non-pass-through query translation.
+fan-out results sum the units and report the lowest `budgetRemaining`. Every result also
+carries `nextPageToken`: opaque and bound to the query (a fan-out token encodes each
+account's position), or `null` when there is nothing more. Collections add `approxTotal`,
+which is a provider estimate: use `mail_count` for exact numbers. `capped: true` marks a
+provider result ceiling (Microsoft Graph `$search` stops at 1,000 results; narrow with
+`after:`/`before:`). `translation` explains a non-pass-through query translation.
 
 Rows are compact `MailRow`s (about 300 bytes): `id` and `threadId` handles, `rfc822Id`,
 `account`, `date`, `from`, `to` (first three, then `+N more`), `subject`, `snippet`
@@ -492,7 +494,8 @@ and `createToolRegistry({...,readers?,scratchDir?,scratchSession?})` take the on
 seams: `readers` is a `MailReaderResolver` (`accountId → MailReader | null`); `scratchDir`
 (for example `<dataDir>/scratch`) enables `mail_export`, with one random session directory
 per MCP server; the host calls `sweepScratchDir(scratchDir)` periodically. The built-in agent
-passes `readers` and no `scratchDir`. `createMailboxMcpServer(...)`,
+passes `readers` and no `scratchDir`. A trusted per-call `ToolContext.readers` (second
+`handler` argument, never model-supplied) overrides the registry's resolver for that call. `createMailboxMcpServer(...)`,
 `createAgentRuntime(...)`, and `createToolRegistry(...)` accept an optional
 `freeBusy(accountId,range)` resolver. Return provider intervals for a connected
 calendar account, or `null` when none is connected; an empty array means confirmed

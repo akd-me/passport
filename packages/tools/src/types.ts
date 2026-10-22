@@ -25,6 +25,8 @@ export interface ToolContext {
   personSnapshot?: Person;
   emailPatch?: Partial<Pick<Email, "category" | "personIds">>;
   matterId?: string;
+  /** Per-call on-demand readers; overrides `ToolRegistryOptions.readers` for this call. */
+  readers?: MailReaderResolver;
 }
 /** MCP tool hints that differ from the defaults derived from `risk`. */
 export interface ToolAnnotations {

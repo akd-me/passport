@@ -25,7 +25,7 @@ export const deprecated = (replacement: string) => ({
 
 /** True when a reader serves `accountId`, or any account when it is omitted. */
 async function served(ctx: Context, accountId?: string): Promise<boolean> {
-  if (!ctx.deps.readers) {
+  if (!ctx.readers) {
     return false;
   }
   if (accountId) {
@@ -42,7 +42,7 @@ async function served(ctx: Context, accountId?: string): Promise<boolean> {
 
 /** The account of a mail handle or legacy id, when a reader serves it. */
 async function servedTarget(ctx: Context, id: string): Promise<boolean> {
-  if (!ctx.deps.readers) {
+  if (!ctx.readers) {
     return false;
   }
   const target = await resolveMailTarget(ctx, id).catch(() => null);
@@ -216,7 +216,7 @@ export async function queryWriteMatches(
       source?: "provider";
     }
 > {
-  if (ctx.deps.readers) {
+  if (ctx.readers) {
     let resolved: Awaited<ReturnType<typeof queryWriteRows>> = null;
     const result = await onDemand(
       async () => {
