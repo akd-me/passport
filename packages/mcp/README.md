@@ -117,7 +117,8 @@ the library itself does not load account configuration or credentials.
 
 ## Tools
 
-The registry exposes 44 tools. The original tools are described below; the full
+The registry exposes the shared tool catalogue (61 tools in v0.3, listed in
+[docs/tools.md](../../docs/tools.md)). The original tools are described below; the full
 [shared catalogue](../../docs/tools.md) also covers summaries, free slots, person
 search, query batches, standing rules, daily logs, decision explanations and
 unsubscribe previews. `passport mcp install --client <client> [--http]` installs

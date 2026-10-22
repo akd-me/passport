@@ -42,7 +42,8 @@ settings are never read. Query writes cap at 200 matches and require one account
 Standing-rule edits submit a reversible `profile_update` action in `matters`;
 USER.md lives at `store.kv["user_profile"]`, including its other sections.
 
-All results have a serialized UTF-8 byte budget: 512 KiB by default, configured with
+All results have a serialized UTF-8 byte budget: 512 KiB by default for the built-in agent
+(the MCP server defaults to 64 KiB, see `DEFAULT_MCP_RESPONSE_BYTE_BUDGET`), configured with
 `responseByteBudget` (minimum 1024). `full: true` keeps this total cap. Clipped bodies
 carry `truncated: true` and `continueFrom`; `get_email_body({emailId,offset,length})`
 returns text/HTML chunks with UTF-16 offsets and sanitized HTML. Default length is

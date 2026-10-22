@@ -210,8 +210,8 @@ envelopes and bodies, tasks, notes and the rest of the database are not encrypte
 
 The cache is bounded: bodies are evicted beyond 200 MB and envelopes beyond the 100,000 most
 recently used. `mail_export` files are written for the client's own `rg` or scripts and are meant
-to live 24 hours. This build does not yet sweep `scratch/` on a timer, so delete old session
-directories yourself (it is safe while no MCP client is exporting) and keep `scratch/` out of
+to live 24 hours. The server sweeps `scratch/` at startup and from the `tasks.maintenance` job,
+removing session directories older than 24 hours. Keep `scratch/` out of
 backups.
 
 ## Models
