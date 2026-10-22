@@ -138,7 +138,8 @@ shell or service manager. Docker Compose loads the supplied `.env` file.
 | `PASSPORT_HOST`, `PASSPORT_PORT` | API bind address and port; defaults `127.0.0.1:3000` |
 | `PASSPORT_MCP_PORT` | Loopback HTTP MCP port, default `4318` |
 | `PASSPORT_LLM_PROVIDER`, `PASSPORT_LLM_MODEL` | Pin the provider (`codex`, `claude-code`, or an API provider) and model; skips auto-detection |
-| `PASSPORT_CODEX_PATH`, `PASSPORT_CLAUDE_PATH` | Host CLI binary outside `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` |
+| `PASSPORT_CODEX_PATH`, `PASSPORT_CLAUDE_PATH` | Host CLI binary Passport cannot find; wins over `hostAgents.codexPath`/`claudePath` in the config file |
+| `PASSPORT_SHELL_ENV_PREPARED` | Set by a launcher that already read PATH from the login shell; skips the probe (see [below](#running-from-a-gui-or-launchd)) |
 | `PASSPORT_LLM_FAST_MODEL` | Optional model for classification |
 | `PASSPORT_LLM_BASE_URL` | Compatible/Ollama endpoint override |
 | `PASSPORT_LLM_API_KEY` | API provider key (optional; never passed to host agents) |
@@ -165,8 +166,8 @@ machine**. Install and sign in to either CLI once:
 | Claude Code | [setup guide](https://docs.claude.com/en/docs/claude-code/setup) | `claude auth login` (Claude plan) | `claude auth status` |
 
 With `llmSelection: "auto"`, each `serve` (and `doctor`, `sync`, `triage`) start
-detects the CLIs on `PATH` plus `~/.local/bin`, `/opt/homebrew/bin` and
-`/usr/local/bin`, and uses Codex if it is signed in, else Claude Code, else the
+detects the CLIs on `PATH` plus the usual install locations (see
+[Running from a GUI or launchd](#running-from-a-gui-or-launchd)), and uses Codex if it is signed in, else Claude Code, else the
 configured API provider, else no agent. `passport init`, **Settings →
 Model** and `PUT /api/settings/llm` record an explicit choice; `GET
 /api/host-agents` returns what was detected. `passport doctor` lists both CLIs
@@ -191,6 +192,36 @@ choose **advanced** in `passport init`, **Settings → Advanced**, or set
 For Ollama, set `PASSPORT_LLM_PROVIDER=ollama`, select an installed model and use
 `PASSPORT_LLM_BASE_URL=http://localhost:11434`. In Docker, use a hostname reachable
 from the container instead. See [deployment](deploy.md).
+
+## Running from a GUI or launchd
+
+A process started from Finder, the Dock, the Mac app or a LaunchAgent does not get your terminal's
+`PATH`: macOS gives it roughly `/usr/bin:/bin:/usr/sbin:/sbin`. A `claude` or `codex` installed
+with Homebrew, nvm, fnm, volta, mise, asdf, pnpm, bun or a custom npm prefix is then invisible,
+and an npm-installed `codex` cannot find `node`.
+
+When `passport serve` or `passport demo` starts without a terminal (stdin is not a TTY) and
+`PASSPORT_SHELL_ENV_PREPARED` is unset, Passport runs your login shell once (`$SHELL -ilc`, then
+`/bin/zsh`; 5-second limit) and copies `PATH`, the Homebrew, version-manager, certificate and
+locale variables from it. Nushell and other non-POSIX shells are skipped. If no shell answers,
+macOS's `launchctl getenv PATH` is used, and otherwise the inherited `PATH`. The startup log
+shows the source and the number of `PATH` entries, never the `PATH` itself. A launcher that has
+already done this (the Mac app) sets `PASSPORT_SHELL_ENV_PREPARED=1`, and optionally
+`PASSPORT_SHELL_ENV_SOURCE=login-shell|launchctl|fallback` for `doctor`.
+
+Discovery also checks `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.volta/bin`,
+`~/.bun/bin`, `~/Library/pnpm`, `~/.npm-global/bin`, mise and asdf shims, and fnm's default alias.
+If a CLI is still not found, set its full path (`which codex` in a terminal) under **Settings →
+Model → Agent programs**, which saves it to `passport.config.json`:
+
+```json
+{ "hostAgents": { "codexPath": "/Users/me/.nvm/versions/node/v22.12.0/bin/codex" } }
+```
+
+**Re-detect** in the same panel reads the login shell again and re-checks both CLIs; in
+automatic selection Passport switches to a newly signed-in agent without a restart.
+`passport doctor` prints the **PATH source** (login shell, launchctl, fallback, inherited, or
+prepared by the app) and each CLI's resolved path.
 
 ## Accounts and agents
 
