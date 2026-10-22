@@ -1,8 +1,42 @@
 # Passport v0.3 design: on-demand mail, tasks, and a Mac app
 
-Status: proposal, 2026-10-22. Supersedes the mirror-first model documented in `docs/accounts.md`
-and the sync invariants in `docs/CONTRACT.md` once accepted. The four research reports this draws
-on are in `docs/design/research/` (file:line references there are against commit `24e5da7`).
+## Status (2026-10-22)
+
+Accepted and implemented for v0.3.0 (unreleased). This document supersedes the mirror-first model
+and the sync invariants in `docs/CONTRACT.md`. Sections 1–7 below are the proposal as accepted;
+the current behaviour is documented in [accounts](../accounts.md), [tools](../tools.md),
+[tasks](../tasks.md) and [the Mac app](../desktop.md). The four research reports this draws on are
+in `docs/design/research/` (file:line references there are against commit `24e5da7`).
+
+**Implemented:**
+
+- Wave 1: the `MailReader` contract with Gmail, Graph, IMAP, JMAP and mock readers; the
+  per-account quota governor with interactive, arrivals and background lanes; sealed page tokens;
+  the read-through envelope cache and body LRU; the new-mail watcher with its cursor at connect
+  time; the on-demand tools (`mail_search`, `mail_list`, `mail_read`, `mail_grep`, `mail_count`,
+  `mail_changes`, `mail_labels`, `mail_attachment_read`, `mail_export`, `provider_get`), old read
+  tools as aliases, query writes resolved server-side. Backfill, **Load older mail**, mail
+  reconciliation and FTS over bodies are gone (FTS covers cached envelopes only).
+- Wave 2: tasks with runs, lanes, a streamed timeline, approvals at the composer, per-run change
+  summaries with undo and the inbox / working / snoozed / settled lifecycle; the Inbox task per
+  account; routines bound to tasks; `watch_conversation`; people and matters as notes
+  (`notes_*`); `freeBusy` wired into scheduling; the task-centred web UI with **Needs you**.
+- Wave 3, M1 and M2: the unsigned arm64 Passport.app spawning or attaching to `passport serve`,
+  login-shell `PATH`, the Keychain master key on a bootstrap pipe, menu-bar count and notifications
+  for tasks that need you, `passport://task/<id>` and other deep links, login item and CLI shim.
+
+**Deferred:**
+
+- Push: Gmail Pub/Sub and Graph change subscriptions. The watcher polls (IMAP IDLE triggers an
+  immediate check).
+- An optional deep local index (the third quota lane is reserved for it).
+- OCR for scanned PDFs and images in `mail_attachment_read`.
+- M3: signing, notarization, electron-updater and a Homebrew cask.
+- Staged task changes (the worktree analogue); approval stays per action.
+- Task-scoped "accept for this task" and "always"; "always" maps to the existing trust pin.
+- `question` items and child tasks spawned by a tool.
+
+Real Gmail and Outlook sign-in and reads have not been verified against the live APIs.
 
 ## 1. What is wrong today
 
