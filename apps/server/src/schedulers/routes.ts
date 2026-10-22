@@ -2,6 +2,7 @@ import { SchedulerError } from "@passport/scheduler";
 import { Hono } from "hono";
 import type { Backend } from "../backend.js";
 import { ApiError, required } from "../errors.js";
+import { logger } from "../logger.js";
 import { object } from "../validation.js";
 import { existingSchedulerService, getSchedulerService } from "./service.js";
 
@@ -26,7 +27,10 @@ export function installJobRoutes(app: Hono, backend: Backend) {
       c.res.ok &&
       c.req.path.startsWith("/api/accounts")
     ) {
-      await existingSchedulerService(backend)?.reconcileAccounts();
+      // The account change already happened; a scheduler problem must not turn it into a 500.
+      await existingSchedulerService(backend)
+        ?.reconcileAccounts()
+        .catch(() => logger.warn("Scheduler account reconcile failed"));
     }
   });
   const routes = new Hono();

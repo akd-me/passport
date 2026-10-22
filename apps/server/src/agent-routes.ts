@@ -12,6 +12,11 @@ export function installAgentRoutes(app: Hono, backend: Backend): void {
       await readEmail(backend.store, backend.readers, c.req.param("id")),
       "Email",
     );
+    // Still queued for automatic triage: a second, explicit run would duplicate it (R4-32).
+    const queued = JSON.parse((await backend.store.kv.get(`arrival:${email.id}`)) ?? "null");
+    if (queued && !queued.completedAt && !queued.attentionActionId) {
+      throw new ApiError("TRIAGE_PENDING", "This message is already queued for triage", 409);
+    }
     if (!(await backend.store.emails.get(email.id, { cacheOnly: true }))) {
       await backend.store.emails.upsertMany([email]);
     }

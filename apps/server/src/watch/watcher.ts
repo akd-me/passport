@@ -16,7 +16,14 @@ import { cachedEmail, refreshLabelCache } from "../ondemand-wiring.js";
 import { readCursors, updateCursors } from "../sync/state.js";
 import { type ArrivalContext, alreadyHandled, arrivalContext, isInboxArrival } from "./arrival.js";
 import { maintainEmailCache } from "./cache-maintenance.js";
-import { backoffDelayMs, INVALID_CURSOR, REAUTHORIZE, rateLimited, safeCode } from "./failure.js";
+import {
+  BoundedError,
+  backoffDelayMs,
+  INVALID_CURSOR,
+  REAUTHORIZE,
+  rateLimited,
+  safeCode,
+} from "./failure.js";
 import {
   labelsKey,
   lastTickKey,
@@ -348,10 +355,15 @@ export class MailWatcher {
     const { store } = this.options;
     await store.kv.set(lastTickKey(account.id), this.iso());
     this.backoff.delete(account.id);
-    if (this.unhealthy.delete(account.id) || (await store.kv.get(stateKey(account.id)))) {
+    const state = await store.kv.get(stateKey(account.id));
+    if (this.unhealthy.delete(account.id) || state) {
       await store.kv.delete(stateKey(account.id));
     }
-    if (account.lastSyncError && account.lastSyncError !== "REAUTHORIZE_REQUIRED") {
+    // Calendar sync shares lastSyncError: clear only a code the watcher set (R4-28).
+    const own =
+      !account.capabilities.calendar ||
+      (state !== null && (JSON.parse(state) as WatchState).error === account.lastSyncError);
+    if (own && account.lastSyncError && account.lastSyncError !== "REAUTHORIZE_REQUIRED") {
       const fresh = await store.accounts.get(account.id);
       if (fresh) {
         await store.accounts.upsert({ ...fresh, lastSyncError: null, updatedAt: this.iso() });
@@ -405,14 +417,14 @@ export class MailWatcher {
         accountId: account.id,
         error: "REAUTHORIZE_REQUIRED",
       });
-      throw error;
+      throw new BoundedError(code, "New-mail check failed");
     }
     await this.setState(account.id, { status: "error", error: code });
     if (fresh.lastSyncError !== code) {
       await store.accounts.upsert({ ...fresh, lastSyncError: code, updatedAt: this.iso() });
     }
     bus.emit({ type: "account.watch.failed", accountId: account.id, error: code });
-    throw error;
+    throw new BoundedError(code, "New-mail check failed");
   }
 }
 

@@ -300,7 +300,9 @@ export async function saveConfig(config: PassportConfig): Promise<void> {
   await mkdir(config.dataDir, { recursive: true, mode: 0o700 });
   const path = join(config.dataDir, "passport.config.json");
   const temp = `${path}.${crypto.randomUUID()}.tmp`;
-  await writeFile(temp, JSON.stringify({ ...config, llm, accounts }, null, 2) + "\n", {
+  // The retired `sync` block is not written back, so its deprecation warning stops (R4-30).
+  const { sync: _retired, ...kept } = config as typeof config & { sync?: unknown };
+  await writeFile(temp, JSON.stringify({ ...kept, llm, accounts }, null, 2) + "\n", {
     mode: 0o600,
   });
   await rename(temp, path);

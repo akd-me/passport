@@ -8,6 +8,9 @@ import type {
 import { ApiError, required } from "../errors.js";
 import { logger } from "../logger.js";
 
+/** Reader errors that mean the shared connection is unusable, not that one read failed. */
+const CONNECTION_FAILURES = new Set(["IMAP_CONNECTION_ERROR", "NOT_CONNECTED", "NETWORK_ERROR"]);
+
 type Provider = MailProvider | CalendarProvider;
 interface Entry {
   raw: Provider;
@@ -111,8 +114,9 @@ export class ProviderConnections {
             return value.bind(target);
           }
           if (property === "reader") {
-            // The reader shares this adapter: its calls count as active operations, and a
-            // failed read (NOT_FOUND, RATE_LIMITED) never invalidates the connection.
+            // The reader shares this adapter: its calls count as active operations. A failed
+            // read (NOT_FOUND, RATE_LIMITED) keeps the connection; a broken one is replaced so
+            // the watcher recovers without the push job (R4-31).
             return async () => {
               await connect();
               const reader = value.apply(target) as MailReader;
@@ -125,10 +129,17 @@ export class ProviderConnections {
                   return async (...args: unknown[]) => {
                     await connect();
                     active++;
+                    let broken = false;
                     try {
                       return await fn.apply(inner, args);
+                    } catch (error) {
+                      broken = CONNECTION_FAILURES.has((error as { code?: string })?.code ?? "");
+                      throw error;
                     } finally {
                       active--;
+                      if (broken) {
+                        await fail();
+                      }
                     }
                   };
                 },

@@ -130,14 +130,19 @@ export class SchedulerService {
     const saved = await backend.store.kv.get(ROUTINES_KEY);
     if (saved) {
       for (const value of JSON.parse(saved) as RoutineDefinition[]) {
-        const def = {
-          id: value.id,
-          name: text(value.name, "name", 200),
-          schedule: validateSchedule(value.schedule),
-          routine: instruction(value.routine),
-        };
-        this.routines.set(def.id, def);
-        await this.registerRoutine(def);
+        try {
+          const def = {
+            id: value.id,
+            name: text(value.name, "name", 200),
+            schedule: validateSchedule(value.schedule),
+            routine: instruction(value.routine),
+          };
+          await this.registerRoutine(def);
+          this.routines.set(def.id, def);
+        } catch {
+          // One invalid saved routine must not keep the scheduler (and account routes) down.
+          logger.warn("Skipped a saved routine that no longer validates");
+        }
       }
     }
     await this.discoverAccounts();
