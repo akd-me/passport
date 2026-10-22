@@ -1,4 +1,4 @@
-import type { ActionRecord, Task, TaskMessageMode } from "@passport/types";
+import type { Task, TaskMessageMode } from "@passport/types";
 import { useState } from "react";
 import { Feedback, Icon, Kbd, mod } from "../components/ui";
 import { logger } from "../logger";
@@ -15,7 +15,6 @@ import { type Clamp, ClampNotice, PlanToggle, TaskModePicker } from "./TaskModes
 export function TaskComposer({
   task,
   running,
-  records,
   summaries,
   clamp,
   onClamp,
@@ -23,7 +22,6 @@ export function TaskComposer({
 }: {
   task: Task;
   running: boolean;
-  records: Map<string, ActionRecord>;
   summaries: Map<string, string>;
   clamp: Clamp | null;
   onClamp: (clamp: Clamp | null) => void;
@@ -34,6 +32,8 @@ export function TaskComposer({
     [error, setError] = useState("");
   const { composer } = useUi(),
     { upsert, trackRuns } = useTasks();
+  // Inbox and routine runs can't be stopped or steered; messages to them queue (R5-8).
+  const live = running && task.kind === "task";
   const send = async (mode: TaskMessageMode) => {
     const message = text.trim();
     if (!message || sending) {
@@ -67,12 +67,7 @@ export function TaskComposer({
   };
   return (
     <div className="composer-wrap task-composer">
-      <ApprovalPanel
-        task={task}
-        records={records}
-        summaries={summaries}
-        onSelect={onSelectApproval}
-      />
+      <ApprovalPanel task={task} summaries={summaries} onSelect={onSelectApproval} />
       <ClampNotice clamp={clamp} />
       <form
         className={`composer ${sending ? "busy" : ""}`}
@@ -103,7 +98,7 @@ export function TaskComposer({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              void send(e.metaKey || e.ctrlKey ? "steer" : "queue");
+              void send(live && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
             } else if (e.key === "Escape") {
               e.currentTarget.blur();
             }
@@ -114,13 +109,13 @@ export function TaskComposer({
           <PlanToggle task={task} />
           <span className="composer-hint" aria-hidden="true">
             <Kbd>↵</Kbd> {running ? "queue" : "send"}
-            {running && (
+            {live && (
               <>
                 <Kbd>{mod}↵</Kbd> steer
               </>
             )}
           </span>
-          {running && (
+          {live && (
             <button
               type="button"
               className="btn btn-sm stop-btn"

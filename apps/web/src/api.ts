@@ -75,6 +75,7 @@ export interface HostAgentSettings {
   paths: Record<HostAgent["kind"], { configured: string | null; environment: string | null }>;
   agents: HostAgent[];
 }
+export type ApproveScope = "once" | "task" | "always";
 export interface AgentInstruction {
   instruction?: string;
   emailIds?: string[];
@@ -139,11 +140,17 @@ export function queryString(query: object = {}): string {
 }
 export const api = {
   decisions: () => request<Page<ActionRecord>>("/decisions"),
-  approve: (id: string, edited?: ActionRequest) =>
+  /**
+   * `scope` "task" also approves this kind of change for the rest of the task, "always" for
+   * good. "once" is the default and is not sent, so older servers see the same body.
+   */
+  approve: (id: string, edited?: ActionRequest, scope: ApproveScope = "once") =>
     write<ActionRecord>(
       `/actions/${encodeURIComponent(id)}/approve`,
       "POST",
-      edited ? { request: edited } : undefined,
+      edited || scope !== "once"
+        ? { ...(edited ? { request: edited } : {}), ...(scope !== "once" ? { scope } : {}) }
+        : undefined,
     ),
   reject: (id: string) => write<ActionRecord>(`/actions/${encodeURIComponent(id)}/reject`, "POST"),
   cancel: (id: string) =>

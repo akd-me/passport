@@ -41,7 +41,7 @@ describe("DecisionCard", () => {
     render(<DecisionCard action={action()} />);
     expect(screen.getByText("Confirm the launch with Maya.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-    await waitFor(() => expect(approve).toHaveBeenCalledWith("action-test", undefined));
+    await waitFor(() => expect(approve).toHaveBeenCalledWith("action-test", undefined, "once"));
   });
   it("edits the draft, focuses the editor, and approves the edited body", async () => {
     const approve = vi.spyOn(api, "approve").mockResolvedValue(action("held"));

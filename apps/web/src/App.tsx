@@ -9,6 +9,7 @@ import { SettingsDialog } from "./settings/SettingsDialog";
 import { CommandPalette } from "./shell/CommandPalette";
 import { BrandMark, Sidebar } from "./shell/Sidebar";
 import { Surface } from "./shell/Surface";
+import { useTaskListKeys } from "./shell/TaskList";
 import { useWorkspace } from "./state";
 import { DecisionLink } from "./tasks/DecisionLink";
 import { TasksProvider } from "./tasks/store";
@@ -110,9 +111,10 @@ function useGlobalShortcuts() {
 }
 
 function Shell() {
-  const { notice } = useWorkspace(),
+  const { notice, noticeAction, notify } = useWorkspace(),
     ui = useUi();
   useGlobalShortcuts();
+  useTaskListKeys();
   return (
     <div className={`app ${ui.sidebar ? "with-sidebar" : "sidebar-hidden"}`}>
       <a href="#main" className="skip-link">
@@ -169,6 +171,18 @@ function Shell() {
         <div className="toast" role="status">
           <Icon name="check" size={15} />
           {notice}
+          {noticeAction && (
+            <button
+              type="button"
+              className="link-btn toast-action"
+              onClick={() => {
+                notify("");
+                noticeAction.run();
+              }}
+            >
+              {noticeAction.label}
+            </button>
+          )}
         </div>
       )}
     </div>

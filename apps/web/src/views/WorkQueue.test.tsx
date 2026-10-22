@@ -135,7 +135,7 @@ describe("work queue", () => {
       "true",
     );
     fireEvent.keyDown(window, { key: "a" });
-    await waitFor(() => expect(approve).toHaveBeenCalledWith("p3", undefined));
+    await waitFor(() => expect(approve).toHaveBeenCalledWith("p3", undefined, "once"));
     fireEvent.keyDown(window, { key: "k" });
     expect(first).toHaveAttribute("aria-current", "true");
   });
@@ -152,7 +152,7 @@ describe("work queue", () => {
     expect(order).toEqual(["Reason p4", "Reason p2", "Reason p3", "Reason p1"]);
   });
 
-  it("starts a task from the composer, mentioning the selected proposal's message", async () => {
+  it("R5-1: starts a task with the selected proposal's message as an id, never its subject", async () => {
     stubQueue();
     const created = {
       task: { id: "t1", permissionMode: "supervised" } as Task,
@@ -173,7 +173,8 @@ describe("work queue", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
       expect(create).toHaveBeenCalledWith({
-        message: "Draft replies\n\nMessage: “Subject p1” (id e1).",
+        message: "Draft replies",
+        emailIds: ["e1"],
         title: "Draft replies",
       }),
     );

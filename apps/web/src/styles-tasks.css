@@ -797,3 +797,36 @@
     margin-left: 0;
   }
 }
+
+/* ---------------------------------------------------------------- Review R5 */
+.task-section .side-group-head h2 {
+  margin: 0;
+}
+.section-toggle {
+  font: inherit;
+}
+.side-more {
+  padding: 4px 8px;
+  font-size: var(--t-xs);
+}
+.toast .toast-action {
+  margin-left: 4px;
+  color: var(--bg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.approval-panel .approval-draft {
+  font-size: var(--t-xs);
+}
+.quick-decision {
+  align-items: center;
+}
+.quick-decision .loading-note,
+.quick-decision.unavailable {
+  font-size: var(--t-xs);
+}
+.timeline-older {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 10px;
+}

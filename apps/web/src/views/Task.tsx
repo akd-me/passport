@@ -48,9 +48,10 @@ export function TaskPage() {
     [params] = useSearchParams();
   const tasks = useTasks(),
     detail = useTaskDetail(id),
-    timeline = useTaskItems(id),
-    records = useTaskActions(detail.runs);
+    timeline = useTaskItems(id);
   const task = newest(tasks.get(id), detail.task);
+  const actions = useTaskActions(task),
+    { records, loadRun } = actions;
   const focus = params.get("approval") ?? undefined;
   const [selected, setSelected] = useState(focus),
     [clamp, setClamp] = useState<Clamp | null>(
@@ -71,15 +72,25 @@ export function TaskPage() {
         ?.scrollIntoView?.({ block: "center" });
     }
   }, [focus, timeline.loaded, records]);
-  const summaries = useMemo(() => {
-    const map = new Map<string, string>();
+  const { summaries, runOf } = useMemo(() => {
+    const summaries = new Map<string, string>(),
+      runOf = new Map<string, string | null>();
     for (const item of timeline.items) {
       if (item.kind === "approval_request") {
-        map.set(item.payload.actionId, item.payload.summary);
+        summaries.set(item.payload.actionId, item.payload.summary);
+        runOf.set(item.payload.actionId, item.runId);
       }
     }
-    return map;
+    return { summaries, runOf };
   }, [timeline.items]);
+  // A decided approval's record comes with its run's records.
+  const selectedRun = selected && !records.has(selected) ? runOf.get(selected) : undefined;
+  useEffect(() => {
+    const run = detail.runs.find((r) => r.id === selectedRun);
+    if (run) {
+      loadRun(run);
+    }
+  }, [selectedRun, detail.runs, loadRun]);
   if (!task) {
     return (
       <Surface title="Task" crumbs={[{ label: "Tasks", to: "/tasks" }, { label: "Task" }]}>
@@ -122,7 +133,6 @@ export function TaskPage() {
         <TaskComposer
           task={task}
           running={running}
-          records={records}
           summaries={summaries}
           clamp={clamp}
           onClamp={setClamp}
@@ -136,8 +146,13 @@ export function TaskPage() {
         items={timeline.items}
         runs={detail.runs}
         records={records}
+        pending={actions.pending}
+        onRetry={actions.retryPending}
         loaded={timeline.loaded}
         error={timeline.error}
+        older={timeline.older}
+        loadingOlder={timeline.loadingOlder}
+        onOlder={timeline.loadOlder}
         selected={selected}
         onSelect={setSelected}
       />

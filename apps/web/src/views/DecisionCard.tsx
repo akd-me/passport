@@ -2,10 +2,11 @@ import type { ActionRecord, Page } from "@passport/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { AccountDot, useAccountScopeLink } from "../accounts/AccountFilter";
-import { api, queryString } from "../api";
+import { type ApproveScope, api, queryString } from "../api";
 import { Feedback, Icon, Kbd, relativeTime } from "../components/ui";
 import { actionLabel } from "../labels";
 import { useResource, useTask } from "../state";
+import { useDecision } from "../tasks/actions-store";
 import { draftOf, recipients } from "./decision-model";
 
 function Countdown({ until }: { until: string }) {
@@ -41,30 +42,34 @@ export function DecisionCard({
     [body, setBody] = useState(draft?.textBody ?? ""),
     textarea = useRef<HTMLTextAreaElement>(null);
   const task = useTask(),
+    decision = useDecision(action.id),
+    busy = task.busy || decision.busy,
     held = action.status === "held";
   useEffect(() => {
     if (editing) {
       textarea.current?.focus();
     }
   }, [editing]);
-  const approve = () =>
-    task.run(
-      () =>
-        api.approve(
-          action.id,
+  const approve = (scope: ApproveScope = "once") =>
+    decision.decide(
+      {
+        kind: "approve",
+        scope,
+        edited:
           editing && draft
             ? {
                 ...action.request,
-                params: {
-                  ...action.request.params,
-                  draft: { ...draft, textBody: body },
-                },
+                params: { ...action.request.params, draft: { ...draft, textBody: body } },
               }
             : undefined,
-        ),
+      },
       action.request.type === "send"
         ? "Approved. It waits in the outbox before sending."
-        : "Approved.",
+        : scope === "task"
+          ? "Approved for this task."
+          : scope === "always"
+            ? "Approved. Passport won’t ask about this again."
+            : "Approved.",
     );
   return (
     <article
@@ -114,7 +119,7 @@ export function DecisionCard({
       ) : (
         <p className="proposal-detail">{action.decision.reason}</p>
       )}
-      <Feedback error={task.error} />
+      <Feedback error={task.error || decision.error} />
       <div className="proposal-actions">
         {held ? (
           <>
@@ -131,7 +136,7 @@ export function DecisionCard({
             <button
               className="btn btn-sm"
               data-action="cancel"
-              disabled={task.busy}
+              disabled={busy}
               onClick={() =>
                 task.run(() => api.cancel(action.id), "Send cancelled. Nothing left your outbox.")
               }
@@ -144,17 +149,35 @@ export function DecisionCard({
             <button
               className="btn btn-sm btn-primary"
               data-action="approve"
-              disabled={task.busy || (editing && !body.trim())}
-              onClick={approve}
+              disabled={busy || (editing && !body.trim())}
+              onClick={() => void approve()}
             >
               <Icon name="check" size={14} />
-              {task.busy ? "Saving…" : editing ? "Edit & approve" : "Approve"}
+              {busy ? "Saving…" : editing ? "Edit & approve" : "Approve"}
+            </button>
+            <button
+              className="btn btn-sm"
+              data-action="approve-task"
+              disabled={busy || (editing && !body.trim())}
+              title="Approve this, and changes like it for the rest of this task"
+              onClick={() => void approve("task")}
+            >
+              Approve for this task
+            </button>
+            <button
+              className="btn btn-sm btn-ghost"
+              data-action="approve-always"
+              disabled={busy || (editing && !body.trim())}
+              title="Approve this, and stop asking about changes like it"
+              onClick={() => void approve("always")}
+            >
+              Always
             </button>
             {draft && (
               <button
                 className="btn btn-sm"
                 data-action="edit"
-                disabled={task.busy}
+                disabled={busy}
                 onClick={() => {
                   if (editing) {
                     setBody(draft.textBody ?? "");
@@ -169,9 +192,9 @@ export function DecisionCard({
             <button
               className="btn btn-sm btn-ghost"
               data-action="reject"
-              disabled={task.busy}
+              disabled={busy}
               onClick={() =>
-                task.run(() => api.reject(action.id), "Rejected. Passport learns from that.")
+                void decision.decide({ kind: "reject" }, "Rejected. Passport learns from that.")
               }
             >
               Reject

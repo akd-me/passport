@@ -1,117 +1,12 @@
-import type { ActionRecord, Page, Task, TaskItem, TaskRun } from "@passport/types";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import type { Task, TaskRun } from "@passport/types";
+import { useEffect, useState } from "react";
 import { logger } from "../logger";
 import { useWorkspace, useWorkspaceEvents } from "../state";
-import { ITEMS_PAGE, taskApi } from "./api";
+import { useActions } from "./actions-store";
+import { taskApi } from "./api";
 import { useTasks } from "./store";
 
-interface ItemsState {
-  taskId: string;
-  items: TaskItem[];
-  loaded: boolean;
-  error?: string;
-}
-
-/**
- * The task's timeline: paged from `afterSeq=0`, then extended by `task.item.appended`. After a
- * reconnect (or any workspace refresh) it pages again from the last contiguous `seq` it holds.
- */
-export function useTaskItems(taskId: string) {
-  const { version } = useWorkspace();
-  const [state, setState] = useState<ItemsState>({ taskId, items: [], loaded: false });
-  const current = useRef(taskId),
-    lastSeq = useRef(0),
-    busy = useRef(false),
-    again = useRef(false),
-    mounted = useRef(false);
-
-  const merge = useCallback((id: string, incoming: TaskItem[]) => {
-    setState((s) => {
-      if (s.taskId !== id) {
-        return s;
-      }
-      const seen = new Set(s.items.map((item) => item.seq));
-      const add = incoming.filter((item) => item.taskId === id && !seen.has(item.seq));
-      if (!add.length) {
-        return s.loaded && !s.error ? s : { ...s, loaded: true, error: undefined };
-      }
-      return {
-        ...s,
-        loaded: true,
-        error: undefined,
-        items: [...s.items, ...add].sort((a, b) => a.seq - b.seq),
-      };
-    });
-  }, []);
-
-  const load = useCallback(() => {
-    if (busy.current) {
-      again.current = true;
-      return;
-    }
-    busy.current = true;
-    const id = current.current;
-    const pages = async () => {
-      let page: Awaited<ReturnType<typeof taskApi.items>>;
-      do {
-        page = await taskApi.items(id, lastSeq.current);
-        if (current.current !== id) {
-          return;
-        }
-        lastSeq.current = Math.max(lastSeq.current, page.lastSeq);
-        merge(id, page.items);
-      } while (page.items.length >= ITEMS_PAGE);
-    };
-    pages()
-      .catch((error: unknown) => {
-        logger.warn("Task items request failed");
-        setState((s) =>
-          s.taskId === id
-            ? { ...s, loaded: true, error: error instanceof Error ? error.message : "Failed" }
-            : s,
-        );
-      })
-      .finally(() => {
-        busy.current = false;
-        if (again.current || current.current !== id) {
-          again.current = false;
-          load();
-        }
-      });
-  }, [merge]);
-
-  useEffect(() => {
-    current.current = taskId;
-    lastSeq.current = 0;
-    setState({ taskId, items: [], loaded: false });
-    load();
-  }, [taskId, load]);
-
-  useEffect(() => {
-    if (mounted.current) {
-      load();
-    }
-    mounted.current = true;
-  }, [version, load]);
-
-  useWorkspaceEvents((event) => {
-    if (event.type !== "task.item.appended" || event.item.taskId !== current.current) {
-      return;
-    }
-    const { item } = event;
-    if (item.seq === lastSeq.current + 1 && !busy.current) {
-      lastSeq.current = item.seq;
-      merge(item.taskId, [item]);
-    } else if (item.seq > lastSeq.current) {
-      // A gap: show what arrived, then page the missing items in.
-      merge(item.taskId, [item]);
-      load();
-    }
-  });
-
-  return state.taskId === taskId ? state : { taskId, items: [], loaded: false };
-}
+export { useTaskItems } from "./use-task-items";
 
 /** `GET /api/tasks/:id`: the task and its runs; runs follow `task.run.updated`. */
 export function useTaskDetail(taskId: string) {
@@ -164,38 +59,17 @@ export function useTaskDetail(taskId: string) {
 }
 
 /**
- * ActionRecords of the task: every run's `actionIds` (via `/api/actions?runId=`) plus the open
- * decisions, so approvals and change summaries can show the full record.
+ * ActionRecords for the task page, from the shared cache: the open decisions are fetched when a
+ * pending id has no record; run records load when a change summary opens (R5-2).
  */
-export function useTaskActions(runs: TaskRun[]) {
-  const { version } = useWorkspace();
-  const key = runs
-    .filter((run) => run.actionIds.length)
-    .map((run) => `${run.agentRunId}:${run.actionIds.length}`)
-    .join(",");
-  const [records, setRecords] = useState<Map<string, ActionRecord>>(() => new Map());
+export function useTaskActions(task?: Task) {
+  const actions = useActions(),
+    { ensurePending } = actions;
+  const key = (task?.pendingActionIds ?? []).join(",");
   useEffect(() => {
-    let cancelled = false;
-    const runIds = key ? key.split(",").map((part) => part.slice(0, part.lastIndexOf(":"))) : [];
-    Promise.all([
-      api.decisions().catch(() => ({ items: [] }) as Partial<Page<ActionRecord>>),
-      ...runIds.map((runId) => api.actions({ runId, limit: 200 })),
-    ])
-      .then((pages) => {
-        if (!cancelled) {
-          const next = new Map<string, ActionRecord>();
-          for (const page of pages) {
-            for (const record of page.items ?? []) {
-              next.set(record.id, record);
-            }
-          }
-          setRecords(next);
-        }
-      })
-      .catch(() => logger.warn("Task actions request failed"));
-    return () => {
-      cancelled = true;
-    };
-  }, [key, version]);
-  return records;
+    if (key) {
+      ensurePending(key.split(","));
+    }
+  }, [key, ensurePending]);
+  return actions;
 }
