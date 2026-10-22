@@ -150,6 +150,9 @@ export function TaskPage() {
         onRetry={actions.retryPending}
         loaded={timeline.loaded}
         error={timeline.error}
+        older={timeline.older}
+        loadingOlder={timeline.loadingOlder}
+        onOlder={timeline.loadOlder}
         selected={selected}
         onSelect={setSelected}
       />

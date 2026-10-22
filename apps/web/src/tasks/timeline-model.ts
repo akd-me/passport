@@ -10,7 +10,16 @@ export type TimelineEntry =
  * Timeline order: items by `seq`; a run header before the first item of each run; consecutive
  * `tool_call` items of one run collapse into one group. Runs without items yet (queued) go last.
  */
-export function buildTimeline(items: TaskItem[], runs: TaskRun[] = []): TimelineEntry[] {
+/**
+ * Run headers, collapsed tool calls and items, oldest first. Runs without items follow at the end
+ * (queued or silent runs); with `since`, only those created after the first item held, so runs
+ * from an older, unloaded page do not pile up at the bottom.
+ */
+export function buildTimeline(
+  items: TaskItem[],
+  runs: TaskRun[] = [],
+  since?: string,
+): TimelineEntry[] {
   const byId = new Map(runs.map((run) => [run.id, run]));
   const headed = new Set<string>();
   const entries: TimelineEntry[] = [];
@@ -34,7 +43,7 @@ export function buildTimeline(items: TaskItem[], runs: TaskRun[] = []): Timeline
     }
   }
   const pending = runs
-    .filter((run) => !headed.has(run.id))
+    .filter((run) => !headed.has(run.id) && (!since || run.createdAt >= since))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const run of pending) {
     entries.push({ kind: "run", key: `run-${run.id}`, run });
