@@ -268,7 +268,7 @@ export function registerMailRead(ctx: Context) {
   register(
     ctx,
     "mail_read",
-    'Read a thread (default) or one message as clean text. Quoted history is collapsed (quoted:"full" expands it). Long threads show the last 5 messages in full and earlier ones as one-line headers; messagesFrom picks the first full message. offset/length window the bodies; continue with continueFrom. Lists attachments. Gmail: ~120 units per thread, ~60 per message.',
+    'Read a thread (default) or one message as clean text. Quoted history is collapsed (quoted:"full" expands it). Long threads show the last 5 messages in full and earlier ones as one-line headers; messagesFrom picks the first full message. offset/length window the bodies; continue with continueFrom. Lists attachments. Gmail: ~120 units per thread, ~80 per message (envelope + body).',
     {
       id: o.handle,
       view: z.enum(["thread", "message"]).default("thread"),

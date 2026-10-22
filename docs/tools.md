@@ -49,7 +49,7 @@ Input shapes (all limits are enforced):
 - `mail_changes({account?, cursor?, limit≤200=50, kinds?: ("added"|"labelChanged"|"deleted")[]})`
 - `people_history({email | personId, account?: id|"all", direction?: "both"|"from"|"to"="both", limit≤100=25, pageToken?})`
 - `provider_get({account?, path, query?: Record<string,string>})`
-- `mail_export({ids? | query?, account?, max≤200=50, format?: "md"|"eml"="md", includeAttachments?=false})` → `{dir, files[], attachmentsDir?, attachments?, skippedAttachments?}`
+- `mail_export({ids? | query?, account?, max≤200=50, format?: "md"|"eml"="md", includeAttachments?=false})` → `{dir, fileCount, files[], attachmentsDir?, attachments?, skippedAttachments?}`
 - `watch_conversation({threadHandle, account?})` → `{watching, threadHandle, since}`; needs a task run (`ToolContext.taskId`), else `TASK_REQUIRED`
 - `unwatch_conversation({threadHandle?})` → `{watching: threadHandle[]}`
 
@@ -85,6 +85,7 @@ the source of truth for a matter's conversations, while `emailIds` stays for v0.
 - `notes_read({kind: "person"|"matter", id? | email? (person) | matterId? (matter)})` →
   `{kind, id, fields, notes, markdown, source: "cache", untrusted}`
 - `notes_search({pattern≤500, regex?=false, kind?, limit≤100=25})` → `{items: NotesSearchHit[]}`
+  (with `regex: true`: at most 200 characters, no backreferences or nested quantifiers)
   (`{kind, id, name, field: "name"|"email"|"summary"|"notes", snippet, updatedAt}`)
 - `notes_write({kind, id, notes≤64000, mode?="append", accountId?, reason})` → write result
 - `people_lookup({query: address | name, account?: id|"all"})` →
@@ -106,7 +107,10 @@ matter's watch matched) and, for non-routine mail, to the sender's notes. It che
 `watch` queries of at most five open matters per arrival (those involving the message's
 people first) with one `(<watch>) rfc822msgid:<id>` search each in the arrivals lane; matches
 are offered to the model first. The MCP resources `passport://people/{id}` and
-`passport://matters/{id}` include the notes (and a matter's watch and newest refs).
+`passport://matters/{id}` include the notes (and a matter's watch and newest refs). Each
+resource opens with an untrusted-data line; names, addresses, subjects, previews, titles and
+summaries are neutralised, and the notes come last as a neutralised `> ` block quote so they
+cannot forge a section such as `## References`.
 
 ### Other reads
 
@@ -195,12 +199,19 @@ Rows are compact `MailRow`s (about 300 bytes): `id` and `threadId` handles, `rfc
 `account`, `date`, `from`, `to` (first three, then `+N more`), `subject`, `snippet`
 (≤160), `labels`, `unread`, `flagged`, `attachments` (count), `listId?`, `auth?`.
 
-**Untrusted data.** Subjects, snippets, names, label names, bodies, grep lines and
-`provider_get` bodies come from senders or the provider. Each result has an `untrusted`
-notice, and those strings are neutralised: every `$`, an `@` that starts a mention
-(addresses are untouched) and a `/` at the start of a line are followed by an invisible
-U+200B so host agents never treat them as skills, mentions or slash commands. Offsets in
-`mail_read` refer to the neutralised text, so windows stay consistent between calls.
+**Untrusted data.** Every string field except ids, handles, cursors and cost comes from
+senders or the provider: subjects, snippets, names, addresses, label names, headers,
+attachment names and types, bodies, grep lines, participants and `provider_get` bodies (keys
+too). Each result has an `untrusted` notice, and those strings are neutralised: every `$` (and
+fullwidth `＄`, `﹩`), an `@` or `＠` that is not inside a `local@domain.tld` address, and a `/`
+or `／` at the start of a line (after any indentation, including non-breaking and ideographic
+spaces; NEL counts as a line break) are followed by an invisible U+200B so host agents never
+treat them as skills, mentions or slash commands. Neutralising twice changes nothing.
+`rfc822Id`, `inReplyTo` and `references` are returned only as a single well-formed
+`<local@domain>` id (else `null`), so a duplicated or forged header cannot inject a line.
+Offsets in `mail_read` refer to the neutralised text, so windows stay consistent between
+calls; a window that would start mid-line on a live `/` or `@` begins at the previous
+non-blank character instead (its `offset` says so).
 
 **Rate limits.** Interactive reads never block on long backoff. A throttled call returns
 `{isError: true, error: "RATE_LIMITED", retryAfterSeconds, scope, hint, partial?}`;
@@ -220,7 +231,8 @@ expand]`): reply attributions in common locales, Outlook `Original Message` and
 messages are kept. HTML-only bodies become text with links shown as `text (host)` and images
 dropped. `offset`/`length` window the concatenated bodies of the full messages (UTF-16 units);
 each shown message has its stream `offset`, cut messages carry `truncated`/`continueFrom`, and
-the top-level `continueFrom` is where to resume. `format:"html"` returns sanitized `htmlBody`
+the top-level `continueFrom` is where to resume (after any MCP re-truncation it is the lowest
+per-message resume point, so no text is skipped). `format:"html"` returns sanitized `htmlBody`
 (remote images and beacons stripped); `format:"headers"` returns threading and authentication
 headers without bodies. Attachments are listed with `index`, `attachmentId`, `name`, `type` and
 `size`; inline parts (embedded images) follow with `inline: true` and no `index`. Pass any of
@@ -264,7 +276,13 @@ native `@napi-rs/canvas` (rendering only) is excluded with `ignoredOptionalDepen
 **`mail_grep`** resolves its set from `ids` (messages or whole threads) or a query
 (`maxMessages` rows), fetches bodies four at a time per account and matches the pattern per
 line (JavaScript regex; lines over 500 characters are clipped in the output). Results list
-`id`, `threadId`, `date`, `from`, `subject`, `line`, `text`, `before` and `after`.
+`id`, `threadId`, `date`, `from`, `subject`, `line`, `text`, `before` and `after`. Patterns are
+model-supplied and the text is attacker-controlled, so a pattern over 200 characters, with a
+backreference, or with a repeated group that contains a quantifier or alternation (`(a+)+`,
+`(\w+\s?)*`, `(a|aa)*`) is refused with `INVALID_INPUT`, and matching runs in the attachment
+worker thread: past 2 s it is stopped with `PATTERN_TIMEOUT` and the server keeps serving.
+`matchCount` counts matches found; over the response budget trailing matches are dropped
+(`truncated: true`, `omittedItems`).
 
 **`mail_changes`** without a cursor returns no changes and a cursor at "now"; Passport never
 backfills. `expired: true` means the cursor was too old and a fresh one was issued.
@@ -272,22 +290,50 @@ backfills. `expired: true` means the cursor was too old and a fresh one was issu
 **`provider_get`** allows GET only under — Gmail: `users/me/{messages, threads, labels,
 history, drafts, settings/filters, settings/sendAs}`; Graph: `me/{messages, mailFolders,
 events, calendarView, people, contacts, mailboxSettings, outlook/masterCategories}` — and
-rejects `..`, `$batch` and other prefixes with `PATH_NOT_ALLOWED`. Providers implement the
-optional `MailReader.rawGet(path, query)`; until they do the tool returns
-`ON_DEMAND_UNSUPPORTED`.
+rejects `..`, `$batch` and other prefixes with `PATH_NOT_ALLOWED`. Gmail and Graph implement
+`MailReader.rawGet(path, query)`; IMAP and JMAP do not and return `ON_DEMAND_UNSUPPORTED`.
+Over the response budget, lists in the body lose trailing items (`truncated: true`,
+`omittedItems`); a body that still does not fit becomes `body: null` with `bodyText`, its JSON
+clipped to the budget, and `totalBytes`.
 
 **`mail_export`** writes under `<scratchDir>/<session>/` (directory 0700, files 0600): one
-Markdown file per thread (headed by an untrusted-content note) or one `.eml` per message. With
+Markdown file per thread (`<subject>-<thread hash>.md`, headed by an untrusted-content note,
+header lines neutralised and each body block-quoted with `> ` so a body cannot forge another
+message's section) or one `.eml` per message (`<thread hash>-<message hash>.eml`; hashes are
+16 hex characters of SHA-256 over the full id, so Graph ids sharing a long prefix never
+collide). The scratch directory may be writable by a sandboxed host shell, so nothing follows a
+symlink: the session and `attachments/` directories must be real directories owned by this
+user whose real path stays inside the scratch root (else `INVALID_PATH`), and every file is
+created with `O_CREAT|O_EXCL` after unlinking whatever was at its path. The result always
+keeps `dir`; over the response budget `files` loses trailing entries (`fileCount` is the
+total). With
 `includeAttachments`, each non-inline attachment's raw bytes go to `attachments/` as
-`<thread>-<message>-<index>-<name>`: names are reduced to a single safe path component
+`<thread hash>-<message hash>-<index>-<name>`: names are reduced to a single safe path component
 (no `/`, `\`, control characters or leading dots), each file is at most 25 MB and one call
 writes at most 200 MB; anything skipped is listed in `skippedAttachments` with a reason
 (`ATTACHMENT_TOO_LARGE`, `TOTAL_LIMIT`, `NOT_DOWNLOADABLE`, …). The host removes sessions
-older than 24 h with `sweepScratchDir(scratchDir)`.
+older than 24 h with `sweepScratchDir(scratchDir)` (exported by `@passport/tools` and
+`@passport/mcp`; it inspects entries with `lstat`, skips symlinks and never throws); the
+Passport server sweeps at start and from its maintenance job.
 
 Errors use stable codes: `ON_DEMAND_UNSUPPORTED`, `RATE_LIMITED`, `WOULD_EXCEED_BUDGET`,
 `NOT_FOUND`, `STALE_ID`, `INVALID_QUERY`, `INVALID_CURSOR`, `INVALID_INPUT`, `PATH_NOT_ALLOWED`,
-plus the attachment codes above.
+`PATTERN_TIMEOUT`, `INVALID_PATH`, `EXPORT_COLLISION`, plus the attachment codes above.
+
+### Known limitations (review R4)
+
+- **R4-6 (notes_search):** with `regex: true` the pattern runs inside the store on the main
+  thread. The lint above refuses exponential shapes, but polynomial patterns (`x.*y`, `\w*y`)
+  over a very long note (notes hold up to 64 KB) can still take seconds per field. A full fix
+  needs store-side matching in a worker or a linear-time engine; `mail_grep` already has the
+  worker bound.
+- **R4-2 (mail_export):** directories are checked with `lstat` before files are created by
+  path; Node has no `openat`, so a process that swaps a checked directory for a symlink in the
+  instant between the check and the write is not stopped. Files themselves are never written
+  through a symlink.
+- **R4-3:** provider normalisation still joins duplicate `Message-ID` headers; the tools return
+  such values as `null` rather than repairing them, and server-side consumers must validate
+  them too.
 
 ## Results and write behavior
 
@@ -321,8 +367,10 @@ registry (`DEFAULT_RESPONSE_BYTE_BUDGET`). Both are configurable with `responseB
 the registry or MCP constructor (minimum 1024). `full: true`
 respects the budget, including across multiple emails. Truncated body views return
 `truncated: true` and a `continueFrom` offset. MCP accounts for protocol JSON escaping;
-resource contents use the same cap with truncation details in `_meta`. Oversized metadata
-returns `RESPONSE_TOO_LARGE`; request fewer results.
+resource contents use the same cap with truncation details in `_meta`. When clipping bodies is
+not enough, trailing list items are dropped (grep matches, provider lists, export files; at
+least one item per list stays) with `omittedItems`; only when that fails too are metadata
+strings cut, and finally the call returns `RESPONSE_TOO_LARGE`; request fewer results.
 
 On the store path, `get_email_body({emailId,offset:0,length:16000})` returns `textBody`, sanitized `htmlBody`,
 `offset`, `totalLength`, `truncated`, and (when more remains) `continueFrom`. Offsets and
