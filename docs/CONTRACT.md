@@ -113,3 +113,41 @@ constructor injection. Tests use small in-memory fakes of those interfaces. The 
   and, like the rest of `agent`, imports neither `providers` nor server code.
 - Spawned CLIs get an allowlisted environment (no `PASSPORT_*`, no provider API keys); stderr is classified,
   never surfaced; token-shaped strings are redacted from any CLI-derived error text.
+
+## Additive contract: on-demand mail (v0.3)
+
+Design: `docs/design/on-demand.md`; tool shapes, cache and governor: `docs/design/research/03-ondemand-tools.md`
+§2, §3 and §5.1. Everything below is additive. `@passport/types` stays append-only: never rename or remove an
+export, and add only optional fields to existing interfaces.
+
+- **Reader.** `MailProvider` gains optional `reader?(): MailReader`, bound to the connected account.
+  `AccountCapabilities` gains optional `search` and `onDemand`. `MailReader` methods: `search(MailSearchInput)`,
+  `list(container, MailListFilter, limit, pageToken?)`, `labels(counts?)`, `envelopes(providerIds)` →
+  `Map<providerId, MailEnvelope | null>`, `thread(threadProviderId, { format })`, `body(providerId)` → `MailBody`,
+  `countIds(query, cap)`, `changes(cursor | null, limit)` → `MailChanges`, `findByRfc822(rfc822Id)`. Each takes
+  optional `MailReadOptions` (`lane`, default `"interactive"`, and `signal`).
+- **Cost on every result.** Collections (`search`, `list`, `labels`) return `ReadResult<T>` (`items`,
+  `nextPageToken?`, `approxTotal?`); everything else returns `ReadValue<T>` (`value`). Both extend `ReadMeta`:
+  `source` (`"provider" | "cache" | "mixed"`), `cost: ReadCost` (`gmailUnits?`, `graphRequests?`, `imapCommands?`,
+  `budgetRemaining?`, `windowResetsAt?`), `staleAsOf?` and `translation?`.
+- **Rows.** `MailRow` is the compact row: `id` and `threadId` are opaque account-scoped handles
+  (`mailHandle` / `parseMailHandle`, same format as adapter ids), plus `rfc822Id`, `account`, `date`, `from`
+  (`"Name <addr>"`), `to` (first 3, then `"+N more"`; `compactRecipients`), `subject`, `snippet` (≤160),
+  `labels` (display names), `unread`, `flagged`, `attachments` (count), `listId?`, `auth?`. `toMailRow` projects
+  an envelope. `MailLabel` is `{ id, name, role?, parentId?, counts? }`.
+- **Quota.** `QuotaLane` is `"interactive" | "arrivals" | "background"`. Interactive calls never block on long
+  backoff: past about 5 s they fail with `RATE_LIMITED` carrying `retryAfterSeconds` and `scope`, which tools
+  return as a `RateLimitedResult` (`rateLimitedResult` helper). Expensive shapes return
+  `WouldExceedBudgetResult`. Stable codes are in `MAIL_READ_ERROR_CODES`: `RATE_LIMITED`,
+  `WOULD_EXCEED_BUDGET`, `STALE_ID`, `NOT_FOUND`.
+- **Providers.** `@passport/providers` exports `QuotaGovernor` (`acquire`, `report`, `snapshot`),
+  `QUOTA_PRESETS`, `GMAIL_UNIT_COSTS`, `RateLimitedError`, the portable query parser (`parsePortableQuery`,
+  `renderGmailQuery`, `listFilterToAst`, `matchesQuery`) and `MockMailProvider.reader()`.
+
+Invariants (on-demand.md §5):
+
+- Passport never backfills. `changes(null, …)` and the watcher cursor start at connect time ("now").
+- Every provider read declares its quota cost and goes through the per-account governor.
+- Provider-derived strings (subjects, snippets, names, label names, bodies, attachments) are untrusted and
+  are wrapped as data in tool results and prompts.
+- A task's permission mode cannot exceed the account's trust ladder, and a child task cannot exceed its parent.
