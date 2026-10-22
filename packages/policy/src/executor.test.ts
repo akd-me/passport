@@ -710,7 +710,8 @@ describe("internal store actions", () => {
     );
     expect((await store.people.get("person"))?.notes).toBe("Colleague");
     await executor.undo(updated.id);
-    expect((await store.people.get("person"))?.notes).toBeUndefined();
+    // Notes-only updates invert to the prior content (profile_update pattern); "none" is null.
+    expect((await store.people.get("person"))?.notes).toBeNull();
     await store.kv.set("policy:snooze:email", "2026-10-21T12:00:00.000Z");
     const snoozed = await executor.submit(
       request("snooze", {

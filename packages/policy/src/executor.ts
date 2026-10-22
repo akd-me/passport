@@ -12,6 +12,7 @@ import { createExecutorCommands } from "./executor-commands.js";
 import { createExecutorContext } from "./executor-context.js";
 import { createDispatch } from "./executor-dispatch.js";
 import { createMailActions } from "./executor-mail.js";
+import { knowledgeInverseOf } from "./executor-notes.js";
 import { createRestoration } from "./executor-restoration.js";
 import { type ActionExecutorOptions, marker, type Request, snapshotOf } from "./executor-shared.js";
 import { newId } from "./id.js";
@@ -132,12 +133,16 @@ export function createActionExecutor(options: ActionExecutorOptions): ActionExec
         }
       }
       const snapshot = snapshotOf(request) ? null : await capture(request);
+      // Knowledge-only person/matter updates invert to their prior content, like profile_update.
+      const knowledge = undoOf ? null : await knowledgeInverseOf(store, request);
       const inverseParams =
         request.type === "profile_update"
           ? { markdown: await getEffectiveProfile(store) }
-          : snapshot
-            ? { ...request.params, [marker]: snapshot }
-            : null;
+          : knowledge
+            ? knowledge
+            : snapshot
+              ? { ...request.params, [marker]: snapshot }
+              : null;
       const inverse: ActionRequest | null = undoOf
         ? undoOf.request
         : inverseParams

@@ -11,6 +11,7 @@ import type { RunContext } from "./context.js";
 import { normalizeAddress, overlaps } from "./data.js";
 import { recordDecision } from "./decisions.js";
 import { AgentError } from "./errors.js";
+import { logArrival, watchedMatters } from "./knowledge.js";
 import { attachMatter, readThread } from "./matters.js";
 import { resolvePeople, serviceSender } from "./people.js";
 import { formatDraft } from "./profile.js";
@@ -278,9 +279,25 @@ export async function triage(
   if (counterparty.personId && !resolved.persistedIds.includes(counterparty.personId)) {
     counterparty.personId = null;
   }
-  const matter = await step("matter", () =>
-    attachMatter(ctx, email, category, resolved.persistedIds, reader),
-  );
+  // One durable step: watch checks, the matter decision and its notes line replay together.
+  const matter = await step("matter", async () => {
+    const watched = await watchedMatters(ctx, email, resolved.persistedIds, reader);
+    const attached = await attachMatter(
+      ctx,
+      email,
+      category,
+      resolved.persistedIds,
+      reader,
+      watched,
+    );
+    const sender = resolved.people.find(
+      (person) =>
+        resolved.persistedIds.includes(person.id) &&
+        email.from.some((address) => person.emails.includes(normalizeAddress(address.email))),
+    );
+    await logArrival(ctx, { email, category, matter: attached, sender, watched });
+    return attached;
+  });
   const common = { accountId: email.accountId, emailIds: [email.id] };
   const toolContext = {
     classification: category,

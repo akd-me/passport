@@ -18,6 +18,7 @@ class SQLiteStore extends StoreDatabase implements Store {
   events: Store["events"];
   people: Store["people"];
   matters: Store["matters"];
+  notes: NonNullable<Store["notes"]>;
   actions: Store["actions"];
   trust: Store["trust"];
   kv: Store["kv"];
@@ -36,6 +37,7 @@ class SQLiteStore extends StoreDatabase implements Store {
     const people = createPeopleRepositories(this);
     this.people = people.people;
     this.matters = people.matters;
+    this.notes = people.notes;
     const actions = createActionsRepositories(this);
     this.actions = actions.actions;
     this.trust = actions.trust;

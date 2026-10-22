@@ -2,6 +2,7 @@ import {
   type ActionCategory,
   type Email,
   type Matter,
+  mailRefHandle,
   parseMailHandle,
   type Store,
 } from "@passport/types";
@@ -23,15 +24,18 @@ const OPEN_MATTER_SCAN = 200;
  * this thread, matters of the people involved, matters referencing recent mail with the sender
  * (`with:<addr> newer_than:90d` through the reader), and matters whose title or summary shares a
  * subject word. Without a reader, the thread's stored rows stand in for the provider search.
+ * References are matched through `Matter.refs` (message handle or provider thread id) and the
+ * v0.2 `emailIds`. Matters whose `watch` matched this arrival (`watched`) come first.
  */
 export async function matterCandidates(
   ctx: Pick<RunContext, "store" | "selfAddresses">,
   email: Email,
   personIds: string[],
   reader?: AgentReader | null,
+  watched: readonly Matter[] = [],
 ): Promise<Matter[]> {
   const { store } = ctx;
-  const matters = new Map<string, Matter>();
+  const matters = new Map<string, Matter>(watched.map((matter) => [matter.id, matter]));
   const addId = async (id?: string | null): Promise<void> => {
     if (id && !matters.has(id)) {
       const matter = await store.matters.get(id);
@@ -67,8 +71,17 @@ export async function matterCandidates(
     status: ["active", "waiting"],
     limit: OPEN_MATTER_SCAN,
   });
+  const thread = parseMailHandle(email.threadId);
+  const threadPid = thread?.accountId === email.accountId ? thread.providerId : undefined;
+  const referenced = (matter: Matter) =>
+    matter.emailIds.some((id) => refs.has(id)) ||
+    (matter.refs ?? []).some(
+      (ref) =>
+        refs.has(mailRefHandle(ref)) ||
+        (threadPid !== undefined && ref.account === email.accountId && ref.threadPid === threadPid),
+    );
   for (const matter of open) {
-    if (!matters.has(matter.id) && matter.emailIds.some((id) => refs.has(id))) {
+    if (!matters.has(matter.id) && referenced(matter)) {
       matters.set(matter.id, matter);
     }
   }
@@ -105,8 +118,9 @@ export async function attachMatter(
   category: ActionCategory,
   personIds: string[],
   reader?: AgentReader | null,
+  watched: readonly Matter[] = [],
 ): Promise<{ id?: string; summary: string }> {
-  const options = await matterCandidates(ctx, email, personIds, reader);
+  const options = await matterCandidates(ctx, email, personIds, reader, watched);
   const vendor = (email.from[0]?.name || email.from[0]?.email.split("@")[1] || "Unknown vendor")
     .replace(/[\r\n/\\]/g, " ")
     .trim();

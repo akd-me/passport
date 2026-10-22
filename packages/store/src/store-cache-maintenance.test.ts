@@ -193,6 +193,8 @@ describe("migration from a v0.2 database", () => {
       expect(check.prepare("SELECT version FROM schema_version").all()).toEqual([
         { version: 1 },
         { version: 2 },
+        // Migration 3 (matter refs) follows; this test only covers the v0.2 → envelope cache step.
+        { version: 3 },
       ]);
       check.close();
     } finally {

@@ -1,4 +1,5 @@
-import type { Email, PolicyEngine, TrustState } from "@passport/types";
+import type { Email, Matter, PolicyEngine, TrustState } from "@passport/types";
+import { mailRefHandle } from "@passport/types";
 import type { RunContext } from "./context.js";
 import { allActions } from "./data.js";
 import { pendingDecisions } from "./decisions.js";
@@ -97,26 +98,42 @@ export async function dailyDigest(ctx: RunContext, policy: PolicyEngine): Promis
   );
 }
 
-/** Referenced emails fetched per matter review: the newest ids the matter lists. */
+/** Referenced emails fetched per matter review: the newest refs (or v0.2 ids) the matter lists. */
 export const MATTER_REVIEW_EMAILS = 20;
+
+/** Rows for the review prompt: refs read through the envelope cache (no bodies), else v0.2 ids. */
+async function reviewEmails(ctx: RunContext, matter: Matter): Promise<Email[]> {
+  const reads = matter.refs
+    ? [...matter.refs]
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(-MATTER_REVIEW_EMAILS)
+        .map((ref) => ctx.store.emails.get(mailRefHandle(ref), { includeBodies: false }))
+    : [...new Set(matter.emailIds)]
+        .slice(-MATTER_REVIEW_EMAILS)
+        .map((id) => ctx.store.emails.get(id));
+  const settled = await Promise.allSettled(reads);
+  // A ref whose read-through fails (rate limit, deleted) is left out of the prompt only.
+  return settled.flatMap((result) =>
+    result.status === "fulfilled" && result.value ? [result.value] : [],
+  );
+}
 
 export async function reviewMatters(ctx: RunContext, days: number): Promise<void> {
   const cutoff = Date.parse(ctx.now()) - days * 86_400_000;
   let reviewed = 0;
   for (const matter of await ctx.store.matters.list({ status: ["active"] })) {
-    // Only the matter's own references, newest last in `emailIds`; never a store scan by matter.
-    const emails = (
-      await Promise.all(
-        [...new Set(matter.emailIds)]
-          .slice(-MATTER_REVIEW_EMAILS)
-          .map((id) => ctx.store.emails.get(id)),
-      )
-    ).filter((email): email is Email => email !== null);
     const events = await ctx.store.events.query({ matterId: matter.id });
+    // Activity comes from the refs themselves (date), so idle matters cost no reads to skip.
+    const refDates = matter.refs?.map((ref) => ref.date) ?? [];
+    const quick = [matter.updatedAt, ...refDates, ...events.map((event) => event.updatedAt)];
+    if (Math.max(...quick.map((at) => Date.parse(at))) > cutoff) {
+      continue;
+    }
+    // Only the matter's own references; never a store scan by matter.
+    const emails = await reviewEmails(ctx, matter);
     const activity = [
-      matter.updatedAt,
+      ...quick,
       ...emails.flatMap((email) => [email.receivedAt, email.sentAt ?? email.receivedAt]),
-      ...events.map((event) => event.updatedAt),
     ];
     if (Math.max(...activity.map((at) => Date.parse(at))) > cutoff) {
       continue;
@@ -129,7 +146,10 @@ export async function reviewMatters(ctx: RunContext, days: number): Promise<void
       ),
     );
     const accountId =
-      emails[0]?.accountId ?? events[0]?.accountId ?? (await ctx.store.accounts.list())[0]?.id;
+      emails[0]?.accountId ??
+      matter.refs?.at(-1)?.account ??
+      events[0]?.accountId ??
+      (await ctx.store.accounts.list())[0]?.id;
     if (!accountId) {
       throw new AgentError(
         "Matter review requires an account for the action log",

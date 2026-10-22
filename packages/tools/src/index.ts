@@ -1,6 +1,7 @@
 import { Context } from "./context.js";
 import { registerExtra } from "./extra.js";
 import { registerMailExport } from "./mail-export.js";
+import { registerNotes } from "./notes.js";
 import { registerReads } from "./reads.js";
 import { registerOnDemandReads } from "./reads-ondemand.js";
 import { registerOnDemandExtra } from "./reads-ondemand-extra.js";
@@ -20,6 +21,7 @@ export function createToolRegistry(options: ToolRegistryOptions): Tool[] {
   registerMailRead(ctx);
   registerOnDemandExtra(ctx);
   registerMailExport(ctx);
+  registerNotes(ctx);
   return ctx.tools;
 }
 

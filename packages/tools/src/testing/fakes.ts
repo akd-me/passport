@@ -250,6 +250,45 @@ export class MemoryStore implements Store {
       this.data.matters.delete(id);
     },
   };
+  /** Substring / regex notes search over names, addresses, summaries and notes. */
+  notes: NonNullable<Store["notes"]> = {
+    search: async (input) => {
+      const regex = input.pattern
+        ? new RegExp(input.pattern, "imu")
+        : new RegExp((input.text ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "iu");
+      const hit = (
+        kind: "person" | "matter",
+        id: string,
+        name: string,
+        updatedAt: string,
+        fields: Array<["name" | "email" | "summary" | "notes", string | null | undefined]>,
+      ) => {
+        for (const [field, value] of fields) {
+          const line = value?.split("\n").find((item) => regex.test(item));
+          if (line !== undefined) {
+            return [{ kind, id, name, field, snippet: line, updatedAt }];
+          }
+        }
+        return [];
+      };
+      return [
+        ...(input.kind === "matter" ? [] : [...this.data.people.values()]).flatMap((p) =>
+          hit("person", p.id, p.displayName, p.updatedAt, [
+            ["name", p.displayName],
+            ["email", p.emails.join("\n")],
+            ["notes", p.notes],
+          ]),
+        ),
+        ...(input.kind === "person" ? [] : [...this.data.matters.values()]).flatMap((m) =>
+          hit("matter", m.id, m.title, m.updatedAt, [
+            ["name", m.title],
+            ["summary", m.summary],
+            ["notes", m.notes],
+          ]),
+        ),
+      ].slice(0, input.limit ?? 25);
+    },
+  };
   actions: Store["actions"] = {
     get: async (id) => clone(this.data.actions.get(id) ?? null),
     query: async (query) =>

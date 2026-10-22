@@ -1,7 +1,7 @@
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { limitResponse } from "@passport/tools";
-import { getEffectiveProfile } from "@passport/types";
+import { limitResponse, neutralize } from "@passport/tools";
+import { getEffectiveProfile, type Matter, mailRefHandle } from "@passport/types";
 import type { Context } from "./context.js";
 import {
   decisionsMarkdown,
@@ -11,6 +11,32 @@ import {
   required,
 } from "./presentation.js";
 import { id } from "./schemas.js";
+
+/** References listed in the matter resource, newest first. */
+const RESOURCE_REFS = 20;
+
+/** Agent-maintained knowledge of a matter (notes, watch, provider refs) as markdown sections. */
+export function matterKnowledgeMarkdown(matter: Matter): string {
+  const refs = [...(matter.refs ?? [])].sort((a, b) => b.date.localeCompare(a.date));
+  const sections = [
+    "## Notes",
+    matter.notes?.trim() ? neutralize(matter.notes) : "No notes yet.",
+    `Watch: ${matter.watch ? `\`${matter.watch.replace(/`/g, "")}\`` : "None"}`,
+  ];
+  if (refs.length) {
+    sections.push(
+      `## References (${Math.min(refs.length, RESOURCE_REFS)} of ${refs.length}, newest first)`,
+      refs
+        .slice(0, RESOURCE_REFS)
+        .map(
+          (ref) =>
+            `- ${mailRefHandle(ref)} · ${ref.date} · ${neutralize(ref.subject.replace(/[\r\n]/g, " "))}`,
+        )
+        .join("\n"),
+    );
+  }
+  return sections.join("\n\n");
+}
 
 export function registerResources(ctx: Context) {
   const { server, store } = ctx;
@@ -58,7 +84,8 @@ export function registerResources(ctx: Context) {
         })),
     }),
     {
-      description: "Matter summary, next step, people, recent emails and calendar events.",
+      description:
+        "Matter summary, next step, people, recent emails, calendar events, agent notes, watch query and provider references.",
       mimeType: "text/markdown",
     },
     async (uri, variables) =>
@@ -66,6 +93,7 @@ export function registerResources(ctx: Context) {
         const bundle = await ctx.matterBundle(variableId(variables.id));
         return (
           matterMarkdown(bundle.matter, bundle.emails, bundle.events, bundle.people) +
+          `\n\n${matterKnowledgeMarkdown(bundle.matter)}` +
           (bundle.nextCursor || bundle.linkedEmailsNextCursor
             ? "\n\nAdditional emails available via get_matter or search_emails(matterId)."
             : "")
@@ -85,7 +113,7 @@ export function registerResources(ctx: Context) {
         })),
     }),
     {
-      description: "Person identity, verification, relationship and notes.",
+      description: "Person identity, verification, relationship (security state) and agent notes.",
       mimeType: "text/markdown",
     },
     async (uri, variables) =>
