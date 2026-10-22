@@ -3,6 +3,7 @@ import type { Matter, Person, Store } from "@passport/types";
 import { nowIso } from "@passport/types";
 import { StoreError } from "./errors.js";
 import type { StoreDatabase } from "./store-database.js";
+import { createNotesRepository, indexMatterRefs } from "./store-notes.js";
 import { latest, like, limitOf, type Row, unique } from "./store-query.js";
 
 export function createPeopleRepositories(db: StoreDatabase) {
@@ -128,9 +129,9 @@ export function createPeopleRepositories(db: StoreDatabase) {
       }
       if (q.text) {
         where.push(
-          "(json_extract(m.data, '$.title') LIKE ? ESCAPE '\\' OR json_extract(m.data, '$.summary') LIKE ? ESCAPE '\\')",
+          "(json_extract(m.data, '$.title') LIKE ? ESCAPE '\\' OR json_extract(m.data, '$.summary') LIKE ? ESCAPE '\\' OR COALESCE(json_extract(m.data, '$.notes'), '') LIKE ? ESCAPE '\\')",
         );
-        params.push(like(q.text), like(q.text));
+        params.push(like(q.text), like(q.text), like(q.text));
       }
       return db
         .all(
@@ -157,17 +158,22 @@ export function createPeopleRepositories(db: StoreDatabase) {
           });
         }
         db.replaceIds("matter_people", "matter_id", matter.id, "person_id", matter.personIds);
+        indexMatterRefs(db, matter);
         return readMatter(db.one("SELECT data FROM matters WHERE id = ?", [matter.id])!);
       }),
     delete: async (id) =>
       db.transaction(() => {
         db.run("UPDATE emails SET matter_id = NULL WHERE matter_id = ?", [id]);
         db.run("UPDATE events SET matter_id = NULL WHERE matter_id = ?", [id]);
-        for (const table of ["matter_emails", "matter_events", "matter_people"]) {
+        for (const table of ["matter_emails", "matter_events", "matter_people", "matter_refs"]) {
           db.run(`DELETE FROM ${table} WHERE matter_id = ?`, [id]);
         }
         db.run("DELETE FROM matters WHERE id = ?", [id]);
       }),
   };
-  return { people, matters };
+  const notes = createNotesRepository(db, (id) => {
+    const row = db.one("SELECT data FROM matters WHERE id = ?", [id]);
+    return row ? readMatter(row) : null;
+  });
+  return { people, matters, notes };
 }
