@@ -13,3 +13,5 @@ coverage/
 setup-browser-profile/
 setup-agent/
 .playwright-mcp/
+# Desktop app staging (server artifact + production node_modules) and builder output.
+apps/desktop/build/

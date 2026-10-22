@@ -23,6 +23,22 @@ Your inbox is organized around **the person** and **the matter**: who you are de
 
 **Pre-release:** npm and GHCR commands below are the release installation paths. They require a published version; until the first release, build from source or use a locally packed tarball. Provider/model integrations have offline tests; this repository does not claim live Gmail, Outlook, IMAP or LLM delivery validation.
 
+### Mac app (recommended on macOS)
+
+Passport.app runs the same server in the background, keeps a menu-bar item with the count of decisions waiting for you, sends notifications when the agent needs a decision, and can start at login. There is no signed download yet, so build it on an Apple silicon Mac:
+
+```sh
+git clone https://github.com/akd-me/passport.git
+cd passport
+corepack enable
+pnpm install --frozen-lockfile
+pnpm dist:desktop            # → apps/desktop/dist/mac-arm64/Passport.app
+```
+
+Drag `Passport.app` to `/Applications` and open it. It is unsigned, so the first time, right-click it and choose **Open**. It uses the same `~/.passport` workspace as the CLI. If `passport serve` is already running, the app attaches to it. See the [Mac app guide](docs/desktop.md) for logs, deep links, the bundled `passport` command and the Keychain-held encryption key.
+
+The npm, Docker and source paths below run the same server on any platform, including headless home servers.
+
 ### 1. npx
 
 Node **24** is recommended; the persistent backend needs **Node 22.16 or newer with SQLite FTS5**. Stock Node 22.5 has `node:sqlite` but lacks FTS5, so it runs the demo only. The installed shim reports this limitation before opening a persistent workspace.
@@ -167,6 +183,7 @@ flowchart TD
 | `@passport/mcp` | Policy-controlled tools over stdio and Streamable HTTP |
 | `@passport/server` | Composition root, API, WebSockets, CLI and background jobs |
 | `@passport/web` | Decisions, Matters, People, Trust and account UI |
+| `@passport/desktop` | macOS app: Electron shell that runs the server as a child, menu bar, notifications |
 
 The public **`@akd-me/passport`** artifact bundles the private workspace code and built web UI. The server workspace retains its development name. See the [engineering contract](docs/CONTRACT.md) and [server reference](apps/server/README.md).
 
