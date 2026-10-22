@@ -1,58 +1,29 @@
 // Main-process subscription to the server's /ws DomainEvent stream. It keeps the "needs you"
-// count and announces new proposals even while no window is open.
+// count and announces tasks and proposals that newly need the person, even with no window open.
 import { EventEmitter } from "node:events";
+import {
+  type Attention,
+  type PendingAction,
+  type Seen,
+  snapshot,
+  type TaskSummary,
+} from "./attention";
 import { log } from "./paths";
 
-/** The slice of ActionRecord (packages/types) this process reads. */
-interface PendingAction {
-  id: string;
-  status: string;
-  request?: { type?: string; params?: Record<string, unknown> };
-}
-
-export interface NewDecision {
-  id: string;
-  /** Never message content: an action label and, at most, a subject line. */
-  title: string;
-}
-
-const LABELS: Record<string, string> = {
-  send: "Send a message",
-  draft_create: "Save a draft",
-  draft_update: "Update a draft",
-  draft_delete: "Delete a draft",
-  delete: "Delete mail",
-  move: "Move mail",
-  archive: "Archive mail",
-  label: "Label mail",
-  unsubscribe: "Unsubscribe",
-  calendar_propose: "Propose a meeting",
-  calendar_create: "Create an event",
-  calendar_update: "Update an event",
-  calendar_respond: "Answer an invitation",
-  calendar_delete: "Delete an event",
-  profile_update: "Update your profile",
-};
-
-function describe(action: PendingAction): string {
-  const type = action.request?.type ?? "";
-  const label = LABELS[type] ?? `Review: ${type.replaceAll("_", " ") || "action"}`;
-  const subject = action.request?.params?.subject;
-  if (typeof subject !== "string" || !subject.trim()) {
-    return label;
-  }
-  const line = subject.replace(/\s+/g, " ").trim();
-  return `${label}: ${line.length > 80 ? `${line.slice(0, 79)}…` : line}`;
-}
+/** Task statuses that can need the person; settled and archived tasks never do. */
+const OPEN_TASKS = "inbox,working,snoozed";
+const TASK_PAGES = 10;
 
 export class DecisionWatcher extends EventEmitter<{
   count: [number];
-  proposed: [NewDecision[]];
+  attention: [Attention[]];
 }> {
   count = 0;
   private socket: WebSocket | null = null;
   private target: { origin: string; token: string } | null = null;
-  private known: Set<string> | null = null;
+  private known: Seen | null = null;
+  /** False once the server answered TASKS_UNAVAILABLE (demo): count pending decisions instead. */
+  private tasksAvailable = true;
   private refreshTimer: NodeJS.Timeout | undefined;
   private reconnectTimer: NodeJS.Timeout | undefined;
   private attempt = 0;
@@ -64,6 +35,7 @@ export class DecisionWatcher extends EventEmitter<{
   connect(origin: string, token: string): void {
     this.teardown();
     this.target = { origin, token };
+    this.tasksAvailable = true;
     this.open();
     this.scheduleRefresh(0);
   }
@@ -108,7 +80,7 @@ export class DecisionWatcher extends EventEmitter<{
         // The server only sends DomainEvent JSON; ignore anything else.
         return;
       }
-      if (typeof type === "string" && type.startsWith("action.")) {
+      if (typeof type === "string" && (type.startsWith("action.") || type === "task.updated")) {
         this.scheduleRefresh(250);
       }
     });
@@ -128,43 +100,83 @@ export class DecisionWatcher extends EventEmitter<{
     this.refreshTimer = setTimeout(() => void this.refresh(), delay);
   }
 
+  private async get<T>(target: { origin: string; token: string }, path: string): Promise<T> {
+    const response = await fetch(`${target.origin}${path}`, {
+      headers: { Authorization: `Bearer ${target.token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.status === 501) {
+      throw new TasksUnavailable();
+    }
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return (await response.json()) as T;
+  }
+
+  /** Open tasks, or null when the server has no task routes. */
+  private async tasks(target: { origin: string; token: string }): Promise<TaskSummary[] | null> {
+    if (!this.tasksAvailable) {
+      return null;
+    }
+    const tasks: TaskSummary[] = [];
+    let cursor: string | null | undefined;
+    for (let page = 0; page < TASK_PAGES; page += 1) {
+      const query = `status=${OPEN_TASKS}&limit=500${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+      try {
+        const result = await this.get<{ items?: TaskSummary[]; nextCursor?: string | null }>(
+          target,
+          `/api/tasks?${query}`,
+        );
+        tasks.push(...(result.items ?? []));
+        cursor = result.nextCursor;
+      } catch (error) {
+        if (error instanceof TasksUnavailable) {
+          this.tasksAvailable = false;
+          return null;
+        }
+        throw error;
+      }
+      if (!cursor) {
+        break;
+      }
+    }
+    return tasks;
+  }
+
   private async refresh(): Promise<void> {
     const target = this.target;
     if (!target) {
       return;
     }
-    let items: PendingAction[];
+    let decisions: PendingAction[];
+    let tasks: TaskSummary[] | null;
     try {
-      const response = await fetch(`${target.origin}/api/decisions`, {
-        headers: { Authorization: `Bearer ${target.token}` },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      items = ((await response.json()) as { items?: PendingAction[] }).items ?? [];
+      [decisions, tasks] = await Promise.all([
+        this.get<{ items?: PendingAction[] }>(target, "/api/decisions").then((r) => r.items ?? []),
+        this.tasks(target),
+      ]);
     } catch (error) {
       // The server may be restarting; the socket's reconnect triggers the next refresh.
-      log("warn", `Could not list decisions (${(error as Error).name})`);
+      log("warn", `Could not list what needs you (${(error as Error).name})`);
       return;
     }
     if (this.target !== target) {
       return;
     }
-    const proposed = items.filter((item) => item.status === "proposed");
-    const known = this.known;
-    const first = known === null;
-    const fresh = known ? proposed.filter((item) => !known.has(item.id)) : [];
-    this.known = new Set(proposed.map((item) => item.id));
-    if (proposed.length !== this.count || first) {
-      this.count = proposed.length;
+    const first = this.known === null;
+    const next = snapshot(decisions, tasks, this.known);
+    this.known = next.seen;
+    if (next.count !== this.count || first) {
+      this.count = next.count;
       this.emit("count", this.count);
     }
-    if (fresh.length) {
-      this.emit(
-        "proposed",
-        fresh.map((item) => ({ id: item.id, title: describe(item) })),
-      );
+    if (next.fresh.length) {
+      this.emit("attention", next.fresh);
     }
   }
+}
+
+class TasksUnavailable extends Error {
+  override name = "TasksUnavailable";
 }

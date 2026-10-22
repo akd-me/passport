@@ -1,5 +1,33 @@
 # Installation
 
+On a Mac, the [Mac app](#mac-app) is the recommended install: it bundles its own Node runtime and
+runs the same server. Everything below the Mac app section is the server path (npm, source,
+Docker in [deployment](deploy.md)), which works on any platform, including headless machines.
+
+## Mac app
+
+There is no signed download yet. Build the app on an Apple silicon Mac with Node 24 and pnpm:
+
+```sh
+git clone https://github.com/akd-me/passport.git
+cd passport
+corepack enable
+pnpm install --frozen-lockfile
+PASSPORT_DESKTOP_DMG=1 pnpm dist:desktop   # apps/desktop/dist/*.dmg, plus mac-arm64/Passport.app
+```
+
+Open the DMG and drag **Passport** to `/Applications`. The app is unsigned and not notarized, so
+Gatekeeper blocks a double-click the first time: right-click the app, choose **Open**, then
+**Open** again. If the DMG came from another Mac or a download, first run
+`xattr -dr com.apple.quarantine /Applications/Passport.app`.
+
+The app uses `~/.passport` (or `PASSPORT_DATA_DIR`) like the CLI, keeps the encryption key in the
+Keychain, and attaches to a `passport serve` that already owns the workspace. The
+[Mac app guide](desktop.md) covers the menu bar, notifications, logs, `passport://` links and the
+bundled `passport` command.
+
+## Node
+
 Use Node **24** and pnpm **10.33.0** for development. Persistent workspaces require
 **Node >=22.16 with SQLite FTS5**. There are no native SQLite addons.
 
@@ -32,7 +60,8 @@ Open the login URL printed at startup (it includes the API token). `demo` is an 
 `serve` creates a persistent workspace. No account or API key is required: if
 Codex or Claude Code is installed and signed in on this machine, the agent uses
 that subscription (see [Models](#models)). With no agent available, automatic
-triage is disabled, while UI, sync, human decisions and MCP remain available.
+triage is disabled, while the UI, on-demand reads, the new-mail watcher, human
+decisions and MCP remain available.
 
 ## Build from source
 
@@ -55,8 +84,10 @@ Start a persistent workspace with `node apps/server/bin/passport.js serve`.
 
 ```sh
 pnpm run pack
-node scripts/smoke-package.mjs apps/server/dist/akd-me-passport-0.1.0.tgz
+node scripts/smoke-package.mjs apps/server/dist/akd-me-passport-<version>.tgz
 ```
+
+`<version>` is the first release heading in `CHANGELOG.md` (the build reads it from there).
 
 `pnpm run pack` builds everything, then runs `pnpm pack` in
 `apps/server/dist/package`; the tarball is written to `apps/server/dist/`.
@@ -76,7 +107,7 @@ using the tarball produced by the build/test job.
 To install a local build yourself:
 
 ```sh
-npm install -g ./apps/server/dist/akd-me-passport-0.1.0.tgz
+npm install -g ./apps/server/dist/akd-me-passport-<version>.tgz
 passport demo
 ```
 
@@ -113,6 +144,7 @@ it. Configuration is read from `<data-dir>/passport.config.json`:
   "host": "127.0.0.1",
   "port": 3000,
   "mcpPort": 4318,
+  "watch": { "intervalSeconds": 30 },
   "syncIntervalSeconds": 120,
   "calendarMaxSyncAgeMinutes": 10,
   "dailyDigestHour": 8,
@@ -123,6 +155,13 @@ it. Configuration is read from `<data-dir>/passport.config.json`:
   }
 }
 ```
+
+`watch.intervalSeconds` (5â€“86400, default 30) is how often the new-mail watcher asks each mail
+account what changed since its cursor; IMAP accounts with IDLE are also checked as soon as the
+server signals new mail. `syncIntervalSeconds` now paces calendar sync and the check for accounts added outside the UI. There is no initial
+sync or backfill: the watcher's cursor starts when you connect an account, and agents read older
+mail on demand. A leftover `sync.initialDays` is ignored with a one-time warning; see
+[accounts](accounts.md#watching-for-new-mail-account-controls-and-diagnostics).
 
 `llmSelection` is `auto` (default) or `explicit`; see [Models](#models). In `auto`
 mode `llm` is only the fallback used when no host agent is available.
@@ -144,16 +183,36 @@ shell or service manager. Docker Compose loads the supplied `.env` file.
 | `PASSPORT_LLM_BASE_URL` | Compatible/Ollama endpoint override |
 | `PASSPORT_LLM_API_KEY` | API provider key (optional; never passed to host agents) |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | Provider-specific fallback keys for API providers |
-| `PASSPORT_MASTER_KEY` | Credential encryption secret; omitted generates `master.key` |
-| `PASSPORT_SYNC_INTERVAL_SECONDS` | Poll interval, default `120` |
+| `PASSPORT_MASTER_KEY` | Credential encryption secret; omitted generates `master.key` (the Mac app uses the Keychain instead) |
+| `PASSPORT_WATCH_INTERVAL_SECONDS` | New-mail watcher interval (`watch.intervalSeconds`), default `30` |
+| `PASSPORT_SYNC_INTERVAL_SECONDS` | Calendar sync (and account discovery) interval, default `120` |
 | `PASSPORT_CALENDAR_MAX_SYNC_AGE_MINUTES` | Maximum calendar sync age at proposal release, default `10` minutes |
 | `PASSPORT_DIGEST_HOUR` | Local wall-clock digest hour, default `8` |
 | `PASSPORT_OAUTH_REDIRECT_URI` | Override the registered OAuth callback |
 
 Environment model keys are not copied into saved configuration; a file-authored
 key remains in that file. Provider credentials are encrypted in SQLite. Keep
-the generated `master.key` or your chosen master secret with your backups; mail
-bodies and the whole database are not encrypted by Passport.
+the generated `master.key` or your chosen master secret with your backups; cached
+envelopes and bodies, tasks, notes and the rest of the database are not encrypted by Passport.
+
+### Data directory
+
+| Path | Contents |
+| --- | --- |
+| `passport.sqlite` (+ WAL) | Envelope and body cache, tasks, notes, people, matters, action log, encrypted credentials |
+| `passport.config.json` | Configuration above |
+| `api-token`, `mcp-token` | UI/API and MCP bearer tokens (0600) |
+| `master.key` or `master.key.keychain` | Credential key, or the marker that the Mac app keeps it in the Keychain |
+| `owner.lock` | The live server's lease |
+| `scratch/` | `mail_export` output for MCP clients with a shell: one private (0700) directory per MCP server session |
+| `host-agent/` | Working directory for each Codex or Claude Code call |
+| `setup-browser-profile/`, `setup-agent/` | Agent-driven account setup; keep out of backups |
+
+The cache is bounded: bodies are evicted beyond 200 MB and envelopes beyond the 100,000 most
+recently used. `mail_export` files are written for the client's own `rg` or scripts and are meant
+to live 24 hours. This build does not yet sweep `scratch/` on a timer, so delete old session
+directories yourself (it is safe while no MCP client is exporting) and keep `scratch/` out of
+backups.
 
 ## Models
 
@@ -206,8 +265,9 @@ When `passport serve` or `passport demo` starts without a terminal (stdin is not
 locale variables from it. Nushell and other non-POSIX shells are skipped. If no shell answers,
 macOS's `launchctl getenv PATH` is used, and otherwise the inherited `PATH`. The startup log
 shows the source and the number of `PATH` entries, never the `PATH` itself. A launcher that has
-already done this (the Mac app) sets `PASSPORT_SHELL_ENV_PREPARED=1`, and optionally
-`PASSPORT_SHELL_ENV_SOURCE=login-shell|launchctl|fallback` for `doctor`.
+already done this can set `PASSPORT_SHELL_ENV_PREPARED=1` (and optionally
+`PASSPORT_SHELL_ENV_SOURCE=login-shell|launchctl|fallback` for `doctor`) to skip the probe. The
+Mac app does not set it: its server child runs the probe itself.
 
 Discovery also checks `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.volta/bin`,
 `~/.bun/bin`, `~/Library/pnpm`, `~/.npm-global/bin`, mise and asdf shims, and fnm's default alias.
@@ -229,8 +289,8 @@ Run `passport serve` and use **Connect another** in the sidebar (or **Settings â
 Google Desktop app OAuth client; see [accounts](accounts.md) for scopes and setup.
 `passport init --llm auto --skip-account` initializes a workspace unattended
 (`--llm codex|claude-code|none` also work); `printf 'none\nskip\n' | passport init`
-also works. `passport sync` requests one
-sync pass from the running server, or uses the store directly when no owner is live.
+also works. `passport sync` asks the running server for an immediate new-mail check and calendar
+sync, or uses the store directly when no owner is live.
 
 `passport mcp install --client claude-code|codex|cursor|claude-desktop` merges the
 client config and preserves unrelated settings. `--http`, `--dry-run`, and

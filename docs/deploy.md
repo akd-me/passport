@@ -1,5 +1,8 @@
 # Deploying Passport
 
+This page is the server path: `passport serve` on a home server, NAS or any always-on machine. On
+a Mac you use directly, the [Mac app](install.md#mac-app) is simpler; it runs the same server.
+
 Passport assumes one user on a trusted machine. The API requires its bearer token
 or a browser session; use the startup login URL or `passport token`. Keep the
 listener on localhost, through SSH, or behind a verified HTTPS proxy with restricted
@@ -32,7 +35,16 @@ can reach the server. Native installs retain the server's loopback default.
 `PASSPORT_DATA_DIR=/data` and the volume preserve config, database and the
 generated key. Do not override these settings without migrating your data.
 The health check requests `/api/health`; it reports process readiness, not
-successful remote-provider sync or model availability.
+provider reachability, watcher health or model availability. `passport doctor`
+(or `docker compose exec passport passport doctor`) reports each account's last
+watcher check and cursor age.
+
+Passport does not mirror mail, so a new deployment has no initial sync to wait
+for and no mailbox-sized database to grow. Agents read mail on demand through the
+provider; the new-mail watcher checks each account every 30 seconds. Set
+`PASSPORT_WATCH_INTERVAL_SECONDS` in `.env` (5–86400) to poll less often, for
+example on a metered connection; Gmail polling at the default costs about 240
+quota units an hour per account. See [accounts](accounts.md#watching-for-new-mail-account-controls-and-diagnostics).
 
 On a NAS, use Compose/Container Manager with these same mount and port settings.
 If using a bind mount instead of a named volume, create a private directory
@@ -104,11 +116,14 @@ token from `PASSPORT_MCP_TOKEN` or `<data-dir>/mcp-token`. Do not expose that to
 ## Backups and upgrades
 
 Back up the data directory and the matching encryption secret, except
-`setup-browser-profile/` and `setup-agent/`: they hold the agent-driven setup browser's live
-Google/Microsoft console sign-in and scratch files, are recreated on demand, and must not be archived. If
+`setup-browser-profile/` and `setup-agent/` (the agent-driven setup browser's live
+Google/Microsoft console sign-in and scratch files, recreated on demand, and never to be archived),
+`scratch/` (`mail_export` copies of mail for MCP clients) and `host-agent/` (per-call working
+directories). If
 `PASSPORT_MASTER_KEY` is supplied externally, save it securely with the backup;
 otherwise include `master.key`. Losing the key makes saved provider credentials
-unreadable. The database contains plaintext mail; encrypt backup storage.
+unreadable. The database contains plaintext cached mail, tasks and notes; encrypt backup storage.
+The mail itself stays at the provider, so a lost cache costs nothing but a re-read.
 
 Stop the service for a consistent SQLite snapshot, including any WAL files:
 
@@ -117,7 +132,7 @@ docker compose stop passport
 mkdir -p backups
 chmod 700 backups
 # Run from this Compose project so /data mounts the correct named volume.
-docker compose run --rm --no-deps --entrypoint tar passport -C /data --exclude=./setup-browser-profile --exclude=./setup-agent -czf - . > backups/passport-data.tar.gz
+docker compose run --rm --no-deps --entrypoint tar passport -C /data --exclude=./setup-browser-profile --exclude=./setup-agent --exclude=./scratch --exclude=./host-agent -czf - . > backups/passport-data.tar.gz
 chmod 600 backups/passport-data.tar.gz
 docker compose up -d
 ```
@@ -156,7 +171,8 @@ Maintainer setup before the first tag:
    tag must be exactly `v<version>`. Run `pnpm build`, `pnpm test`, `pnpm run pack`
    and the installed-package smoke check before pushing the tag.
 
-For example, tag `v0.1.0` when ready. The verification job uploads the exact CLI
+For example, tag `v0.3.0` once the `0.3.0` heading is committed. The workflow does not build,
+sign or upload the Mac app; that is milestone M3 in the [Mac app guide](desktop.md#m3-signing-notarization-and-updates). The verification job uploads the exact CLI
 tarball; the npm job publishes that tarball. The image job builds from the same
 tag and pushes both Linux architectures. The GitHub release is created only
 after both publish jobs succeed and attaches the CLI tarball with changelog notes.

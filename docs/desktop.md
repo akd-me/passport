@@ -110,7 +110,7 @@ or a download, first run `xattr -dr com.apple.quarantine /Applications/Passport.
 
 | What | Where |
 | --- | --- |
-| Workspace (mail index, config, `api-token`, `master.key` if any) | `~/.passport`, or `PASSPORT_DATA_DIR` |
+| Workspace (envelope cache, tasks, notes, config, `api-token`, `master.key` if any) | `~/.passport`, or `PASSPORT_DATA_DIR` |
 | Desktop settings, Keychain-sealed master keys, browser session | `~/Library/Application Support/Passport/` (`desktop-settings.json`, `master-keys/`) |
 | Server output (stdout and stderr of `passport serve`) | `~/Library/Logs/Passport/server.log` |
 | App diagnostics | `~/Library/Logs/Passport/desktop.log` |
@@ -152,7 +152,7 @@ there would make its credentials unreadable. If macOS refuses Keychain access, a
 **Restart Server**.
 
 **Optional: delete `master.key`.** After an import, you may delete `~/.passport/master.key` so the key
-exists only in the Keychain. Before you do, make sure your accounts sync from the app. Do not delete
+exists only in the Keychain. Before you do, make sure your accounts work from the app. Do not delete
 it if you also run the npm or Docker server, or CLI commands that open the store directly, on that
 data directory. Without the file, they cannot decrypt credentials. Keep a copy of the file in your
 backups either way.
@@ -177,18 +177,27 @@ fixes that.
 
 ## Menu bar, Dock and notifications
 
-The menu-bar icon's title is the number of **proposed** actions waiting for your decision. The Dock
-badge shows the same number. Both clear while no server answers, rather than showing a stale count. Actions already held in the outbox are not counted. The main process
-keeps the count current with the window closed. It subscribes to the server's `/ws` event stream and
-re-reads `GET /api/decisions` after every `action.*` event, and again after each reconnect.
+The menu-bar icon's title is the number of things that **need you**, the same as the web UI's
+**Needs you** view: tasks whose `needsUser` is set (an approval, a failed run or a question), plus
+proposed actions that no task owns (for example, proposals from Claude Code or Codex over MCP). A
+proposal that belongs to a task counts once, as that task. Actions already held in the outbox are not
+counted. The Dock badge shows the same number. Both clear while no server answers, rather than
+showing a stale count. Against a server without task routes (`passport demo`, which answers
+`TASKS_UNAVAILABLE`), the count falls back to proposed actions, as in v0.2.
 
-When a new proposal arrives and the Passport window is not focused, a notification appears. The app
-remembers what it last saw across server restarts, so proposals made while it was reconnecting are
-announced too. It shows
-only an action label and, at most, the message subject (for example "Send a message: Lunch on
-Friday?"). It never shows message bodies or the agent's free-text reason. If more than three arrive at
-once, the rest are summarised in one notification. Clicking a notification opens the window at that
-decision.
+The main process keeps the count current with the window closed. It subscribes to the server's `/ws`
+event stream and re-reads `GET /api/tasks?status=inbox,working,snoozed` and `GET /api/decisions`
+after every `task.updated` and `action.*` event, and again after each reconnect. Clicking the count in
+the menu opens **Needs you** (`/needs-you`).
+
+When a task starts needing you, or a new proposal arrives, and the Passport window is not focused, a
+notification appears. The app remembers what it last saw across server restarts, so anything that
+started needing you while it was reconnecting is announced too. A notification shows only a short
+reason and, at most, the task title or message subject (for example "Waiting for your approval: Plan
+the offsite" or "Send a message: Lunch on Friday?"). It never shows message bodies or the agent's
+free-text reason. Clicking it opens the task (`passport://task/<id>`); a proposal outside any task
+opens the queue at that decision. If more than three arrive at once, the rest are summarised in one
+notification that opens **Needs you**.
 
 The menu also offers these settings:
 
@@ -196,7 +205,7 @@ The menu also offers these settings:
   with no window: just the menu bar and the server.
 - **Hide Dock Icon When No Window Is Open.** For a pure menu-bar app. The icon returns when you open
   the window.
-- **Notifications.** Turn decision notifications on or off.
+- **Notifications.** Turn "needs you" notifications on or off.
 
 macOS may not run login items from unsigned apps reliably; this is expected to work once the app is
 signed in M3.
@@ -207,14 +216,16 @@ The app registers the `passport://` scheme, for in-app navigation only. OAuth ne
 
 | Link | Opens |
 | --- | --- |
-| `passport://open` | the queue |
-| `passport://decision/<id>` | the queue (`/?decision=<id>`) |
+| `passport://open` | Home, the new-task composer (`/`) |
+| `passport://task/<id>` | that task (`/tasks/<id>`) |
+| `passport://needs-you` | **Needs you** (`/needs-you`) |
+| `passport://tasks` | the task list (`/tasks`) |
+| `passport://decision/<id>` | the task that owns that proposal, with its approval selected; otherwise the queue with the card selected (`/?decision=<id>`) |
 | `passport://matter/<id>` | `/matters/<id>` |
 | `passport://settings` | Settings → Accounts |
 | `passport://settings/trust`, `passport://settings/routines` | that Settings section |
 
-Unknown links just bring the window forward. The web UI does not read the `decision` parameter yet,
-so a decision link opens the queue without preselecting the card.
+Ids are 1–64 letters, digits, `_` or `-`. Unknown or malformed links just bring the window forward.
 
 ## The `passport` command
 
@@ -261,9 +272,6 @@ These come from the R3 review of the app and are accepted for now:
 - **R3-18.**
   - **Open at Login** is off by default, and macOS 13+ may hold a new login item for approval in
     System Settings → General → Login Items without the app saying so.
-  - Notifications fire for proposed actions only, not for tasks waiting on an answer.
-  - There is no `passport://task/<id>` link yet.
-  - A `passport://decision/<id>` link opens the queue without selecting the card.
   - The `passport` command bakes in the data directory the app had when the command was installed.
     Reinstall it after changing `PASSPORT_DATA_DIR`.
 - **R3-8.** The staged `node_modules` is laid out like npm's (hoisted, with nested copies where

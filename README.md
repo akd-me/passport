@@ -1,6 +1,8 @@
 # Passport
 
-Passport is an open-source, local-first email harness where AI agents handle mail and calendar through a trust policy you control. You see decisions, build context around people and matters, and bring your own mail providers, models and agents.
+Passport is an open-source, local-first email harness. AI agents work on your mail and calendar the way a coding agent works on a repository: they `ls`, `grep` and `read` the mailbox **on demand** through your provider's own search, keep notes about people and matters, and propose changes that pass through a trust policy you control.
+
+**Passport reads your mail on demand and watches for new mail; it never mirrors or backfills.** Connecting an account takes a change cursor at "now", so the agent is usable the moment the account connects.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/task-dark.png">
@@ -11,36 +13,35 @@ More screens: [starting a task](docs/screenshots/new-task.png), [Needs you](docs
 
 ## Why
 
-Your inbox is organized around **the person** and **the matter**: who you are dealing with, and what you are trying to get done. AI handles routine mail, prepares replies and keeps that context current; you see the decisions that need your attention.
-
-- **Tasks, not a feed.** Ask in plain language and Passport opens a task, like a coding agent's thread: each step it takes, collapsed tool calls, a per-run change summary with undo, and approvals at the composer. Follow-ups queue or steer the running task. Tasks that need you come back to the sidebar's inbox; the rest work, snooze or settle.
-- **Earned trust.** Start supervised and grant autonomy per category as evidence accumulates. The ladder mirrors a coding agent's permission modes: `supervised`, `auto_accept_edits`, `auto`, `full_access`. An external agent has a separate ceiling.
-- **A record of every change.** Agent and human changes pass through the policy executor and action log. Reversible actions carry undo; irreversible operations are identified explicitly.
-- **Time to change your mind.** Sends wait in a delayed outbox where you can cancel them. A delivered message cannot be unsent.
-- **Your providers, your subscription.** Connect Gmail, Outlook or IMAP and calendar services. The agent runs on the Codex or Claude Code subscription already signed in on your computer; no API key needed. API providers and local Ollama models remain available.
-- **A mailbox any agent can use.** The MCP server gives Claude Code, Codex and other clients the same policy-controlled tools as the built-in agent.
+- **Tasks are the unit of work.** Ask in plain language and Passport opens a [task](docs/tasks.md), like a coding agent's thread: each step it takes, collapsed tool calls ("Searched twice, read 4 messages"), a per-run change summary with undo, and approvals at the composer. Follow-ups queue or steer the running task. Tasks that need you come back to the inbox; the rest work, snooze or settle. New mail wakes each account's Inbox task, routines run as scheduled tasks, and `watch_conversation` wakes a task when someone replies.
+- **A tool belt, not a mirror.** The [tools](docs/tools.md) map to coding primitives: `mail_labels` and `mail_list` (`ls`), `mail_search` (`grep`, Gmail `q`, Graph `$search`/`$filter`, IMAP and JMAP search), `mail_grep` (`grep -C`), `mail_read` and `mail_attachment_read` (`Read`), `mail_count` (`wc`), `mail_changes` (`git status`). Every result reports its quota cost; a per-account governor keeps interactive work ahead of background work.
+- **Notes for people and matters.** The agent keeps memory-file notes on people and matters (`notes_read`, `notes_search`, `notes_write`), next to a small structured table for what policy depends on: relationship and sender verification, which notes can never change.
+- **Earned trust.** Start supervised and grant autonomy per category as evidence accumulates. The ladder mirrors a coding agent's permission modes: `supervised`, `auto_accept_edits`, `auto`, `full_access`. A task's mode is capped by the ladder, and an external agent has a separate ceiling.
+- **A record of every change.** Agent and human changes pass through the policy executor and action log. Reversible actions carry undo; irreversible operations are identified explicitly. Sends wait in a delayed outbox where you can cancel them.
+- **Your providers, your subscription.** Connect Gmail, Outlook, IMAP or JMAP and calendar services. The agent runs on the Codex or Claude Code subscription already signed in on your computer; no API key needed. API providers and local Ollama models remain available.
+- **A mailbox any agent can use.** The MCP server gives Claude Code, Codex and other clients the same policy-controlled tool belt as the built-in agent.
 
 ## Quickstart
 
-**Pre-release:** npm and GHCR commands below are the release installation paths. They require a published version; until the first release, build from source or use a locally packed tarball. Provider/model integrations have offline tests; this repository does not claim live Gmail, Outlook, IMAP or LLM delivery validation.
+**Pre-release:** there is no published release of 0.3 yet. Build the Mac app or the server from source, or use a locally packed tarball; the npm and GHCR commands below need a published version. Provider/model integrations have offline tests; real Gmail and Outlook sign-in and reads have not been verified against the live APIs (see [Status](#status)).
 
 ### Mac app (recommended on macOS)
 
-Passport.app runs the same server in the background, keeps a menu-bar item with the count of decisions waiting for you, sends notifications when the agent needs a decision, and can start at login. There is no signed download yet, so build it on an Apple silicon Mac:
+Passport.app runs the same server in the background and keeps a menu-bar item with the number of tasks that need you. It notifies you when a task needs an approval or has failed, even with the window closed, and clicking a notification opens that task. It can start at login and keeps the encryption key in the macOS Keychain. There is no signed download yet, so build it on an Apple silicon Mac:
 
 ```sh
 git clone https://github.com/akd-me/passport.git
 cd passport
 corepack enable
 pnpm install --frozen-lockfile
-pnpm dist:desktop            # → apps/desktop/dist/mac-arm64/Passport.app
+PASSPORT_DESKTOP_DMG=1 pnpm dist:desktop   # → apps/desktop/dist/Passport-<version>-arm64.dmg and mac-arm64/Passport.app
 ```
 
-Drag `Passport.app` to `/Applications` and open it. It is unsigned, so the first time, right-click it and choose **Open**. It uses the same `~/.passport` workspace as the CLI. If `passport serve` is already running, the app attaches to it. See the [Mac app guide](docs/desktop.md) for logs, deep links, the bundled `passport` command and the Keychain-held encryption key.
+Open the DMG and drag `Passport.app` to `/Applications`. It is unsigned and not notarized, so the first time, right-click it and choose **Open**, then **Open** again. It uses the same `~/.passport` workspace as the CLI; if `passport serve` is already running, the app attaches to it. See the [Mac app guide](docs/desktop.md) for logs, `passport://` links, the bundled `passport` command and the Keychain-held key.
 
 The npm, Docker and source paths below run the same server on any platform, including headless home servers.
 
-### 1. npx
+### Server: npx
 
 Node **24** is recommended; the persistent backend needs **Node 22.16 or newer with SQLite FTS5**. Stock Node 22.5 has `node:sqlite` but lacks FTS5, so it runs the demo only. The installed shim reports this limitation before opening a persistent workspace.
 
@@ -50,7 +51,7 @@ npx @akd-me/passport demo
 npx @akd-me/passport serve
 ```
 
-Open the login URL printed at startup. The offline demo uses in-memory fixtures, makes no provider/model requests and resets on restart. `serve` stores data in `~/.passport` (override with `PASSPORT_DATA_DIR`). If Codex or Claude Code is installed and signed in, the agent uses it automatically (see [Models](#models)); without any agent, the UI, account sync and MCP work while automatic triage is disabled.
+Open the login URL printed at startup. The offline demo uses in-memory fixtures, makes no provider/model requests and resets on restart. `serve` stores data in `~/.passport` (override with `PASSPORT_DATA_DIR`). If Codex or Claude Code is installed and signed in, the agent uses it automatically (see [Models](#models)); without any agent, the UI, on-demand reads, the new-mail watcher and MCP work while automatic triage is disabled.
 
 For repeated use, install the executable:
 
@@ -62,7 +63,7 @@ passport serve
 
 The npm package is **`@akd-me/passport`**; its executable is **`passport`**. The unscoped npm name belongs to Passport.js.
 
-### 2. Docker
+### Server: Docker
 
 ```sh
 git clone https://github.com/akd-me/passport.git
@@ -74,7 +75,7 @@ docker compose up --build -d
 
 Open **http://127.0.0.1:3000**. Compose keeps data in a named volume and publishes only to host loopback. The API requires a bearer token or browser session. Open the login URL printed at startup; `passport token` prints the API token again. Keep it on localhost or behind a private boundary. After a release, `docker compose pull && docker compose up -d --no-build` uses `ghcr.io/akd-me/passport:latest`. See [deployment](docs/deploy.md) for home servers, NAS, backups and remote access.
 
-### 3. From source
+### Server: from source
 
 ```sh
 git clone https://github.com/akd-me/passport.git
@@ -110,7 +111,7 @@ The default is your **Claude Code or Codex subscription**: no API key. Passport 
 1. **Codex**, if installed and signed in (`codex login`, ChatGPT plan),
 2. **Claude Code**, if installed and signed in (`claude auth login`, Claude plan),
 3. an API provider you configured (Anthropic, OpenAI, OpenAI-compatible or Ollama),
-4. otherwise no agent: mail, decisions and MCP still work.
+4. otherwise no agent: mail, tasks you drive by hand, decisions and MCP still work.
 
 `passport init` shows what it found ("Codex (ChatGPT login) ✓, Claude Code ✓") and lets you pick; **Settings → Model** does the same in the browser, and `passport doctor` explains how to fix a missing or signed-out CLI. Choosing an agent pins it; "Choose automatically" returns to the order above. Pin from the environment with `PASSPORT_LLM_PROVIDER=codex` or `claude-code` and `PASSPORT_LLM_MODEL`.
 
@@ -146,61 +147,78 @@ url = "http://127.0.0.1:4318/mcp"
 http_headers = { Authorization = "Bearer <PASSPORT_MCP_TOKEN or contents of ~/.passport/mcp-token>" }
 ```
 
-The MCP token is separate from the UI/API token. Stdio shares the store in client mode and can coexist with `serve`; it starts no schedulers or arrival queue. Without `serve`, held/proposed work waits for the server. Docker keeps HTTP MCP inside the container; see [deployment](docs/deploy.md).
+The MCP token is separate from the UI/API token. Stdio shares the store in client mode and can coexist with `serve`; it starts no schedulers, watcher or arrival queue. Without `serve`, held/proposed work waits for the server. Docker keeps HTTP MCP inside the container; see [deployment](docs/deploy.md).
 
-External agents use the shared executor and their trust ceiling. Human approval, outbox cancellation and undo remain available in the UI/API. Mail and tool results are untrusted input; policy enforcement does not make prompt injection impossible.
+External agents use the shared executor and their trust ceiling. Human approval, outbox cancellation and undo remain available in the UI/API. An external agent cannot approve its own proposals or raise its ceiling. Mail and tool results are untrusted input; policy enforcement does not make prompt injection impossible.
 
 ## Scheduler and routines
 
-Periodic account sync, outbox release, trust decay, daily digests and matter reviews run only in the `serve` (or `demo`) process that owns the data directory. USER.md supplies standing instructions; model-backed routines require a configured model. See [scheduler and routines](docs/scheduler.md).
-
-## Tool catalogue
-
-Search and read mail, prepare drafts, organize matters and people, and work with calendars through the mailbox MCP tools. Writes enter the same action pipeline as the UI. See the [tool catalogue](docs/tools.md) for names, schemas and permission behavior.
+The new-mail watcher (every 30 seconds by default, `watch.intervalSeconds`), calendar sync, outbox release, trust decay, daily digests and matter reviews run only in the `serve` (or `demo`) process that owns the data directory. Model routines run on their own routine tasks. USER.md supplies standing instructions; model-backed routines require a configured model. See [scheduler and routines](docs/scheduler.md).
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-  UI[React web UI] --> Server[Local server and CLI]
+  App[Passport.app: menu bar, notifications, Keychain] --> Server
+  UI[React web UI: tasks, Needs you, matters, people] --> Server[Local server and CLI]
   Client[Claude Code / Codex / other agents] --> MCP[Mailbox MCP]
-  Server --> Agent[Agent runtime and scheduler]
-  Server --> Policy[Policy and action executor]
-  Agent --> Policy
-  MCP --> Policy
-  Policy --> Store[SQLite / credentials / action log]
-  Policy --> Providers[Mail and calendar providers]
-  Agent --> Model[Codex / Claude Code CLI, or your chosen model endpoint]
+  Server --> Tasks[Tasks: runs, lanes, timeline, watches]
+  Server --> Watcher[New-mail watcher]
+  Tasks --> Agent[Agent runtime]
+  Agent --> Tools[Tool belt: list, search, grep, read, notes]
+  MCP --> Tools
+  Watcher --> Tasks
+  Tools --> Readers[Provider readers and quota governor]
+  Tools --> Policy[Policy and action executor]
+  Readers --> Providers[Gmail, Graph, IMAP, JMAP, calendars]
+  Watcher --> Readers
+  Readers --> Cache[Envelope and body cache]
+  Policy --> Store[SQLite: tasks, notes, action log, credentials]
   Policy --> Outbox[Delayed outbox and undo]
+  Policy --> Providers
+  Agent --> Model[Codex / Claude Code CLI, or your chosen model endpoint]
 ```
 
 | Workspace | Responsibility |
 | --- | --- |
-| `@passport/types` | Shared contracts and invariants |
-| `@passport/store` | SQLite, FTS5, encrypted credentials and event bus |
-| `@passport/providers` | Gmail, Graph, IMAP/SMTP, JMAP and calendar adapters |
-| `@passport/policy` | Trust, risk, action execution, delayed sends and undo |
-| `@passport/agent` | Triage, people/matter context, USER.md, digests and reviews |
+| `@passport/types` | Shared contracts and invariants, including tasks and `MailReader` |
+| `@passport/store` | SQLite: envelope and body cache (no mirror), tasks, notes, action log, encrypted credentials, event bus |
+| `@passport/providers` | Gmail, Graph, IMAP/SMTP, JMAP and calendar adapters; on-demand readers and the quota governor |
+| `@passport/policy` | Trust, risk, action execution with fresh pre-images, delayed sends and undo |
+| `@passport/tools` | The tool belt shared by the built-in agent and MCP |
+| `@passport/agent` | Agent runtime, triage, people and matter notes, USER.md, digests and reviews |
 | `@passport/mcp` | Policy-controlled tools over stdio and Streamable HTTP |
-| `@passport/server` | Composition root, API, WebSockets, CLI and background jobs |
+| `@passport/scheduler` | Persistent jobs: watcher ticks, calendar sync, outbox release, routines |
+| `@passport/server` | Composition root, tasks, new-mail watcher, API, WebSockets and CLI |
 | `@passport/web` | Tasks, Needs you, Matters, People, Trust and account UI |
-| `@passport/desktop` | macOS app: Electron shell that runs the server as a child, menu bar, notifications |
+| `@passport/desktop` | macOS app: Electron shell that runs the server as a child, menu bar, notifications, Keychain key, deep links |
 
-The public **`@akd-me/passport`** artifact bundles the private workspace code and built web UI. The server workspace retains its development name. See the [engineering contract](docs/CONTRACT.md) and [server reference](apps/server/README.md).
+The public **`@akd-me/passport`** artifact bundles the private workspace code and built web UI. The server workspace retains its development name. See the [engineering contract](docs/CONTRACT.md), the [v0.3 design](docs/design/on-demand.md) and the [server reference](apps/server/README.md).
 
 ## Security model
 
-Passport is local-first: the database and action history live on your machine. Provider credentials are encrypted at rest with AES-256-GCM using `PASSPORT_MASTER_KEY` or a generated private `master.key`. Message bodies and the database itself are **not** encrypted by Passport; use OS disk encryption and protect backups. Model keys supplied in the environment are not copied into config; a key you put in the config file remains there.
+Passport is local-first: tasks, notes, the cache and the action history live on your machine. Provider credentials are encrypted at rest with AES-256-GCM under a master key: in the macOS Keychain for the Mac app (handed to its server on a private pipe, never in the environment), otherwise `PASSPORT_MASTER_KEY` or a generated private `master.key`. Cached message envelopes and bodies and the database itself are **not** encrypted by Passport; use OS disk encryption and protect backups.
 
-Mail/calendar providers receive the normal synchronization and action requests you authorize. Beyond those connections, the agent sends relevant context only to the model you choose (through the Codex or Claude Code CLI and its vendor, or your configured endpoint); there is no Passport telemetry service or required hosted backend. External MCP clients can read mailbox content and have their own data handling policies. A local model can keep inference local.
+Mail, subjects and attachments are **untrusted data**: tool results and task prompts wrap them as data, not instructions. The agent can read and propose; every write goes through the executor under the task's permission mode, the trust ladder and, for MCP clients, the external-agent ceiling. Agents cannot approve their own proposals or change trust. Page tokens handed to agents are sealed, so an edited token cannot point a reader somewhere else.
 
-Trust gates and the external-agent ceiling constrain actions. Sends are held before delivery when a hold is configured; reversible changes are logged with undo. Sender verification is derived from headers/signatures, never message content; production Passport identity verification is not wired yet. The HTTP API is authenticated with the startup token (`passport token`) or a browser session, with Host and Origin checks. See [SECURITY.md](SECURITY.md) for the threat model and private reporting.
+Mail/calendar providers receive the reads and actions you authorize. Beyond those, the agent sends relevant context only to the model you choose (through the Codex or Claude Code CLI and its vendor, or your configured endpoint); there is no Passport telemetry service or required hosted backend. External MCP clients can read mailbox content and have their own data handling policies. The HTTP API is authenticated with the startup token (`passport token`) or a browser session, with Host and Origin checks. See [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md).
 
-## Status and roadmap
+**Offline search is partial, on purpose.** When a provider cannot be reached, reads fall back to what is cached, marked with how stale it is, and writes to cached mail are refused until Passport can read the current state again. Passport does not keep a searchable copy of your whole mailbox.
 
-This is an early **0.1.0, unreleased** implementation. The offline suite covers policy integration, resumable arrivals and calendar release checks. Live provider/model interoperability and hosted deployment must be validated in your environment.
+## Status
 
-Near-term work includes live provider validation and deployment verification. **Hosted identity and SMTP+ are parked.** Gmail/Graph/JMAP push subscriptions and contacts sync are not implemented; periodic sync is available. See [CHANGELOG.md](CHANGELOG.md).
+**0.3.0 is unreleased.** What is verified, and how:
+
+| Area | State |
+| --- | --- |
+| On-demand reads, watcher, tasks, tools, policy, MCP | Offline tests against fixtures and fake provider endpoints |
+| Real Gmail and Outlook OAuth sign-in, reads and the watcher | **Not verified** against the live APIs |
+| IMAP and JMAP against real servers | Not verified |
+| Mac app (unsigned, arm64) | Built and smoke-tested locally: the packaged server starts, signs in and stops on quit |
+| Signing, notarization, auto-update | **Not done**; right-click → **Open** on first launch |
+| npm, GHCR and release workflow | Not yet live-published |
+
+Deferred: Gmail Pub/Sub push and Graph subscriptions (the watcher polls), a deep local index, OCR for scanned attachments, staged task changes (approval is per action), and task-scoped "accept always". **Hosted identity and SMTP+ are parked.** See [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
@@ -208,14 +226,14 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/CONTRACT.md](docs/CONTRACT.md)
 
 ```sh
 pnpm build
-pnpm typecheck
 pnpm lint
 pnpm test
 pnpm run pack
-node scripts/smoke-package.mjs apps/server/dist/akd-me-passport-0.1.0.tgz
+node scripts/smoke-package.mjs apps/server/dist/akd-me-passport-<version>.tgz
+pnpm --filter @passport/desktop test
 ```
 
-The package smoke test installs the tarball in a temporary directory, checks CLI help and MCP install `--dry-run`, and boots demo and persistent servers on free ports. It reads their startup login tokens and curls `/api/health` with bearer authentication, checks decisions and UI assets, and fails on any error. See the [installation guide](docs/install.md#pack-and-test-the-installable-artifact).
+`<version>` is the first release heading in `CHANGELOG.md`. The package smoke test installs the tarball in a temporary directory, checks CLI help and MCP install `--dry-run`, and boots demo and persistent servers on free ports. It reads their startup login tokens and curls `/api/health` with bearer authentication, checks decisions and UI assets, and fails on any error. See the [installation guide](docs/install.md#pack-and-test-the-installable-artifact).
 
 CI checks Node 22 and 24, with a separate package-smoke job after build/tests. Tagged releases publish npm provenance, a GHCR image and changelog release notes; [maintainer setup](docs/deploy.md#releasing) describes the required permissions and secrets.
 

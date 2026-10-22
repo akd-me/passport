@@ -5,6 +5,11 @@ Node's built-in `node:sqlite` (`DatabaseSync`, FTS5, JSON1). Also exports monoto
 ULIDs, `nowIso`, `StoreError`, and the synchronous `InMemoryEventBus`. No native
 addons or runtime dependencies beyond `@passport/types`.
 
+Since v0.3 the `emails` table is a **cache, not a mirror**: it holds envelopes the watcher or an
+agent touched, plus bodies on a TTL/LRU budget (see [below](#read-through-envelope-cache-v03)). The
+mailbox itself stays at the provider; nothing here is backfilled. Tasks, notes, people, matters, the
+action log and credentials are the durable state.
+
 ```ts
 import { openStore, newId, nowIso, InMemoryEventBus } from "@passport/store";
 
@@ -12,7 +17,7 @@ import { openStore, newId, nowIso, InMemoryEventBus } from "@passport/store";
 const store = openStore({ path: "./passport.sqlite" });
 await store.migrate(); // Required; safe to call again, including after reopening.
 await store.kv.set("USER.md", "Prefer concise replies.");
-const page = await store.emails.query({ text: '"project update" OR schedul*', limit: 20 });
+const page = await store.emails.query({ text: '"project update" OR schedul*', limit: 20 }); // cached envelopes only
 const next = page.nextCursor
   ? await store.emails.query({ text: '"project update" OR schedul*', limit: 20, cursor: page.nextCursor })
   : null;
@@ -29,7 +34,7 @@ method is async, although SQLite operations run synchronously. The caller create
 parent directories, owns the store lifetime, and awaits `migrate()` before use.
 Migrations are ordered SQL strings tracked atomically in `schema_version`.
 Persistent databases use WAL, a 5-second busy timeout, and foreign keys for owned
-join rows. Relationships may reference records that have not synced yet.
+join rows. Relationships may reference records that are not cached.
 
 Credentials use AES-256-GCM, fresh 96-bit nonces, 128-bit authentication tags, and
 the account ID as authenticated associated data. A versioned binary envelope is
@@ -52,8 +57,9 @@ remain JSON; queried IDs, dates, categories, statuses, and action metadata use
 indexed scalar columns. Bodies are separate columns to avoid loading them in lists.
 
 Email search accepts FTS5 `MATCH` syntax, including phrases, prefixes, boolean
-operators, and field qualifiers `subject:`, `from:`, `preview:`, and `textBody:`.
-The index includes sender names/addresses, and updates/deletes are maintained by
+operators, and field qualifiers `subject:`, `from:` and `preview:`. The index covers
+cached envelopes only (subject, sender names/addresses and preview), never bodies; full
+mailbox search is the provider's (`MailReader.search`). Updates/deletes are maintained by
 triggers inside the writing transaction. Blank search text means no text filter;
 malformed FTS syntax rejects the query. Keyword `has` means a JSON value of `true`;
 `not` accepts absent or false keywords. `after`/`before` are exclusive UTC timestamp

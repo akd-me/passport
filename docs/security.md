@@ -45,3 +45,70 @@ more characters that mix letters and digits. When a secret becomes known (`regis
 text already retained in the task is scrubbed again and a corrected snapshot is published. Frames
 published before that cannot be retracted: a client that received them keeps them, so treat the
 setup log like terminal output.
+
+## Mail is untrusted data
+
+Message bodies, subjects, sender names, labels and attachments come from whoever sent the mail.
+Passport treats them as data, never as instructions:
+
+- Task prompts wrap provider-derived text in an `<untrusted-data source="…">` block that says the
+  text is data, and neutralise the sigils host agents treat as commands: `$`, mention-style `@` and
+  a line-leading `/` get an invisible joiner. Tool results do the same, and timeline items that may
+  quote mail are flagged `untrusted` and rendered as plain text.
+- Tool-call summaries in a task's timeline are redacted (bodies, secret-named fields and
+  token-shaped strings) and at most 200 characters.
+- Sender verification comes from authentication headers and the provider's trusted boundary,
+  computed once per envelope. Message content never grants verification, and `notes_write` cannot
+  change a person's relationship or verification fields.
+- Each Codex or Claude Code call is a fresh run in `<data dir>/host-agent` with its own tools,
+  shell and plugins disabled and a minimal environment, so mail cannot drive local commands.
+
+This framing reduces prompt injection; it does not make it impossible. The limits below are what
+holds when a model follows instructions it should not.
+
+## What an agent can and cannot do
+
+An agent (the built-in runtime or an MCP client) **can** list, search, grep and read mail through
+the providers you connected, read attachments, keep notes on people and matters, watch a
+conversation for replies, and propose or perform changes through the action executor.
+
+It **cannot**:
+
+- Write anything except through the executor, which applies the global trust mode, category trust,
+  always-ask rules, risk and reversibility checks, and the outbox hold for sends.
+- Exceed its ceiling. A task's permission mode is clamped to the trust dial and to its parent task,
+  and enforced on every action of its runs; plan mode records writes as proposals only. MCP clients
+  are capped by `externalAgentCeiling`, and the HTTP MCP bearer token grants access, not trust.
+- Approve its own proposals, change trust, or claim another actor's undo. Approvals go through
+  `/api/actions/:id/approve` (the UI or an API client holding the UI token); no tool approves,
+  rejects or edits trust settings, and tools accept no actor or category override.
+- Read credentials or provider settings, or make arbitrary provider requests: `provider_get` is a
+  read-only allowlist.
+- Steer a reader with a forged page token. Graph and IMAP page tokens, which name provider links
+  or UID anchors, are sealed with HMAC-SHA256 (Gmail's own opaque page tokens are passed through); an edited token fails with `INVALID_CURSOR`
+  before anything in it is used. The sealing key is derived from the master key with HKDF, so
+  tokens survive a restart without a second stored secret.
+
+`mail_export` writes copies of mail to `<data dir>/scratch/<session>/` (0700) for MCP clients with a
+shell. Those copies are readable by your OS user and by whatever the client runs; see
+[installation](install.md#data-directory).
+
+## Keys
+
+Provider credentials are encrypted with AES-256-GCM under a master key. The CLI and Docker use
+`PASSPORT_MASTER_KEY` or a 0600 `<data dir>/master.key`. The Mac app keeps the key in the macOS
+Keychain through Electron's `safeStorage` and hands it to its server as JSON on an inherited pipe
+(file descriptor 3, named by `PASSPORT_BOOTSTRAP_FD`), never in the command line or environment,
+so `ps eww` cannot read it. The server closes the pipe after reading it and never forwards the key
+to `claude` or `codex`. Every process that opens the store checks its key against an HMAC key check
+and fails with `MASTER_KEY_MISMATCH` rather than writing credentials nobody else can read. See
+[the Mac app guide](desktop.md#encryption-key-in-the-keychain) for import, recovery and the residual
+risks of an unsigned build.
+
+## Offline is partial, on purpose
+
+Passport does not keep a copy of your mailbox. When a provider cannot be reached, reads fall back to
+cached envelopes and bodies marked with `staleAsOf`, and changes to cached mail are refused
+(`PROVIDER_UNAVAILABLE`) until the executor can read the current state again. This is a deliberate
+trade: there is no full local mail store to steal, back up or keep in sync, at the cost of search
+that only covers what was recently read while offline.

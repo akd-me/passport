@@ -221,7 +221,7 @@ data; `toolBudget.reads` reports calls, failures, skips and provider units.
 
 - **R2-22** v0.2 people have no `statsRefreshedAt`, so their first v0.3 arrival recounts them with
   the capped counts and writes one `person_update` per existing contact (action-log noise, capped
-  counts in the UI). A one-time backfill would avoid it.
+  counts in the UI). A one-time migration recounting them would avoid it.
 - **R2-24** `RunQueue` (and the server's `PriorityRunQueue`) are unbounded and have no per-run
   timeout: a stuck LLM call stalls later runs. Arrival runs are durable, so a bound plus timeout can
   be added without losing work; neither is implemented yet.

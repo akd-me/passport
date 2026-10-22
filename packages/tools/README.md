@@ -34,7 +34,8 @@ in tool input schemas. Optional trusted invocation context correlates `runId`;
 only built-in `agent` actors can supply projected triage evidence, person snapshots
 or atomic email metadata patches. External actors cannot use that evidence path.
 
-Read results use local synced data. Bodies are capped at 2,000 characters unless
+The on-demand `mail_*` tools read the provider through injected readers; the legacy
+read tools fall back to cached local data without readers. Bodies are capped at 2,000 characters unless
 `full: true`; HTML image beacons and remote image tags are removed in both views.
 Actions omit parameters, provider results and raw errors. Account credentials and
 settings are never read. Query writes cap at 200 matches and require one account.

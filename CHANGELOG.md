@@ -29,6 +29,9 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   `ToolContext.taskId`; `AgentRuntime.run(trigger, { runId, observer, readOnly, taskId, signal,
   priority })`; the policy engine `ceiling` option; `Store.tasks`.
 
+- Passport.app deep links `passport://task/<id>` (→ `/tasks/<id>`), `passport://needs-you` and
+  `passport://tasks`.
+
 ### Changed
 
 - Mail is no longer mirrored. Connecting an account takes a change cursor at "now"; Passport never
@@ -51,6 +54,15 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 - Settings → Accounts shows "Watching since … · last check …" and the Inbox count; the sidebar
   shows Watching, Paused or Needs sign-in. Workspace refetches are throttled per event type.
 - `store.maintenance` also evicts cached bodies and envelopes.
+- Passport.app: the menu-bar count and Dock badge are the tasks that need you plus proposals no
+  task owns, matching **Needs you** (pending decisions against a server without task routes, such
+  as the demo). They refresh on `task.updated` as well as `action.*`. Notifications also fire when
+  a run fails, name the task, and open it; the menu item opens `/needs-you`.
+- Docs for v0.3: the README leads with the Mac app and the on-demand model; install and deploy
+  cover `watch.intervalSeconds`, the data directory (including `scratch/`) and the DMG's
+  right-click → Open; `docs/security.md` and `SECURITY.md` cover untrusted-data framing, what an
+  agent can and cannot do, sealed page tokens, the Keychain key and partial offline search.
+  `SECURITY.md` no longer says the HTTP API is unauthenticated.
 
 ### Security
 

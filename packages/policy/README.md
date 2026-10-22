@@ -1,8 +1,8 @@
 # @passport/policy
 
 The policy gate for Passport mutations: evaluate risk and trust, queue human decisions,
-hold outward-facing messages, execute through injected providers, mirror successful changes,
-and undo from captured prior state. Depends only on `@passport/types` and Node built-ins.
+hold outward-facing messages, execute through injected providers, patch the local cache after
+successful changes, and undo from captured prior state. Depends only on `@passport/types` and Node built-ins.
 
 ## Usage
 
@@ -135,7 +135,7 @@ JSON leaves (including added/removed leaves), independent of object key order.
   missing destinations fail with `ARCHIVE_MAILBOX_MISSING` before changing mail. Folder unarchive
   moves to the requested mailbox or inbox, and undo moves each message to its captured prior folder.
   Move replaces mailbox membership. Delete moves to trash; it never purges. Mail changes map local
-  ids to provider ids and mirror full keyword and mailbox patches only after provider success.
+  ids to provider ids and patch the cached keywords and mailboxes only after provider success.
   IMAP and Graph report replacement identities through `MailChangeResult`; moves persist the
   new provider id in both the local email and its inverse snapshot. Undo uses the current id
   and persists any replacement returned by the reverse move. Copies retain the source identity.
@@ -148,11 +148,11 @@ JSON leaves (including added/removed leaves), independent of object key order.
   Saved draft sends submit the approved content, then remove the original provider draft,
   preventing a concurrent draft edit from replacing the authorized content. Saved reply drafts
   resolve their In-Reply-To message within the stored thread to retain threading; an unavailable
-  reply source requires syncing before approval. Calendar
+  reply source must be readable from the provider before approval. Calendar
   proposals send their supplied draft through the outbox; slots are context, not automatically
   converted to an iCalendar attachment. Event create/update/respond/delete use CalendarProvider
-  and mirror the result. Sent mail is fetched through `getEmail`; if a provider cannot expose
-  the sent email yet, the action retains SendResult and the next normal sync imports the email.
+  and cache the result. Sent mail is fetched through `getEmail`; if a provider cannot expose
+  the sent email yet, the action retains SendResult and the email is read on demand later.
 - Matters, people, and snooze use only Store. Email snooze state is under
   `policy:snooze:<emailId>` because Email has no snooze field. Matter snooze updates
   status/snoozedUntil. Matter attachments update the matter and email/event backlinks.
@@ -170,14 +170,15 @@ JSON leaves (including added/removed leaves), independent of object key order.
   for later human approval. Undo creates its own ActionRecord before dispatch and
   then marks the original undone. Private inverse snapshots cannot be edited.
 - Every action domain event is emitted: proposed, decided, held, executed, undone, failed.
-  Mirror changes also emit email.updated and matter.updated. `PolicyError` has a `code`;
+  Cache patches also emit email.updated and matter.updated. `PolicyError` has a `code`;
   provider errors are persisted as failed and rethrown unchanged, except `SUBMISSION_ACCEPTED`:
   SMTP already accepted that message, so the send is executed with `result.warning` and is
   never retried. Sent-copy/local draft cleanup failures after a successful send also become warnings.
 - Each executor serializes its own operations; Store claims coordinate independent writers.
   Claims are not automatically recovered after a process crash because a provider may already
   have accepted an operation. There is no provider idempotency interface. A provider-success /
-  local-write failure can leave a partial remote change; reconcile through sync before retrying.
+  local-write failure can leave a partial remote change; re-read the message from the provider
+  before retrying.
   IDs are locally generated ULIDs because the injected Store interface exposes no id allocator.
 
 ## Agent conventions honoured

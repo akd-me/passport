@@ -13,7 +13,10 @@ const SETTINGS: Record<string, string> = {
 
 /**
  * Maps a deep link to a web UI route, or null when it is not one of ours.
- *   passport://decision/<id>  → the queue, selecting that decision
+ *   passport://task/<id>      → /tasks/<id>
+ *   passport://needs-you      → /needs-you
+ *   passport://tasks          → /tasks
+ *   passport://decision/<id>  → the task that owns that decision, else the queue selecting it
  *   passport://matter/<id>    → /matters/<id>
  *   passport://settings[/<section>]
  *   passport://open           → the queue
@@ -33,6 +36,12 @@ export function routeFor(link: string): string | null {
   if (rest.length) {
     return null;
   }
+  if (kind === "task" && ID.test(id)) {
+    return `/tasks/${encodeURIComponent(id)}`;
+  }
+  if ((kind === "needs-you" || kind === "tasks") && !id) {
+    return `/${kind}`;
+  }
   if (kind === "decision" && ID.test(id)) {
     return `/?decision=${encodeURIComponent(id)}`;
   }
@@ -50,6 +59,7 @@ export function routeFor(link: string): string | null {
 }
 
 export const decisionLink = (id: string) => `${SCHEME}://decision/${id}`;
+export const taskLink = (id: string) => `${SCHEME}://task/${id}`;
 
 /** Deep links arrive in argv on second-instance launches (and on non-macOS platforms). */
 export function linkFromArgv(argv: string[]): string | undefined {
