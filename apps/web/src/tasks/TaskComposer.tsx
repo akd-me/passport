@@ -1,4 +1,4 @@
-import type { ActionRecord, Task, TaskMessageMode } from "@passport/types";
+import type { Task, TaskMessageMode } from "@passport/types";
 import { useState } from "react";
 import { Feedback, Icon, Kbd, mod } from "../components/ui";
 import { logger } from "../logger";
@@ -15,7 +15,6 @@ import { type Clamp, ClampNotice, PlanToggle, TaskModePicker } from "./TaskModes
 export function TaskComposer({
   task,
   running,
-  records,
   summaries,
   clamp,
   onClamp,
@@ -23,7 +22,6 @@ export function TaskComposer({
 }: {
   task: Task;
   running: boolean;
-  records: Map<string, ActionRecord>;
   summaries: Map<string, string>;
   clamp: Clamp | null;
   onClamp: (clamp: Clamp | null) => void;
@@ -67,12 +65,7 @@ export function TaskComposer({
   };
   return (
     <div className="composer-wrap task-composer">
-      <ApprovalPanel
-        task={task}
-        records={records}
-        summaries={summaries}
-        onSelect={onSelectApproval}
-      />
+      <ApprovalPanel task={task} summaries={summaries} onSelect={onSelectApproval} />
       <ClampNotice clamp={clamp} />
       <form
         className={`composer ${sending ? "busy" : ""}`}

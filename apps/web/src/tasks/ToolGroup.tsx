@@ -22,7 +22,7 @@ export function ToolGroup({ calls }: { calls: ToolCallItem[] }) {
         type="button"
         className="tool-group-head"
         aria-expanded={open}
-        aria-controls={id}
+        aria-controls={open ? id : undefined}
         onClick={() => setOpen(!open)}
       >
         <Icon name={open ? "chevron" : "next"} size={13} />

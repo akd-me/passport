@@ -110,7 +110,7 @@ function useGlobalShortcuts() {
 }
 
 function Shell() {
-  const { notice } = useWorkspace(),
+  const { notice, noticeAction, notify } = useWorkspace(),
     ui = useUi();
   useGlobalShortcuts();
   return (
@@ -169,6 +169,18 @@ function Shell() {
         <div className="toast" role="status">
           <Icon name="check" size={15} />
           {notice}
+          {noticeAction && (
+            <button
+              type="button"
+              className="link-btn toast-action"
+              onClick={() => {
+                notify("");
+                noticeAction.run();
+              }}
+            >
+              {noticeAction.label}
+            </button>
+          )}
         </div>
       )}
     </div>

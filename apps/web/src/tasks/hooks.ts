@@ -1,8 +1,8 @@
-import type { ActionRecord, Page, Task, TaskItem, TaskRun } from "@passport/types";
+import type { Task, TaskItem, TaskRun } from "@passport/types";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "../api";
 import { logger } from "../logger";
 import { useWorkspace, useWorkspaceEvents } from "../state";
+import { useActions } from "./actions-store";
 import { ITEMS_PAGE, taskApi } from "./api";
 import { useTasks } from "./store";
 
@@ -164,38 +164,17 @@ export function useTaskDetail(taskId: string) {
 }
 
 /**
- * ActionRecords of the task: every run's `actionIds` (via `/api/actions?runId=`) plus the open
- * decisions, so approvals and change summaries can show the full record.
+ * ActionRecords for the task page, from the shared cache: the open decisions are fetched when a
+ * pending id has no record; run records load when a change summary opens (R5-2).
  */
-export function useTaskActions(runs: TaskRun[]) {
-  const { version } = useWorkspace();
-  const key = runs
-    .filter((run) => run.actionIds.length)
-    .map((run) => `${run.agentRunId}:${run.actionIds.length}`)
-    .join(",");
-  const [records, setRecords] = useState<Map<string, ActionRecord>>(() => new Map());
+export function useTaskActions(task?: Task) {
+  const actions = useActions(),
+    { ensurePending } = actions;
+  const key = (task?.pendingActionIds ?? []).join(",");
   useEffect(() => {
-    let cancelled = false;
-    const runIds = key ? key.split(",").map((part) => part.slice(0, part.lastIndexOf(":"))) : [];
-    Promise.all([
-      api.decisions().catch(() => ({ items: [] }) as Partial<Page<ActionRecord>>),
-      ...runIds.map((runId) => api.actions({ runId, limit: 200 })),
-    ])
-      .then((pages) => {
-        if (!cancelled) {
-          const next = new Map<string, ActionRecord>();
-          for (const page of pages) {
-            for (const record of page.items ?? []) {
-              next.set(record.id, record);
-            }
-          }
-          setRecords(next);
-        }
-      })
-      .catch(() => logger.warn("Task actions request failed"));
-    return () => {
-      cancelled = true;
-    };
-  }, [key, version]);
-  return records;
+    if (key) {
+      ensurePending(key.split(","));
+    }
+  }, [key, ensurePending]);
+  return actions;
 }

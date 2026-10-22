@@ -135,7 +135,7 @@ describe("work queue", () => {
       "true",
     );
     fireEvent.keyDown(window, { key: "a" });
-    await waitFor(() => expect(approve).toHaveBeenCalledWith("p3", undefined));
+    await waitFor(() => expect(approve).toHaveBeenCalledWith("p3", undefined, "once"));
     fireEvent.keyDown(window, { key: "k" });
     expect(first).toHaveAttribute("aria-current", "true");
   });

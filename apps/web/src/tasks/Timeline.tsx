@@ -2,6 +2,7 @@ import type { ActionRecord, Task, TaskItem, TaskRun } from "@passport/types";
 import { useEffect, useMemo, useRef } from "react";
 import { Feedback, Loading } from "../components/ui";
 import { ApprovalItem } from "./ApprovalItem";
+import type { LoadState } from "./actions-store";
 import { RunHeader } from "./RunHeader";
 import { TimelineItem } from "./TimelineItems";
 import { ToolGroup } from "./ToolGroup";
@@ -31,6 +32,8 @@ export function Timeline({
   items,
   runs,
   records,
+  pending,
+  onRetry,
   loaded,
   error,
   selected,
@@ -40,6 +43,9 @@ export function Timeline({
   items: TaskItem[];
   runs: TaskRun[];
   records: Map<string, ActionRecord>;
+  /** The open decisions' request, for approvals whose record has not loaded. */
+  pending: LoadState | "idle";
+  onRetry: () => void;
   loaded: boolean;
   error?: string;
   selected?: string;
@@ -57,7 +63,7 @@ export function Timeline({
         {entries.map((entry) => (
           <li key={entry.key} className={`tl-entry tl-${entry.kind}`}>
             {entry.kind === "run" ? (
-              <RunHeader run={entry.run} records={records} />
+              <RunHeader run={entry.run} />
             ) : entry.kind === "tools" ? (
               <ToolGroup calls={entry.calls} />
             ) : entry.item.kind === "approval_request" ? (
@@ -65,6 +71,8 @@ export function Timeline({
                 item={entry.item}
                 task={task}
                 record={records.get(entry.item.payload.actionId)}
+                load={pending}
+                onRetry={onRetry}
                 selected={selected === entry.item.payload.actionId}
                 onSelect={() =>
                   entry.item.kind === "approval_request" && onSelect(entry.item.payload.actionId)

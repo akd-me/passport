@@ -12,6 +12,7 @@ import {
 import { ApiError } from "../api";
 import { logger } from "../logger";
 import { useWorkspace, useWorkspaceEvents } from "../state";
+import { ActionsProvider } from "./actions-store";
 import { taskApi } from "./api";
 import { isActiveRun } from "./model";
 
@@ -216,7 +217,11 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     }),
     [status, tasks, active, upsert, trackRuns, act],
   );
-  return <Tasks.Provider value={value}>{children}</Tasks.Provider>;
+  return (
+    <Tasks.Provider value={value}>
+      <ActionsProvider>{children}</ActionsProvider>
+    </Tasks.Provider>
+  );
 }
 
 export const useTasks = () => useContext(Tasks);

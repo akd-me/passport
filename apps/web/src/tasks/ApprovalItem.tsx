@@ -1,9 +1,9 @@
 import type { ActionRecord, Task, TaskItem } from "@passport/types";
-import { api } from "../api";
+import { Link } from "react-router";
 import { Feedback, Icon } from "../components/ui";
 import { actionLabel } from "../labels";
-import { useTask } from "../state";
 import { DecisionCard } from "../views/DecisionCard";
+import { type LoadState, useActions, useDecision } from "./actions-store";
 import { PlainText } from "./TimelineItems";
 
 type ApprovalRequest = Extract<TaskItem, { kind: "approval_request" }>;
@@ -19,21 +19,49 @@ const decided: Partial<Record<ActionRecord["status"], string>> = {
   expired: "Expired before a decision",
 };
 
-export const isPending = (task: Task, actionId: string) =>
-  !!task.pendingActionIds?.includes(actionId);
+/** Pending per the task, or per the record when the task's list is missing or behind (R5-14). */
+export const isPending = (task: Task, actionId: string, record?: ActionRecord) =>
+  !!task.pendingActionIds?.includes(actionId) || record?.status === "proposed";
 
-/** Approve and reject without the full record (it has not loaded yet). */
-export function QuickDecision({ actionId, label }: { actionId: string; label: string }) {
-  const task = useTask();
+/**
+ * Approve and reject from a one-line row. Without the record (type, reversibility, draft) on
+ * screen there is nothing to approve yet: the buttons stay disabled (R5-6).
+ */
+export function QuickDecision({
+  actionId,
+  label,
+  record,
+  load,
+  onRetry,
+}: {
+  actionId: string;
+  label: string;
+  record?: ActionRecord;
+  load: LoadState | "idle";
+  onRetry: () => void;
+}) {
+  const decision = useDecision(actionId);
+  if (!record && load === "failed") {
+    return (
+      <span className="quick-decision unavailable">
+        <span className="muted">This change did not load.</span>
+        <button type="button" className="link-btn" onClick={onRetry}>
+          Retry
+        </button>
+        <Link to={`/needs-you?decision=${encodeURIComponent(actionId)}`}>Review in Needs you</Link>
+      </span>
+    );
+  }
   return (
     <>
-      <span className="quick-decision">
+      <span className="quick-decision" aria-busy={!record || undefined}>
+        {!record && <span className="muted loading-note">Loading…</span>}
         <button
           type="button"
           className="btn btn-sm btn-primary"
-          disabled={task.busy}
+          disabled={!record || decision.busy}
           aria-label={`Approve: ${label}`}
-          onClick={() => task.run(() => api.approve(actionId), "Approved.")}
+          onClick={() => void decision.decide({ kind: "approve" }, "Approved.")}
         >
           <Icon name="check" size={13} />
           Approve
@@ -41,37 +69,42 @@ export function QuickDecision({ actionId, label }: { actionId: string; label: st
         <button
           type="button"
           className="btn btn-sm btn-ghost"
-          disabled={task.busy}
+          disabled={!record || decision.busy}
           aria-label={`Reject: ${label}`}
-          onClick={() => task.run(() => api.reject(actionId), "Rejected.")}
+          onClick={() => void decision.decide({ kind: "reject" }, "Rejected.")}
         >
           Reject
         </button>
       </span>
-      <Feedback error={task.error} />
+      <Feedback error={decision.error} />
     </>
   );
 }
 
 /**
- * An `approval_request` in the timeline. While the action is in `task.pendingActionIds` it is
- * the full decision card (approve, edit a draft, reject); afterwards a one-line outcome.
+ * An `approval_request` in the timeline. While the action is pending it is the full decision
+ * card (approve, edit a draft, reject) once the record has loaded; afterwards a one-line outcome.
  */
 export function ApprovalItem({
   item,
   task,
   record,
+  load,
+  onRetry,
   selected,
   onSelect,
 }: {
   item: ApprovalRequest;
   task: Task;
   record?: ActionRecord;
+  load: LoadState | "idle";
+  onRetry: () => void;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const { actionId, summary } = item.payload;
-  if (isPending(task, actionId)) {
+  const { actionId, summary } = item.payload,
+    { decided: done } = useActions();
+  if (isPending(task, actionId, record) && !done.has(actionId)) {
     return record ? (
       <div className="tl-approval">
         <DecisionCard action={record} selected={selected} onSelect={onSelect} />
@@ -82,7 +115,13 @@ export function ApprovalItem({
           <Icon name="approval" size={14} />
           <PlainText text={summary} />
         </div>
-        <QuickDecision actionId={actionId} label={summary} />
+        <QuickDecision
+          actionId={actionId}
+          label={summary}
+          record={record}
+          load={load}
+          onRetry={onRetry}
+        />
       </div>
     );
   }

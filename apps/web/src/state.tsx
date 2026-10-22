@@ -15,27 +15,48 @@ import { createRefreshThrottle } from "./refresh-throttle";
 /** Frames on /ws: domain events plus setup-task updates from the onboarding service. */
 type WorkspaceEvent = DomainEvent | { type: "setup.task.updated"; task: unknown };
 type Listener = (event: WorkspaceEvent) => void;
+/** A toast button, such as Undo; it disappears with the toast. */
+export interface NoticeAction {
+  label: string;
+  run: () => void;
+}
 interface WorkspaceState {
   version: number;
+  /** Counts reconnects of `/ws` (not the first connect): what may have changed offline. */
+  reconnects: number;
   subscribe: (listener: Listener) => () => void;
   refresh: () => void;
   connection: string;
   notice: string;
-  notify: (message: string) => void;
+  noticeAction?: NoticeAction;
+  notify: (message: string, action?: NoticeAction) => void;
 }
 const Workspace = createContext<WorkspaceState>({
   version: 0,
+  reconnects: 0,
   subscribe: () => () => {},
   refresh: () => {},
   connection: "Connecting",
   notice: "",
   notify: () => {},
 });
+/** Window focus refetches only data older than this (R5-2, R5-12). */
+export const FOCUS_STALE_MS = 30_000;
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [version, setVersion] = useState(0),
+    [reconnects, setReconnects] = useState(0),
     [connection, setConnection] = useState("Connecting"),
-    [notice, notify] = useState("");
-  const refresh = useCallback(() => setVersion((v) => v + 1), []);
+    [toast, setToast] = useState<{ notice: string; noticeAction?: NoticeAction }>({ notice: "" });
+  const notify = useCallback(
+    (message: string, action?: NoticeAction) =>
+      setToast({ notice: message, noticeAction: message ? action : undefined }),
+    [],
+  );
+  const refreshedAt = useRef(Date.now());
+  const refresh = useCallback(() => {
+    refreshedAt.current = Date.now();
+    setVersion((v) => v + 1);
+  }, []);
   const listeners = useRef(new Set<Listener>());
   const subscribe = useCallback((listener: Listener) => {
     listeners.current.add(listener);
@@ -45,6 +66,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     let socket: WebSocket | undefined,
       reconnect: ReturnType<typeof setTimeout>,
       stopped = false,
+      dropped = false,
       attempts = 0;
     const throttle = createRefreshThrottle(refresh);
     const connect = () => {
@@ -55,7 +77,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       socket.onopen = () => {
         attempts = 0;
         setConnection("Live");
-        refresh();
+        // The first connect follows the first fetches; only a reconnect may have missed events.
+        if (dropped) {
+          dropped = false;
+          setReconnects((n) => n + 1);
+          refresh();
+        }
       };
       socket.onmessage = (message) => {
         try {
@@ -76,6 +103,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       };
       socket.onclose = () => {
         if (!stopped) {
+          dropped = true;
           void checkSession();
           setConnection("Reconnecting");
           reconnect = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempts++));
@@ -84,7 +112,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       socket.onerror = () => socket?.close();
     };
     connect();
-    const onFocus = () => refresh();
+    const onFocus = () => {
+      if (Date.now() - refreshedAt.current > FOCUS_STALE_MS) {
+        refresh();
+      }
+    };
     window.addEventListener("focus", onFocus);
     return () => {
       stopped = true;
@@ -95,14 +127,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh]);
   useEffect(() => {
-    if (!notice) {
+    if (!toast.notice) {
       return;
     }
     const timer = setTimeout(() => notify(""), 5500);
     return () => clearTimeout(timer);
-  }, [notice]);
+  }, [toast, notify]);
   return (
-    <Workspace.Provider value={{ version, subscribe, refresh, connection, notice, notify }}>
+    <Workspace.Provider
+      value={{ version, reconnects, subscribe, refresh, connection, ...toast, notify }}
+    >
       {children}
     </Workspace.Provider>
   );
