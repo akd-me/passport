@@ -78,4 +78,9 @@ export interface ToolRegistryOptions {
   observer?: (event: ToolCallEvent) => void;
   /** Plan mode: write tools return `{ status: "planned" }` without executing. */
   readOnly?: boolean;
+  /**
+   * The host renders `IMAGE_CONTENT` on results as image content (the MCP server does), so
+   * `mail_attachment_read` returns images without `asImage:true`.
+   */
+  imageContent?: boolean;
 }

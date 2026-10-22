@@ -3,7 +3,7 @@ import { chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { builtinModules, createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import config from "../apps/server/esbuild.config.mjs";
+import config, { WORKER_BUNDLED, workerConfig } from "../apps/server/esbuild.config.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const serverDir = join(root, "apps/server");
@@ -61,6 +61,9 @@ async function collect(manifestPath) {
   }
   visited.add(manifest.name);
   for (const name of Object.keys(manifest.dependencies ?? {})) {
+    if (WORKER_BUNDLED.includes(name)) {
+      continue; // Bundled into the attachment worker below.
+    }
     if (name.startsWith("@passport/")) {
       const directory = join(root, "packages", name.slice("@passport/".length));
       workspaceEntries.set(name, join(directory, "src/index.ts"));
@@ -84,7 +87,15 @@ await mkdir(packageDir, { recursive: true });
 const result = await build(
   config({ serverDir, outdir: join(packageDir, "dist/server"), workspaceEntries }),
 );
+const worker = await build(workerConfig({ root, outdir: join(packageDir, "dist/server") }));
 const builtins = new Set(builtinModules);
+for (const output of Object.values(worker.metafile.outputs)) {
+  for (const { path, external } of output.imports) {
+    if (external && !path.startsWith("node:") && !builtins.has(path)) {
+      throw new Error(`The attachment worker must be self-contained; external import: ${path}`);
+    }
+  }
+}
 for (const output of Object.values(result.metafile.outputs)) {
   for (const { path, external } of output.imports) {
     if (!external || path.startsWith("node:") || builtins.has(path)) {

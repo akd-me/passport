@@ -1,3 +1,4 @@
+import { registerAttachmentRead } from "./attachments/tool.js";
 import { Context } from "./context.js";
 import { registerExtra } from "./extra.js";
 import { registerMailExport } from "./mail-export.js";
@@ -20,6 +21,7 @@ export function createToolRegistry(options: ToolRegistryOptions): Tool[] {
   registerExtra(ctx);
   registerOnDemandReads(ctx);
   registerMailRead(ctx);
+  registerAttachmentRead(ctx);
   registerOnDemandExtra(ctx);
   registerMailExport(ctx);
   registerNotes(ctx);
@@ -52,6 +54,7 @@ export const toMcpTools = (tools: readonly Tool[]) =>
       ...tool.annotations,
     },
   }));
+export { IMAGE_CONTENT, type ImageContent } from "./attachments/tool.js";
 export type { FreeBusyResolver } from "./availability.js";
 export { availability, availabilityEvents, expandRecurringEvents } from "./availability.js";
 export type { CategorizeInput } from "./categorize.js";
