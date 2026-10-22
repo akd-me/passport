@@ -9,7 +9,8 @@ export function createMailActions(options: ActionExecutorOptions) {
     patch: Parameters<Store["emails"]["patchMany"]>[1] & { providerId?: string },
   ) => {
     if (patch.providerId !== undefined) {
-      const email = await store.emails.get(id, { includeBodies: true });
+      // Keep cached bodies across the providerId rewrite without fetching any from the provider.
+      const email = await store.emails.get(id, { includeBodies: true, cacheOnly: true });
       if (email) {
         await store.emails.upsertMany([{ ...email, ...patch }]);
       }
@@ -39,7 +40,11 @@ export function createMailActions(options: ActionExecutorOptions) {
     }
     return account.capabilities.labels;
   };
-  const applyMailChanges = async (accountId: string, changes: MailChange[], emails: Email[]) => {
+  const applyMailChanges = async (
+    accountId: string,
+    changes: MailChange[],
+    emails: Array<{ providerId: string }>,
+  ) => {
     if (!changes.length) {
       return;
     }

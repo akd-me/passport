@@ -6,6 +6,7 @@ import {
   type ActionExecutorOptions,
   agentEmailPatchOf,
   draftOf,
+  FRESH_PRE_IMAGE,
   type Snapshot,
 } from "./executor-shared.js";
 
@@ -33,7 +34,8 @@ export function createRestoration(
         const changes: MailChange[] = [];
         const currents: Email[] = [];
         for (const prior of snapshot.emails) {
-          const current = await emailFor(prior.id, request.accountId);
+          // Diff against provider state, not the cache, so the inverse undoes what is really there.
+          const current = await emailFor(prior.id, request.accountId, FRESH_PRE_IMAGE);
           currents.push(current);
           const add = Object.keys(prior.keywords).filter(
             (key) => prior.keywords[key] && !current.keywords[key],

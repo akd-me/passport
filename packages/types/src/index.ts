@@ -10,6 +10,12 @@
  */
 
 import type { MailReader } from "./ondemand.js";
+import type {
+  EmailGetOptions,
+  StoreEmailsOnDemand,
+  StoreMailboxesOnDemand,
+  StoreOnDemand,
+} from "./store-ondemand.js";
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -583,7 +589,11 @@ export interface EmailQuery {
   threadId?: Id;
   matterId?: Id | null;
   personId?: Id;
-  /** Full-text query over subject/from/body (FTS5 syntax). */
+  /**
+   * Full-text query (FTS5 syntax) over cached envelopes: subject, from and preview. Since v0.3
+   * bodies are not indexed and only mail Passport has touched is cached, so results are partial;
+   * use `MailReader.search` for mailbox search.
+   */
   text?: string;
   keywords?: { has?: Keyword[]; not?: Keyword[] };
   category?: ActionCategory;
@@ -615,7 +625,7 @@ export interface SyncState {
   updatedAt: Timestamp;
 }
 
-export interface Store {
+export interface Store extends StoreOnDemand {
   // lifecycle
   migrate(): Promise<void>;
   close(): Promise<void>;
@@ -640,11 +650,15 @@ export interface Store {
     get(id: Id): Promise<Mailbox | null>;
     upsertMany(mailboxes: Mailbox[]): Promise<void>;
     deleteMany(ids: Id[]): Promise<void>;
-  };
+  } & StoreMailboxesOnDemand;
 
   emails: {
-    get(id: Id, opts?: { includeBodies?: boolean }): Promise<Email | null>;
-    getByProviderId(accountId: Id, providerId: string): Promise<Email | null>;
+    get(id: Id, opts?: EmailGetOptions): Promise<Email | null>;
+    getByProviderId(
+      accountId: Id,
+      providerId: string,
+      opts?: EmailGetOptions,
+    ): Promise<Email | null>;
     query(q: EmailQuery): Promise<Page<Email>>;
     upsertMany(emails: Email[]): Promise<void>;
     patchMany(
@@ -654,7 +668,7 @@ export interface Store {
       >,
     ): Promise<void>;
     deleteMany(ids: Id[]): Promise<void>;
-  };
+  } & StoreEmailsOnDemand;
 
   threads: {
     get(id: Id): Promise<Thread | null>;
@@ -1243,3 +1257,4 @@ export interface SetupTask {
 
 export * from "./mail-row.js";
 export * from "./ondemand.js";
+export * from "./store-ondemand.js";

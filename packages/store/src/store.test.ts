@@ -7,6 +7,7 @@ import { DEFAULT_POLICY_CONFIG } from "@passport/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { account, action, at, email, event, matter, person } from "./fixtures.js";
 import { openStore } from "./index.js";
+import { migrations } from "./migrations.js";
 
 let store: Store;
 beforeEach(async () => {
@@ -25,7 +26,7 @@ describe("lifecycle and credentials", () => {
     await store.migrate();
     expect(await store.kv.get("existing")).toBe("value");
     await store.emails.upsertMany([email()]);
-    expect((await store.emails.query({ text: '"quick brown"' })).total).toBe(1);
+    expect((await store.emails.query({ text: '"mountain expedition"' })).total).toBe(1);
   });
 
   it("closes idempotently and rejects later repository calls", async () => {
@@ -81,7 +82,9 @@ describe("lifecycle and credentials", () => {
       const bytes = await readFile(path);
       expect(bytes.includes(Buffer.from("unique-secret-not-in-database"))).toBe(false);
       const raw = new DatabaseSync(path);
-      expect(raw.prepare("SELECT version FROM schema_version").all()).toEqual([{ version: 1 }]);
+      expect(raw.prepare("SELECT version FROM schema_version").all()).toEqual(
+        migrations.map((_, index) => ({ version: index + 1 })),
+      );
       expect(raw.prepare("SELECT COUNT(*) AS count FROM kv").get()).toEqual({ count: 0 });
       raw.exec("VACUUM");
       raw.close();
@@ -100,7 +103,9 @@ describe("lifecycle and credentials", () => {
         token: "unique-secret-not-in-database",
       });
       expect(
-        (await correct.emails.query({ text: '"quick brown"' })).items.map((item) => item.id),
+        (await correct.emails.query({ text: '"mountain expedition"' })).items.map(
+          (item) => item.id,
+        ),
       ).toEqual(["retained"]);
     } finally {
       for (const openedStore of opened) {
@@ -271,27 +276,36 @@ describe("email records and search", () => {
   it.each([
     "Travel",
     "expedition",
-    '"quick brown"',
-    "reserv*",
+    '"mountain expedition"',
+    "expedi*",
     "Alice",
     "example",
     "from:Alice",
-    "textBody:reserv*",
+    "preview:expedi*",
   ])("searches with FTS5 MATCH: %s", async (text) => {
     expect((await store.emails.query({ text })).items.map((item) => item.id)).toEqual(["email"]);
   });
 
+  it("searches cached envelopes only, never bodies", async () => {
+    for (const text of ['"quick brown"', "reservations", "fox"]) {
+      expect((await store.emails.query({ text })).total).toBe(0);
+    }
+    await expect(store.emails.query({ text: "textBody:fox" })).rejects.toMatchObject({
+      code: "ERR_SQLITE_ERROR",
+    });
+  });
+
   it("does not treat unquoted reordered words as a phrase and updates/deletes FTS postings", async () => {
-    expect((await store.emails.query({ text: '"brown quick"' })).total).toBe(0);
+    expect((await store.emails.query({ text: '"expedition mountain"' })).total).toBe(0);
     await store.emails.upsertMany([
       email("email", {
         subject: "Completely changed",
-        preview: "Nothing",
+        preview: "Replacement",
         from: [],
-        textBody: "Replacement",
+        textBody: "Body only",
       }),
     ]);
-    expect((await store.emails.query({ text: "Travel OR fox OR Alice" })).total).toBe(0);
+    expect((await store.emails.query({ text: "Travel OR expedition OR Alice" })).total).toBe(0);
     expect((await store.emails.query({ text: "Replacement" })).total).toBe(1);
     await store.emails.deleteMany(["email"]);
     expect((await store.emails.query({ text: "Replacement" })).total).toBe(0);
@@ -377,7 +391,7 @@ describe("email records and search", () => {
     expect(await store.emails.get("new")).toBeNull();
     expect(await store.emails.get("email")).toEqual(email());
     expect((await store.emails.query({ text: "Uncommitted" })).total).toBe(0);
-    expect((await store.emails.query({ text: "fox" })).total).toBe(1);
+    expect((await store.emails.query({ text: "expedition" })).total).toBe(1);
     await store.emails.upsertMany([email("new")]);
     expect((await store.emails.query({})).total).toBe(2);
   });
@@ -850,7 +864,7 @@ it("R11 excludes tombstones from queries, FTS, totals and pagination unless incl
     email("deleted", { keywords: { $deleted: true } }),
     email("false", { keywords: { $deleted: false } }),
   ]);
-  for (const text of [undefined, "reservations"]) {
+  for (const text of [undefined, "expedition"]) {
     const first = await store.emails.query({ text, limit: 1 });
     expect(first.total).toBe(2);
     expect(first.items[0]?.id).toBe("live");
@@ -861,5 +875,5 @@ it("R11 excludes tombstones from queries, FTS, totals and pagination unless incl
   }
   expect((await store.emails.get("deleted"))?.keywords.$deleted).toBe(true);
   await store.emails.patchMany(["deleted"], { keywords: { $deleted: false } });
-  expect((await store.emails.query({ text: "reservations" })).total).toBe(3);
+  expect((await store.emails.query({ text: "expedition" })).total).toBe(3);
 });

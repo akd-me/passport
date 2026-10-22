@@ -112,4 +112,41 @@ export const migrations: readonly string[] = [
   CREATE TABLE policy_config (id TEXT PRIMARY KEY CHECK(id = 'global'), data TEXT NOT NULL CHECK(json_valid(data)));
   CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `,
+  // v0.3: the mirror becomes a read-through envelope cache. Bodies stay in their columns as a
+  // TTL/LRU cache (body_fetched_at); FTS covers envelopes only (subject, from, preview).
+  String.raw`
+  DROP TRIGGER emails_fts_insert;
+  DROP TRIGGER emails_fts_delete;
+  DROP TRIGGER emails_fts_update;
+  DROP TABLE emails_fts;
+  ALTER TABLE emails ADD COLUMN touched_at TEXT;
+  ALTER TABLE emails ADD COLUMN labels_fresh_at TEXT;
+  ALTER TABLE emails ADD COLUMN body_fetched_at TEXT;
+  UPDATE emails SET
+    touched_at = received_at,
+    body_fetched_at = CASE
+      WHEN textBody IS NOT NULL OR html_body IS NOT NULL
+        OR json_type(data, '$.textBody') IS NOT NULL OR json_type(data, '$.htmlBody') IS NOT NULL
+      THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END;
+  CREATE INDEX emails_touched ON emails(touched_at, id);
+  CREATE INDEX emails_body_fetched ON emails(body_fetched_at) WHERE body_fetched_at IS NOT NULL;
+  CREATE VIRTUAL TABLE emails_fts USING fts5(
+    subject, "from", preview, content='emails', content_rowid='rowid', tokenize='unicode61'
+  );
+  INSERT INTO emails_fts(emails_fts) VALUES ('rebuild');
+  CREATE TRIGGER emails_fts_insert AFTER INSERT ON emails BEGIN
+    INSERT INTO emails_fts(rowid, subject, "from", preview)
+      VALUES (new.rowid, new.subject, new."from", new.preview);
+  END;
+  CREATE TRIGGER emails_fts_delete AFTER DELETE ON emails BEGIN
+    INSERT INTO emails_fts(emails_fts, rowid, subject, "from", preview)
+      VALUES ('delete', old.rowid, old.subject, old."from", old.preview);
+  END;
+  CREATE TRIGGER emails_fts_update AFTER UPDATE OF subject, "from", preview ON emails BEGIN
+    INSERT INTO emails_fts(emails_fts, rowid, subject, "from", preview)
+      VALUES ('delete', old.rowid, old.subject, old."from", old.preview);
+    INSERT INTO emails_fts(rowid, subject, "from", preview)
+      VALUES (new.rowid, new.subject, new."from", new.preview);
+  END;
+`,
 ];

@@ -31,8 +31,27 @@ export interface ActionExecutorOptions {
 }
 export type Request = { [K in ActionType]: ActionRequest<K> }[ActionType];
 export type EmailPatch = Pick<Email, "id" | "matterId" | "personIds" | "category">;
+/**
+ * Body-free pre-image of a mail mutation: enough to compute and display the inverse. Read with
+ * `fresh: true` so it reflects provider state, not a possibly stale cache.
+ */
+export type MailPreImage = Pick<
+  Email,
+  "id" | "accountId" | "providerId" | "threadId" | "mailboxIds" | "keywords" | "subject"
+>;
+export const preImageOf = (email: Email): MailPreImage => ({
+  id: email.id,
+  accountId: email.accountId,
+  providerId: email.providerId,
+  threadId: email.threadId,
+  mailboxIds: [...email.mailboxIds],
+  keywords: { ...email.keywords },
+  subject: email.subject,
+});
+/** Pre-image reads: provider-fresh labels and flags, no bodies. */
+export const FRESH_PRE_IMAGE = { fresh: true, includeBodies: false } as const;
 export type Snapshot =
-  | { kind: "mail"; emails: Email[]; createdMailboxIds?: string[] }
+  | { kind: "mail"; emails: MailPreImage[]; createdMailboxIds?: string[] }
   | { kind: "draft"; email: Email | null; createdId?: string }
   | { kind: "event"; event: CalendarEvent | null; createdId?: string }
   | {

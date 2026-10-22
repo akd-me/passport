@@ -5,16 +5,19 @@ import type {
   CalendarEvent,
   DraftInput,
   Email,
+  EmailGetOptions,
   Matter,
 } from "@passport/types";
 import { PolicyError } from "./errors.js";
 import {
   type ActionExecutorOptions,
   draftOf,
+  FRESH_PRE_IMAGE,
   isCompletePerson,
   marker,
   normalizedDraft,
   patchOf,
+  preImageOf,
   type Request,
   type Snapshot,
 } from "./executor-shared.js";
@@ -57,8 +60,12 @@ export function createExecutorContext(options: ActionExecutorOptions) {
     }
     return claimed;
   };
-  const emailFor = async (id: string, accountId: string): Promise<Email> => {
-    const email = await store.emails.get(id, { includeBodies: true });
+  const emailFor = async (
+    id: string,
+    accountId: string,
+    opts: EmailGetOptions = { includeBodies: true },
+  ): Promise<Email> => {
+    const email = await store.emails.get(id, opts);
     if (!email) {
       throw new PolicyError("EMAIL_NOT_FOUND", `Email ${id} does not exist`);
     }
@@ -84,8 +91,8 @@ export function createExecutorContext(options: ActionExecutorOptions) {
     }
     return matter;
   };
-  const allEmails = (ids: string[], accountId: string) =>
-    Promise.all([...new Set(ids)].map((id) => emailFor(id, accountId)));
+  const allEmails = (ids: string[], accountId: string, opts?: EmailGetOptions) =>
+    Promise.all([...new Set(ids)].map((id) => emailFor(id, accountId, opts)));
   const resolvedDraft = async (request: ActionRequest): Promise<DraftInput> => {
     const { draft, draftEmailId } = request.params as ActionParams["send"];
     if (!!draft === !!draftEmailId) {
@@ -205,7 +212,9 @@ export function createExecutorContext(options: ActionExecutorOptions) {
       case "delete":
         return {
           kind: "mail",
-          emails: await allEmails(request.params.emailIds, request.accountId),
+          emails: (
+            await allEmails(request.params.emailIds, request.accountId, FRESH_PRE_IMAGE)
+          ).map(preImageOf),
         };
       case "draft_create":
         return { kind: "draft", email: null };
