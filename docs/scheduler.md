@@ -18,6 +18,7 @@ create a routine. Changes arrive through the existing WebSocket event stream.
 | `trust.decay`            | Daily 03:00                                                     | Apply trust decay                                                                                   |
 | `agent.daily_digest`     | Daily `dailyDigestHour` (`PASSPORT_DIGEST_HOUR`, default 08:00) | Agent daily digest                                                                                  |
 | `agent.matter_review`    | Daily 04:00                                                     | Agent matter review                                                                                 |
+| `tasks.maintenance`      | Every 10 minutes                                                | Wake snoozed tasks whose time came, auto-settle tasks idle 3 days, end conversation watches older than 14 days ([tasks](tasks.md)) |
 | `store.maintenance`      | Sunday 03:30                                                    | Call optional store `maintenance()`, or `vacuum()` / `optimizeFts()`; record skipped if unavailable |
 
 Daily/weekly defaults use the machine's local IANA time zone, captured when registered.
@@ -39,7 +40,17 @@ scheduler handle's `registerAccount(accountId)` / `unregisterAccount(accountId)`
 
 A routine stores a name, schedule, and instruction. For example, every weekday at 07:30:
 “Triage anything new, then prepare my day's digest.” The scheduler calls
-`agent.run({ kind: "manual", instruction })`. The runtime's existing tools and policy engine
+`agent.run({ kind: "manual", instruction })` in the background lane.
+
+Each routine, and each of the model-backed built-ins `agent.daily_digest` and
+`agent.matter_review`, is bound to its own `kind: "routine"` [task](tasks.md). The job's
+`taskId` (in `GET /api/jobs` and `JobState`) points at it. Every run is recorded on that task as a
+`schedule` run, with its tool calls, model text and the ActionRecords it created. A run that
+produced something brings the task back to the inbox, and a failure surfaces it with
+`needsUser: "failure"`. In `@passport/scheduler` this is `JobDefinition.taskId` plus the
+`SchedulerOptions.runOnTask(taskId, ctx, run)` seam. The host records the run and passes
+`ctx.agentRunOptions`, which the job forwards to `AgentRuntime.run`. Deleting a routine keeps
+its task and timeline. The runtime's existing tools and policy engine
 control every action. A routine cannot grant itself permissions or bypass the outbox.
 
 The form supports interval, daily and weekly schedules, a named time zone, and three example
