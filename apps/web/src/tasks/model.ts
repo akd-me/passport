@@ -1,12 +1,12 @@
 import type { Task, TaskRun, TaskRunStatus, TaskRunTrigger } from "@passport/types";
 
 export type SectionId = "pinned" | "inbox" | "working" | "snoozed" | "settled";
-export const SECTIONS: { id: SectionId; label: string; empty: string }[] = [
-  { id: "pinned", label: "Pinned", empty: "" },
-  { id: "inbox", label: "Inbox", empty: "Nothing has come back to you." },
-  { id: "working", label: "Working", empty: "" },
-  { id: "snoozed", label: "Snoozed", empty: "" },
-  { id: "settled", label: "Settled", empty: "" },
+export const SECTIONS: { id: SectionId; label: string }[] = [
+  { id: "pinned", label: "Pinned" },
+  { id: "inbox", label: "Inbox" },
+  { id: "working", label: "Working" },
+  { id: "snoozed", label: "Snoozed" },
+  { id: "settled", label: "Settled" },
 ];
 
 /** Most recent first: "when it last came back to you", then id for a stable order. */

@@ -132,6 +132,7 @@ export function TaskComposer({
             </button>
           )}
           <button
+            type="submit"
             className="send-btn"
             aria-label={running ? "Queue message" : "Send message"}
             disabled={!text.trim() || !!sending}

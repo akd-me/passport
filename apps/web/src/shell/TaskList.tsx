@@ -78,12 +78,9 @@ export function TaskRow({ task, running }: { task: Task; running: boolean }) {
           </small>
         </span>
         {pending > 0 && (
-          <span
-            className="side-count strong"
-            aria-label={`${pending} waiting for approval`}
-            title={`${pending} waiting for approval`}
-          >
+          <span className="side-count strong" title={`${pending} waiting for approval`}>
             {pending}
+            <span className="sr-only"> waiting for approval</span>
           </span>
         )}
       </NavLink>

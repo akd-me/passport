@@ -1,5 +1,5 @@
 import type { ActionRecord, Page, Task, TaskItem, TaskRun } from "@passport/types";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { logger } from "../logger";
 import { useWorkspace, useWorkspaceEvents } from "../state";
@@ -197,5 +197,5 @@ export function useTaskActions(runs: TaskRun[]) {
       cancelled = true;
     };
   }, [key, version]);
-  return useMemo(() => records, [records]);
+  return records;
 }

@@ -95,8 +95,9 @@ export function Sidebar() {
           <Icon name="queue" size={15} />
           <span className="side-label">Needs you</span>
           {waiting > 0 && (
-            <span className="side-count strong" aria-label={`${waiting} need you`}>
+            <span className="side-count strong">
               {waiting}
+              <span className="sr-only"> need you</span>
             </span>
           )}
         </NavLink>

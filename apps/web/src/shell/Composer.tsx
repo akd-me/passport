@@ -281,6 +281,7 @@ export function Composer({
             <Kbd>↵</Kbd> start
           </span>
           <button
+            type="submit"
             className="send-btn"
             aria-label="Start task"
             disabled={!text.trim() || run.state === "running"}

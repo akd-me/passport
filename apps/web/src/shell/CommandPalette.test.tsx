@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { TasksProvider } from "../tasks/store";
 import { Harness, stubApi } from "../test-utils";
 import { useUi } from "../ui-state";
 import { type Command, CommandPalette, filterCommands } from "./CommandPalette";
@@ -12,6 +13,22 @@ function OpenPalette() {
 }
 function renderPalette() {
   stubApi({
+    "/tasks": {
+      items: [
+        {
+          id: "t1",
+          title: "Hetzner invoices",
+          status: "inbox",
+          kind: "task",
+          needsUser: "approval",
+          pendingActionIds: ["a1"],
+          pinned: false,
+          watches: [],
+          accountIds: [],
+          lastActivityAt: "2026-10-22T10:00:00Z",
+        },
+      ],
+    },
     "/matters": [
       { id: "m1", title: "Northstar launch", status: "active", nextStep: "Confirm Thursday" },
     ],
@@ -26,8 +43,10 @@ function renderPalette() {
   });
   return render(
     <Harness>
-      <OpenPalette />
-      <CommandPalette />
+      <TasksProvider>
+        <OpenPalette />
+        <CommandPalette />
+      </TasksProvider>
     </Harness>,
   );
 }
@@ -81,5 +100,13 @@ describe("command palette", () => {
     expect(input).toHaveAttribute("aria-activedescendant", screen.getAllByRole("option")[1]!.id);
     fireEvent.keyDown(input, { key: "Escape" });
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  });
+
+  it("lists tasks with what they need", async () => {
+    renderPalette();
+    const input = await screen.findByRole("combobox");
+    fireEvent.change(input, { target: { value: "hetzner" } });
+    const option = await screen.findByRole("option", { name: /Hetzner invoices/ });
+    expect(option).toHaveTextContent("1 change to approve");
   });
 });
