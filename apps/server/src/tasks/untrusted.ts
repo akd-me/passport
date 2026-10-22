@@ -6,32 +6,35 @@
 import { randomBytes } from "node:crypto";
 import { type MailRow, TASK_LIMITS } from "@passport/types";
 
-const INVISIBLE = "​";
+const INVISIBLE = "\u200b";
 const SECRET_KEY = /pass(word)?|secret|token|authorization|cookie|api[-_]?key|credential/i;
 const BODY_KEY = /^(textBody|htmlBody|body|html|content|markdown|data)$/i;
 const TOKEN_SHAPE = /[A-Za-z0-9_\-+/=]{40,}/g;
 
-/** Neutralises `$`, mention-style `@` and a line-leading `/` with an invisible joiner. */
+/** Characters that may precede `@` inside an address (`local@domain.tld`). */
+const ADDRESS_LOCAL = /[\p{L}\p{N}._%+-]/u;
+/** A dotted domain after `@`; an `@` followed by anything else reads as a mention. */
+const DOTTED_DOMAIN = /^[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/u;
+
+/**
+ * Neutralises `$` (and fullwidth `＄`/`﹩`), an `@`/`＠` not inside an address, and a line-leading
+ * `/`/`／` (after any indentation; NEL counts as a line break) with an invisible joiner.
+ * Idempotent; identical to `neutralize` in `@passport/tools` (R4-34).
+ */
 export function neutralize(text: string): string {
-  return (
-    text
-      // Fullwidth and small sigils some hosts fold to ASCII (R4-34).
-      .replace(/[＄﹩]/g, "$")
-      .replace(/／/g, "/")
-      .replace(/＠/g, "@")
-      .replace(/\$/g, () => `$${INVISIBLE}`)
-      // `@` right after an address local part stays (`a.b@x`); `-@`, `.@` at a word start do not.
-      .replace(
-        /(^|[^\p{L}\p{N}_%+.-]|(?<![\p{L}\p{N}_])[.+-])@(?=[\p{L}\p{N}_])/gmu,
-        (_, b: string) => {
-          return `${b}@${INVISIBLE}`;
-        },
-      )
-      // Any Unicode space counts as indentation, and NEL as a line break.
-      .replace(/(^|\u0085)([\p{Zs}\t\v\f]*)\//gmu, (_, br: string, indent: string) => {
-        return `${br}${indent}/${INVISIBLE}`;
-      })
-  );
+  return text
+    .replace(/[$\uFF04\uFE69](?!\u200b)/g, (sigil) => `${sigil}${INVISIBLE}`)
+    .replace(/[@\uFF20](?=[\p{L}\p{N}_])/gu, (sigil: string, at: number, whole: string) => {
+      const inAddress =
+        sigil === "@" &&
+        ADDRESS_LOCAL.test(whole[at - 1] ?? "") &&
+        DOTTED_DOMAIN.test(whole.slice(at + 1, at + 254));
+      return inAddress ? sigil : `${sigil}${INVISIBLE}`;
+    })
+    .replace(
+      /(^|\u0085)([^\S\r\n\u2028\u2029]*)([/\uFF0F])(?!\u200b)/gm,
+      (_, start: string, indent: string, slash: string) => `${start}${indent}${slash}${INVISIBLE}`,
+    );
 }
 
 /** Single line, at most `max` characters, token-shaped strings redacted. */

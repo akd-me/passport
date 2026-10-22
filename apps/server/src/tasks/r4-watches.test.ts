@@ -97,6 +97,7 @@ describe("R4 conversation watches", () => {
       expect(neutralize(text)).toContain("​");
     }
     expect(neutralize("sam.lee@example.com")).toBe("sam.lee@example.com");
+    expect(neutralize(neutralize("$x /y @z"))).toBe(neutralize("$x /y @z"));
   });
 
   it("R4-8 three automatic replies stop the watch; two do not", async () => {
