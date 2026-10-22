@@ -1,7 +1,8 @@
-import type { ActionRecord } from "@passport/types";
+import type { ActionRecord, Task, TaskRun } from "@passport/types";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { api } from "../api";
+import { taskApi } from "../tasks/api";
 import { Harness, stubApi } from "../test-utils";
 import { groupProposals, WorkQueue } from "./Decisions";
 
@@ -151,15 +152,13 @@ describe("work queue", () => {
     expect(order).toEqual(["Reason p4", "Reason p2", "Reason p3", "Reason p1"]);
   });
 
-  it("sends a plain-language instruction to the agent and reports the result", async () => {
+  it("starts a task from the composer, mentioning the selected proposal's message", async () => {
     stubQueue();
-    const run = vi.spyOn(api, "runAgent").mockResolvedValue({
-      id: "run",
-      trigger: { kind: "manual", instruction: "Draft replies" },
-      startedAt: new Date().toISOString(),
-      actionIds: ["p1", "p2"],
-      summary: "",
-    });
+    const created = {
+      task: { id: "t1", permissionMode: "supervised" } as Task,
+      run: { id: "r1", taskId: "t1", status: "queued" } as TaskRun,
+    };
+    const create = vi.spyOn(taskApi, "create").mockResolvedValue(created);
     render(
       <Harness>
         <WorkQueue />
@@ -173,12 +172,14 @@ describe("work queue", () => {
     fireEvent.change(input, { target: { value: "Draft replies" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() =>
-      expect(run).toHaveBeenCalledWith({ instruction: "Draft replies", emailIds: ["e1"] }),
+      expect(create).toHaveBeenCalledWith({
+        message: "Draft replies\n\nMessage: “Subject p1” (id e1).",
+        title: "Draft replies",
+      }),
     );
-    expect(await screen.findByText(/2 actions ready/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Don’t include Subject p1" }));
     fireEvent.change(input, { target: { value: "Summarise" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send instruction" }));
-    await waitFor(() => expect(run).toHaveBeenLastCalledWith({ instruction: "Summarise" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start task" }));
+    await waitFor(() => expect(create).toHaveBeenLastCalledWith({ message: "Summarise" }));
   });
 });

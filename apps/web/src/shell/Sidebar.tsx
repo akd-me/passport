@@ -1,13 +1,14 @@
-import type { ActionRecord, Matter, Page, Person } from "@passport/types";
-import type { ReactNode } from "react";
-import { Link, NavLink, useLocation, useNavigate, useSearchParams } from "react-router";
-import { AccountDot, useAccounts } from "../accounts/AccountFilter";
-import { watchLabel } from "../accounts/AccountRow";
+import type { ActionRecord, Page } from "@passport/types";
+import { Link, NavLink, useSearchParams } from "react-router";
+import { useAccounts } from "../accounts/AccountFilter";
 import { Icon, Kbd, mod } from "../components/ui";
-import { providerNames } from "../connect/setup-task-model";
 import { useResource, useWorkspace } from "../state";
+import { needsYou } from "../tasks/model";
+import { useTasks } from "../tasks/store";
 import { useUi } from "../ui-state";
 import { ModeMenu } from "../views/Trust";
+import { AccountsGroup } from "./SidebarAccounts";
+import { TaskList } from "./TaskList";
 
 export function BrandMark({ size = 18 }: { size?: number }) {
   return (
@@ -28,202 +29,19 @@ export function BrandMark({ size = 18 }: { size?: number }) {
   );
 }
 
-function Group({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="side-group" aria-label={title}>
-      <div className="side-group-head">
-        <h2>{title}</h2>
-        {action}
-      </div>
-      <ul>{children}</ul>
-    </section>
-  );
-}
-
-const scopedRoutes = ["/", "/matters", "/activity"];
-
-/** A setup waiting on the user stays reachable after its dialog is closed. */
-function SetupWaiting() {
-  const { connecting, setConnecting, setup } = useUi();
-  const task = setup.task;
-  if (connecting || task?.status !== "waiting_for_user") {
-    return null;
-  }
-  return (
-    <li>
-      <button type="button" className="side-row setup-waiting" onClick={() => setConnecting(true)}>
-        <Icon name="alert" size={14} />
-        <span className="side-label">
-          Setup needs you
-          <small>Connecting {providerNames[task.provider]}</small>
-        </span>
-      </button>
-    </li>
-  );
-}
-
-function AccountsGroup() {
-  const { accounts } = useAccounts(),
-    { setConnecting } = useUi(),
-    [params] = useSearchParams(),
-    location = useLocation(),
-    navigate = useNavigate();
-  const active = params.get("accountId");
-  const mail = accounts.filter((a) => a.capabilities.mail);
-  return (
-    <Group
-      title="Accounts"
-      action={
-        <button
-          type="button"
-          className="icon-btn tiny"
-          aria-label="Connect an account"
-          title="Connect an account"
-          onClick={() => setConnecting(true)}
-        >
-          <Icon name="plus" size={14} />
-        </button>
-      }
-    >
-      {mail.map((account) => {
-        const selected = active === account.id,
-          state = watchLabel(account),
-          attention = state !== "Watching" || !!account.lastSyncError;
-        return (
-          <li key={account.id}>
-            <button
-              type="button"
-              className={`side-row account ${selected ? "active" : ""}`}
-              aria-pressed={selected}
-              title={selected ? "Show all accounts" : `Show only ${account.emailAddress}`}
-              onClick={() => {
-                const base = scopedRoutes.includes(location.pathname) ? location.pathname : "/";
-                const next = new URLSearchParams(base === location.pathname ? params : undefined);
-                if (selected) {
-                  next.delete("accountId");
-                } else {
-                  next.set("accountId", account.id);
-                }
-                navigate(`${base}${next.size ? `?${next}` : ""}`);
-              }}
-            >
-              <AccountDot id={account.id} />
-              <span className="side-label">
-                {account.emailAddress}
-                <small className={attention ? "warn" : ""}>{state}</small>
-              </span>
-              {attention && <Icon name="alert" size={13} className="warn" />}
-            </button>
-          </li>
-        );
-      })}
-      <SetupWaiting />
-      <li>
-        <button type="button" className="side-row quiet" onClick={() => setConnecting(true)}>
-          <Icon name="plus" size={14} />
-          <span className="side-label">
-            {mail.length ? "Connect another" : "Connect an account"}
-          </span>
-        </button>
-      </li>
-    </Group>
-  );
-}
-
-function MattersGroup({ pending }: { pending: Map<string, number> }) {
-  const matters = useResource<Matter[]>("/matters?status=active,waiting");
-  const list = matters.data ?? [];
-  return (
-    <Group
-      title="Matters"
-      action={
-        <Link to="/matters" className="quiet-link small">
-          All
-        </Link>
-      }
-    >
-      {list.slice(0, 12).map((m) => (
-        <li key={m.id}>
-          <NavLink
-            to={`/matters/${m.id}`}
-            className={({ isActive }) => `side-row ${isActive ? "active" : ""} status-${m.status}`}
-          >
-            <span className={`matter-glyph ${m.status}`} aria-hidden="true" />
-            <span className="side-label">{m.title}</span>
-            {!!pending.get(m.id) && (
-              <span className="side-count" aria-label={`${pending.get(m.id)} waiting for you`}>
-                {pending.get(m.id)}
-              </span>
-            )}
-          </NavLink>
-        </li>
-      ))}
-      {matters.data && !list.length && <li className="side-empty">No open matters</li>}
-    </Group>
-  );
-}
-
-function PeopleGroup() {
-  const people = useResource<Person[]>("/people?relationship=known&limit=40");
-  const list = [...(people.data ?? [])]
-    .sort((a, b) => (b.stats.lastContactAt ?? "").localeCompare(a.stats.lastContactAt ?? ""))
-    .slice(0, 6);
-  return (
-    <Group
-      title="People"
-      action={
-        <Link to="/people" className="quiet-link small">
-          All
-        </Link>
-      }
-    >
-      {list.map((p) => {
-        const downgraded =
-          !!p.lastSeenBlueAt && p.verification === "green" && !p.downgradeAcknowledgedAt;
-        return (
-          <li key={p.id}>
-            <NavLink
-              to={`/people/${p.id}`}
-              className={({ isActive }) => `side-row ${isActive ? "active" : ""}`}
-            >
-              <span className={`person-dot ${p.verification}`} aria-hidden="true" />
-              <span className="side-label">{p.displayName}</span>
-              {downgraded && (
-                <span title="Verification changed" className="warn">
-                  <Icon name="alert" size={13} />
-                  <span className="sr-only">Verification changed</span>
-                </span>
-              )}
-            </NavLink>
-          </li>
-        );
-      })}
-    </Group>
-  );
-}
-
-/** Navigation: mode first, then accounts, matters and people. Settings live behind the gear. */
+/**
+ * Navigation: mode first, then the task list (Pinned, Inbox, Working, Snoozed, Settled), accounts,
+ * and the context units (matters, people). Settings live behind the gear.
+ */
 export function Sidebar() {
   const { toggleSidebar, setPalette, openSettings } = useUi(),
     { connection } = useWorkspace(),
     { mode } = useAccounts(),
+    tasks = useTasks(),
     [params] = useSearchParams();
   const decisions = useResource<Page<ActionRecord>>("/decisions");
   const proposed = decisions.data?.items.filter((a) => a.status === "proposed") ?? [];
-  const pending = new Map<string, number>();
-  for (const a of proposed) {
-    if (a.request.matterId) {
-      pending.set(a.request.matterId, (pending.get(a.request.matterId) ?? 0) + 1);
-    }
-  }
+  const waiting = tasks.available ? needsYou(tasks.tasks).length : proposed.length;
   const scope = params.get("accountId");
   const withScope = (path: string) =>
     scope ? `${path}?accountId=${encodeURIComponent(scope)}` : path;
@@ -243,7 +61,7 @@ export function Sidebar() {
       }}
     >
       <div className="sidebar-top">
-        <Link to="/" className="brand" aria-label="Passport, go to queue">
+        <Link to="/" className="brand" aria-label="Passport, start a new task">
           <BrandMark />
           <span>Passport</span>
         </Link>
@@ -266,14 +84,22 @@ export function Sidebar() {
         <ModeMenu />
       </div>
       <nav className="side-nav" aria-label="Workspace">
+        <NavLink to="/" end className={({ isActive }) => `side-row ${isActive ? "active" : ""}`}>
+          <Icon name="plus" size={15} />
+          <span className="side-label">New task</span>
+        </NavLink>
         <NavLink
-          to={withScope("/")}
-          end
+          to={withScope("/needs-you")}
           className={({ isActive }) => `side-row ${isActive ? "active" : ""}`}
         >
           <Icon name="queue" size={15} />
-          <span className="side-label">Queue</span>
-          {proposed.length > 0 && <span className="side-count strong">{proposed.length}</span>}
+          <span className="side-label">Needs you</span>
+          {waiting > 0 && (
+            <span className="side-count strong">
+              {waiting}
+              <span className="sr-only"> need you</span>
+            </span>
+          )}
         </NavLink>
         <NavLink
           to={withScope("/activity")}
@@ -284,9 +110,26 @@ export function Sidebar() {
         </NavLink>
       </nav>
       <div className="sidebar-scroll">
+        <nav aria-label="Tasks" className="task-nav">
+          <TaskList />
+        </nav>
         <AccountsGroup />
-        <MattersGroup pending={pending} />
-        <PeopleGroup />
+        <nav className="side-group side-secondary" aria-label="Context">
+          <NavLink
+            to={withScope("/matters")}
+            className={({ isActive }) => `side-row ${isActive ? "active" : ""}`}
+          >
+            <Icon name="matters" size={15} />
+            <span className="side-label">Matters</span>
+          </NavLink>
+          <NavLink
+            to="/people"
+            className={({ isActive }) => `side-row ${isActive ? "active" : ""}`}
+          >
+            <Icon name="people" size={15} />
+            <span className="side-label">People</span>
+          </NavLink>
+        </nav>
       </div>
       <div className="sidebar-foot">
         <span className={`live ${connection === "Live" ? "on" : ""}`} role="status">

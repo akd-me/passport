@@ -10,16 +10,23 @@ import { CommandPalette } from "./shell/CommandPalette";
 import { BrandMark, Sidebar } from "./shell/Sidebar";
 import { Surface } from "./shell/Surface";
 import { useWorkspace } from "./state";
+import { DecisionLink } from "./tasks/DecisionLink";
+import { TasksProvider } from "./tasks/store";
 import { isTyping, type SettingsSection, useUi } from "./ui-state";
 import { Activity } from "./views/Activity";
 import { WorkQueue } from "./views/Decisions";
 import { MatterPage, Matters } from "./views/Matters";
+import { NewTask } from "./views/NewTask";
 import { People, PersonPage } from "./views/People";
+import { TaskPage } from "./views/Task";
+import { Tasks } from "./views/Tasks";
 
 export function App() {
   return (
     <AccountScope>
-      <Shell />
+      <TasksProvider>
+        <Shell />
+      </TasksProvider>
     </AccountScope>
   );
 }
@@ -63,7 +70,7 @@ function Home() {
   if (!loaded) {
     return <Loading />;
   }
-  return accounts.length ? <WorkQueue /> : <Welcome />;
+  return accounts.length ? <NewTask /> : <Welcome />;
 }
 
 function useGlobalShortcuts() {
@@ -125,6 +132,9 @@ function Shell() {
       <main className="workspace">
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/tasks/:id" element={<TaskPage />} />
+          <Route path="/needs-you" element={<WorkQueue />} />
           <Route path="/matters" element={<Matters />} />
           <Route path="/matters/:id" element={<MatterPage />} />
           <Route path="/people" element={<People />} />
@@ -142,7 +152,7 @@ function Shell() {
                   <div>
                     <h2>There is nothing at this address.</h2>
                     <p>
-                      <Link to="/">Go to your queue</Link>
+                      <Link to="/">Start a new task</Link>
                     </p>
                   </div>
                 </div>
@@ -151,6 +161,7 @@ function Shell() {
           />
         </Routes>
       </main>
+      <DecisionLink />
       <CommandPalette />
       <SettingsDialog />
       <ConnectDialog />

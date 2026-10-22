@@ -8,6 +8,7 @@ import { App } from "./App";
 import { WorkspaceProvider } from "./state";
 import { UiProvider } from "./ui-state";
 import "./styles.css";
+import "./styles-tasks.css";
 import { initializeAuth } from "./auth";
 
 void initializeAuth(() =>

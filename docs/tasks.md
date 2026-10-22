@@ -226,11 +226,41 @@ reconnect, refetch `GET /api/tasks/:id` and page items with `afterSeq=<last seen
 - `tasks.maintenance` (every 10 minutes) handles snooze wake-ups, auto-settle and watch expiry.
   See [scheduler](scheduler.md).
 
+## UI
+
+The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
+
+- **Sidebar.** Pinned, Inbox, Working, Snoozed and Settled (folded), each ordered by
+  `lastActivityAt`. A row shows the title, an Inbox or Routine badge, a status mark (running,
+  watching, needs approval, failed), the pending approval count and the account dots. Its menu
+  pins, snoozes until a preset or a chosen time, settles or archives. These changes apply at once
+  and roll back if the server refuses. `j`/`k` move between rows, Enter opens, and ⌘K finds tasks.
+- **Task view** (`/tasks/:id`). Items are paged with `afterSeq` and extended by
+  `task.item.appended`. On a gap or a reconnect the client pages again from the last contiguous
+  `seq`. Each run gets a header with its trigger, status and change summary (counts by action type
+  from `/api/actions?runId=`, each record with its undo). Consecutive `tool_call` items of a run
+  collapse into one line that names at most two categories, writes first ("Archived 40, read 4
+  messages and 1 other step"). Proposals read "asked to", plan mode "planned to", and failed calls
+  are counted apart. Every item is rendered as plain text, whether or not it is `untrusted`.
+- **Approvals.** A pending `approval_request` is the queue's decision card (approve, edit a
+  draft, reject). The composer's approval panel lists every `pendingActionIds` entry and approves
+  all the reversible ones in one click.
+- **Composer.** Enter sends with `mode: "queue"` and ⌘Enter with `"steer"`. Stop calls
+  `/interrupt`. The permission picker and the Plan toggle `PATCH` the task, and the composer says
+  when the server returned a lower mode than the one asked for.
+- **New task** (`/`). The home composer calls `POST /api/tasks` and opens the task. Matter or
+  message context is appended to the message, because the route accepts no `matterId` or
+  `emailIds`. The v0.2 queue lives on as **Needs you** (`/needs-you`), under the tasks waiting on
+  the person.
+- **Deep links.** `?decision=<actionId>` opens the loaded task whose `pendingActionIds` holds the
+  action (`/tasks/:id?approval=<actionId>`). When no loaded task holds it, it falls back to
+  `/needs-you?decision=<actionId>`.
+- On the demo backend (`501 TASKS_UNAVAILABLE`) the sidebar and home say tasks need
+  `passport serve`.
+
 ## Not yet
 
 - `question` items and `needsUser: "question"` are reserved. No tool asks the person yet.
-- Collapsing consecutive reads ("Searched twice, read 4 messages") is left to the client.
-  `tool_call` items carry everything it needs.
 - Staged changes, the worktree analogue, are not implemented. Approval stays per action.
 - Approval choices "accept for this task" and "always" are not task-scoped yet. "Always" maps to
   the existing trust pin (`PUT /api/trust/:category/pin`).

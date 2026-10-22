@@ -1,18 +1,23 @@
-import type { AgentRun } from "@passport/types";
-import { useEffect, useState } from "react";
+import type { TrustLevel } from "@passport/types";
+import { useState } from "react";
+import { useNavigate } from "react-router";
 import { useAccounts } from "../accounts/AccountFilter";
-import { api } from "../api";
+import type { TrustData } from "../api";
+import { Popover } from "../components/Popover";
 import { Icon, Kbd } from "../components/ui";
 import { logger } from "../logger";
 import { providerLabel } from "../settings/ModelSettings";
-import { useWorkspace } from "../state";
+import { useResource } from "../state";
+import { taskApi } from "../tasks/api";
+import { useTasks } from "../tasks/store";
+import { clampOf } from "../tasks/TaskModes";
 import { useUi } from "../ui-state";
-import { ModeMenu } from "../views/Trust";
+import { TrustLadder, TrustPicker } from "../views/TrustControls";
+import { modeLabel } from "../views/trust-modes";
 
 type RunState =
   | { state: "idle" }
   | { state: "running"; instruction: string }
-  | { state: "done"; instruction: string; run: AgentRun }
   | { state: "failed"; instruction: string; error: string };
 
 const suggestions = [
@@ -21,49 +26,95 @@ const suggestions = [
   "What’s due in the next few days?",
 ];
 
-function outcome(run: AgentRun) {
-  if (run.error) {
-    return run.error;
+/** The task route takes the message only; context the agent should read rides along in it. */
+function withContext(
+  instruction: string,
+  matter?: { id: string; title: string },
+  email?: { emailId: string; label: string },
+) {
+  const lines = [instruction];
+  if (matter) {
+    lines.push(`Matter: “${matter.title}” (id ${matter.id}).`);
   }
-  const count = run.actionIds.length;
-  if (!count) {
-    return run.summary || "Done. Nothing needed changing.";
+  if (email) {
+    lines.push(`Message: “${email.label}” (id ${email.emailId}).`);
   }
-  return `${count} ${count === 1 ? "action" : "actions"} ready. Anything that needs you is in the queue.`;
+  return lines.join("\n\n");
+}
+
+/** The new task's permission mode; it starts at the global dial and can only be clamped. */
+function TaskModeChoice({
+  value,
+  onChange,
+}: {
+  value: TrustLevel;
+  onChange: (mode: TrustLevel) => void;
+}) {
+  return (
+    <Popover
+      label={`Permission mode for this task: ${modeLabel(value)}`}
+      placement="above"
+      className="mode-menu in-composer"
+      triggerClassName={`mode-trigger in-composer mode-${value}`}
+      trigger={
+        <>
+          <TrustLadder level={value} />
+          <span className="mode-trigger-label">{modeLabel(value)}</span>
+          <Icon name="chevron" size={14} className="chevron" />
+        </>
+      }
+    >
+      {(close) => (
+        <>
+          <div className="popover-title">How much this task does without asking</div>
+          <TrustPicker
+            compact
+            value={value}
+            onChange={(mode) => {
+              onChange(mode);
+              close();
+            }}
+          />
+          <div className="popover-footer">
+            <span>Passport lowers it to the account ladder if you pick higher.</span>
+          </div>
+        </>
+      )}
+    </Popover>
+  );
 }
 
 /**
- * Tell the agent what to do in plain language. The footer carries the permission mode and the
- * model, as in a coding agent’s composer.
+ * Start a task in plain language (`POST /api/tasks`) and open it. The footer carries the task's
+ * permission mode, Plan, and the model, as in a coding agent’s composer.
  */
 export function Composer({
   matterId,
   matterTitle,
-  onRun,
   showSuggestions = false,
   context,
+  autoFocus = false,
 }: {
   matterId?: string;
   matterTitle?: string;
-  onRun?: (run: AgentRun) => void;
   showSuggestions?: boolean;
-  /** The message the user is looking at; sent as `emailIds` unless they remove it. */
+  /** The message the user is looking at; mentioned in the task unless they remove it. */
   context?: { emailId: string; label: string };
+  autoFocus?: boolean;
 }) {
   const [text, setText] = useState(""),
     [run, setRun] = useState<RunState>({ state: "idle" }),
-    [dropped, setDropped] = useState<string>();
+    [dropped, setDropped] = useState<string>(),
+    [chosenMode, setMode] = useState<TrustLevel>(),
+    [plan, setPlan] = useState(false);
   const attached = context && context.emailId !== dropped ? context : undefined;
   const { composer, openSettings } = useUi(),
-    { refresh } = useWorkspace(),
-    { llm, mode } = useAccounts();
-  useEffect(() => {
-    if (run.state !== "done") {
-      return;
-    }
-    const timer = setTimeout(() => setRun({ state: "idle" }), 12000);
-    return () => clearTimeout(timer);
-  }, [run]);
+    { upsert, trackRuns } = useTasks(),
+    navigate = useNavigate(),
+    { llm, mode } = useAccounts(),
+    trust = useResource<TrustData>("/trust");
+  const dial = trust.data?.config.globalMode ?? "supervised",
+    taskMode = chosenMode ?? dial;
   const submit = async (instruction = text.trim()) => {
     if (!instruction || run.state === "running") {
       return;
@@ -73,23 +124,29 @@ export function Composer({
       setText("");
     }
     try {
-      const result = await api.runAgent({
-        instruction,
-        ...(matterId ? { matterId } : {}),
-        ...(attached ? { emailIds: [attached.emailId] } : {}),
+      const result = await taskApi.create({
+        message: withContext(
+          instruction,
+          matterId ? { id: matterId, title: matterTitle ?? "Matter" } : undefined,
+          attached,
+        ),
+        ...(matterId || attached ? { title: instruction.slice(0, 200) } : {}),
+        ...(chosenMode ? { permissionMode: chosenMode } : {}),
+        ...(plan ? { interactionMode: "plan" as const } : {}),
       });
-      setRun({ state: "done", instruction, run: result });
-      refresh();
-      onRun?.(result);
+      upsert(result.task);
+      trackRuns([result.run]);
+      setRun({ state: "idle" });
+      navigate(`/tasks/${encodeURIComponent(result.task.id)}`, {
+        state: { clamp: chosenMode ? clampOf(chosenMode, result.task.permissionMode) : null },
+      });
     } catch (e) {
-      // Agent composition failed; restoring the instruction unless a new draft was started.
-      logger.warn("Agent composition failed; restoring the instruction");
-
+      logger.warn("Task creation failed; restoring the instruction");
       setText((draft) => draft || instruction);
       setRun({
         state: "failed",
         instruction,
-        error: e instanceof Error ? e.message : "The agent could not run.",
+        error: e instanceof Error ? e.message : "The task could not start.",
       });
     }
   };
@@ -119,19 +176,10 @@ export function Composer({
       >
         {run.state !== "idle" && (
           <div className={`run-status ${run.state}`} role="status" aria-live="polite">
-            <Icon
-              name={
-                run.state === "running" ? "spinner" : run.state === "failed" ? "alert" : "check"
-              }
-              size={14}
-            />
+            <Icon name={run.state === "running" ? "spinner" : "alert"} size={14} />
             <span className="run-instruction">{run.instruction}</span>
             <span className="run-result">
-              {run.state === "running"
-                ? "Working…"
-                : run.state === "failed"
-                  ? run.error
-                  : outcome(run.run)}
+              {run.state === "running" ? "Starting the task…" : run.error}
             </span>
             {run.state === "failed" && text && text !== run.instruction && (
               <button
@@ -143,7 +191,7 @@ export function Composer({
                 Retry
               </button>
             )}
-            {run.state !== "running" && (
+            {run.state === "failed" && (
               <button
                 type="button"
                 className="icon-btn"
@@ -163,6 +211,8 @@ export function Composer({
           ref={composer}
           rows={1}
           value={text}
+          // biome-ignore lint/a11y/noAutofocus: the new-task page exists to type into this field
+          autoFocus={autoFocus}
           placeholder={
             matterTitle
               ? `Ask Passport about ${matterTitle}…`
@@ -183,7 +233,17 @@ export function Composer({
           }}
         />
         <div className="composer-footer">
-          <ModeMenu placement="above" variant="composer" />
+          <TaskModeChoice value={taskMode} onChange={setMode} />
+          <button
+            type="button"
+            className={`composer-chip plan-toggle ${plan ? "on" : ""}`}
+            aria-pressed={plan}
+            title="Plan: reads only and proposes; nothing changes"
+            onClick={() => setPlan(!plan)}
+          >
+            <Icon name="plan" size={14} />
+            <span>Plan</span>
+          </button>
           <button
             type="button"
             className="composer-chip"
@@ -212,17 +272,18 @@ export function Composer({
             </span>
           )}
           {matterTitle && (
-            <span className="composer-chip static" title="This instruction is scoped to the matter">
+            <span className="composer-chip static" title="This task is about the matter">
               <Icon name="matters" size={14} />
               <span>{matterTitle}</span>
             </span>
           )}
           <span className="composer-hint" aria-hidden="true">
-            <Kbd>↵</Kbd> send
+            <Kbd>↵</Kbd> start
           </span>
           <button
+            type="submit"
             className="send-btn"
-            aria-label="Send instruction"
+            aria-label="Start task"
             disabled={!text.trim() || run.state === "running"}
           >
             <Icon name={run.state === "running" ? "spinner" : "up"} size={16} />
