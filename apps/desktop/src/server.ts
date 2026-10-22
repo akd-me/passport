@@ -6,6 +6,7 @@ import { closeSync, openSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { activeOwner, type Health, health, readToken, serverAddress } from "./discovery";
 import { log, rotatedLog, serverEntry } from "./paths";
+import { forgetSpawn, ownOrphan, recordSpawn } from "./spawn-marker";
 
 export type ServerState =
   | { status: "starting"; detail: string }
@@ -21,6 +22,13 @@ export type ServerState =
     }
   | { status: "failed"; detail: string };
 
+export interface SupervisorOptions {
+  /** The key for the child's bootstrap pipe (null: the server keeps its master.key behaviour). */
+  masterKey: () => string | null;
+  /** Where the app records the child it spawned, so a later launch can stop an orphan. */
+  spawnMarker: string;
+}
+
 const STARTUP_TIMEOUT_MS = 60_000;
 const ATTACH_TIMEOUT_MS = 30_000;
 const STOP_TIMEOUT_MS = 10_000;
@@ -29,6 +37,7 @@ const STABLE_MS = 60_000;
 const MAX_BACKOFF_MS = 30_000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const running = (child: ChildProcess) => child.exitCode === null && child.signalCode === null;
 
 function describe(result: Health | "exited" | "timeout", port: number): string {
   switch (result) {
@@ -43,10 +52,31 @@ function describe(result: Health | "exited" | "timeout", port: number): string {
   }
 }
 
+/** A filesystem or spawn failure, with its errno, for the window and menu bar. */
+const describeError = (error: unknown) =>
+  `Passport could not start its server (${(error as NodeJS.ErrnoException).code ?? (error as Error).name}: ${(error as Error).message}).`;
+
+/** Children without the app's secrets: the key goes over the bootstrap pipe instead. */
+function childEnvironment(dataDir: string, key: boolean): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.PASSPORT_MASTER_KEY;
+  delete env.PASSPORT_BOOTSTRAP_FD;
+  return {
+    ...env,
+    PASSPORT_DATA_DIR: dataDir,
+    ELECTRON_RUN_AS_NODE: "1",
+    PASSPORT_PARENT: "desktop",
+    ...(key ? { PASSPORT_BOOTSTRAP_FD: "3" } : {}),
+  };
+}
+
 export class ServerSupervisor extends EventEmitter<{ state: [ServerState] }> {
   state: ServerState = { status: "starting", detail: "Starting Passport…" };
-  private child: ChildProcess | null = null;
+  /** Every child this app started and has not seen exit; Quit stops all of them. */
+  private readonly children = new Set<ChildProcess>();
   private stopping = false;
+  /** Bumped by start/restart/stop and each retry; an older connect() gives up at its next step. */
+  private attemptId = 0;
   private attempt = 0;
   private generation = 0;
   private readyAt = 0;
@@ -55,32 +85,55 @@ export class ServerSupervisor extends EventEmitter<{ state: [ServerState] }> {
 
   constructor(
     private readonly dataDir: string,
-    /** Extra child environment (PASSPORT_MASTER_KEY); resolved once per spawn. */
-    private readonly childEnv: () => NodeJS.ProcessEnv,
+    private readonly options: SupervisorOptions,
   ) {
     super();
   }
 
   start(): void {
-    void this.connect();
+    void this.connect(++this.attemptId);
   }
 
   /** Drop the current server and connect again now (tray "Restart server"). */
   async restart(): Promise<void> {
+    const id = ++this.attemptId;
     clearTimeout(this.retryTimer);
     clearInterval(this.monitor);
-    // Leave "ready" first so the child's exit handler does not schedule a second retry.
     this.set({ status: "starting", detail: "Restarting…" });
-    await this.stopChild();
+    await this.stopChildren();
+    if (id !== this.attemptId || this.stopping) {
+      return;
+    }
+    clearTimeout(this.retryTimer);
     this.attempt = 0;
-    void this.connect();
+    void this.connect(id);
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.attemptId += 1;
     clearTimeout(this.retryTimer);
     clearInterval(this.monitor);
-    await this.stopChild();
+    await this.stopChildren();
+  }
+
+  /** The server answered 401 to the window: the token file may have been rotated. */
+  refreshToken(): void {
+    const state = this.state;
+    if (state.status !== "ready") {
+      return;
+    }
+    let token: string | null = null;
+    try {
+      token = readToken(this.dataDir);
+    } catch (error) {
+      log("warn", `Could not re-read api-token (${(error as NodeJS.ErrnoException).code})`);
+    }
+    if (token && token !== state.token) {
+      log("info", "api-token changed; signing the window in again");
+      this.generation += 1;
+      this.set({ ...state, token, generation: this.generation });
+    }
   }
 
   private set(state: ServerState): void {
@@ -88,26 +141,65 @@ export class ServerSupervisor extends EventEmitter<{ state: [ServerState] }> {
     this.emit("state", state);
   }
 
-  private async connect(): Promise<void> {
-    if (this.stopping) {
+  private current(id: number): boolean {
+    return id === this.attemptId && !this.stopping;
+  }
+
+  private async connect(id: number): Promise<void> {
+    try {
+      await this.connectOnce(id);
+    } catch (error) {
+      // EACCES/ENOSPC/EISDIR on the token, lease, config or log: report it and keep retrying.
+      log("error", describeError(error));
+      this.fail(id, describeError(error));
+    }
+  }
+
+  private async connectOnce(id: number): Promise<void> {
+    if (!this.current(id)) {
       return;
     }
-    const { origin, port } = serverAddress(this.dataDir);
-    const owner = activeOwner(this.dataDir);
+    let owner = activeOwner(this.dataDir);
+    if (owner && ownOrphan(this.options.spawnMarker, owner, this.dataDir)) {
+      // Our own child from a launch that crashed: stop it and start fresh, never attach.
+      log("warn", `Stopping passport serve (pid ${owner.pid}) left by an earlier app launch`);
+      this.set({ status: "starting", detail: "Stopping the previous Passport server…" });
+      await this.stopPid(owner.pid);
+      forgetSpawn(this.options.spawnMarker);
+      if (!this.current(id)) {
+        return;
+      }
+      owner = activeOwner(this.dataDir);
+    }
+    const { origin, port } = serverAddress(this.dataDir, process.env, owner);
     if (owner) {
+      if (owner.mode === "demo") {
+        this.fail(
+          id,
+          `passport demo (pid ${owner.pid}) is using this data directory. Stop it to use Passport.`,
+        );
+        return;
+      }
       this.set({ status: "starting", detail: `Connecting to passport serve (pid ${owner.pid})…` });
-      const result = await this.waitHealthy(origin, ATTACH_TIMEOUT_MS, () => true);
+      const result = await this.waitHealthy(origin, ATTACH_TIMEOUT_MS, () => this.current(id));
+      if (!this.current(id)) {
+        return;
+      }
       if (result === "ok") {
-        this.ready(origin, true, owner.pid);
-        this.watchAttached(origin);
+        this.ready(id, origin, true, owner.pid);
+        this.watchAttached(id, origin);
       } else {
-        this.fail(describe(result, port));
+        this.fail(id, describe(result, port));
       }
       return;
     }
     const occupied = await health(origin, readToken(this.dataDir));
+    if (!this.current(id)) {
+      return;
+    }
     if (occupied !== "down") {
       this.fail(
+        id,
         occupied === "wrong-server"
           ? describe(occupied, port)
           : `Port ${port} already runs a Passport server for a different data directory. Stop it, or set PASSPORT_PORT.`,
@@ -116,45 +208,63 @@ export class ServerSupervisor extends EventEmitter<{ state: [ServerState] }> {
     }
     this.set({ status: "starting", detail: "Starting the Passport server…" });
     const child = this.spawnChild();
-    const alive = () => child.exitCode === null && child.signalCode === null;
-    const result = await this.waitHealthy(origin, STARTUP_TIMEOUT_MS, alive);
-    if (this.stopping) {
+    const result = await this.waitHealthy(
+      origin,
+      STARTUP_TIMEOUT_MS,
+      () => running(child) && this.current(id),
+    );
+    if (!this.current(id)) {
+      // A restart or quit took over; it stops every child, including this one.
       return;
     }
-    if (result === "ok") {
-      this.ready(origin, false, child.pid ?? null);
+    if (result === "ok" && running(child)) {
+      this.ready(id, origin, false, child.pid ?? null);
       return;
     }
-    if (alive()) {
-      await this.stopChild();
-    }
-    this.fail(describe(result, port));
+    await this.stopChild(child);
+    this.fail(id, describe(running(child) ? result : "exited", port));
   }
 
   private spawnChild(): ChildProcess {
+    const key = this.options.masterKey();
     const logPath = rotatedLog("server.log");
     const fd = openSync(logPath, "a", 0o600);
-    writeSync(fd, `\n--- ${new Date().toISOString()} Passport.app starting passport serve\n`);
-    const child = spawn(process.execPath, [serverEntry(), "serve"], {
-      cwd: homedir(),
-      env: { ...process.env, ...this.childEnv(), ELECTRON_RUN_AS_NODE: "1" },
-      stdio: ["ignore", fd, fd],
-    });
-    closeSync(fd);
-    this.child = child;
+    let child: ChildProcess;
+    try {
+      writeSync(fd, `\n--- ${new Date().toISOString()} Passport.app starting passport serve\n`);
+      // stdin stays open for the child's lifetime: EOF tells it the app is gone. fd 3 carries
+      // the key once and is closed, so it is never in argv or in the environment `ps` shows.
+      child = spawn(process.execPath, [serverEntry(), "serve"], {
+        cwd: homedir(),
+        env: childEnvironment(this.dataDir, !!key),
+        stdio: ["pipe", fd, fd, "pipe"],
+      });
+    } finally {
+      closeSync(fd);
+    }
+    const bootstrap = child.stdio[3] as NodeJS.WritableStream | null;
+    // A child that dies at once closes its pipes; the exit handler reports that instead.
+    child.stdin?.on("error", () => {});
+    bootstrap?.on("error", () => {});
+    bootstrap?.end(key ? JSON.stringify({ masterKey: key }) : "");
+    this.children.add(child);
+    if (child.pid) {
+      recordSpawn(this.options.spawnMarker, child.pid, this.dataDir);
+    }
     log("info", `Spawned passport serve (pid ${child.pid ?? "?"}); output in ${logPath}`);
     child.once("error", () => {
       log("error", "Could not spawn the Passport server process");
     });
     child.once("exit", (code, signal) => {
-      if (this.child === child) {
-        this.child = null;
+      this.children.delete(child);
+      if (child.pid) {
+        forgetSpawn(this.options.spawnMarker, child.pid);
       }
       log("warn", `passport serve exited (code ${code ?? "none"}, signal ${signal ?? "none"})`);
       const wasServing =
         this.state.status === "ready" && !this.state.attached && this.state.pid === child.pid;
       if (wasServing && !this.stopping) {
-        this.fail("The Passport server stopped unexpectedly. Restarting…");
+        this.fail(this.attemptId, "The Passport server stopped unexpectedly. Restarting…");
       }
     });
     return child;
@@ -180,10 +290,13 @@ export class ServerSupervisor extends EventEmitter<{ state: [ServerState] }> {
     return last === "down" ? "timeout" : last;
   }
 
-  private ready(origin: string, attached: boolean, pid: number | null): void {
+  private ready(id: number, origin: string, attached: boolean, pid: number | null): void {
+    if (!this.current(id)) {
+      return;
+    }
     const token = readToken(this.dataDir);
     if (!token) {
-      this.fail("The server is running but its api-token is unreadable.");
+      this.fail(id, "The server is running but its api-token is unreadable.");
       return;
     }
     this.generation += 1;
@@ -193,23 +306,31 @@ export class ServerSupervisor extends EventEmitter<{ state: [ServerState] }> {
   }
 
   /** An attached server can stop at any time; when it does, take over the data directory. */
-  private watchAttached(origin: string): void {
+  private watchAttached(id: number, origin: string): void {
     let misses = 0;
     clearInterval(this.monitor);
     this.monitor = setInterval(async () => {
-      const result = await health(origin, readToken(this.dataDir));
+      let result: Health = "down";
+      try {
+        result = await health(origin, readToken(this.dataDir));
+      } catch (error) {
+        log("warn", `Could not check the attached server (${(error as Error).name})`);
+      }
+      if (!this.current(id)) {
+        return;
+      }
       misses = result === "ok" ? 0 : misses + 1;
       if (misses >= 2) {
         clearInterval(this.monitor);
         log("warn", "Lost the attached passport serve; reconnecting");
         this.set({ status: "starting", detail: "Reconnecting…" });
-        void this.connect();
+        void this.connect(++this.attemptId);
       }
     }, MONITOR_MS);
   }
 
-  private fail(detail: string): void {
-    if (this.stopping) {
+  private fail(id: number, detail: string): void {
+    if (!this.current(id)) {
       return;
     }
     if (this.readyAt && Date.now() - this.readyAt > STABLE_MS) {
@@ -220,12 +341,15 @@ export class ServerSupervisor extends EventEmitter<{ state: [ServerState] }> {
     log("warn", `${detail} Retrying in ${Math.round(delay / 1000)} s.`);
     this.set({ status: "failed", detail });
     clearTimeout(this.retryTimer);
-    this.retryTimer = setTimeout(() => void this.connect(), delay);
+    this.retryTimer = setTimeout(() => void this.connect(++this.attemptId), delay);
   }
 
-  private async stopChild(): Promise<void> {
-    const child = this.child;
-    if (!child || child.exitCode !== null || child.signalCode !== null) {
+  private async stopChildren(): Promise<void> {
+    await Promise.all([...this.children].map((child) => this.stopChild(child)));
+  }
+
+  private async stopChild(child: ChildProcess): Promise<void> {
+    if (!running(child)) {
       return;
     }
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
@@ -235,6 +359,32 @@ export class ServerSupervisor extends EventEmitter<{ state: [ServerState] }> {
       log("warn", "passport serve ignored SIGTERM for 10 s; killing it");
       child.kill("SIGKILL");
       await Promise.race([exited, sleep(2000)]);
+    }
+  }
+
+  /** Stops a process this app spawned in an earlier launch (not our child any more). */
+  private async stopPid(pid: number): Promise<void> {
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        // ESRCH: it has exited.
+        return false;
+      }
+    };
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // Already gone.
+      return;
+    }
+    const deadline = Date.now() + STOP_TIMEOUT_MS;
+    while (alive() && Date.now() < deadline) {
+      await sleep(200);
+    }
+    if (alive()) {
+      process.kill(pid, "SIGKILL");
     }
   }
 }

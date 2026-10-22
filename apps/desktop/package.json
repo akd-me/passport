@@ -13,13 +13,14 @@
     "dist": "node scripts/dist.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "node scripts/smoke.mjs"
+    "test": "vitest run && node scripts/smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
     "electron": "44.9.3",
     "electron-builder": "26.16.1",
     "esbuild": "0.28.2",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
   }
 }
