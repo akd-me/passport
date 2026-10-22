@@ -65,6 +65,13 @@ export interface Task {
   createdAt: Timestamp;
   settledAt?: Timestamp | null;
   watches: ConversationWatch[];
+  /**
+   * The person chose `permissionMode` explicitly (PATCH). System tasks (inbox, routine) without it
+   * follow the global trust dial: their mode is refreshed to it before each run.
+   */
+  permissionModePinned?: boolean;
+  /** Proposed ActionRecords from this task's runs still awaiting a decision (approval panel). */
+  pendingActionIds?: Id[];
   /** Routine tasks: the scheduler job bound to this task. */
   jobId?: string | null;
   /** Monotonic, incremented on every persisted change. */

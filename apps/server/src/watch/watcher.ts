@@ -54,6 +54,7 @@ export class MailWatcher {
   private unhealthy = new Set<string>();
   private retired = new Set<string>();
   private controller = new AbortController();
+  private addedListeners = new Set<(accountId: string, emails: Email[]) => void>();
   private stopped = false;
   private readonly now: () => number;
   constructor(private readonly options: MailWatcherOptions) {
@@ -72,6 +73,11 @@ export class MailWatcher {
     const job = this.run(accountId, !!opts.force).finally(() => this.active.delete(accountId));
     this.active.set(accountId, job);
     return job;
+  }
+  /** Reports messages each tick added (any mailbox, including the person's own), after caching. */
+  onAdded(listener: (accountId: string, emails: Email[]) => void): () => void {
+    this.addedListeners.add(listener);
+    return () => this.addedListeners.delete(listener);
   }
   async drain(): Promise<void> {
     await Promise.allSettled([...this.active.values()]);
@@ -239,6 +245,7 @@ export class MailWatcher {
     let ctx: ArrivalContext | undefined;
     let added = 0;
     let arrivals = 0;
+    const emails: Email[] = [];
     for (const providerId of providerIds) {
       const envelope = envelopes.value.get(providerId);
       if (!envelope) {
@@ -264,12 +271,16 @@ export class MailWatcher {
         },
       ]);
       added++;
+      emails.push(email);
       if (arrival) {
         arrivals++;
         bus.emit({ type: "email.received", email });
       } else if (existing) {
         bus.emit({ type: "email.updated", emailId: email.id });
       }
+    }
+    for (const listener of this.addedListeners) {
+      listener(account.id, emails);
     }
     return { added, arrivals };
   }

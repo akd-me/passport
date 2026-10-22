@@ -11,6 +11,7 @@ import type {
   Store,
 } from "@passport/types";
 import type { PassportConfig } from "./config.js";
+import type { TaskSystem } from "./tasks/wiring.js";
 import type { WatchStatus } from "./watch/status.js";
 import type { WatchTickResult } from "./watch/watcher.js";
 
@@ -42,5 +43,7 @@ export interface Backend {
   waitForChanges?(accountId: string, signal: AbortSignal): Promise<void>;
   /** Drain due persisted arrivals, sharing the immediate triage queue. */
   processArrivals?(signal?: AbortSignal): Promise<void>;
+  /** Tasks, runs and timelines (v0.3); absent in the demo backend. */
+  readonly tasks?: TaskSystem;
   close(): Promise<void>;
 }

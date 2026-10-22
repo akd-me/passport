@@ -1,6 +1,7 @@
 import type { JobDefinition, Schedule } from "@passport/scheduler";
 import type { Store } from "@passport/types";
 import type { Backend } from "../backend.js";
+import { registerTaskJobs, routineBinding } from "../tasks/jobs.js";
 export async function registerSystemJobs(
   backend: Backend,
   register: (def: JobDefinition) => Promise<void>,
@@ -43,34 +44,38 @@ export async function registerSystemJobs(
       type: "daily",
       at: `${String(backend.config.dailyDigestHour).padStart(2, "0")}:00`,
     },
-    async () => {
-      const run = await backend.agent.run({
-        kind: "schedule",
-        name: "daily_digest",
-      });
+    async ({ agentRunOptions }) => {
+      const run = await backend.agent.run(
+        { kind: "schedule", name: "daily_digest" },
+        agentRunOptions,
+      );
       if (run.error) {
         throw new Error(run.error);
       }
       return { summary: run.summary };
     },
-    { timeoutMs: 300000 },
+    { timeoutMs: 300000, ...(await routineBinding(backend, "agent.daily_digest", "Daily digest")) },
   );
   await system(
     "agent.matter_review",
     "Review active matters",
     { type: "daily", at: "04:00" },
-    async () => {
-      const run = await backend.agent.run({
-        kind: "schedule",
-        name: "matter_review",
-      });
+    async ({ agentRunOptions }) => {
+      const run = await backend.agent.run(
+        { kind: "schedule", name: "matter_review" },
+        agentRunOptions,
+      );
       if (run.error) {
         throw new Error(run.error);
       }
       return { summary: run.summary };
     },
-    { timeoutMs: 300000 },
+    {
+      timeoutMs: 300000,
+      ...(await routineBinding(backend, "agent.matter_review", "Review active matters")),
+    },
   );
+  await registerTaskJobs(backend, register);
   await system(
     "store.maintenance",
     "Store maintenance",

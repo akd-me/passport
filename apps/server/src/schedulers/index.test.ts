@@ -70,7 +70,7 @@ describe("backend schedulers", () => {
     await vi.advanceTimersByTimeAsync(999);
     expect(run).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    expect(run).toHaveBeenCalledWith({
+    expect(run.mock.calls.map(([trigger]) => trigger)).toContainEqual({
       kind: "schedule",
       name: "daily_digest",
     });
@@ -82,7 +82,7 @@ describe("backend schedulers", () => {
         ([trigger]) => trigger.kind === "schedule" && trigger.name === "daily_digest",
       ),
     ).toHaveLength(2);
-    expect(run).toHaveBeenCalledWith({
+    expect(run.mock.calls.map(([trigger]) => trigger)).toContainEqual({
       kind: "schedule",
       name: "matter_review",
     });

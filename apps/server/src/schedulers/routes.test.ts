@@ -68,10 +68,10 @@ describe("scheduler HTTP API", () => {
     expect((await app.request(`/api/jobs/${job.id}`, request("PATCH", patch))).status).toBe(200);
     const run = vi.spyOn(backend.agent, "run");
     expect((await app.request(`/api/jobs/${job.id}/run`, request("POST"))).status).toBe(200);
-    expect(run).toHaveBeenCalledWith({
-      kind: "manual",
-      instruction: patch.routine.instruction,
-    });
+    expect(run).toHaveBeenCalledWith(
+      { kind: "manual", instruction: patch.routine.instruction },
+      expect.objectContaining({ priority: "background" }),
+    );
     const history = await (await app.request(`/api/jobs/${job.id}/history`)).json();
     expect(history).toEqual([
       expect.objectContaining({ status: "ok", durationMs: expect.any(Number) }),

@@ -17,6 +17,7 @@ import { registerOnboarding } from "./onboarding/routes.js";
 import { installJobRoutes } from "./schedulers/routes.js";
 import { installSettingsRoutes } from "./settings-routes.js";
 import { registerSetup } from "./setup/routes.js";
+import { installTaskRoutes } from "./tasks/routes.js";
 
 export function createApp(
   backend: Backend,
@@ -62,6 +63,8 @@ export function createApp(
   installSettingsRoutes(app, backend);
 
   installAgentRoutes(app, backend);
+
+  installTaskRoutes(app, backend);
 
   app.all("/api/*", (c) =>
     c.json({ error: { code: "NOT_FOUND", message: "Unknown API route" } }, 404),

@@ -10,6 +10,7 @@ import type { Account } from "@passport/types";
 import type { Backend } from "../backend.js";
 import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
+import { routineBinding } from "../tasks/jobs.js";
 import { object, string } from "../validation.js";
 import { calendarSyncJob, pushJob, watchJob, watchJobId } from "./account-jobs.js";
 import { registerSystemJobs } from "./system-jobs.js";
@@ -71,6 +72,8 @@ export class SchedulerService {
       store: backend.store,
       bus: backend.bus,
       logger,
+      runOnTask: (taskId, ctx, run) =>
+        backend.tasks ? backend.tasks.triggers.runJob(taskId, ctx, run) : run(ctx),
     });
     this.ready = this.initialize();
     // Successful onboarding/sync outside the HTTP API also discovers new accounts.
@@ -146,11 +149,13 @@ export class SchedulerService {
       kind: "user",
       schedule: def.schedule,
       timeoutMs: 300000,
-      run: async () => {
-        const run = await this.backend.agent.run({
-          kind: "manual",
-          instruction: this.routines.get(def.id)!.routine.instruction,
-        });
+      ...(await routineBinding(this.backend, def.id, def.name)),
+      run: async ({ agentRunOptions }) => {
+        const run = await this.backend.agent.run(
+          { kind: "manual", instruction: this.routines.get(def.id)!.routine.instruction },
+          // Routines run in the background lane; the composer keeps the interactive one.
+          { ...agentRunOptions, priority: "background" },
+        );
         if (run.error) {
           throw new Error(run.error);
         }

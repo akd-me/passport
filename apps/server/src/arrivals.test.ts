@@ -264,12 +264,16 @@ describe("durable email arrivals", () => {
     expect(run).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await backend.processArrivals!();
-    expect(run).toHaveBeenCalledExactlyOnceWith({
-      kind: "email.received",
-      emailId: email.id,
-      runId: `arrival:${email.id}`,
-      availabilityUnverified: true,
-    });
+    // Arrival runs now carry task run options (inbox task timeline) as a second argument.
+    expect(run).toHaveBeenCalledExactlyOnceWith(
+      {
+        kind: "email.received",
+        emailId: email.id,
+        runId: `arrival:${email.id}`,
+        availabilityUnverified: true,
+      },
+      expect.objectContaining({ runId: `arrival:${email.id}`, priority: "background" }),
+    );
   });
 
   it("R5: resumes deferred arrivals once the companion calendar has a completed sync", async () => {
@@ -377,11 +381,10 @@ describe("durable email arrivals", () => {
     const second = await fixture(directory, undefined, false);
     expect(await entry(second.backend, email)).toMatchObject({ attempts: 1 });
     await second.scheduler.scheduler.runNow("agent.arrivals");
-    expect(second.run).toHaveBeenCalledExactlyOnceWith({
-      kind: "email.received",
-      emailId: email.id,
-      runId: `arrival:${email.id}`,
-    });
+    expect(second.run).toHaveBeenCalledExactlyOnceWith(
+      { kind: "email.received", emailId: email.id, runId: `arrival:${email.id}` },
+      expect.objectContaining({ runId: `arrival:${email.id}`, priority: "background" }),
+    );
     expect(await entry(second.backend, email)).toBeNull();
   });
 
