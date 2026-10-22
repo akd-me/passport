@@ -178,7 +178,7 @@ async function start(): Promise<void> {
     refreshTray();
   });
   watcher.on("count", (count) => {
-    log("info", `Decisions needing you: ${count}`);
+    log("info", `Needing you: ${count}`);
     app.setBadgeCount(count);
     refreshTray();
   });
