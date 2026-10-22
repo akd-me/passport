@@ -13,6 +13,7 @@ More screens: [starting a task](docs/screenshots/new-task.png), [Needs you](docs
 
 Your inbox is organized around **the person** and **the matter**: who you are dealing with, and what you are trying to get done. AI handles routine mail, prepares replies and keeps that context current; you see the decisions that need your attention.
 
+- **Tasks, not a feed.** Ask in plain language and Passport opens a task, like a coding agent's thread: each step it takes, collapsed tool calls, a per-run change summary with undo, and approvals at the composer. Follow-ups queue or steer the running task. Tasks that need you come back to the sidebar's inbox; the rest work, snooze or settle.
 - **Earned trust.** Start supervised and grant autonomy per category as evidence accumulates. The ladder mirrors a coding agent's permission modes: `supervised`, `auto_accept_edits`, `auto`, `full_access`. An external agent has a separate ceiling.
 - **A record of every change.** Agent and human changes pass through the policy executor and action log. Reversible actions carry undo; irreversible operations are identified explicitly.
 - **Time to change your mind.** Sends wait in a delayed outbox where you can cancel them. A delivered message cannot be unsent.
@@ -182,7 +183,7 @@ flowchart TD
 | `@passport/agent` | Triage, people/matter context, USER.md, digests and reviews |
 | `@passport/mcp` | Policy-controlled tools over stdio and Streamable HTTP |
 | `@passport/server` | Composition root, API, WebSockets, CLI and background jobs |
-| `@passport/web` | Decisions, Matters, People, Trust and account UI |
+| `@passport/web` | Tasks, Needs you, Matters, People, Trust and account UI |
 | `@passport/desktop` | macOS app: Electron shell that runs the server as a child, menu bar, notifications |
 
 The public **`@akd-me/passport`** artifact bundles the private workspace code and built web UI. The server workspace retains its development name. See the [engineering contract](docs/CONTRACT.md) and [server reference](apps/server/README.md).
