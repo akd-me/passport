@@ -1,0 +1,45 @@
+# Passport.app. scripts/dist.mjs stages build/server (the npm artifact plus production
+# node_modules) and build/icon.png, then runs electron-builder with this file.
+appId: me.akd.passport
+productName: Passport
+copyright: Copyright © Passport contributors
+directories:
+  output: dist
+  buildResources: build-resources
+files:
+  - package.json
+  - dist/main.cjs
+  - dist/preload.cjs
+  - dist/trayTemplate.png
+  - dist/trayTemplate@2x.png
+# Outside app.asar: the server resolves web/dist via import.meta.url and runs as plain Node.
+extraResources:
+  # Copied from build/ because electron-builder always drops a node_modules at the root of `from`.
+  - from: build
+    to: .
+    filter:
+      - "server/**/*"
+asar: true
+npmRebuild: false
+protocols:
+  - name: Passport
+    schemes:
+      - passport
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.productivity
+  icon: build/icon.png
+  minimumSystemVersion: "13.0"
+  # M3 signing: dist.mjs passes identity=null unless PASSPORT_DESKTOP_SIGN=1 (see docs/desktop.md).
+  hardenedRuntime: true
+  entitlements: build-resources/entitlements.mac.plist
+  entitlementsInherit: build-resources/entitlements.mac.plist
+dmg:
+  title: Passport ${version}
+# Present for M3 (electron-updater reads latest-mac.yml from GitHub Releases); dist.mjs never publishes.
+publish:
+  provider: github
+  owner: akd-me
+  repo: passport

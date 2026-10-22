@@ -17,6 +17,7 @@
     "dev": "pnpm --filter @passport/server dev",
     "demo": "pnpm --filter @passport/server demo",
     "pack": "pnpm build && pnpm --dir apps/server/dist/package pack --pack-destination ..",
+    "dist:desktop": "pnpm --filter @passport/desktop dist",
     "docker:build": "docker build -t passport:local .",
     "format": "biome format --write .",
     "format:check": "biome format ."

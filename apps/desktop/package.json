@@ -1,0 +1,25 @@
+{
+  "name": "@passport/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Passport for macOS: an Electron shell that runs the passport server as a child process.",
+  "productName": "Passport",
+  "author": "Passport contributors",
+  "license": "MIT",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node scripts/build-main.mjs",
+    "dev": "node scripts/build-main.mjs && electron .",
+    "dist": "node scripts/dist.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "electron": "44.9.3",
+    "electron-builder": "26.16.1",
+    "esbuild": "0.28.2",
+    "typescript": "^5.8.0"
+  }
+}
