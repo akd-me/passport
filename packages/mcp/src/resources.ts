@@ -8,33 +8,34 @@ import {
   MailboxMcpError,
   matterMarkdown,
   personMarkdown,
+  quotedNotes,
   required,
+  safeLine,
 } from "./presentation.js";
 import { id } from "./schemas.js";
 
 /** References listed in the matter resource, newest first. */
 const RESOURCE_REFS = 20;
 
-/** Agent-maintained knowledge of a matter (notes, watch, provider refs) as markdown sections. */
+/**
+ * Agent-maintained knowledge of a matter as markdown sections: watch query, provider refs, and
+ * the notes last, block-quoted so they cannot forge the sections above them (R4-4).
+ */
 export function matterKnowledgeMarkdown(matter: Matter): string {
   const refs = [...(matter.refs ?? [])].sort((a, b) => b.date.localeCompare(a.date));
   const sections = [
-    "## Notes",
-    matter.notes?.trim() ? neutralize(matter.notes) : "No notes yet.",
-    `Watch: ${matter.watch ? `\`${matter.watch.replace(/`/g, "")}\`` : "None"}`,
+    `Watch: ${matter.watch ? `\`${neutralize(matter.watch.replace(/[`\r\n]/g, ""))}\`` : "None"}`,
   ];
   if (refs.length) {
     sections.push(
       `## References (${Math.min(refs.length, RESOURCE_REFS)} of ${refs.length}, newest first)`,
       refs
         .slice(0, RESOURCE_REFS)
-        .map(
-          (ref) =>
-            `- ${mailRefHandle(ref)} · ${ref.date} · ${neutralize(ref.subject.replace(/[\r\n]/g, " "))}`,
-        )
+        .map((ref) => `- ${mailRefHandle(ref)} · ${ref.date} · ${safeLine(ref.subject)}`)
         .join("\n"),
     );
   }
+  sections.push("## Notes (agent-written, untrusted)", quotedNotes(matter.notes));
   return sections.join("\n\n");
 }
 
@@ -78,7 +79,7 @@ export function registerResources(ctx: Context) {
         listSafely(async () => ({
           resources: (await store.matters.list({ limit: 100 })).map((matter) => ({
             uri: `passport://matters/${encodeURIComponent(matter.id)}`,
-            name: matter.title,
+            name: safeLine(matter.title),
             mimeType: "text/markdown",
           })),
         })),
@@ -107,7 +108,7 @@ export function registerResources(ctx: Context) {
         listSafely(async () => ({
           resources: (await store.people.list({ limit: 100 })).map((person) => ({
             uri: `passport://people/${encodeURIComponent(person.id)}`,
-            name: person.displayName,
+            name: safeLine(person.displayName),
             mimeType: "text/markdown",
           })),
         })),

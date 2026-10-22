@@ -2,11 +2,14 @@ import type { Email, EmailAddress, ReadMeta } from "@passport/types";
 import { compactRecipients, formatMailAddress, parseMailHandle } from "@passport/types";
 import type { Context } from "./context.js";
 import {
+  MAIL_ID_KEYS,
   mailboxLabel,
   mergeMeta,
   neutralize,
+  neutralizeDeep,
   onDemand,
   resolveMailTarget,
+  safeMessageId,
   UNTRUSTED_NOTICE,
 } from "./ondemand-support.js";
 import { emailView, stripTrackingPixels, ToolError } from "./presentation.js";
@@ -87,7 +90,7 @@ function messageHead(email: Email) {
   const v = email.verification;
   return {
     id: email.id,
-    rfc822Id: email.headers.messageId,
+    rfc822Id: safeMessageId(email.headers.messageId),
     date: email.receivedAt,
     from: neutralize(email.from[0] ? formatMailAddress(email.from[0]) : ""),
     to: people(email.to),
@@ -121,6 +124,22 @@ function messageHead(email: Email) {
     ],
     listUnsubscribe: Boolean(email.headers.listUnsubscribe),
   };
+}
+
+/**
+ * A window that starts mid-line on an un-neutralised `/` or `@` would hand the agent a fresh
+ * `/command` or `@mention`; such a window begins at the previous non-blank character instead
+ * (at most 64 characters back). The window end, and so `continueFrom`, is unchanged.
+ */
+function contextStart(text: string, from: number): number {
+  if (from <= 0 || !/^[/@\uFF0F\uFF20](?!\u200b)/.test(text.slice(from, from + 2))) {
+    return from;
+  }
+  let start = from - 1;
+  while (start > 0 && from - start < 64 && /[^\S\r\n]/.test(text[start] ?? "")) {
+    start--;
+  }
+  return start > 0 && /[\uDC00-\uDFFF]/.test(text[start] ?? "") ? start - 1 : start;
 }
 
 /** Avoids ending a window between the halves of a surrogate pair. */
@@ -164,8 +183,8 @@ export function readMail(ctx: Context, input: ReadInput): Promise<ToolResult> {
       const body = bodies[index];
       if (input.format === "headers") {
         head.headers = {
-          inReplyTo: email.headers.inReplyTo,
-          references: email.headers.references,
+          inReplyTo: safeMessageId(email.headers.inReplyTo),
+          references: email.headers.references.flatMap((id) => safeMessageId(id) ?? []),
           listId: email.headers.listId ? neutralize(email.headers.listId) : null,
           authenticationResults: (email.headers.authenticationResults ?? []).map(neutralize),
         };
@@ -181,8 +200,9 @@ export function readMail(ctx: Context, input: ReadInput): Promise<ToolResult> {
         return head;
       }
       const end = safeEnd(text, to - start);
-      head.offset = from;
-      head[key] = text.slice(from - start, end);
+      const begin = contextStart(text, from - start);
+      head.offset = start + begin;
+      head[key] = text.slice(begin, end);
       if (start + end < position) {
         head.truncated = true;
         head.continueFrom = start + end;
@@ -239,31 +259,16 @@ export function readMail(ctx: Context, input: ReadInput): Promise<ToolResult> {
   });
 }
 
-/** `emailView` with provider strings neutralised; used by the legacy summarize alias. */
+/** `emailView` with every provider string neutralised (ids kept); the legacy summarize alias. */
 export function safeEmailView(email: Email, full = false) {
-  const view = emailView(email, full);
-  const names = (list: EmailAddress[]) =>
-    list.map((address) => ({
-      ...address,
-      ...(address.name ? { name: neutralize(address.name) } : {}),
-    }));
-  return {
-    ...view,
-    from: names(view.from),
-    to: names(view.to),
-    cc: names(view.cc),
-    subject: neutralize(view.subject),
-    preview: neutralize(view.preview),
-    textBody: view.textBody == null ? view.textBody : neutralize(view.textBody),
-    htmlBody: view.htmlBody == null ? view.htmlBody : neutralize(view.htmlBody),
-  };
+  return neutralizeDeep(emailView(email, full), MAIL_ID_KEYS);
 }
 
 export function registerMailRead(ctx: Context) {
   register(
     ctx,
     "mail_read",
-    'Read a thread (default) or one message as clean text. Quoted history is collapsed (quoted:"full" expands it). Long threads show the last 5 messages in full and earlier ones as one-line headers; messagesFrom picks the first full message. offset/length window the bodies; continue with continueFrom. Lists attachments. Gmail: ~120 units per thread, ~60 per message.',
+    'Read a thread (default) or one message as clean text. Quoted history is collapsed (quoted:"full" expands it). Long threads show the last 5 messages in full and earlier ones as one-line headers; messagesFrom picks the first full message. offset/length window the bodies; continue with continueFrom. Lists attachments. Gmail: ~120 units per thread, ~80 per message (envelope + body).',
     {
       id: o.handle,
       view: z.enum(["thread", "message"]).default("thread"),

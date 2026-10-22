@@ -21,7 +21,34 @@ function bodyPrefix(text: string, length: number): string {
   return text.slice(0, length);
 }
 
-/** Bound the entire serialized result, including JSON escaping and multi-email responses. */
+interface Clippable {
+  parent: Record<string, unknown>;
+  key: string;
+  original: string;
+  body: boolean;
+}
+
+interface ListEntry {
+  parent: Record<string, unknown>;
+  key: string;
+  original: unknown[];
+  size: number;
+}
+
+/** Lists trimmed per pass, largest first; bounds the serialisations a pathological result costs. */
+const MAX_LISTS = 40;
+const BODY_KEY = /^(textBody|htmlBody|body|bodyText|text|markdown)$/;
+const CLIPPABLE_KEY =
+  /^(textBody|htmlBody|body|bodyText|text|markdown|description|summary|notes|preview|subject|title|name|reason|actionReason|policy_note)$/;
+
+/**
+ * Bound the entire serialized result, including JSON escaping and multi-email responses:
+ *  1. clip body strings (with `continueFrom`), keeping every item;
+ *  2. otherwise drop trailing list items (grep matches, provider lists, export files), keeping
+ *     at least one per list, then re-clip bodies; `omittedItems` counts what was dropped;
+ *  3. otherwise blank metadata strings; else `RESPONSE_TOO_LARGE`.
+ * A root `continueFrom` (mail_read) becomes the lowest per-body resume point.
+ */
 export function limitResponse<T extends object>(
   value: T,
   budget = DEFAULT_RESPONSE_BYTE_BUDGET,
@@ -31,37 +58,33 @@ export function limitResponse<T extends object>(
     return value;
   }
   const result = structuredClone(value);
-  const strings: Array<{
-    parent: Record<string, unknown>;
-    key: string;
-    original: string;
-    body: boolean;
-  }> = [];
+  const root = result as Record<string, unknown>;
+  const strings: Clippable[] = [];
+  const lists: ListEntry[] = [];
   const visit = (node: unknown) => {
     if (!node || typeof node !== "object") {
       return;
     }
     for (const [key, child] of Object.entries(node)) {
       // Identifiers, cursors and policy outcomes must remain intact.
-      if (
-        typeof child === "string" &&
-        /^(textBody|htmlBody|body|text|markdown|description|summary|notes|preview|subject|title|name|reason|actionReason|policy_note)$/.test(
-          key,
-        )
-      ) {
+      if (typeof child === "string" && CLIPPABLE_KEY.test(key)) {
         strings.push({
           parent: node as Record<string, unknown>,
           key,
           original: child,
-          body: /^(textBody|htmlBody|body|text|markdown)$/.test(key),
+          body: BODY_KEY.test(key),
         });
       } else if (typeof child === "object") {
+        if (Array.isArray(child) && child.length > 1 && key !== "untrusted") {
+          lists.push({ parent: node as Record<string, unknown>, key, original: child, size: 0 });
+        }
         visit(child);
       }
     }
   };
   visit(result);
-  (result as Record<string, unknown>).truncated = true;
+  const rootContinue = root.continueFrom;
+  root.truncated = true;
   const bodies = strings.filter((string) => string.body);
   const parents = new Map(
     bodies.map(({ parent }) => [
@@ -108,12 +131,24 @@ export function limitResponse<T extends object>(
     }
     mark(low);
   };
-  if (bodies.length) {
-    markBodies(0);
-    if (bytes(result) <= budget) {
-      fit(Math.max(...bodies.map((body) => body.original.length)), markBodies);
-      return result;
+  const fitBodies = () => {
+    if (!bodies.length) {
+      return bytes(result) <= budget;
     }
+    markBodies(0);
+    if (bytes(result) > budget) {
+      return false;
+    }
+    fit(Math.max(...bodies.map((body) => body.original.length)), markBodies);
+    syncRootContinue(root, rootContinue, [...parents.keys()]);
+    return true;
+  };
+  if (fitBodies()) {
+    return result;
+  }
+  markBodies(Number.MAX_SAFE_INTEGER);
+  if (trimLists(root, lists, budget) && fitBodies()) {
+    return result;
   }
   const metadata = strings
     .filter((string) => !string.body)
@@ -133,4 +168,55 @@ export function limitResponse<T extends object>(
     "RESPONSE_TOO_LARGE",
     "Response metadata exceeds the byte budget; request fewer results.",
   );
+}
+
+/** A root `continueFrom` must not point past text a later pass clipped away (R4-15). */
+function syncRootContinue(
+  root: Record<string, unknown>,
+  original: unknown,
+  parents: Array<Record<string, unknown>>,
+) {
+  if (!("continueFrom" in root) || parents.includes(root)) {
+    return;
+  }
+  const resume = parents
+    .map((parent) => parent.continueFrom)
+    .concat(original)
+    .filter((value): value is number => typeof value === "number");
+  if (resume.length) {
+    root.continueFrom = Math.min(...resume);
+  }
+}
+
+/**
+ * Drops trailing items from the largest lists until the result (bodies unclipped) fits or every
+ * list is down to one item. Returns whether anything was dropped.
+ */
+function trimLists(root: Record<string, unknown>, lists: ListEntry[], budget: number): boolean {
+  for (const list of lists) {
+    list.size = bytes(list.original);
+  }
+  let omitted = 0;
+  for (const list of lists.sort((a, b) => b.size - a.size).slice(0, MAX_LISTS)) {
+    if (bytes(root) <= budget) {
+      break;
+    }
+    let low = 1,
+      high = list.original.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      list.parent[list.key] = list.original.slice(0, mid);
+      if (bytes(root) <= budget) {
+        low = mid;
+      } else {
+        high = mid - 1;
+      }
+    }
+    list.parent[list.key] = list.original.slice(0, low);
+    omitted += list.original.length - low;
+  }
+  if (omitted) {
+    root.omittedItems = omitted;
+  }
+  return omitted > 0;
 }

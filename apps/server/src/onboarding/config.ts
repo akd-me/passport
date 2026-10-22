@@ -9,7 +9,7 @@ export function warnDeprecatedSyncConfig(config: { sync?: { initialDays?: number
   if (config.sync?.initialDays !== undefined && !warnedInitialDays) {
     warnedInitialDays = true;
     logger.warn(
-      "sync.initialDays is deprecated and ignored: Passport no longer backfills mail. Remove it from config.json.",
+      "sync.initialDays is deprecated and ignored: Passport no longer backfills mail. Remove it from passport.config.json.",
     );
   }
 }

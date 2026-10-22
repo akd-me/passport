@@ -49,7 +49,10 @@ interface ActiveRun {
   controller: AbortController;
   cancellable: boolean;
   preStatus: TaskStatus;
+  startStatus?: TaskStatus;
   produced: boolean;
+  /** Cancelled by a steer: the replacement run owns the status. */
+  steered: boolean;
   writes: Promise<unknown>;
 }
 
@@ -116,11 +119,12 @@ export class TaskRunner {
   }
 
   /** Cancels a cancellable run: a queued one leaves the lane, a running one stops at its next step. */
-  cancel(runId: string): boolean {
+  cancel(runId: string, steer = false): boolean {
     const active = this.active.get(runId);
     if (!active?.cancellable) {
       return false;
     }
+    active.steered ||= steer;
     active.controller.abort();
     return true;
   }
@@ -165,32 +169,37 @@ export class TaskRunner {
       cancellable: spec.cancellable,
       preStatus: task.status,
       produced: false,
+      steered: false,
       writes: Promise.resolve(),
     };
     this.active.set(run.id, active);
     this.byAgent.set(run.agentRunId, active);
-    this.ceilings.set(run.agentRunId, await this.effectiveMode(task));
-    for (const item of spec.items ?? []) {
-      await this.appendItem({
-        ...item,
-        at: item.at ?? this.now(),
-        taskId: task.id,
-        runId: run.id,
-      } as TaskItemInput);
-    }
-    await this.updateTask(task.id, (current) => statusDuringRun(current, spec.trigger, this.now()));
-    const options: AgentRunOptions = {
-      priority: spec.priority,
-      runId: run.agentRunId,
-      taskId: task.id,
-      signal: active.controller.signal,
-      readOnly: task.interactionMode === "plan",
-      observer: {
-        toolCall: (event) => this.queue(active, () => this.onToolCall(active, event)),
-        assistantMessage: (text) => this.queue(active, () => this.onText(active, text)),
-      },
-    };
     try {
+      // Inside `try`: a failure here still finishes the run and releases its ceiling (R4-22).
+      this.ceilings.set(run.agentRunId, await this.effectiveMode(task));
+      for (const item of spec.items ?? []) {
+        await this.appendItem({
+          ...item,
+          at: item.at ?? this.now(),
+          taskId: task.id,
+          runId: run.id,
+        } as TaskItemInput);
+      }
+      const started = await this.updateTask(task.id, (current) =>
+        statusDuringRun(current, spec.trigger, this.now()),
+      );
+      active.startStatus = started.status;
+      const options: AgentRunOptions = {
+        priority: spec.priority,
+        runId: run.agentRunId,
+        taskId: task.id,
+        signal: active.controller.signal,
+        readOnly: task.interactionMode === "plan",
+        observer: {
+          toolCall: (event) => this.queue(active, () => this.onToolCall(active, event)),
+          assistantMessage: (text) => this.queue(active, () => this.onText(active, text)),
+        },
+      };
       const value = await invoke(options);
       const description = describe(value);
       await this.finish(active, description.error ? "failed" : "completed", description);
@@ -303,12 +312,15 @@ export class TaskRunner {
       });
     }
     if (fresh.length) {
-      await this.updateTask(taskId, (current) => ({
-        ...surface("approval", this.now()),
-        pendingActionIds: [
+      await this.updateTask(taskId, (current) => {
+        const pendingActionIds = [
           ...new Set([...(current.pendingActionIds ?? []), ...fresh.map((a) => a.id)]),
-        ],
-      }));
+        ];
+        // Settled or archived by the person: record the approval without un-settling (R4-9).
+        return current.status === "settled" || current.status === "archived"
+          ? { pendingActionIds, needsUser: "approval" as const }
+          : { ...surface("approval", this.now()), pendingActionIds };
+      });
     }
   }
 
@@ -369,9 +381,14 @@ export class TaskRunner {
         },
       });
     }
+    if (active.steered) {
+      // The steer's replacement run is starting; moving the task now would bounce it (R4-20).
+      return;
+    }
     const outcome: RunOutcome = {
       trigger: run.trigger,
       preStatus: active.preStatus,
+      ...(active.startStatus ? { startStatus: active.startStatus } : {}),
       failed: status === "failed",
       produced: active.produced || done.actionIds.length > 0,
       otherActiveRuns: this.activeRuns(run.taskId).length,

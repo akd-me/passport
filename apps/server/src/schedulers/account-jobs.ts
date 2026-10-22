@@ -2,6 +2,7 @@ import type { JobDefinition } from "@passport/scheduler";
 import type { Account } from "@passport/types";
 import type { Backend } from "../backend.js";
 import { watchIntervalSeconds } from "../onboarding/config.js";
+import { BoundedError, safeCode } from "../watch/failure.js";
 
 /** New-mail watcher job for one account. */
 export const watchJobId = (accountId: string) => `watch:${accountId}`;
@@ -14,9 +15,14 @@ export function calendarSyncJob(backend: Backend, account: Account): JobDefiniti
     kind: "system",
     schedule: { type: "interval", everyMs: backend.config.syncIntervalSeconds * 1000 },
     run: async () => {
-      await (backend.syncCalendar
-        ? backend.syncCalendar(account.id)
-        : backend.syncAccount(account.id));
+      try {
+        await (backend.syncCalendar
+          ? backend.syncCalendar(account.id)
+          : backend.syncAccount(account.id));
+      } catch (error) {
+        // Job history and `job.finished` carry the message: keep it fixed (R4-26).
+        throw new BoundedError(safeCode(error, "SYNC_FAILED"), "Calendar sync failed");
+      }
       return { summary: "Calendar synchronized" };
     },
     timeoutMs: 300000,

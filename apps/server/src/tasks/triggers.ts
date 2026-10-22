@@ -7,6 +7,7 @@ import {
   type Task,
   toMailRow,
 } from "@passport/types";
+import { type DroppedCounts, droppedNotice } from "../arrival-backlog.js";
 import type { ArrivalTrigger } from "../arrivals.js";
 import { describeAgentRun, type TaskService } from "./service.js";
 import { clip, neutralize, safeRow } from "./untrusted.js";
@@ -50,6 +51,23 @@ export class TaskTriggers {
         jobId,
       });
     });
+  }
+
+  /** A notice on each account's inbox task for arrivals dropped before triage (R4-11, R4-12). */
+  async reportDroppedArrivals(counts: DroppedCounts): Promise<void> {
+    for (const [accountId, count] of Object.entries(counts)) {
+      if (!(await this.service.options.store.accounts.get(accountId))) {
+        continue;
+      }
+      const task = await this.ensureInbox(accountId);
+      await this.service.runner.appendItem({
+        taskId: task.id,
+        runId: null,
+        kind: "system_notice",
+        at: this.service.now(),
+        payload: { text: droppedNotice(count), code: "ARRIVALS_DROPPED" },
+      });
+    }
   }
 
   /** Wraps the agent the ArrivalQueue drives so each triage run lands on the account's inbox task. */

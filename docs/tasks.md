@@ -26,13 +26,19 @@ Item payloads by `kind`:
 | `tool_call` | `{ name, inputSummary, resultSummary, cost?, durationMs, isError, planned? }`; summaries are redacted (bodies, secrets, token-shaped strings) and at most 200 characters |
 | `approval_request` | `{ actionId, summary }`; approve or reject with `/api/actions/:id/{approve,reject}` |
 | `question` | `{ text }` (reserved: nothing emits it yet) |
-| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code, `RETRY`, `WATCH_LOOP_GUARD` |
+| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks) |
 | `notification` | `{ source: "arrival" \| "watch" \| "schedule" \| "system", summary, row? }`; `row` is a `MailRow` |
 
 **Untrusted data.** Items with `untrusted: true` contain provider-derived strings (subjects,
 senders, snippets, tool arguments and results, model text). Their `$`, mention-style `@` and
-line-leading `/` carry an invisible U+200B so host agents never treat them as commands. Render
-them as plain text, never as HTML or markdown links that auto-load.
+line-leading `/` carry an invisible U+200B so host agents never treat them as commands (fullwidth
+`＄`/`／`/`＠`, Unicode indentation and NEL included; an `@` inside `local@dotted.domain` is
+kept). Render them as plain text, never as HTML or markdown links that auto-load.
+
+**Prompt framing.** When the server puts mail-derived text into a model prompt (task history,
+watch wakes) it wraps it in `<untrusted-data-<random> source="…">` … `</untrusted-data-<random>>`.
+The 12-hex suffix is new for every frame, and every `untrusted-data` tag inside the framed text
+loses its `<` (becomes `‹`), so mail can neither close the frame nor open a decoy.
 
 **`waiting`** is reserved. Passport runs never block on an approval: a proposal becomes an
 `approval_request` item, and the run carries on and completes.
@@ -64,11 +70,13 @@ System tasks (`inbox`, `routine`) follow the global trust dial: before each run 
   A running one stops at its next model or tool call, and the answer of an in-flight model call
   is discarded. Arrival and routine runs can't be cancelled. Steering a system task queues.
 - **Interrupt** cancels every cancellable run of the task. Each one ends `cancelled` with a
-  `RUN_CANCELLED` notice.
+  `RUN_CANCELLED` notice. A run cancelled by a steer leaves the status to its replacement, so the
+  task never bounces through the inbox.
 - **Context.** Each message run's prompt includes the task title, up to 16 recent
   user/assistant/notification items (6,000 characters, wrapped as untrusted data), and the
   request.
-- **Plan mode** (`interactionMode: "plan"`). Write tools don't execute. They return
+- **Plan mode** (`interactionMode: "plan"`). Write tools (including `watch_conversation` and
+  `unwatch_conversation`) don't execute. They return
   `{ status: "planned" }`, appear as `tool_call` items with `planned: true`, and the model is asked
   for a numbered proposal list.
 - **Change summary.** `run.actionIds` lists every ActionRecord whose `request.runId` equals the
@@ -92,6 +100,8 @@ anywhere removes it from the list, and `needsUser` clears once the list is empty
 
 When a run ends, the first matching rule applies:
 
+0. The person settled, snoozed or archived the task while the run was active: it stays there. A
+   failed run only sets `needsUser: "failure"`.
 1. Failed (not arrivals, which `ArrivalQueue` retries): `inbox` with `needsUser: "failure"`.
 2. Pending approvals: `inbox` with `needsUser: "approval"`.
 3. Another run of the task is still active: `working`.
@@ -102,14 +112,19 @@ When a run ends, the first matching rule applies:
 7. Arrival triage never moves the task by itself, only through rules 1–2.
 
 `lastActivityAt` ("when it last came back to you") moves only when the task surfaces or the
-person acts. Background no-op runs don't count, so auto-settle is not reset by them.
+person acts. Background no-op runs don't count, so auto-settle is not reset by them. A task that
+rested in Working (watching) and is handed back to the inbox when a run ends counts as surfacing.
 
 Lifecycle:
 
 - **Snooze** hides the task until `snoozedUntil`. The `tasks.maintenance` job (every 10 minutes)
   returns it to `inbox` when that time passes. An approval, a failure or a user message brings it
   back sooner.
-- **Settle** and **archive** end every conversation watch.
+- **Settle** and **archive** end every conversation watch and cancel the task's cancellable runs
+  (each ends `cancelled`). A non-cancellable run (arrival triage, routines) finishes, but the
+  task stays settled or archived, and new approvals only add to `pendingActionIds` and set
+  `needsUser`. A settled or archived task cannot start a watch (`TASK_SETTLED`).
+- **Pin** never changes status, so pinning during a run is kept as well.
 - **Auto-settle.** Tasks in `inbox` that are idle for 3 days, not pinned, and with no
   `needsUser` move to `settled`.
 - The 5-second undo after settle, snooze or archive is a UI concern: undo with the matching
@@ -120,16 +135,22 @@ Lifecycle:
 `watch_conversation({ threadHandle, account? })` and `unwatch_conversation({ threadHandle? })`
 are registry tools, available to the built-in agent and over MCP. The task comes from the
 trusted call context (`ToolContext.taskId`). Calls without one, such as from external MCP
-clients, return `TASK_REQUIRED`. Each task keeps at most 20 watches.
+clients, return `TASK_REQUIRED`. `threadHandle` must be a thread handle (a mail row's
+`threadId`), else `INVALID_INPUT`. Each task keeps at most 20 watches. Wake and expiry prompts
+JSON-quote the handles.
 
 While a task watches, it rests in `working`. After each tick, the new-mail watcher reports every
 added message. A message on a watched thread wakes the task when all of these hold:
 
 - it was received strictly after the watch's `since`;
-- it is not from the person (the account's addresses or verified-self people);
+- it is not from the person (the account's addresses or verified-self people) and not in the
+  account's Sent or Drafts mailbox;
 - its Message-ID (or its id) was not seen for this task in the last 7 days (replay key).
 
 Replies on one thread within 120 seconds coalesce into one wake that uses the latest message.
+Pending wakes are persisted (kv `task-watch-pending`, with their due time and Message-IDs), so a
+restart, update or crash replays them once the next process starts; shutdown keeps them pending
+instead of firing them. A message's Message-ID is recorded as seen only once its wake run exists.
 A wake appends a `notification` (`source: "watch"`, `row`) and starts a background `watch` run.
 The wake is classified from headers first (`Auto-Submitted`, `X-Autoreply`, `Precedence`),
 then from sender and subject:
@@ -138,12 +159,28 @@ then from sender and subject:
 - `auto_reply`: an automatic header, or an "Automatic reply" or "Out of office" subject.
 - `reply`: anything else.
 
-**Loop guard.** Auto-replies count toward a limit, and so do wakes whose run created no
-ActionRecords. A real reply resets the count. At 3 the watch stops, with a `WATCH_LOOP_GUARD`
-notice, and the task returns to the inbox.
+**Loop guard.** Each wake counts once, after its run (`consecutiveWakes`). A wake is a strike
+when it was an auto-reply or bounce, when its run failed or created no ActionRecords, or when the
+run sent mail (`send`, `calendar_propose`, `calendar_respond`) that policy let through without
+asking the person. The last case catches autoresponders without `Auto-Submitted` headers ("Thanks,
+ticket #123 received") answering the agent's own reply. A real reply whose run asked the person
+or did other work resets the count. At 3 the watch stops: a third automatic message in a row
+stops it without running the agent. The task gets a `WATCH_LOOP_GUARD` notice and surfaces
+(`inbox`, `needsUser: "failure"`, fresh `lastActivityAt`), so auto-settle never takes it first.
 
-**Expiry.** A watch older than 14 days ends with one `wake` run (`reason: "watch_expired"`) so
-the agent can follow up or hand back.
+**Expiry.** A watch older than 14 days ends with a `WATCH_EXPIRED` notice and one `wake` run
+(`reason: "watch_expired"`) so the agent can follow up or hand back. If that run does nothing,
+the task still comes back to the inbox with a fresh `lastActivityAt`.
+
+## Arrivals backlog
+
+The durable arrival queue (one `arrival:<emailId>` entry per new Inbox message) keeps at most the
+200 newest pending arrivals, and an arrival never attempted within 24 hours of being queued is
+dropped instead of triaged. While no model is configured, new mail is therefore not turned into a
+backfill when one is configured later. An arrival whose message is gone at the provider is
+dropped after one retry. Drops are reported as one `ARRIVALS_DROPPED` notice per account on its
+Inbox task. `POST /api/agent/triage/:id` answers `409 TRIAGE_PENDING` while the message is still
+queued for automatic triage.
 
 ## HTTP API
 
@@ -223,8 +260,9 @@ reconnect, refetch `GET /api/tasks/:id` and page items with `afterSeq=<last seen
 - `JobDefinition.taskId` / `JobState.taskId` bind a job to its routine task, and
   `SchedulerOptions.runOnTask` wraps those runs.
 - Job functions pass `ctx.agentRunOptions` to `AgentRuntime.run`.
-- `tasks.maintenance` (every 10 minutes) handles snooze wake-ups, auto-settle and watch expiry.
-  See [scheduler](scheduler.md).
+- `tasks.maintenance` (every 10 minutes) handles snooze wake-ups, auto-settle, watch expiry and
+  the 24-hour `mail_export` sweep (`<dataDir>/scratch`, also swept at startup). See
+  [scheduler](scheduler.md).
 
 ## UI
 
@@ -266,3 +304,22 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   the existing trust pin (`PUT /api/trust/:category/pin`).
 - Child tasks: `parentTaskId` is honored for the permission clamp, but no tool spawns a child
   task yet.
+
+## Known limitations (review R4)
+
+- **R4-8:** there is no separate cap on wakes per watch per day; the loop guard above is the only
+  bound. A long, genuinely human back-and-forth that the agent answers with unattended sends
+  stops after three exchanges and hands back.
+- **R4-23:** replies sent from a send-as alias that is neither an account address nor a
+  verified-self person and that the provider files outside Sent can still wake the task (they
+  are classified `reply`, so the loop guard applies).
+- **R4-24 (packages/agent):** the `matter_review` prompt and the manual runtime's "Initial context
+  (untrusted data)" line embed matter notes and email JSON with a label instead of the random-tag
+  frame above. The agent's system prompt treats them as untrusted, but a forged closing marker is
+  not neutralised there.
+- **R4-27 (packages/store):** a data directory first opened by the pre-release task-model branch
+  build skips the `matter_refs` migration; v0.2 data directories migrate correctly.
+- **R4-29:** `passport sync` in client mode runs its own forced watcher tick next to the server's.
+  Arrival dedupe prevents double triage; the cost is duplicate provider reads.
+- **R4-32:** explicit triage of an uncached handle caches the provider row without normalising
+  it first (`personIds`, `category` and `matterId` fill in on the next read).

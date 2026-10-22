@@ -327,6 +327,7 @@ export async function createRealBackend(
           bus,
           tasks?.triggers.arrivalAgent(agent) ?? agent,
           () => enabled && !stopped,
+          tasks ? (counts) => tasks.triggers.reportDroppedArrivals(counts) : undefined,
         );
     const unsubscribe = options.clientMode
       ? () => {}
@@ -406,6 +407,8 @@ export async function createRealBackend(
                 await sync.drain();
                 await watcher.stop();
                 unsubscribe();
+                // Pending watch wakes stay persisted for the next start instead of firing now.
+                await tasks?.watches.close();
                 await drainAgentQueue();
                 await tasks?.close();
                 stopped = true;

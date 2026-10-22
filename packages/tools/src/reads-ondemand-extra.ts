@@ -1,6 +1,8 @@
 import type { Email, MailEnvelope, ReadMeta } from "@passport/types";
 import { formatMailAddress, isProviderGetAllowed, PROVIDER_GET_ALLOWLIST } from "@passport/types";
+import { runGrep } from "./attachments/run-worker.js";
 import type { Context } from "./context.js";
+import { linesOf } from "./grep-match.js";
 import {
   mapLimit,
   mergeMeta,
@@ -19,6 +21,8 @@ import { PROVIDER_READ } from "./reads-ondemand.js";
 import { loadMail } from "./reads-ondemand-read.js";
 import { searchMail } from "./reads-ondemand-search.js";
 import { register } from "./register.js";
+import { limitResponse } from "./response-budget.js";
+import { compileSafeRegex, REGEX_MAX_LENGTH } from "./safe-regex.js";
 import { Schema, schema as z } from "./schema.js";
 import * as o from "./schemas-ondemand.js";
 import type { ToolResult } from "./types.js";
@@ -35,15 +39,6 @@ interface GrepItem {
 
 const clipLine = (line: string) =>
   neutralize(line.length > LINE_MAX ? `${line.slice(0, LINE_MAX)}…` : line);
-
-function compile(pattern: string, flags: string): RegExp {
-  try {
-    return new RegExp(pattern, [...new Set(flags)].join(""));
-  } catch {
-    // Report the stable input error; the engine message adds nothing for the agent.
-    throw new ToolError("INVALID_INPUT", "pattern is not a valid JavaScript regular expression.");
-  }
-}
 
 const plain = (email: Pick<Email, "textBody" | "htmlBody">) =>
   stripQuoteMarkers(email.textBody ?? (email.htmlBody ? htmlToText(email.htmlBody) : ""));
@@ -80,41 +75,55 @@ async function grepItems(ctx: Context, ids: string[], metas: ReadMeta[]): Promis
   return slots.flat();
 }
 
-function grep(
+/** Matches in the worker (bounded wall clock), then builds rows with neutralised context. */
+async function grep(
   items: GrepItem[],
   regex: RegExp,
   context: number,
   maxMatches: number,
   partial: PartialRows,
-) {
-  let truncated = false;
-  for (const { meta, text } of items) {
-    const lines = text.replace(/\r\n?/g, "\n").split("\n");
-    for (let index = 0; index < lines.length; index++) {
-      if (!regex.test((lines[index] ?? "").slice(0, 2000))) {
-        continue;
-      }
-      if (partial.items.length >= maxMatches) {
-        truncated = true;
-        break;
-      }
-      partial.items.push({
-        id: meta.id,
-        threadId: meta.threadId,
-        date: meta.receivedAt,
-        from: neutralize(meta.from[0] ? formatMailAddress(meta.from[0]) : ""),
-        subject: neutralize(meta.subject),
-        line: index + 1,
-        text: clipLine(lines[index] ?? ""),
-        before: lines.slice(Math.max(0, index - context), index).map(clipLine),
-        after: lines.slice(index + 1, index + 1 + context).map(clipLine),
-      });
-    }
-    if (truncated) {
-      break;
-    }
+): Promise<boolean> {
+  const { hits, truncated } = await runGrep({
+    grep: {
+      pattern: regex.source,
+      flags: regex.flags,
+      texts: items.map((item) => item.text),
+      maxMatches,
+    },
+  });
+  for (const [item, index] of hits) {
+    const { meta, text } = items[item] as GrepItem;
+    const lines = linesOf(text);
+    partial.items.push({
+      id: meta.id,
+      threadId: meta.threadId,
+      date: meta.receivedAt,
+      from: neutralize(meta.from[0] ? formatMailAddress(meta.from[0]) : ""),
+      subject: neutralize(meta.subject),
+      line: index + 1,
+      text: clipLine(lines[index] ?? ""),
+      before: lines.slice(Math.max(0, index - context), index).map(clipLine),
+      after: lines.slice(index + 1, index + 1 + context).map(clipLine),
+    });
   }
   return truncated;
+}
+
+/**
+ * A provider body over the response budget: lists lose trailing items (`omittedItems`); a body
+ * that still does not fit becomes `bodyText`, its JSON clipped to the budget (`totalBytes`).
+ */
+function clipProviderBody(result: ToolResult & { body: unknown }, budget?: number): ToolResult {
+  try {
+    return limitResponse(result, budget);
+  } catch {
+    // Not reducible structurally (one huge value); fall back to clipped JSON text.
+    const json = JSON.stringify(result.body) ?? "null";
+    return limitResponse(
+      { ...result, body: null, bodyText: json, totalBytes: Buffer.byteLength(json) },
+      budget,
+    );
+  }
 }
 
 const queryParams = new Schema<Record<string, string>>(
@@ -151,8 +160,10 @@ export function registerOnDemandExtra(ctx: Context) {
       pattern: z
         .string()
         .min(1)
-        .max(500)
-        .describe("JavaScript regular expression, matched per line."),
+        .max(REGEX_MAX_LENGTH)
+        .describe(
+          "JavaScript regular expression, matched per line. No backreferences or nested quantifiers; matching stops after 2 s.",
+        ),
       flags: z
         .string()
         .regex(/^[im]{0,2}$/, 'Use "", "i", "m" or "im".')
@@ -163,7 +174,7 @@ export function registerOnDemandExtra(ctx: Context) {
     },
     false,
     async (input, call) => {
-      const regex = compile(input.pattern, input.flags);
+      const regex = compileSafeRegex(input.pattern, input.flags);
       const byQuery = input.query !== undefined || input.rawQuery !== undefined;
       if (Boolean(input.ids) === byQuery) {
         throw new ToolError("INVALID_INPUT", "Provide ids, or query/rawQuery, not both.");
@@ -193,7 +204,7 @@ export function registerOnDemandExtra(ctx: Context) {
       return onDemand(async (partial) => {
         partial.source = "mixed";
         const items = await grepItems(call, ids, metas);
-        const truncated = grep(items, regex, input.context, input.maxMatches, partial);
+        const truncated = await grep(items, regex, input.context, input.maxMatches, partial);
         return {
           matches: partial.items,
           matchCount: partial.items.length,
@@ -235,14 +246,17 @@ export function registerOnDemandExtra(ctx: Context) {
           throw new ToolError("ON_DEMAND_UNSUPPORTED", "This provider has no raw GET.");
         }
         const response = await target.reader.rawGet(allowed, query ?? {});
-        return {
-          account: target.account.id,
-          path: allowed,
-          status: response.value.status,
-          body: neutralizeDeep(response.value.body),
-          ...mergeMeta([response]),
-          untrusted: UNTRUSTED_NOTICE,
-        };
+        return clipProviderBody(
+          {
+            account: target.account.id,
+            path: allowed,
+            status: response.value.status,
+            body: neutralizeDeep(response.value.body),
+            ...mergeMeta([response]),
+            untrusted: UNTRUSTED_NOTICE,
+          },
+          call.deps.responseByteBudget,
+        );
       }),
     PROVIDER_READ,
   );

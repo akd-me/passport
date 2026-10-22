@@ -1,5 +1,12 @@
 import { newId } from "@passport/store";
 import type { AgentTrigger, Email, EventBus, Store } from "@passport/types";
+import {
+  ARRIVAL_LIMITS,
+  type DroppedCounts,
+  overflow,
+  recordDropped,
+  takeDropped,
+} from "./arrival-backlog.js";
 import { compareAndSetKv, mutateKv } from "./atomic-kv.js";
 import type { PassportAgent } from "./backend.js";
 import { calendarsReady } from "./calendar-safety.js";
@@ -13,6 +20,10 @@ export interface Arrival {
   nextAttemptAt: string | null;
   lastError: string | null;
   attentionActionId?: string;
+  /** When the arrival was queued (absent on entries from older versions). */
+  createdAt?: string;
+  /** Drains that found the message gone at the provider. */
+  missing?: number;
   startedAt?: string;
   completedAt?: string;
   calendarWaitStartedAt?: string;
@@ -44,19 +55,32 @@ export async function persistArrival(store: Store, email: Email): Promise<void> 
   await indexed(store, async () => {
     const key = arrivalKey(email.id);
     if (!(await store.kv.get(key))) {
+      const now = new Date().toISOString();
       const entry: Arrival = {
         accountId: email.accountId,
         attempts: 0,
-        nextAttemptAt: new Date().toISOString(),
+        nextAttemptAt: now,
         lastError: null,
+        createdAt: now,
       };
       compareAndSetKv(store, key, null, JSON.stringify(entry));
     }
     // Both writes finish before sync stores the email, so interrupted ingestion
     // retries registration before the email can be considered already ingested.
-    mutateKv(store, INDEX, (current) =>
-      JSON.stringify({ ...JSON.parse(current ?? "{}"), [email.id]: email.accountId }),
-    );
+    let dropped: Array<[string, string]> = [];
+    mutateKv(store, INDEX, (current) => {
+      const index = { ...JSON.parse(current ?? "{}"), [email.id]: email.accountId };
+      // Keep the newest arrivals only: a queue that waits on a model is not a backfill (R4-11).
+      dropped = overflow(index);
+      for (const [id] of dropped) {
+        delete index[id];
+      }
+      return JSON.stringify(index);
+    });
+    for (const [id, accountId] of dropped) {
+      await store.kv.delete(arrivalKey(id));
+      recordDropped(store, accountId, "backlog");
+    }
   });
 }
 
@@ -70,6 +94,8 @@ export class ArrivalQueue {
     private bus: EventBus,
     private agent: PassportAgent,
     private enabled: () => boolean,
+    /** Reports arrivals dropped since the last drain (a notice on the account's inbox task). */
+    private onDropped?: (counts: DroppedCounts) => Promise<void>,
   ) {}
 
   private async acknowledge(emailId: string, keepEntry = false) {
@@ -202,11 +228,27 @@ export class ArrivalQueue {
       await this.acknowledge(emailId);
       return;
     }
+    const created = Date.parse(entry.createdAt ?? entry.nextAttemptAt ?? "");
+    if (entry.attempts === 0 && Date.now() - created > ARRIVAL_LIMITS.staleMs) {
+      // Waited a day without a model run (no model configured): never triage it late.
+      await this.acknowledge(emailId);
+      recordDropped(this.store, entry.accountId, "backlog");
+      return;
+    }
     const email = await this.store.emails.get(emailId);
     if (!email) {
       // An indexed arrival can precede its email if sync was interrupted.
       if (!(await this.store.accounts.get(entry.accountId))) {
         await this.acknowledge(emailId);
+        return;
+      }
+      // Gone at the provider (read-through found nothing): drop after one retry (R4-12).
+      entry.missing = (entry.missing ?? 0) + 1;
+      if (entry.missing > ARRIVAL_LIMITS.goneRetries) {
+        await this.acknowledge(emailId);
+        recordDropped(this.store, entry.accountId, "gone");
+      } else {
+        await this.save(emailId, entry);
       }
       return;
     }
@@ -299,6 +341,7 @@ export class ArrivalQueue {
       return this.draining;
     }
     const job = (async () => {
+      await this.reportDropped();
       if (!this.enabled() || signal?.aborted) {
         return;
       }
@@ -316,6 +359,16 @@ export class ArrivalQueue {
     });
     this.draining = job;
     return job;
+  }
+  private async reportDropped() {
+    const counts = takeDropped(this.store);
+    if (!Object.keys(counts).length) {
+      return;
+    }
+    logger.warn("Some new-mail arrivals were dropped before triage");
+    await this.onDropped?.(counts).catch(() => {
+      logger.warn("Arrival drop notice failed");
+    });
   }
   async drain(): Promise<void> {
     while (this.draining || this.active.size) {

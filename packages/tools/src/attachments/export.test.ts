@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MAIL_ATTACHMENT_MAX_BYTES } from "@passport/types";
 import { afterEach, describe, expect, it } from "vitest";
+import { shortHash } from "../scratch-fs.js";
 import { onDemandHarness } from "../testing/ondemand.js";
 import { exportLimits, safeFileName } from "./export.js";
 
@@ -66,7 +67,8 @@ describe("mail_export includeAttachments", () => {
     expect(result).not.toHaveProperty("skippedAttachments");
     const written = result.attachments as Array<{ path: string }>;
     expect(written.every((file) => file.path.startsWith(`${dir}/`))).toBe(true);
-    expect(await readdir(dir)).toEqual(["exp-exp-0-lease.pdf", "exp-exp-1-escape.sh"]);
+    const prefix = `${shortHash(String((result.files as Array<{ threadId: string }>)[0]?.threadId))}-${shortHash("account-1:email:exp")}`;
+    expect(await readdir(dir)).toEqual([`${prefix}-0-lease.pdf`, `${prefix}-1-escape.sh`]);
     expect(await readdir(join(scratchDir, "s1"))).toEqual(
       expect.not.arrayContaining(["escape.sh"]),
     );

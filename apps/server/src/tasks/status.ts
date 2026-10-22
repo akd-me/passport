@@ -39,6 +39,8 @@ export interface RunOutcome {
   trigger: TaskRunTrigger;
   /** Status before the run started. */
   preStatus: TaskStatus;
+  /** Status once the run started (after `statusDuringRun`). */
+  startStatus?: TaskStatus;
   failed: boolean;
   /** Created ActionRecords or said something (assistant text) during the run. */
   produced: boolean;
@@ -47,8 +49,16 @@ export interface RunOutcome {
   now: string;
 }
 
+/** Settled, snoozed or archived by the person while the run was active (R4-9). */
+function putAwayDuringRun(task: Task, outcome: RunOutcome): boolean {
+  const away = task.status === "settled" || hidden(task.status);
+  return away && outcome.startStatus !== undefined && task.status !== outcome.startStatus;
+}
+
 /**
  * Status when a run ends:
+ *  0. a task the person settled, snoozed or archived during the run stays there; a failure
+ *     only sets `needsUser`;
  *  1. a failed run (not arrivals, which retry) surfaces with `needsUser: "failure"`;
  *  2. pending approvals surface with `needsUser: "approval"`;
  *  3. another run of the task still active keeps it Working;
@@ -57,8 +67,21 @@ export interface RunOutcome {
  *  6. schedule and watch runs that produced something come back (Working while watching);
  *     ones that produced nothing return to where they were;
  *  7. arrival triage never moves the task by itself.
+ * A task that rested in Working (watching) and comes back to the inbox gets a fresh
+ * `lastActivityAt` (R4-10), so auto-settle never takes it before the person saw it.
  */
 export function statusAfterRun(task: Task, outcome: RunOutcome): Partial<Task> {
+  if (putAwayDuringRun(task, outcome)) {
+    return outcome.failed && outcome.trigger.kind !== "arrival" ? { needsUser: "failure" } : {};
+  }
+  const next = ruleStatus(task, outcome);
+  // Resting in Working (watching) before the run and handed back now: the watch ended.
+  return outcome.preStatus === "working" && next.status === "inbox"
+    ? { ...next, lastActivityAt: outcome.now }
+    : next;
+}
+
+function ruleStatus(task: Task, outcome: RunOutcome): Partial<Task> {
   const { trigger, now } = outcome;
   if (outcome.failed && trigger.kind !== "arrival") {
     return surface("failure", now);

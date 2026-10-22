@@ -49,32 +49,63 @@ function sumCosts(costs: ReadCost[]): ReadCost {
   return total;
 }
 
+/** An account left out of a multi-account search, with a bounded code (R4-13). */
+interface Skipped {
+  account: string;
+  code: string;
+  retryAfterSeconds?: number;
+}
+
+const SAFE_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
+
+function skippedFor(account: string, error: unknown): Skipped {
+  const failure = error as { code?: unknown; retryAfterSeconds?: unknown };
+  const code = typeof failure?.code === "string" && SAFE_CODE.test(failure.code);
+  return {
+    account,
+    code: code ? (failure.code as string) : "PROVIDER_ERROR",
+    ...(typeof failure?.retryAfterSeconds === "number"
+      ? { retryAfterSeconds: Math.max(1, Math.ceil(failure.retryAfterSeconds)) }
+      : {}),
+  };
+}
+
 async function readersFor(backend: Backend, store: Store, account: string | undefined) {
-  const ids = account
-    ? [required(await store.accounts.get(account), "Account").id]
-    : (await store.accounts.list()).filter((a) => a.capabilities.mail).map((a) => a.id);
+  const accounts = account
+    ? [required(await store.accounts.get(account), "Account")]
+    : (await store.accounts.list()).filter((a) => a.capabilities.mail);
   const found: Array<{ accountId: string; reader: MailReader }> = [];
-  for (const accountId of ids) {
+  const skipped: Skipped[] = [];
+  for (const { id: accountId, settings } of accounts) {
     // A single failing account (e.g. needs sign-in) does not hide the others.
+    if (!account && settings.reauthorizationRequired === true) {
+      skipped.push({ account: accountId, code: "REAUTHORIZE_REQUIRED" });
+      continue;
+    }
     const reader = await backend.readers?.(accountId).catch((error: unknown) => {
       if (account) {
         throw error;
       }
+      skipped.push(skippedFor(accountId, error));
       return null;
     });
     if (reader) {
       found.push({ accountId, reader });
     }
   }
-  return found;
+  return { found, skipped };
 }
 
 export function installMailRoutes(app: Hono, backend: Backend): void {
   /** Provider search (`q` portable query, `account`, `limit`, `pageToken`); cache-only fallback. */
   app.get("/api/emails", async (c) => {
     const q = c.req.query();
-    const readers = await readersFor(backend, backend.store, q.account ?? q.accountId);
-    if (!readers.length) {
+    const { found: readers, skipped } = await readersFor(
+      backend,
+      backend.store,
+      q.account ?? q.accountId,
+    );
+    if (!readers.length && !skipped.length) {
       // No on-demand reader (demo, or a provider without one): only what is cached locally.
       const page = await backend.store.emails.query(
         emailQuery({
@@ -89,25 +120,44 @@ export function installMailRoutes(app: Hono, backend: Backend): void {
     if (q.pageToken && readers.length > 1) {
       throw new ApiError("INVALID_QUERY", "pageToken requires account");
     }
+    const search = (reader: MailReader) =>
+      reader.search({
+        ...(q.q ? { query: q.q } : {}),
+        limit,
+        ...(q.pageToken ? { pageToken: q.pageToken } : {}),
+      });
+    if (q.account ?? q.accountId) {
+      return provider(c, async () => {
+        const page = await search(readers[0]!.reader);
+        return c.json(page);
+      });
+    }
     return provider(c, async () => {
-      const pages = await Promise.all(
-        readers.map(({ reader }) =>
-          reader.search({
-            ...(q.q ? { query: q.q } : {}),
-            limit,
-            ...(q.pageToken ? { pageToken: q.pageToken } : {}),
-          }),
-        ),
-      );
+      const settled = await Promise.allSettled(readers.map(({ reader }) => search(reader)));
+      const pages = [];
+      const failures: unknown[] = [];
+      for (const [index, result] of settled.entries()) {
+        if (result.status === "fulfilled") {
+          pages.push(result.value);
+        } else {
+          failures.push(result.reason);
+          skipped.push(skippedFor(readers[index]!.accountId, result.reason));
+        }
+      }
+      if (!pages.length && failures.length) {
+        // Every searched account failed: 429 only when all of them are throttled.
+        const limited = (f: unknown) => (f as { code?: string }).code === "RATE_LIMITED";
+        throw failures.every(limited) ? failures[0] : failures.find((f) => !limited(f));
+      }
       const items: MailRow[] = pages
         .flatMap((page) => page.items)
         .sort((a, b) => b.date.localeCompare(a.date))
         .slice(0, limit);
       const [only] = pages;
       return c.json(
-        pages.length === 1 && only
-          ? { ...only, items }
-          : { items, source: "provider", cost: sumCosts(pages.map((page) => page.cost)) },
+        readers.length === 1 && only
+          ? { ...only, items, skipped }
+          : { items, source: "provider", cost: sumCosts(pages.map((page) => page.cost)), skipped },
       );
     });
   });

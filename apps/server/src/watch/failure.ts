@@ -12,10 +12,23 @@ export const INVALID_CURSOR = ["INVALID_CURSOR", "CURSOR_EXPIRED"];
 const MAX_BACKOFF_MS = 15 * 60_000;
 const BASE_BACKOFF_MS = 30_000;
 
-export const safeCode = (error: unknown) => {
+export const safeCode = (error: unknown, fallback = "WATCH_FAILED") => {
   const code = (error as { code?: unknown })?.code;
-  return typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : "WATCH_FAILED";
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : fallback;
 };
+
+/**
+ * A failure with a bounded code and fixed text. The scheduler stores and broadcasts error
+ * messages, so raw adapter or SQLite text never leaves the watcher (R4-26).
+ */
+export class BoundedError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 /** Provider or governor throttling: back off the tick, never fail the account. */
 export const rateLimited = (error: unknown) => {

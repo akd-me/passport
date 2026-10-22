@@ -36,12 +36,26 @@ async function currentTask(
   return { task, tasks };
 }
 
-/** `watch_conversation` / `unwatch_conversation`: the email analogue of `watch_pull_request`. */
+/** The person settled or archived the task (possibly while this run was working): no new watches. */
+function refuseClosed(task: Task) {
+  if (task.status === "settled" || task.status === "archived") {
+    throw new ToolError(
+      "TASK_SETTLED",
+      "The person settled or archived this task; it can no longer watch conversations.",
+    );
+  }
+}
+
+/**
+ * `watch_conversation` / `unwatch_conversation`. Both are write tools: they change the task's
+ * lifecycle, so plan mode records them instead of running them (R4-18). The email analogue of
+ * `watch_pull_request`.
+ */
 export function registerTaskWatches(ctx: Context) {
   register(
     ctx,
     "watch_conversation",
-    "Wake this task when someone other than the user replies on a conversation, a bounce or auto-reply arrives, or after 14 days. Only messages after now count. While watching, the task waits in Working instead of the user's inbox; call unwatch_conversation when handing back.",
+    "Wake this task when someone other than the user replies on a conversation, a bounce or auto-reply arrives, or after 14 days. Only messages after now count. While watching, the task waits in Working instead of the user's inbox; call unwatch_conversation when handing back. Settled or archived tasks cannot watch (TASK_SETTLED).",
     {
       threadHandle,
       account: z
@@ -52,18 +66,20 @@ export function registerTaskWatches(ctx: Context) {
         .optional()
         .describe("Account id; defaults to the handle's account."),
     },
-    false,
+    true,
     async (args, call) => {
       const { task, tasks } = await currentTask(call);
+      refuseClosed(task);
+      // Only a real thread handle: arbitrary text would sit in later wake prompts (R4-17).
       const parsed = parseMailHandle(args.threadHandle);
-      if (parsed && parsed.type !== "thread") {
+      if (parsed?.type !== "thread") {
         throw new ToolError(
           "INVALID_INPUT",
-          "Pass the conversation (thread) handle, not a message id.",
+          "Pass the conversation (thread) handle from a mail row's threadId.",
         );
       }
-      const accountId = args.account ?? parsed?.accountId;
-      if (parsed && accountId !== parsed.accountId) {
+      const accountId = args.account ?? parsed.accountId;
+      if (accountId !== parsed.accountId) {
         throw new ToolError("ACCOUNT_MISMATCH", "The handle belongs to a different account.");
       }
       const account = await call.account(accountId);
@@ -73,13 +89,16 @@ export function registerTaskWatches(ctx: Context) {
         since: call.now(),
         consecutiveWakes: 0,
       };
-      const updated = await tasks.update(task.id, (current) => ({
-        watches: [
-          ...current.watches.filter((item) => item.threadHandle !== watch.threadHandle),
-          watch,
-        ].slice(-MAX_WATCHES),
-        lastActivityAt: call.now(),
-      }));
+      const updated = await tasks.update(task.id, (current) => {
+        refuseClosed(current);
+        return {
+          watches: [
+            ...current.watches.filter((item) => item.threadHandle !== watch.threadHandle),
+            watch,
+          ].slice(-MAX_WATCHES),
+          lastActivityAt: call.now(),
+        };
+      });
       call.deps.bus.emit({ type: "task.updated", task: updated });
       return json({ watching: true, threadHandle: watch.threadHandle, since: watch.since });
     },
@@ -89,7 +108,7 @@ export function registerTaskWatches(ctx: Context) {
     "unwatch_conversation",
     "Stop watching a conversation for this task (or every conversation when threadHandle is omitted). The task returns to the user's inbox when nothing else keeps it working.",
     { threadHandle: threadHandle.optional() },
-    false,
+    true,
     async (args, call) => {
       const { task, tasks } = await currentTask(call);
       const updated = await tasks.update(task.id, (current) => ({
