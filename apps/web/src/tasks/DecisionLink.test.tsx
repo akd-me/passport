@@ -11,8 +11,14 @@ function Where() {
   return <output aria-label="location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function open(path: string) {
-  stubApi({
+function open(path: string, byAction?: Record<string, string>) {
+  const fetchMock = stubApi({
+    "/tasks/by-action": (url: URL) => {
+      const owner = byAction?.[decodeURIComponent(url.pathname.split("/").at(-1) ?? "")];
+      return owner
+        ? { taskId: owner, runId: null }
+        : Response.json({ error: { code: "NOT_FOUND", message: "Not found" } }, { status: 404 });
+    },
     "/tasks": {
       items: [
         task("t-other", { pendingActionIds: ["a-9"] }),
@@ -31,6 +37,7 @@ function open(path: string) {
       </TasksProvider>
     </Harness>,
   );
+  return fetchMock;
 }
 
 describe("decision deep links", () => {
@@ -44,6 +51,15 @@ describe("decision deep links", () => {
   it("falls back to the Needs you queue when no loaded task owns it", async () => {
     open("/matters?decision=a-404");
     expect(await screen.findByText("/needs-you?decision=a-404")).toBeInTheDocument();
+  });
+
+  it("deep link: asks the server which task holds the action before searching", async () => {
+    // a-77 is in no loaded task (an older run, or a settled task outside the sidebar).
+    const fetchMock = open("/?decision=a-77", { "a-77": "t-far" });
+    expect(await screen.findByText("/tasks/t-far?approval=a-77")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes("/api/tasks/by-action/a-77")),
+    ).toBe(true);
   });
 
   it("leaves other addresses alone", async () => {

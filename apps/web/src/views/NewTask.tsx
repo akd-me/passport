@@ -20,8 +20,8 @@ export function NewTask() {
         </p>
         {!available && (
           <p className="side-note new-task-note" role="note">
-            Tasks need the full backend (<code>passport serve</code>). The demo workspace can’t
-            start them; its proposals are under <Link to="/needs-you">Needs you</Link>.
+            Tasks need the full backend (<code>passport serve</code>). Here the demo agent runs your
+            instruction once; its proposals are under <Link to="/needs-you">Needs you</Link>.
           </p>
         )}
         <PromotionPrompts />

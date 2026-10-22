@@ -1,14 +1,14 @@
-import type { TrustLevel } from "@passport/types";
+import type { AgentRun, TrustLevel } from "@passport/types";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useAccounts } from "../accounts/AccountFilter";
-import type { TrustData } from "../api";
+import { ApiError, api, type TrustData } from "../api";
 import { Popover } from "../components/Popover";
 import { Icon, Kbd } from "../components/ui";
 import { logger } from "../logger";
 import { providerLabel } from "../settings/ModelSettings";
 import { useResource } from "../state";
-import { taskApi } from "../tasks/api";
+import { type NewTaskInput, taskApi } from "../tasks/api";
 import { useTasks } from "../tasks/store";
 import { clampOf } from "../tasks/TaskModes";
 import { useUi } from "../ui-state";
@@ -18,6 +18,8 @@ import { modeLabel } from "../views/trust-modes";
 type RunState =
   | { state: "idle" }
   | { state: "running"; instruction: string }
+  /** The demo backend has no tasks; its one-shot agent run answers inline (R5-7). */
+  | { state: "done"; instruction: string; result: string }
   | { state: "failed"; instruction: string; error: string };
 
 const suggestions = [
@@ -26,20 +28,44 @@ const suggestions = [
   "What’s due in the next few days?",
 ];
 
-/** The task route takes the message only; context the agent should read rides along in it. */
-function withContext(
-  instruction: string,
-  matter?: { id: string; title: string },
-  email?: { emailId: string; label: string },
-) {
-  const lines = [instruction];
-  if (matter) {
-    lines.push(`Matter: “${matter.title}” (id ${matter.id}).`);
+/** What a demo agent run did, in the v0.2 composer's words. */
+function outcome(run: AgentRun) {
+  if (run.error) {
+    return run.error;
   }
-  if (email) {
-    lines.push(`Message: “${email.label}” (id ${email.emailId}).`);
+  const count = run.actionIds.length;
+  return count
+    ? `${count} ${count === 1 ? "action" : "actions"} ready. Anything that needs you is in Needs you.`
+    : run.summary || "Done. Nothing needed changing.";
+}
+
+/** Only plain ids go into a message; anything else is dropped rather than quoted. */
+const plainId = (id: string) => /^[\w:.@-]{1,200}$/.test(id);
+
+/**
+ * For servers whose `POST /api/tasks` predates `matterId`/`emailIds`: the ids alone, so the
+ * agent reads the matter and message through its tools, where their text stays untrusted
+ * (R5-1). Subjects and titles are never put into the person's message.
+ */
+function withIds(instruction: string, ids: Pick<NewTaskInput, "matterId" | "emailIds">) {
+  const refs = [
+    ...(ids.matterId && plainId(ids.matterId) ? [`matter ${ids.matterId}`] : []),
+    ...(ids.emailIds ?? []).filter(plainId).map((id) => `message ${id}`),
+  ];
+  return refs.length ? `${instruction}\n\n(Context: ${refs.join(", ")}.)` : instruction;
+}
+
+/** Create the task with context as ids; an older server that refuses them gets the ids inline. */
+async function createTask(input: NewTaskInput) {
+  try {
+    return await taskApi.create(input);
+  } catch (error) {
+    const { matterId, emailIds, ...rest } = input;
+    if (!(error instanceof ApiError && error.status === 400 && (matterId || emailIds))) {
+      throw error;
+    }
+    return taskApi.create({ ...rest, message: withIds(input.message, { matterId, emailIds }) });
   }
-  return lines.join("\n\n");
 }
 
 /** The new task's permission mode; it starts at the global dial and can only be clamped. */
@@ -108,8 +134,8 @@ export function Composer({
     [chosenMode, setMode] = useState<TrustLevel>(),
     [plan, setPlan] = useState(false);
   const attached = context && context.emailId !== dropped ? context : undefined;
-  const { composer, openSettings } = useUi(),
-    { upsert, trackRuns } = useTasks(),
+  const { composer, openSettings, focusComposer } = useUi(),
+    { upsert, trackRuns, available } = useTasks(),
     navigate = useNavigate(),
     { llm, mode } = useAccounts(),
     trust = useResource<TrustData>("/trust");
@@ -123,13 +149,17 @@ export function Composer({
     if (instruction === text.trim()) {
       setText("");
     }
+    const ids = {
+      ...(matterId ? { matterId } : {}),
+      ...(attached ? { emailIds: [attached.emailId] } : {}),
+    };
     try {
-      const result = await taskApi.create({
-        message: withContext(
-          instruction,
-          matterId ? { id: matterId, title: matterTitle ?? "Matter" } : undefined,
-          attached,
-        ),
+      if (!available) {
+        return await runOnce(instruction, ids);
+      }
+      const result = await createTask({
+        message: instruction,
+        ...ids,
         ...(matterId || attached ? { title: instruction.slice(0, 200) } : {}),
         ...(chosenMode ? { permissionMode: chosenMode } : {}),
         ...(plan ? { interactionMode: "plan" as const } : {}),
@@ -141,14 +171,25 @@ export function Composer({
         state: { clamp: chosenMode ? clampOf(chosenMode, result.task.permissionMode) : null },
       });
     } catch (e) {
-      logger.warn("Task creation failed; restoring the instruction");
-      setText((draft) => draft || instruction);
-      setRun({
-        state: "failed",
-        instruction,
-        error: e instanceof Error ? e.message : "The task could not start.",
-      });
+      if (e instanceof ApiError && e.code === "TASKS_UNAVAILABLE") {
+        return runOnce(instruction, ids).catch((error: unknown) => fail(instruction, error));
+      }
+      fail(instruction, e);
     }
+  };
+  /** The demo backend: one agent run, its outcome shown here (v0.2 behaviour). */
+  const runOnce = async (instruction: string, ids: Pick<NewTaskInput, "matterId" | "emailIds">) => {
+    const result = await api.runAgent({ instruction, ...ids });
+    setRun({ state: "done", instruction, result: outcome(result) });
+  };
+  const fail = (instruction: string, e: unknown) => {
+    logger.warn("Task creation failed; restoring the instruction");
+    setText((draft) => draft || instruction);
+    setRun({
+      state: "failed",
+      instruction,
+      error: e instanceof Error ? e.message : "The task could not start.",
+    });
   };
   const provider = llm
       ? mode === "demo"
@@ -161,7 +202,16 @@ export function Composer({
       {showSuggestions && run.state === "idle" && !text && (
         <div className="suggestions" aria-label="Suggestions">
           {suggestions.map((s) => (
-            <button key={s} type="button" className="chip" onClick={() => void submit(s)}>
+            <button
+              key={s}
+              type="button"
+              className="chip"
+              // Into the composer, not started: the person reads it and presses Enter (R5-19).
+              onClick={() => {
+                setText(s);
+                focusComposer();
+              }}
+            >
               {s}
             </button>
           ))}
@@ -176,10 +226,19 @@ export function Composer({
       >
         {run.state !== "idle" && (
           <div className={`run-status ${run.state}`} role="status" aria-live="polite">
-            <Icon name={run.state === "running" ? "spinner" : "alert"} size={14} />
+            <Icon
+              name={run.state === "running" ? "spinner" : run.state === "done" ? "check" : "alert"}
+              size={14}
+            />
             <span className="run-instruction">{run.instruction}</span>
             <span className="run-result">
-              {run.state === "running" ? "Starting the task…" : run.error}
+              {run.state === "running"
+                ? available
+                  ? "Starting the task…"
+                  : "Working…"
+                : run.state === "done"
+                  ? run.result
+                  : run.error}
             </span>
             {run.state === "failed" && text && text !== run.instruction && (
               <button
@@ -191,7 +250,7 @@ export function Composer({
                 Retry
               </button>
             )}
-            {run.state === "failed" && (
+            {(run.state === "failed" || run.state === "done") && (
               <button
                 type="button"
                 className="icon-btn"
@@ -272,7 +331,10 @@ export function Composer({
             </span>
           )}
           {matterTitle && (
-            <span className="composer-chip static" title="This task is about the matter">
+            <span
+              className="composer-chip static context"
+              title="Passport will read this matter with your instruction"
+            >
               <Icon name="matters" size={14} />
               <span>{matterTitle}</span>
             </span>
