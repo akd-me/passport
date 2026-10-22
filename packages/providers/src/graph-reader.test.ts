@@ -183,9 +183,9 @@ describe("GraphMailReader labels and envelopes", () => {
     expect(result.value.get("c")?.providerId).toBe("c");
     expect(graph.sleeps).toEqual([1000]);
     const batches = graph.seen.filter((r) => r.url.pathname.endsWith("/$batch"));
-    // 25 ids → 20 + 5, plus one retry batch for the throttled request.
+    // 25 ids → 20 + 5, plus one retry batch for the throttled request (reported once, R1-2).
     expect(batches).toHaveLength(3);
-    expect(result.cost.graphRequests).toBe(26);
+    expect(result.cost.graphRequests).toBe(25);
     const inner = graph.seen.find((r) => r.batch && r.url.pathname.endsWith("/messages/a"));
     expect(inner?.url.searchParams.get("$expand")).toContain("attachments");
     expect(inner?.headers.get("Prefer")).toBe('IdType="ImmutableId"');

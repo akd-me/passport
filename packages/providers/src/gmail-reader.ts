@@ -33,6 +33,7 @@ import {
   hydrateTextParts,
   normalizeGmail,
 } from "./gmail-reader-normalize.js";
+import { type GmailPage, readGmailPage } from "./gmail-reader-page.js";
 import {
   clampLimit,
   type GmailThread,
@@ -40,7 +41,6 @@ import {
   joinQ,
   type ListRequest,
   listParams,
-  newestOf,
   RAW_SPAM_TRASH,
   scopesSpamTrash,
 } from "./gmail-reader-query.js";
@@ -49,7 +49,6 @@ import {
   encodePageToken,
   GmailCall,
   type GmailTransport,
-  gmailRow,
   isNotFound,
   metadataParams,
   withoutBodies,
@@ -57,6 +56,7 @@ import {
 import { parsePortableQuery, queryScopesSpamTrash } from "./query.js";
 import { listFilterToAst, renderGmailQuery } from "./query-render.js";
 import { GMAIL_UNIT_COSTS as UNITS } from "./quota-presets.js";
+import { clampCap } from "./reader-limits.js";
 
 /** One priced call, recorded so tests and callers can audit cost accounting. */
 export interface GmailCostEntry {
@@ -113,13 +113,14 @@ export class GmailMailReader implements MailReader {
       Boolean(input.threads),
     ]);
     const account = this.transport.accountId();
-    const pageToken = decodePageToken(account, "search", key, input.pageToken);
+    const state = decodePageToken(account, "search", key, input.pageToken);
     const scope = input.container ? await this.labelCache.scope(call, input.container) : {};
     const page = await this.page(call, {
       q: joinQ(q, scope.q),
       scope,
       limit: clampLimit(input.limit),
-      pageToken,
+      pageToken: state?.token,
+      ids: state?.ids,
       includeSpamTrash: Boolean(input.includeSpamTrash) || spamTrash || scopesSpamTrash(scope),
       threads: Boolean(input.threads),
     });
@@ -141,13 +142,14 @@ export class GmailMailReader implements MailReader {
     const call = this.call(opts);
     const account = this.transport.accountId();
     const key = JSON.stringify([container, filter]);
-    const token = decodePageToken(account, "list", key, pageToken);
+    const state = decodePageToken(account, "list", key, pageToken);
     const scope = container ? await this.labelCache.scope(call, container) : {};
     const page = await this.page(call, {
       q: joinQ(renderGmailQuery(listFilterToAst(filter)), scope.q),
       scope,
       limit: clampLimit(limit),
-      pageToken: token,
+      pageToken: state?.token,
+      ids: state?.ids,
       includeSpamTrash: scopesSpamTrash(scope),
       threads: false,
     });
@@ -246,7 +248,7 @@ export class GmailMailReader implements MailReader {
     const call = this.call(opts);
     const ast = opts.raw ? null : parsePortableQuery(query);
     const q = ast ? renderGmailQuery(ast) : query.trim();
-    const limit = Number.isFinite(cap) ? Math.max(0, Math.floor(cap)) : 0;
+    const limit = clampCap(cap);
     const request = {
       q,
       scope: {},
@@ -347,7 +349,7 @@ export class GmailMailReader implements MailReader {
   private collection(
     method: "search" | "list",
     call: GmailCall,
-    page: { items: MailRow[]; approxTotal: number | undefined },
+    page: GmailPage,
     nextPageToken: string | undefined,
   ): ReadResult<MailRow> {
     return {
@@ -355,46 +357,12 @@ export class GmailMailReader implements MailReader {
       ...(nextPageToken ? { nextPageToken } : {}),
       ...(page.approxTotal !== undefined ? { approxTotal: page.approxTotal } : {}),
       ...this.finish(method, call),
+      ...(page.cut ? { translation: page.cut } : {}),
     };
   }
 
-  /** One page of `messages.list` (or `threads.list`) plus batched metadata hydration. */
-  private async page(
-    call: GmailCall,
-    r: ListRequest,
-  ): Promise<{ items: MailRow[]; next: string | undefined; approxTotal: number | undefined }> {
-    let messages: GmailMessage[];
-    let page: IdPage;
-    if (r.threads) {
-      page = await call.get<IdPage>(`threads?${listParams(r, r.limit)}`, UNITS.threadsList);
-      const threads = await batchGet<GmailThread>(
-        call,
-        (page.threads ?? []).map((t) => `threads/${enc(t.id)}?${metadataParams()}`),
-        UNITS.threadsGetMetadata,
-      );
-      messages = threads.flatMap((t) => {
-        const newest = t?.messages ? newestOf(t.messages, r) : undefined;
-        return newest ? [newest] : [];
-      });
-    } else {
-      page = await call.get<IdPage>(`messages?${listParams(r, r.limit)}`, UNITS.messagesList);
-      // Messages deleted between the list and the get are skipped.
-      messages = (
-        await this.metadata(
-          call,
-          (page.messages ?? []).map((m) => m.id),
-        )
-      ).filter((m): m is GmailMessage => m !== null);
-    }
-    const names = await this.labelCache.labelNames(
-      call,
-      messages.flatMap((m) => m.labelIds ?? []),
-    );
-    const items: MailRow[] = [];
-    for (const message of messages) {
-      items.push(gmailRow(await this.normalize(message), names, message.payload?.mimeType));
-    }
-    return { items, next: page.nextPageToken, approxTotal: page.resultSizeEstimate };
+  private page(call: GmailCall, r: ListRequest & { ids?: string[] | undefined }) {
+    return readGmailPage(call, r, this.labelCache, (m) => this.normalize(m));
   }
 
   private metadata(call: GmailCall, ids: readonly string[]): Promise<Array<GmailMessage | null>> {

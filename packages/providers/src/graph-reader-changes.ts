@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import type { MailChanges } from "@passport/types";
 import { decodeCursor, encodeCursor, ProviderError } from "./errors.js";
+import { rebuildDeltaLink } from "./graph-reader-links.js";
 import {
   DELTA_SELECT,
   type GraphCall,
@@ -11,14 +13,26 @@ import {
 /**
  * `MailReader.changes` over Graph message delta, one delta link per tracked folder (Inbox by
  * default). Delta does not say whether an item was created or updated: an item received after
- * the folder's previous round (minus `ARRIVAL_SKEW_MS`) is an arrival, anything else (read
- * state, categories, a move into the folder) is a label change. `@removed` items left the folder.
+ * the folder's previous round (minus `ARRIVAL_SKEW_MS`) and not reported as added before is an
+ * arrival, anything else (read state, categories, a move into the folder) is a label change.
+ * `@removed` items left the folder.
+ *
+ * "Start at now" (R1-11): a folder's first round is scoped with `$filter=receivedDateTime ge
+ * {now − ARRIVAL_SKEW_MS}` (messages delta supports no `$deltatoken=latest`), so it is near-empty
+ * instead of enumerating the folder. The delta token remembers the filter: messages received
+ * before the cursor was created never appear in later rounds, so moves of older mail into the
+ * folder and label changes on it are not reported.
+ *
+ * Stored links are not fetched as given (R1-4): only their state token is kept and the URL is
+ * rebuilt for the folder (`rebuildDeltaLink`).
  */
 
 /** Tolerates index lag between a message's receivedDateTime and its appearance in delta. */
 export const ARRIVAL_SKEW_MS = 2 * 60_000;
-/** Safety stop while draining the initial round (1,000 rows per page). */
-const MAX_DRAIN_PAGES = 1_000;
+/** Safety stop while draining the (filtered) initial round. */
+const MAX_DRAIN_PAGES = 50;
+/** Ids reported as added that are still inside the arrival window, per folder (R1-6). */
+const MAX_RECENT = 100;
 
 interface FolderState {
   /** Next link to fetch: a deltaLink when `done`, otherwise a nextLink mid-round. */
@@ -26,6 +40,11 @@ interface FolderState {
   done: boolean;
   /** Start of the round `link` belongs to, ISO UTC. */
   at: string;
+  /**
+   * `hash:receivedSeconds36` of ids already reported as added whose receivedDateTime is still
+   * inside the next round's arrival window, so a later change is a label change (R1-6).
+   */
+  recent?: string[];
 }
 
 /** Cursor payload. `folders` keys are folder ids or well-known names, so folders can be added. */
@@ -46,8 +65,10 @@ const prefer = (pageSize: number) => ({ Prefer: `${IMMUTABLE_ID}, odata.maxpages
 
 /** Runs a folder's initial delta round to the end without returning items ("start at now"). */
 async function drain(call: GraphCall, folder: string, at: string): Promise<FolderState> {
+  const since = new Date(Date.parse(at) - ARRIVAL_SKEW_MS).toISOString();
   let link = graphUrl(`/me/mailFolders/${encodeURIComponent(folder)}/messages/delta`, {
     $select: DELTA_SELECT,
+    $filter: `receivedDateTime ge ${since}`,
   });
   for (let pages = 0; pages < MAX_DRAIN_PAGES; pages++) {
     const page = await call.get<DeltaPage>(link, prefer(1_000));
@@ -57,7 +78,7 @@ async function drain(call: GraphCall, folder: string, at: string): Promise<Folde
     if (!page["@odata.nextLink"]) {
       throw new ProviderError("INVALID_RESPONSE", "Graph did not return a final deltaLink");
     }
-    link = page["@odata.nextLink"];
+    link = call.transport.safeLink(page["@odata.nextLink"]);
   }
   throw new ProviderError("INVALID_RESPONSE", "Graph delta did not finish its initial round");
 }
@@ -87,37 +108,56 @@ function decode(cursor: string, account: string): Record<string, FolderState> {
     c.v === 1 &&
     c.folders &&
     typeof c.folders === "object" &&
-    Object.values(c.folders).every((f) => typeof f?.link === "string" && typeof f.at === "string");
+    Object.keys(c.folders).length <= 20 &&
+    Object.values(c.folders).every(
+      (f) =>
+        typeof f?.link === "string" &&
+        typeof f.at === "string" &&
+        Number.isFinite(Date.parse(f.at)) &&
+        (f.recent === undefined ||
+          (Array.isArray(f.recent) &&
+            f.recent.length <= MAX_RECENT &&
+            f.recent.every((r) => typeof r === "string" && RECENT.test(r)))),
+    );
   if (!valid) {
     throw new ProviderError("INVALID_CURSOR", "Change cursor does not belong to this mailbox");
   }
-  return { ...c.folders };
+  const folders: Record<string, FolderState> = {};
+  for (const [folder, state] of Object.entries(c.folders)) {
+    folders[folder] = { ...state, link: rebuildDeltaLink(folder, state.link) };
+  }
+  return folders;
 }
+
+const RECENT = /^[A-Za-z0-9_-]{8}:[0-9a-z]{1,8}$/;
+const idHash = (id: string) => createHash("sha1").update(id).digest("base64url").slice(0, 8);
 
 class ChangeSet {
   readonly added = new Set<string>();
   readonly changed = new Set<string>();
   readonly deleted = new Set<string>();
 
-  apply(message: ReaderMessage, sinceMs: number): void {
+  /** Classifies one delta item; returns true when it was newly reported as added. */
+  apply(message: ReaderMessage, sinceMs: number, reported: ReadonlySet<string>): boolean {
     const id = message.id;
     if (message["@removed"]) {
       this.added.delete(id);
       this.changed.delete(id);
       this.deleted.add(id);
-      return;
+      return false;
     }
     this.deleted.delete(id);
     const received = Date.parse(message.receivedDateTime ?? "");
     if (this.added.has(id)) {
-      return;
+      return false;
     }
-    if (Number.isFinite(received) && received >= sinceMs) {
+    if (Number.isFinite(received) && received >= sinceMs && !reported.has(idHash(id))) {
       this.changed.delete(id);
       this.added.add(id);
-    } else {
-      this.changed.add(id);
+      return true;
     }
+    this.changed.add(id);
+    return false;
   }
 }
 
@@ -130,18 +170,39 @@ async function readFolder(
   now: string,
 ): Promise<{ state: FolderState; seen: number }> {
   const sinceMs = Date.parse(state.at) - ARRIVAL_SKEW_MS;
+  const recent = new Map((state.recent ?? []).map((r) => [r.slice(0, 8), r]));
+  const reported = new Set(recent.keys());
   let link = state.link;
   let seen = 0;
+  const finish = (next: Omit<FolderState, "recent">) => {
+    // Only ids still inside the next round's window can be misread as arrivals.
+    const floor = Date.parse(next.at) - ARRIVAL_SKEW_MS;
+    const kept = [...recent.values()]
+      .map((r) => ({ r, at: Number.parseInt(r.slice(9), 36) * 1000 }))
+      .filter((e) => e.at >= floor)
+      .sort((a, b) => b.at - a.at)
+      .slice(0, MAX_RECENT)
+      .map((e) => e.r);
+    return { ...next, ...(kept.length ? { recent: kept } : {}) };
+  };
   while (seen < budget) {
     const page = await call.get<DeltaPage>(link, prefer(Math.min(budget - seen, 200)));
     for (const message of page.value ?? []) {
-      set.apply(message, sinceMs);
+      if (set.apply(message, sinceMs, reported)) {
+        const h = idHash(message.id);
+        const at = Math.floor(Date.parse(message.receivedDateTime ?? "") / 1000);
+        recent.set(h, `${h}:${at.toString(36)}`);
+      }
     }
     seen += page.value?.length ?? 0;
     if (page["@odata.deltaLink"]) {
       // Round complete: the next round classifies arrivals relative to this call.
       return {
-        state: { link: call.transport.safeLink(page["@odata.deltaLink"]), done: true, at: now },
+        state: finish({
+          link: call.transport.safeLink(page["@odata.deltaLink"]),
+          done: true,
+          at: now,
+        }),
         seen,
       };
     }
@@ -150,7 +211,7 @@ async function readFolder(
     }
     link = call.transport.safeLink(page["@odata.nextLink"]);
   }
-  return { state: { link, done: false, at: state.at }, seen };
+  return { state: finish({ link, done: false, at: state.at }), seen };
 }
 
 /** `MailReader.changes` for the folders in `tracked` (and any already in the cursor). */

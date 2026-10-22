@@ -62,7 +62,9 @@ export function ok(response: JmapInvocation | undefined, method: string): Record
   }
   const [name, args] = response;
   if (name === "error") {
-    const type = String(args.type ?? "");
+    // Server-supplied text: keep only a plain error-type token (R1-21).
+    const raw = String(args.type ?? "");
+    const type = /^[a-zA-Z]{1,40}$/.test(raw) ? raw : "";
     const code =
       type === "cannotCalculateChanges"
         ? "CURSOR_EXPIRED"

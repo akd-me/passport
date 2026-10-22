@@ -1,8 +1,9 @@
 import type { Email, MailboxRole, MailRow } from "@passport/types";
 import { toMailRow } from "@passport/types";
-import { decodeCursor, encodeCursor, ProviderError } from "./errors.js";
+import { ProviderError } from "./errors.js";
 import { normalizeGraph } from "./graph.js";
 import type { GraphFolderInfo } from "./graph-reader-folders.js";
+import { assertRowLink } from "./graph-reader-links.js";
 import {
   type GraphCall,
   graphUrl,
@@ -14,6 +15,7 @@ import {
 import type { QueryNode } from "./query.js";
 import { type MatchLabel, matchesQuery } from "./query-match.js";
 import type { GraphQueryPlan } from "./query-render.js";
+import { openToken, sealToken } from "./reader-tokens.js";
 
 /** Where a plan runs: the resolved folder and the folders hidden from it (Spam/Trash). */
 export interface GraphScope {
@@ -37,15 +39,16 @@ export interface GraphPageToken {
   seen?: string[];
 }
 
+/** Sealed (HMAC) so an agent cannot point the reader at another link (R1-4). */
 export function encodePageToken(token: GraphPageToken): string {
-  return encodeCursor(token);
+  return sealToken(token);
 }
 
 export function decodePageToken(
   value: string,
   expected: Pick<GraphPageToken, "account" | "kind" | "key">,
 ): GraphPageToken {
-  const c = decodeCursor<GraphPageToken>(value);
+  const c = openToken<GraphPageToken>(value);
   if (
     c.account !== expected.account ||
     c.kind !== expected.kind ||
@@ -56,7 +59,7 @@ export function decodePageToken(
   ) {
     throw new ProviderError("INVALID_CURSOR", "Page token belongs to a different query");
   }
-  return c;
+  return { ...c, link: assertRowLink(c.link) };
 }
 
 /** True when any client predicate reads the List-Id header. */

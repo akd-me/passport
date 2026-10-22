@@ -2,8 +2,8 @@ import type { QuotaLane, ReadCost } from "@passport/types";
 import { ProviderError, RateLimitedError } from "./errors.js";
 import type { GraphMessage } from "./graph.js";
 import type { RequestPolicy } from "./http.js";
+import { type WaitBudget, waitBudget } from "./http-request.js";
 import type { ThrottleSignal } from "./quota-presets.js";
-import { INTERACTIVE_MAX_WAIT_MS } from "./quota-presets.js";
 import type { PassportVerifier } from "./verification.js";
 
 export const graphApi = "https://graph.microsoft.com/v1.0";
@@ -81,18 +81,22 @@ function header(headers: Record<string, string> | undefined, name: string): stri
  */
 export class GraphCall {
   requests = 0;
+  /** Queue and backoff time left for the whole call (interactive lane only, R1-2). */
+  readonly budget: WaitBudget | undefined;
   constructor(
     readonly transport: GraphReaderTransport,
     readonly lane: QuotaLane,
     readonly signal?: AbortSignal,
-  ) {}
+  ) {
+    this.budget = waitBudget(lane);
+  }
 
   async get<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
     this.requests += 1;
     return this.transport.json<T>(
       this.transport.safeLink(url),
       { headers: { Prefer: IMMUTABLE_ID, ...headers }, ...this.init() },
-      { lane: this.lane, cost: 1 },
+      this.policy(1),
     );
   }
 
@@ -102,7 +106,7 @@ export class GraphCall {
     return this.transport.http(
       this.transport.safeLink(url),
       { headers: { Prefer: IMMUTABLE_ID, ...headers }, ...this.init() },
-      { lane: this.lane, cost: 1 },
+      this.policy(1),
     );
   }
 
@@ -121,9 +125,7 @@ export class GraphCall {
 
   private async batchChunk(chunk: BatchItem[], out: Map<string, BatchResponse>): Promise<void> {
     let pending = chunk;
-    let waitedMs = 0;
     for (let round = 0; pending.length > 0; round++) {
-      this.requests += pending.length;
       const response = await this.transport.json<{ responses?: BatchResponse[] }>(
         `${graphApi}/$batch`,
         {
@@ -139,7 +141,8 @@ export class GraphCall {
           }),
           ...this.init(),
         },
-        { lane: this.lane, cost: pending.length },
+        // `$batch` carries only GETs, so an outer 429 may be replayed (R1-14).
+        { ...this.policy(pending.length), idempotent: true },
       );
       const byId = new Map((response.responses ?? []).map((r) => [String(r.id), r]));
       const retry: BatchItem[] = [];
@@ -158,19 +161,24 @@ export class GraphCall {
           out.set(item.id, inner);
         }
       }
+      // Each inner request is reported once, by the round that served it (R1-2).
+      this.requests += pending.length - retry.length;
       if (retry.length === 0) {
         return;
       }
       this.transport.report({ retryAfterSeconds: delayMs / 1000 });
-      const tooLong = this.lane === "interactive" && waitedMs + delayMs > INTERACTIVE_MAX_WAIT_MS;
+      const tooLong = this.budget !== undefined && delayMs > this.budget.remainingMs;
       if (round >= 4 || tooLong) {
         throw new RateLimitedError(Math.max(1, Math.ceil(delayMs / 1000)), "graph:mailbox", 429);
       }
-      // A governor already blocks the next acquire until Retry-After; do not wait twice.
+      // A governor already blocks the next acquire until Retry-After (and charges the budget
+      // for the queue time); do not wait twice.
       if (!this.transport.governed) {
         await this.transport.sleep(delayMs);
+        if (this.budget) {
+          this.budget.remainingMs -= delayMs;
+        }
       }
-      waitedMs += delayMs;
       pending = retry;
     }
   }
@@ -180,6 +188,10 @@ export class GraphCall {
     if (Number.isFinite(value) && header(inner.headers, "x-ms-throttle-limit-percentage")) {
       this.transport.report({ throttlePercentage: value });
     }
+  }
+
+  private policy(cost: number): RequestPolicy {
+    return { lane: this.lane, cost, ...(this.budget ? { budget: this.budget } : {}) };
   }
 
   private init(): { signal?: AbortSignal } {

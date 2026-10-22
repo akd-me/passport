@@ -225,6 +225,20 @@ const { value: since } = await reader.changes(null, 50); // starts at "now"; nev
   `this.json(url, init, { lane, cost })`: the cost is acquired first and throttling responses are
   reported. With `lane: "interactive"`, rate-limited GETs retry only while the total wait is ≤ 5 s,
   then throw `RateLimitedError`. Without a lane, the v0.2 2/4/8/16/32 s schedule is unchanged.
+  Readers pass one `budget` (`waitBudget(lane)`) per call, so the 5 s covers the queue and backoff
+  of every request in the call. `idempotent: true` lets a read-only POST (`$batch`, Gmail batch)
+  retry like a GET. Each attempt gets its own 30 s network timeout, combined with the caller's
+  signal and started after the quota wait; caller aborts surface as `ABORTED`.
+- **Partial pages.** A Gmail `search`/`list` that runs out of quota mid-hydration returns the rows
+  it has, `translation: "gmail:partial (…)"` and a `nextPageToken` holding the unhydrated ids.
+  Gmail batches declare at most 1,000 units, so `limit: 100` (or 60 threads) is served over two
+  calls instead of running the bucket into debt.
+- **Page tokens and cursors.** Graph and IMAP page tokens are HMAC-sealed (`reader-tokens.ts`).
+  The key is random per process unless the composition root calls
+  `setReaderTokenSecret(key)`, so tokens from before a restart are `INVALID_CURSOR`. Change cursors
+  are not sealed because the watcher persists them; they are validated instead. Graph cursors keep
+  only the delta state token and the URL is rebuilt for the folder. IMAP cursors stay under 4 KB:
+  a packed UID set when it fits in 1,800 characters, otherwise a UID count.
 - **Queries.** `parsePortableQuery` parses the portable mini-language (see `query.ts`) into a
   `QueryAst`; `renderGmailQuery` renders Gmail `q`; `listFilterToAst` maps `mail_list` filters;
   `matchesQuery` evaluates an AST locally (mock, client-side filters, grep). Unportable Gmail
@@ -263,6 +277,42 @@ trailing items of the largest arrays (`clipJson`); a clipped response sets `trun
 `format=metadata`/`minimal`; unknown methods 5); Graph 1 request. IMAP and JMAP leave `rawGet`
 undefined: IMAP has no REST surface and raw commands cannot be confined to reads, and JMAP is method
 calls rather than paths (`provider_get` has no allowlist for either).
+
+### Known limitations (review R1)
+
+Findings from the R1 provider review that are documented rather than fixed:
+
+- **R1-9 (rescans).** IMAP local-filter pages are anchored correctly, but each page re-runs the scan
+  of the newest `IMAP_SCAN_CAP` candidates per mailbox (bounded `BODY.PEEK[TEXT]<0.65536>`
+  prefixes). Caching candidates per token is not done yet.
+- **R1-10 (ordering).** IMAP pages consume each mailbox's newest-first UID list as a prefix. With
+  several mailboxes and no `SORT`, a page is the union of per-mailbox prefixes sorted by date, so
+  rows across pages are not strictly date-ordered (none are repeated or skipped).
+- **R1-11 (older mail).** Graph change cursors start with `$filter=receivedDateTime ge now−2 min`
+  (messages delta has no `$deltatoken=latest`). Messages received before the cursor was created never
+  appear in later rounds: label changes on them, moves of them into the folder and their removal
+  are not reported. An expired (410) cursor restarts the same way.
+- **R1-5 (unnamed deletions).** When an IMAP mailbox without QRESYNC is too fragmented for a packed
+  UID set, a deletion is detected by count only and the cursor comes back `expired: true` (labels
+  stale, bounded sweep) instead of naming the deleted ids.
+- **R1-12 (JMAP).** Gmail no longer reports drafts, sends and chats as `added` (they are
+  `labelChanged`). JMAP `changes` still reports every created email, including drafts and sends.
+- **R1-13.** Mail writes (Gmail `batchModify`/`modify`/`trash`, Graph and IMAP writes) do not
+  acquire from the governor. Choosing their lane belongs to the executor, and an unconfigured
+  governor would start failing writes with `QUOTA_NOT_CONFIGURED`.
+- **R1-15.** IMAP search without a container covers INBOX only (Gmail IMAP: All Mail), and an
+  explicit `container` overrides a top-level `in:`. Widening the default to INBOX + Sent + Archive
+  changes cost and merge behaviour for every search, so it is left to a follow-up.
+- **R1-16.** On Graph, `label:X` is a category filter only; it does not resolve folders by name.
+- **R1-18 (IMAP).** On the Graph `$search` path, date bounds with a time of day are re-checked
+  client-side and `<` is widened to the next day. IMAP `SINCE`/`BEFORE` stay day-granular, because
+  re-checking them would make every `newer_than:` a local scan.
+- **R1-20 (delta).** By-id reads map a 400 to `null`. A Graph delta link answered with 400
+  `SyncStateInvalid` still throws instead of restarting at now: the error code is in the body,
+  which `ProviderError` does not carry.
+- **R1-21.** `queryScopesSpamTrash` still treats `in:spam OR from:x` as scoping the whole query to
+  Spam/Trash. The Gmail change cursor still accepts a bare numeric history id (the v0.2 format) for
+  migration, without account binding.
 
 ## Normalization, verification, and integration limits
 

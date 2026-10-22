@@ -268,16 +268,96 @@ export function packUids(uids: Iterable<number>): string {
   return parts.join(",");
 }
 
-/** Inverse of `packUids`. */
-export function unpackUids(packed: string): number[] {
+/** Longest packed UID set a change cursor may carry (keeps cursors well under 4 KB, R1-5). */
+export const MAX_PACKED_UIDS = 1_800;
+/** Most UIDs `unpackUids` materialises. */
+const MAX_UNPACKED = 100_000;
+
+function invalidCursor(): ProviderError {
+  return new ProviderError("INVALID_CURSOR", "Invalid IMAP change cursor");
+}
+
+/**
+ * Parses a packed UID set into ascending, non-overlapping `[from, to]` ranges without expanding
+ * them (R1-3). Every UID must be in `1 … below − 1`. Malformed, unordered or oversized sets are
+ * `INVALID_CURSOR`.
+ */
+export function parseUidSet(packed: string, below: number): Array<[number, number]> {
+  if (packed.length > MAX_PACKED_UIDS) {
+    throw invalidCursor();
+  }
   if (!packed) {
     return [];
   }
-  return packed.split(",").flatMap((part) => {
-    const [from, to] = part.split(":").map(Number) as [number, number | undefined];
-    if (!Number.isInteger(from) || (to !== undefined && !Number.isInteger(to))) {
-      throw new ProviderError("INVALID_CURSOR", "Invalid IMAP change cursor");
+  const ranges: Array<[number, number]> = [];
+  let last = 0;
+  for (const part of packed.split(",")) {
+    const match = /^(\d{1,10})(?::(\d{1,10}))?$/.exec(part);
+    const from = Number(match?.[1]);
+    const to = match?.[2] === undefined ? from : Number(match[2]);
+    if (!match || from < 1 || to < from || from <= last || to >= below) {
+      throw invalidCursor();
     }
-    return Array.from({ length: (to ?? from) - from + 1 }, (_, k) => from + k);
-  });
+    ranges.push([from, to]);
+    last = to;
+  }
+  return ranges;
+}
+
+/** Number of UIDs in parsed ranges. */
+export const uidSetSize = (ranges: ReadonlyArray<[number, number]>) =>
+  ranges.reduce((sum, [from, to]) => sum + to - from + 1, 0);
+
+/** Index of the first element of ascending `list` that is `>= value`. */
+function lowerBound(list: readonly number[], value: number): number {
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if ((list[mid] as number) < value) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+/**
+ * UIDs in `ranges` missing from ascending `present`, or null when more than `cap` are missing.
+ * Work is bounded by `present.length + cap`, never by the size of the ranges.
+ */
+export function missingUids(
+  ranges: ReadonlyArray<[number, number]>,
+  present: readonly number[],
+  cap: number,
+): number[] | null {
+  let total = 0;
+  for (const [from, to] of ranges) {
+    total += to - from + 1 - (lowerBound(present, to + 1) - lowerBound(present, from));
+    if (total > cap) {
+      return null;
+    }
+  }
+  const missing: number[] = [];
+  for (const [from, to] of ranges) {
+    let i = lowerBound(present, from);
+    for (let uid = from; uid <= to; uid++) {
+      if (present[i] === uid) {
+        i++;
+      } else {
+        missing.push(uid);
+      }
+    }
+  }
+  return missing;
+}
+
+/** Inverse of `packUids` for small sets; larger or malformed sets are `INVALID_CURSOR`. */
+export function unpackUids(packed: string): number[] {
+  const ranges = parseUidSet(packed, 2 ** 32);
+  if (uidSetSize(ranges) > MAX_UNPACKED) {
+    throw invalidCursor();
+  }
+  return ranges.flatMap(([from, to]) => Array.from({ length: to - from + 1 }, (_, k) => from + k));
 }

@@ -29,11 +29,17 @@ import {
   type ImapScanResult,
   scan,
 } from "./imap-reader-scan.js";
-import { imapIdentity, imapRole, parseImapIdentity } from "./imap-reader-shared.js";
+import { imapRole, parseImapIdentity } from "./imap-reader-shared.js";
 import { type ImapCriteria, ImapSession } from "./imap-reader-support.js";
-import { fetchImapEmail, fetchImapThread, type ImapBodyContext } from "./imap-reader-thread.js";
+import {
+  fetchImapEmail,
+  fetchImapThread,
+  findImapByRfc822,
+  type ImapBodyContext,
+} from "./imap-reader-thread.js";
 import { parsePortableQuery } from "./query.js";
 import { type ImapQueryPlan, listFilterToAst, renderImapQuery } from "./query-render.js";
+import { clampCap } from "./reader-limits.js";
 
 export type { ImapReaderHost } from "./imap-reader-scan.js";
 
@@ -233,7 +239,7 @@ export class ImapMailReader implements MailReader {
         opts.raw ? query : undefined,
         { includeSpamTrash: opts.includeSpamTrash },
       );
-      const limit = Math.max(0, Math.floor(cap));
+      const limit = clampCap(cap);
       let total: number;
       let truncated = false;
       let scanned: ImapScanResult | undefined;
@@ -284,25 +290,7 @@ export class ImapMailReader implements MailReader {
     opts: MailReadOptions = {},
   ): Promise<ReadValue<string | null>> {
     return this.call(opts, async (session) => {
-      const header = `<${rfc822Id.trim().replace(/^<|>$/g, "")}>`;
-      // Received copies first, the Sent copy last (duplicate Message-IDs).
-      const boxes: string[] = [];
-      for (const spec of ["INBOX", "\\Archive", ...this.host.moveTargets(), "\\Sent"]) {
-        const path = await this.mailboxes.resolve(session, spec);
-        if (path && !boxes.includes(path)) {
-          boxes.push(path);
-        }
-      }
-      for (const path of boxes) {
-        const found = await session.select(path, async (box) => {
-          const uids = await session.uids({ query: { header: { "message-id": header } } });
-          return uids[0] ? imapIdentity(box.path, box.validity, uids[0]) : null;
-        });
-        if (found) {
-          return { value: found };
-        }
-      }
-      return { value: null };
+      return { value: await findImapByRfc822(session, this.mailboxes, this.host, rfc822Id) };
     });
   }
 

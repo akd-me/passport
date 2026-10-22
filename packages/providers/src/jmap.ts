@@ -170,6 +170,7 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
         this.http(this.downloadUrl(blobId, meta), policy.signal ? { signal: policy.signal } : {}, {
           lane: policy.lane ?? "interactive",
           cost: 1,
+          budget: policy.budget,
         }),
       ...(this.options.governor ? { governor: this.options.governor } : {}),
       ...(this.options.verifier ? { verifier: this.options.verifier } : {}),
@@ -184,7 +185,7 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
    */
   async invoke(
     calls: JmapInvocation[],
-    policy: Pick<RequestPolicy, "lane"> & { signal?: AbortSignal } = {},
+    policy: Pick<RequestPolicy, "lane" | "budget"> & { signal?: AbortSignal } = {},
   ): Promise<JmapInvocation[]> {
     this.check();
     if (!this.session) {
@@ -203,7 +204,7 @@ export class JmapMailProvider extends HttpConnection implements MailProvider {
     }>(
       this.session.apiUrl,
       { ...request, ...(policy.signal ? { signal: policy.signal } : {}) },
-      { lane: policy.lane ?? "interactive", cost: 1 },
+      { lane: policy.lane ?? "interactive", cost: 1, budget: policy.budget },
     );
     return calls.map((_, i): JmapInvocation => {
       const item = response.methodResponses?.find((r) => r[2] === String(i));
