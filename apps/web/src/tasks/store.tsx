@@ -286,7 +286,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         const undo = inverse[action.kind];
         notify(
           done[action.kind],
-          undo && { label: "Undo", run: () => void actRef.current(result, undo) },
+          undo && { label: "Undo", undo: true, run: () => void actRef.current(result, undo) },
         );
         return true;
       } catch (error) {

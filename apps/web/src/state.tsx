@@ -19,6 +19,8 @@ type Listener = (event: WorkspaceEvent) => void;
 export interface NoticeAction {
   label: string;
   run: () => void;
+  /** ⌘Z runs it too, while the toast shows. */
+  undo?: boolean;
 }
 interface WorkspaceState {
   version: number;
@@ -40,6 +42,8 @@ const Workspace = createContext<WorkspaceState>({
   notice: "",
   notify: () => {},
 });
+/** How long a toast, and its Undo, stays. */
+export const NOTICE_MS = 5000;
 /** Window focus refetches only data older than this (R5-2, R5-12). */
 export const FOCUS_STALE_MS = 30_000;
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
@@ -130,7 +134,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (!toast.notice) {
       return;
     }
-    const timer = setTimeout(() => notify(""), 5500);
+    const timer = setTimeout(() => notify(""), NOTICE_MS);
     return () => clearTimeout(timer);
   }, [toast, notify]);
   return (
