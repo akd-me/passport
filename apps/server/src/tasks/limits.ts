@@ -18,6 +18,7 @@ export interface DetectedLimit {
   source: TaskLimitSource;
 }
 
+const RESUMABLE = new Set<TaskRun["trigger"]["kind"]>(["message", "watch", "wake"]);
 const LIMIT_TEXT = /usage limit|rate limit|limit reached|hit your limit|quota|too many requests/i;
 const MAX_RESET_MS = 31 * 86_400_000;
 /** Longest single timer; later resets are re-armed when it fires (setTimeout caps near 24.8 d). */
@@ -137,7 +138,8 @@ export class TaskLimits {
 
   /** Runner hook, before the status rules: record the limit on the task. */
   async onRunEnded(run: TaskRun): Promise<void> {
-    if (!isLimitCode(run.error)) {
+    // Arrivals retry on their own and routines report `JOB_FAILED`; only these runs continue.
+    if (!RESUMABLE.has(run.trigger.kind) || !isLimitCode(run.error)) {
       return;
     }
     const limit = this.log.take(run.agentRunId) ?? { resetAt: null, source: "host_agent" };

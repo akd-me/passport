@@ -48,7 +48,9 @@ export class TaskQueueService {
         task = await this.service.task(taskId);
       }
       const busy = this.activeMessageRuns(taskId) > 0 || !!task.queue?.length;
-      if (message.mode === "steer" || !busy) {
+      // Only a person's task steers; a steer to an inbox or routine task queues (R5-8).
+      const steer = message.mode === "steer" && task.kind === "task";
+      if (steer || !busy) {
         return this.service.sendMessage(taskId, message);
       }
       const run = await this.enqueue(task, message.text);

@@ -52,7 +52,8 @@ async function recoverTask(
   const task = await service.tasks.get(taskId);
   const queued = new Set(task?.queue?.map((entry) => entry.runId));
   const open = runs.filter((run) => !queued.has(run.id));
-  const continued = task ? open.filter(continuable) : [];
+  const away = !task || task.status === "settled" || task.status === "archived";
+  const continued = away ? [] : open.filter(continuable);
   for (const run of open) {
     const ended = await service.tasks.runs.update(run.id, {
       status: continued.includes(run) ? "cancelled" : "failed",

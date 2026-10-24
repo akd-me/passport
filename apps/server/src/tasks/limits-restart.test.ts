@@ -182,6 +182,24 @@ describe("Limited state, restart continuation and titles", () => {
     expect(await env.service.task(task.id)).toMatchObject({ limited: null, needsUser: null });
   });
 
+  it("ignores limits on arrival runs, which retry on their own", async () => {
+    const env = await setup();
+    const inbox = await env.tasks.triggers.ensureInbox(env.account.id);
+    const run = await env.service.tasks.runs.insert({
+      id: "01ARRIVALRUN00000000000000",
+      taskId: inbox.id,
+      status: "failed",
+      trigger: { kind: "arrival", emailId: "e1" },
+      priority: "background",
+      agentRunId: "arrival:e1",
+      createdAt: new Date().toISOString(),
+      actionIds: [],
+      error: "HOST_AGENT_RATE_LIMIT",
+    });
+    await env.tasks.limits.onRunEnded(run);
+    expect((await env.service.task(inbox.id)).limited).toBeUndefined();
+  });
+
   it("continues runs a restart interrupted once, with a RESTARTED notice", async () => {
     const env = await setup();
     env.llm.script.push("First.");
