@@ -3,6 +3,33 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
+## [Unreleased]
+
+### Changed
+
+- A task run on Codex or Claude Code is now one agentic session instead of up to 12 one-shot
+  CLI completions with tools described in the prompt. The CLI gets Passport's tools as an MCP
+  server (served from the Passport process on `127.0.0.1` behind a per-run bearer) and calls
+  them natively; every call keeps the run's identity, task, permission mode and provider
+  readers, and still goes through policy. Tool calls and replies stream into the timeline as
+  they happen. See [docs/tasks.md](docs/tasks.md#sessions).
+- Follow-ups resume the provider session (`claude --resume`, `codex exec resume`) with a short
+  turn: what happened since your last message, the status of the task's proposals, and the
+  request. A task without a session, a different host agent, or a session the provider no
+  longer has falls back to the history prompt. Tasks gain `providerSessionId` and
+  `providerSessionKind`.
+- The 12-tool-call cap is gone. Every manual or task run, on a host agent or an API provider,
+  has a budget of 200 tool calls and 30 minutes (`agentBudget` in `passport.config.json`,
+  `PASSPORT_AGENT_MAX_TOOL_CALLS`, `PASSPORT_AGENT_MAX_RUN_MINUTES`) and ends with a
+  `BUDGET_EXHAUSTED` notice when it runs out, keeping the work done so far.
+- Task runs' system prompt gains a short orchestration section: what a task is, how approvals
+  come back, the budget and when to hand back.
+
+### Added
+
+- `@passport/mcp` exports `ToolBeltListener` and `createToolBeltServer`; `createAgentRuntime`
+  takes `toolBelt` and `budget`; `HostAgentLlmClient.session()` runs one resumable session.
+
 ## [0.3.2] — 2026-10-24
 
 ### Fixed

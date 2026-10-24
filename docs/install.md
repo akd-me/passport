@@ -234,10 +234,14 @@ with the fix for each and sends a one-word test request through the selected one
 
 Model defaults are `gpt-6.1-sol` (main) and `gpt-5.6-luna` (fast) for Codex and
 `claude-sonnet-5-5` / `claude-haiku-5-5` for Claude Code; set `llm.model` and
-`llm.fastModel` to any model your plan offers. Every call is a fresh, ephemeral
-CLI run in `<data-dir>/host-agent` with tools, shell, user config and plugins
-disabled, so email content cannot drive local commands; Passport executes all
-actions itself. The CLI gets a minimal environment (home, path, locale, proxy and
+`llm.fastModel` to any model your plan offers. A task run is one CLI session in
+`<data-dir>/host-agent` whose only tools are Passport's own, served from the
+server over a per-run loopback MCP endpoint; shell, file edits, web search, user
+config and plugins stay disabled, so email content cannot drive local commands,
+and every write still goes through Passport's policy. The CLI keeps the session's
+transcript in its own data directory so follow-ups can resume it (see
+[tasks](tasks.md#sessions)). Other calls (triage steps, routines) are fresh,
+ephemeral, tool-less CLI runs. The CLI gets a minimal environment (home, path, locale, proxy and
 CLI config variables only). Usage counts against your plan's limits; Passport
 reports token usage without a cost. Docker images do not contain the CLIs; use an
 API provider there, or run Passport natively.

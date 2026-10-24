@@ -484,8 +484,11 @@ Resources and prompts remain available at `passport://matters/{id}`,
 The built-in runtime uses `{kind:"agent",id:runId}` with the same definitions and
 handlers. Its triage pipeline supplies trusted, code-derived identity snapshots
 and classification/email metadata context; this is not part of model-facing
-schemas and is ignored for external actors. Manual instructions have a 12-call
-budget across reads and writes. New registry tool names automatically appear in
+schemas and is ignored for external actors. Manual instructions and task runs
+have a budget of 200 tool calls and 30 minutes across reads and writes
+(configurable; see [tasks](tasks.md#sessions)). On a host agent, a task run is one
+native session that calls the same registry tools through the tool belt (below),
+still under `{kind:"agent",id:runId}`. New registry tool names automatically appear in
 the system prompt and available-tool list. `run()` returns and persists
 `toolBudget: {callsMade,llmCalls,inputTokens,outputTokens,totalTokens}`. Token
 counts use reported LLM usage, not estimates; absent usage counts as zero.
@@ -652,6 +655,25 @@ supply `serveHttp(server,{port,token,host?})`: every request, including session
 GET/DELETE, requires the bearer. The default bind remains `127.0.0.1`; only an
 explicit `host` changes it. Host/Origin validation still applies. The server app
 already loads and passes the shared token through its small listener seam.
+
+**Tool belt (task sessions).** `createAgentRuntime({...,toolBelt?,budget?})` takes a
+`ToolBeltHost` (`bind({tools,call}) → {server,release}`). `@passport/mcp` exports
+`ToolBeltListener`, which the server passes: it serves one run's registry tools
+(`createToolBeltServer`) over stateless Streamable HTTP on `127.0.0.1`, behind a fresh
+32-byte bearer per run, with the mailbox server's 64 KiB response budget
+(`toolCallResponse`), Host checks and no browser origins. The tools execute in the server
+process, so each call keeps the run's agent actor, `ToolContext.taskId`, the task's
+permission ceiling (looked up by run id), plan-mode read-only and the injected `readers`;
+`call` validates arguments against the tool's schema, applies the draft signature, counts
+the budget and refuses calls once the run is cancelled or out of budget. A stdio child
+was rejected: it would need its own store handle, quota governor and reader credentials,
+and could not keep the run's actor and timeline observer. The runtime uses a session when
+the trigger is `manual`, the run asks for one (`AgentRunOptions.session`, set by task runs),
+a tool belt is configured and the LLM client is a host agent (`HostAgentLlmClient.session`).
+`HostAgentSessionRequest` gains `persistSession` and `resumeSessionId`; Claude Code then
+drops `--no-session-persistence` (and adds `--resume <id>`), Codex drops `--ephemeral`
+(`codex exec resume <id>`, read-only sandbox through `-c sandbox_mode`). Session ids are
+validated before they reach argv.
 
 Custom executors must implement `profile_update` in category `matters`: capture
 prior USER.md immediately before execution, write `store.kv["user_profile"]`,
