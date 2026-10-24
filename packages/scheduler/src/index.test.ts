@@ -63,6 +63,35 @@ describe("persistent scheduler", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
+  it("leaves webhook recovery to its durable payload queue and forwards per-delivery prompts", async () => {
+    const def = job({
+      schedule: { type: "webhook" },
+      run: vi.fn(async () => ({ summary: "done" })),
+    });
+    const state = await scheduler.register(def);
+    data.set(
+      "job:test",
+      JSON.stringify({
+        ...state,
+        activeRun: {
+          runId: "interrupted",
+          occurrenceAt: state.lastRunAt ?? new Date().toISOString(),
+          startedAt: new Date().toISOString(),
+        },
+      }),
+    );
+    await scheduler.stop();
+    scheduler = setup();
+    await scheduler.register(def);
+    await scheduler.start();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(def.run).not.toHaveBeenCalled();
+    await scheduler.runNow("test", { webhookPrompt: "framed latest payload" });
+    expect(def.run).toHaveBeenCalledWith(
+      expect.objectContaining({ webhookPrompt: "framed latest payload" }),
+    );
+    expect(scheduler.get("test")?.nextRunAt).toBeNull();
+  });
   it("runs intervals from scheduled times, persists state and emits lifecycle events", async () => {
     const def = job();
     await scheduler.register(def);

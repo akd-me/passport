@@ -330,6 +330,7 @@ export function installAuth(app: Hono, auth: PassportAuth): void {
     }
     const method = auth.authenticate(c.req.raw.headers);
     const publicAuth =
+      (c.req.method === "POST" && /^\/api\/hooks\/[a-f0-9]{64}$/.test(c.req.path)) ||
       (c.req.path === "/api/auth/login" && c.req.method === "POST") ||
       (c.req.path === "/api/auth/status" && ["GET", "HEAD"].includes(c.req.method));
     if (api && !publicAuth) {

@@ -16,6 +16,7 @@ export function createJobExecutor(
     e: Entry,
     occurrenceAt = new Date(now()).toISOString(),
     recovering = false,
+    input?: { webhookPrompt?: string },
   ): Promise<JobRun> {
     const startedMs = now();
     const run: JobRun = {
@@ -51,6 +52,7 @@ export function createJobExecutor(
           runId: run.runId,
         });
         const jobContext = {
+          ...input,
           jobId: e.def.id,
           runId: run.runId,
           signal: controller.signal,
@@ -128,6 +130,7 @@ export function createJobExecutor(
         if (
           e.state.enabled &&
           e.state.schedule.type !== "manual" &&
+          e.state.schedule.type !== "webhook" &&
           e.state.consecutiveFailures % retry.maxAttempts !== 0
         ) {
           const base = Math.min(

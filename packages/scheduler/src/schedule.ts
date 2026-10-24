@@ -1,4 +1,8 @@
+import type { WebhookSchedule } from "@passport/types";
+import { validateWebhookSchedule } from "./webhook-schedule.js";
+
 export type Schedule =
+  | WebhookSchedule
   | { type: "interval"; everyMs: number; jitterMs?: number }
   | { type: "daily"; at: string; timeZone?: string }
   | { type: "weekly"; days: number[]; at: string; timeZone?: string }
@@ -21,6 +25,9 @@ export function validateSchedule(value: unknown): Schedule {
     return invalid("Expected a schedule object");
   }
   const s = value as Record<string, unknown>;
+  if (s.type === "webhook") {
+    return validateWebhookSchedule(s);
+  }
   function allowedFields() {
     if (s.type === "interval") {
       return ["type", "everyMs", "jitterMs"];
@@ -146,7 +153,7 @@ export function nextOccurrence(
   after: number,
   previous?: number,
 ): number | null {
-  if (schedule.type === "manual") {
+  if (schedule.type === "manual" || schedule.type === "webhook") {
     return null;
   }
   if (schedule.type === "interval") {

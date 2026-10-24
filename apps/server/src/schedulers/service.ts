@@ -6,22 +6,27 @@ import {
   type Scheduler,
   validateSchedule,
 } from "@passport/scheduler";
-import type { Account } from "@passport/types";
+import type { Account, RoutineRunOn } from "@passport/types";
 import type { Backend } from "../backend.js";
 import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
 import { routineBinding } from "../tasks/jobs.js";
 import { object, string } from "../validation.js";
 import { calendarSyncJob, pushJob, watchJob, watchJobId } from "./account-jobs.js";
+import { prepareRoutineSignature, validateRunOn } from "./routine-options.js";
 import { registerSystemJobs } from "./system-jobs.js";
+import { RoutineWebhooks } from "./webhooks.js";
 
 export interface RoutineDefinition {
+  runOn?: RoutineRunOn;
   id: string;
   name: string;
   schedule: Schedule;
   routine: { instruction: string };
 }
 export interface JobView extends JobState {
+  runOn?: RoutineRunOn;
+  webhookUrl?: string;
   routine?: { instruction: string };
   definition: Omit<JobDefinition, "run"> & {
     routine?: { instruction: string };
@@ -57,6 +62,7 @@ export function existingSchedulerService(backend: Backend) {
 }
 
 export class SchedulerService {
+  readonly webhooks: RoutineWebhooks;
   readonly scheduler: Scheduler;
   readonly ready: Promise<void>;
   private definitions = new Map<string, JobDefinition>();
@@ -73,8 +79,28 @@ export class SchedulerService {
       bus: backend.bus,
       logger,
       runOnTask: (taskId, ctx, run) =>
-        backend.tasks ? backend.tasks.triggers.runJob(taskId, ctx, run) : run(ctx),
+        backend.tasks
+          ? backend.tasks.triggers.runJob(taskId, ctx, run, this.routines.get(ctx.jobId)?.runOn)
+          : run(ctx),
     });
+    this.webhooks = new RoutineWebhooks(
+      backend.store,
+      backend.bus,
+      (id) => {
+        const job = this.scheduler.get(id);
+        const routine = this.routines.get(id);
+        return job?.schedule.type === "webhook" && routine
+          ? {
+              id,
+              enabled: job.enabled,
+              running: job.running,
+              schedule: job.schedule,
+              instruction: routine.routine.instruction,
+            }
+          : undefined;
+      },
+      (id, webhookPrompt) => this.scheduler.runNow(id, { webhookPrompt }),
+    );
     this.ready = this.initialize();
     // Successful onboarding/sync outside the HTTP API also discovers new accounts.
     const discover = () => {
@@ -121,6 +147,7 @@ export class SchedulerService {
   }
   private async initialize() {
     const { backend } = this;
+    await this.webhooks.load();
     await registerSystemJobs(
       backend,
       (def) => this.register(def),
@@ -132,6 +159,7 @@ export class SchedulerService {
       for (const value of JSON.parse(saved) as RoutineDefinition[]) {
         try {
           const def = {
+            runOn: validateRunOn(value.runOn),
             id: value.id,
             name: text(value.name, "name", 200),
             schedule: validateSchedule(value.schedule),
@@ -139,6 +167,9 @@ export class SchedulerService {
           };
           await this.registerRoutine(def);
           this.routines.set(def.id, def);
+          if (def.schedule.type === "webhook") {
+            await this.webhooks.ensure(def.id);
+          }
         } catch {
           // One invalid saved routine must not keep the scheduler (and account routes) down.
           logger.warn("Skipped a saved routine that no longer validates");
@@ -155,9 +186,12 @@ export class SchedulerService {
       schedule: def.schedule,
       timeoutMs: 300000,
       ...(await routineBinding(this.backend, def.id, def.name)),
-      run: async ({ agentRunOptions }) => {
+      run: async ({ agentRunOptions, webhookPrompt }) => {
         const run = await this.backend.agent.run(
-          { kind: "manual", instruction: this.routines.get(def.id)!.routine.instruction },
+          {
+            kind: "manual",
+            instruction: webhookPrompt ?? this.routines.get(def.id)!.routine.instruction,
+          },
           // Routines run in the background lane; the composer keeps the interactive one.
           { ...agentRunOptions, priority: "background" },
         );
@@ -269,6 +303,7 @@ export class SchedulerService {
     }
     this.started = true;
     await this.scheduler.start();
+    this.webhooks.start();
     this.launchBootRuns();
   }
   async stop() {
@@ -281,6 +316,7 @@ export class SchedulerService {
       return undefined;
     });
     await this.queue;
+    await this.webhooks.stop();
     await this.scheduler.stop();
     services.delete(this.backend);
   }
@@ -291,6 +327,8 @@ export class SchedulerService {
       return {
         ...state,
         routine,
+        runOn: this.routines.get(state.id)?.runOn ?? "bound",
+        ...(state.schedule.type === "webhook" ? { webhookUrl: this.webhooks.path(state.id) } : {}),
         definition: { ...definition, schedule: state.schedule, routine },
       };
     });
@@ -298,20 +336,25 @@ export class SchedulerService {
   async addRoutine(input: unknown) {
     await this.ready;
     const body = object(input);
-    if (Object.keys(body).some((k) => !["name", "schedule", "routine"].includes(k))) {
+    if (Object.keys(body).some((k) => !["name", "schedule", "routine", "runOn"].includes(k))) {
       throw new ApiError("INVALID_FIELD", "Unknown routine field");
     }
     const def: RoutineDefinition = {
+      runOn: validateRunOn(body.runOn),
       id: `routine:${crypto.randomUUID()}`,
       name: text(body.name, "name", 200),
       schedule: validateSchedule(body.schedule),
       routine: instruction(body.routine),
     };
     return this.exclusive(async () => {
+      await prepareRoutineSignature(this.backend.store, def.id, def.schedule);
       this.routines.set(def.id, def);
       try {
         await this.saveRoutines();
         await this.registerRoutine(def);
+        if (def.schedule.type === "webhook") {
+          await this.webhooks.ensure(def.id);
+        }
       } catch (error) {
         // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
 
@@ -330,7 +373,11 @@ export class SchedulerService {
       if (!state) {
         throw new ApiError("NOT_FOUND", "Job not found", 404);
       }
-      if (Object.keys(body).some((k) => !["schedule", "enabled", "name", "routine"].includes(k))) {
+      if (
+        Object.keys(body).some(
+          (k) => !["schedule", "enabled", "name", "routine", "runOn"].includes(k),
+        )
+      ) {
         throw new ApiError("INVALID_FIELD", "Unknown job field");
       }
       if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
@@ -338,12 +385,30 @@ export class SchedulerService {
       }
       const schedule = body.schedule === undefined ? undefined : validateSchedule(body.schedule);
       const routine = this.routines.get(id);
-      if (!routine && (body.name !== undefined || body.routine !== undefined)) {
+      if (
+        !routine &&
+        (body.name !== undefined ||
+          body.routine !== undefined ||
+          body.runOn !== undefined ||
+          schedule?.type === "webhook")
+      ) {
         throw new ApiError("INVALID_FIELD", "System job names and handlers are fixed");
       }
       const name = body.name === undefined ? undefined : text(body.name, "name", 200);
       const nextInstruction = body.routine === undefined ? undefined : instruction(body.routine);
+      const runOn = body.runOn === undefined ? undefined : validateRunOn(body.runOn);
       if (routine) {
+        if (schedule) {
+          await prepareRoutineSignature(this.backend.store, id, schedule, state.schedule);
+          if (schedule.type === "webhook") {
+            await this.webhooks.ensure(id);
+          } else if (state.schedule.type === "webhook") {
+            await this.webhooks.remove(id);
+          }
+        }
+        if (runOn) {
+          routine.runOn = runOn;
+        }
         if (name) {
           routine.name = name;
           this.definitions.get(id)!.name = name;
@@ -368,6 +433,7 @@ export class SchedulerService {
     await this.ready;
     await this.exclusive(async () => {
       await this.scheduler.remove(id);
+      await this.webhooks.remove(id);
       this.routines.delete(id);
       this.definitions.delete(id);
       await this.saveRoutines();
