@@ -57,6 +57,6 @@ const actionLabels: Partial<Record<ActionType, string>> = {
   matter_attach: "File into matter",
   person_update: "Update person",
   snooze: "Snooze",
-  profile_update: "Update standing instructions",
+  profile_update: "Update USER.md",
 };
 export const actionLabel = (type: ActionType) => actionLabels[type] ?? type.replaceAll("_", " ");

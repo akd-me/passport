@@ -6,7 +6,9 @@ export function runToolReaders(
   lane: QuotaLane,
   signal?: AbortSignal,
 ): MailReaderResolver | undefined {
-  if (!resolve) return undefined;
+  if (!resolve) {
+    return undefined;
+  }
   const cached = new Map<string, Promise<MailReader | null>>();
   const options = <T extends MailReadOptions>(value?: T) => ({
     ...value,
@@ -15,7 +17,9 @@ export function runToolReaders(
   });
   const bind = async (id: string): Promise<MailReader | null> => {
     const reader = await resolve(id);
-    if (!reader) return null;
+    if (!reader) {
+      return null;
+    }
     return {
       search: (input, opts) => reader.search(input, options(opts)),
       list: (container, filter, limit, page, opts) =>

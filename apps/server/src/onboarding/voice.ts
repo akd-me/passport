@@ -9,8 +9,11 @@ const PENDING = "voice-learning:pending";
 function remember(backend: Backend, id: string, remove = false): void {
   mutateKv(backend.store, PENDING, (current) => {
     const ids = new Set<string>(JSON.parse(current ?? "[]"));
-    if (remove) ids.delete(id);
-    else ids.add(id);
+    if (remove) {
+      ids.delete(id);
+    } else {
+      ids.add(id);
+    }
     return JSON.stringify([...ids]);
   });
 }
@@ -86,8 +89,11 @@ export async function resumeVoiceLearning<T extends Backend>(backend: T): Promis
     const ids: string[] = JSON.parse((await backend.store.kv.get(PENDING)) ?? "[]");
     for (const id of ids) {
       const account = await backend.store.accounts.get(id);
-      if (account) await learnVoiceOnConnect(backend, account);
-      else remember(backend, id, true);
+      if (account) {
+        await learnVoiceOnConnect(backend, account);
+      } else {
+        remember(backend, id, true);
+      }
     }
   }
   return backend;

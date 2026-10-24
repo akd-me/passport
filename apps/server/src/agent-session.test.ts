@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { runBudget, validateAgentBudget } from "./agent-session.js";
+import { agentJobTimeout, runBudget, validateAgentBudget } from "./agent-session.js";
 import { loadConfig } from "./config.js";
 
 describe("agent run budget configuration", () => {
@@ -40,6 +40,8 @@ describe("agent run budget configuration", () => {
       await rm(dir, { recursive: true, force: true });
     }
     expect(runBudget(undefined)).toEqual({});
+    expect(agentJobTimeout(undefined)).toBe(31 * 60_000);
+    expect(agentJobTimeout({ maxRunMinutes: 10 })).toBe(11 * 60_000);
     for (const bad of [
       [],
       { maxToolCalls: 0 },

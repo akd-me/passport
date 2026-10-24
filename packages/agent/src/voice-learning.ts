@@ -54,7 +54,9 @@ export class VoiceLearningGuard {
   }
 
   result(name: string, result: Record<string, unknown>): void {
-    if (name === "mail_read" && !result.isError) this.readSucceeded = true;
+    if (name === "mail_read" && !result.isError) {
+      this.readSucceeded = true;
+    }
     if (name === "mail_search" && Array.isArray(result.items)) {
       result.items = result.items.slice(0, 50);
       result.nextPageToken = null;
