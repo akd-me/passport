@@ -16,7 +16,7 @@ import type { TaskQueueService } from "./queue.js";
 import { describeAgentRun, type TaskService } from "./service.js";
 import { clip, frameUntrusted, neutralize } from "./untrusted.js";
 
-/** The wake run reason for subtask completions; one queued wake absorbs later ones. */
+/** The wake run reason for subtask completions; one active wake absorbs later ones. */
 export const SUBTASK_WAKE = "subtasks";
 const RESULT_MAX = 2000;
 const SUMMARY_RESULT = 300;
@@ -31,6 +31,8 @@ const SUMMARY_RESULT = 300;
  */
 export class TaskSubtasks {
   questions?: TaskQuestions;
+  /** Completions per parent, one at a time, so a second one finds the first one's wake. */
+  private readonly chains = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly service: TaskService,
@@ -157,10 +159,28 @@ export class TaskSubtasks {
   /** Runner hook (`afterRunEnded`): a subtask's work ended, so its parent hears of it. */
   async afterRunEnded(run: TaskRun): Promise<void> {
     const child = await this.service.tasks.get(run.taskId);
-    if (!child?.delegation || !child.parentTaskId || this.working(child)) {
+    if (!child?.delegation || !child.parentTaskId) {
       return;
     }
-    const parent = await this.service.tasks.get(child.parentTaskId);
+    const parentId = child.parentTaskId;
+    const previous = this.chains.get(parentId) ?? Promise.resolve();
+    const next = previous.then(() => this.completed(child.id, parentId, run));
+    const settled = next.catch(() => undefined);
+    this.chains.set(parentId, settled);
+    void settled.finally(() => {
+      if (this.chains.get(parentId) === settled) {
+        this.chains.delete(parentId);
+      }
+    });
+    await next;
+  }
+
+  private async completed(childId: string, parentId: string, run: TaskRun): Promise<void> {
+    const child = await this.service.tasks.get(childId);
+    if (!child?.delegation || this.working(child)) {
+      return;
+    }
+    const parent = await this.service.tasks.get(parentId);
     if (!parent) {
       return;
     }
@@ -190,21 +210,20 @@ export class TaskSubtasks {
     }
   }
 
-  /** Starts the parent's wake run, or adds to the one already waiting to start. */
+  /**
+   * Starts the parent's wake run, or joins the subtask wake already active. The agent lane runs
+   * one run at a time, so a wake that is running now started after this child's run ended: its
+   * `task_status` call (the wake prompt asks for one) already sees this result.
+   */
   private async wake(parent: Task, child: Task, summary: string | null): Promise<void> {
-    const queued = this.service.runner
+    const active = this.service.runner
       .activeRuns(parent.id)
-      .find(
-        (run) =>
-          run.status === "queued" &&
-          run.trigger.kind === "wake" &&
-          run.trigger.reason === SUBTASK_WAKE,
-      );
-    if (queued) {
+      .find((run) => run.trigger.kind === "wake" && run.trigger.reason === SUBTASK_WAKE);
+    if (active) {
       if (summary) {
         await this.service.runner.appendItem({
           ...this.notification(parent.id, child, summary),
-          runId: queued.id,
+          runId: active.id,
         });
       }
       return;
@@ -216,12 +235,17 @@ export class TaskSubtasks {
     ]
       .filter(Boolean)
       .join("\n\n");
+    let created!: (run: TaskRun) => void;
+    const persisted = new Promise<TaskRun>((resolve) => {
+      created = resolve;
+    });
     const done = this.service.runner.execute(
       {
         taskId: parent.id,
         trigger: { kind: "wake", reason: SUBTASK_WAKE },
         priority: "background",
         cancellable: true,
+        onCreated: created,
         ...(summary
           ? {
               items: [
@@ -247,6 +271,14 @@ export class TaskSubtasks {
     );
     // The outcome is on the run and the timeline.
     done.catch(() => undefined);
+    // Registered as active before the next completion looks for it.
+    await Promise.race([
+      persisted,
+      done.then(
+        () => null,
+        () => null,
+      ),
+    ]);
   }
 
   private notification(parentId: string, child: Task, summary: string): TaskItemInput {
