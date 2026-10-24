@@ -16,7 +16,7 @@ export function needText(task: Task) {
     case "failure":
       return "Stopped with an error";
     case "question":
-      return "Has a question for you";
+      return task.pendingQuestions?.[0]?.text ?? "Has a question for you";
     case "limited":
       return "Paused at a usage limit";
     default:
@@ -55,8 +55,9 @@ export function TasksNeedingYou() {
   const { tasks, available } = useTasks(),
     accountId = useAccountId();
   // The page's account scope applies to tasks too (R5-16).
-  const list = needsYou(tasks).filter((t) => !accountId || t.accountIds.includes(accountId));
-  if (!available || !list.length) {
+  const all = needsYou(tasks).filter((t) => !accountId || t.accountIds.includes(accountId));
+  const list = all;
+  if (!available || !all.length) {
     return null;
   }
   return (

@@ -1,3 +1,4 @@
+import type { Task } from "@passport/types";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorkspaceProvider } from "../state";
@@ -24,6 +25,11 @@ const tasks = () => [
   }),
   task("bad", { title: "Broke", needsUser: "failure" }),
   task("ask", { title: "Needs a password", needsUser: "question" }),
+  // A kind this client does not know yet must still be visible.
+  task("odd", {
+    title: "Needs something new",
+    needsUser: "secret" as unknown as Task["needsUser"],
+  }),
   task("calm", { title: "Nothing to do" }),
 ];
 
@@ -53,12 +59,15 @@ describe("Needs you groups", () => {
     await screen.findByText("Approve the reply");
     expect(headings()).toEqual([
       "Approvals",
+      "Questions for you",
       "Paused at a usage limit",
       "Failed",
       "Waiting on you",
     ]);
+    const asked = screen.getByRole("region", { name: "Questions for you" });
+    expect(within(asked).getByText("Needs a password")).toBeInTheDocument();
     const other = screen.getByRole("region", { name: "Waiting on you" });
-    expect(within(other).getByText("Needs a password")).toBeInTheDocument();
+    expect(within(other).getByText("Needs something new")).toBeInTheDocument();
     expect(screen.queryByText("Nothing to do")).toBeNull();
   });
 
@@ -83,7 +92,13 @@ describe("Needs you groups", () => {
     );
     renderNeedsYou();
     await screen.findByText("Approve the reply");
-    expect(headings()).toEqual(["Approvals", "Questions", "Paused at a usage limit", "Failed"]);
+    expect(headings()).toEqual([
+      "Approvals",
+      "Questions",
+      "Paused at a usage limit",
+      "Failed",
+      "Waiting on you",
+    ]);
   });
 
   it("keeps the incoming order inside each group and drops empty groups", () => {

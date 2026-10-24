@@ -17,11 +17,12 @@ export interface NeedsYouGroup {
 }
 
 /**
- * The groups, highest first. To add one (W2A: questions), add an entry here, or call
+ * The groups, highest first. To add one, add an entry here, or call
  * `registerNeedsYouGroup` from the feature's own module; nothing else needs to change.
  */
 export const needsYouGroups: NeedsYouGroup[] = [
   { id: "approval", label: "Approvals", match: (t) => t.needsUser === "approval" },
+  { id: "question", label: "Questions for you", match: (t) => t.needsUser === "question" },
   {
     id: "limited",
     label: "Paused at a usage limit",

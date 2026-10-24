@@ -24,9 +24,28 @@ export function hidden(status: TaskStatus): boolean {
   return status === "snoozed" || status === "archived";
 }
 
-/** Where a task rests when nothing runs: watching keeps it in Working, else the inbox. */
-export function idleStatus(task: Pick<Task, "watches">): TaskStatus {
-  return task.watches.length ? "working" : "inbox";
+/**
+ * Where a task rests when nothing runs: watching a conversation, or waiting on subtasks it
+ * delegated with `mode: "wait"`, keeps it in Working; else the inbox.
+ */
+export function idleStatus(task: Pick<Task, "watches" | "waitingOnTaskIds">): TaskStatus {
+  return task.watches.length || task.waitingOnTaskIds?.length ? "working" : "inbox";
+}
+
+/**
+ * What the task waits on the person for, from its pending lists: approvals first, then
+ * questions. A subtask's questions wait on its parent task, never on the person.
+ */
+export function waitingOn(
+  task: Pick<Task, "pendingActionIds" | "pendingQuestions" | "delegation">,
+): TaskNeedsUser {
+  if (task.pendingActionIds?.length) {
+    return "approval";
+  }
+  if (task.pendingQuestions?.length && !task.delegation) {
+    return "question";
+  }
+  return null;
 }
 
 /** Brings a task back to the person: approval, question, failure, limit or their own message. */
@@ -55,7 +74,11 @@ export type StatusEvent =
   | { kind: "run_started"; trigger: TaskRunTrigger; now: string }
   | { kind: "run_ended"; outcome: RunOutcome }
   /** Unsettle, unsnooze, unarchive and a snooze whose time came. */
-  | { kind: "reopened"; activeRuns: number; now: string };
+  | { kind: "reopened"; activeRuns: number; now: string }
+  /** v0.4: `ask_user` added a pending question (`Task.pendingQuestions` already holds it). */
+  | { kind: "question_asked"; now: string }
+  /** v0.4: a question was answered or dismissed (already removed from the list). */
+  | { kind: "question_resolved" };
 
 /**
  * The status rules in one place (docs/tasks.md "Status rules"):
@@ -78,8 +101,37 @@ export function resolveTaskStatus(task: Task, event: StatusEvent): Partial<Task>
         snoozedUntil: null,
         settledAt: null,
         lastActivityAt: event.now,
+        ...(task.settleRequested ? { settleRequested: false } : {}),
       };
+    case "question_asked":
+      return asked(task, event.now);
+    case "question_resolved":
+      return resolved(task);
   }
+}
+
+/**
+ * A question surfaces the task like a proposal (approvals keep priority). A settled or archived
+ * task records it without moving (R4-9). A subtask's question goes to its parent instead.
+ */
+function asked(task: Task, now: string): Partial<Task> {
+  const needsUser = waitingOn(task);
+  if (!needsUser) {
+    return {};
+  }
+  if (task.status === "settled" || task.status === "archived") {
+    return { needsUser };
+  }
+  return task.status === "inbox" && task.needsUser === needsUser ? {} : surface(needsUser, now);
+}
+
+/** An answered or dismissed question: the next thing waiting on the person, if any. */
+function resolved(task: Task): Partial<Task> {
+  const next = waitingOn(task);
+  if (next) {
+    return task.needsUser === next ? {} : { needsUser: next };
+  }
+  return task.needsUser === "question" ? { needsUser: null } : {};
 }
 
 /** Status while a run is queued or running. A user message also wakes a snoozed task. */
@@ -93,7 +145,8 @@ export function statusDuringRun(task: Task, trigger: TaskRunTrigger, now: string
  *     only sets `needsUser`;
  *  1. a failed run (not arrivals, which retry) surfaces with `needsUser: "failure"`, or
  *     `"limited"` when it stopped at a usage limit;
- *  2. pending approvals surface with `needsUser: "approval"`;
+ *  2. pending approvals surface with `needsUser: "approval"`, then pending questions with
+ *     `needsUser: "question"` (v0.4);
  *  3. another run of the task still active keeps it Working;
  *  4. a run started by the person's message returns to the inbox (Working while watching);
  *  5. snoozed and archived tasks stay hidden through background work;
@@ -117,6 +170,8 @@ function started(task: Task, trigger: TaskRunTrigger, now: string): Partial<Task
       settledAt: null,
       needsUser: task.needsUser === "failure" ? null : task.needsUser,
       lastActivityAt: now,
+      // The person's message outranks the agent's earlier request to settle (task_organize).
+      ...(task.settleRequested ? { settleRequested: false } : {}),
     };
   }
   return hidden(task.status) || (task.status === "inbox" && task.needsUser)
@@ -136,9 +191,11 @@ function failureKind(outcome: RunOutcome): TaskNeedsUser {
 
 function ended(task: Task, outcome: RunOutcome): Partial<Task> {
   if (putAwayDuringRun(task, outcome)) {
+    // Already put away: a pending settle request (task_organize) has nothing left to do.
+    const cleared = task.settleRequested ? { settleRequested: false } : {};
     return outcome.failed && outcome.trigger.kind !== "arrival"
-      ? { needsUser: failureKind(outcome) }
-      : {};
+      ? { ...cleared, needsUser: failureKind(outcome) }
+      : cleared;
   }
   const next = ruleStatus(task, outcome);
   // Resting in Working (watching) before the run and handed back now: the watch ended.
@@ -147,7 +204,31 @@ function ended(task: Task, outcome: RunOutcome): Partial<Task> {
       ? { ...next, lastActivityAt: outcome.now }
       : next;
   const unseen = unseenOutcome(task, handed, outcome);
-  return unseen ? { ...handed, unseenOutcome: unseen } : handed;
+  const result = unseen ? { ...handed, unseenOutcome: unseen } : handed;
+  return task.settleRequested ? settleAtRunEnd(task, result, outcome) : result;
+}
+
+/**
+ * `task_organize` settle, applied when the run ends: only when nothing then waits on the person
+ * (a failure, an approval, a question), no other run is active and no follow-up is queued.
+ * Otherwise the request is dropped (failure, waiting on the person) or kept for the next run end.
+ */
+function settleAtRunEnd(task: Task, next: Partial<Task>, outcome: RunOutcome): Partial<Task> {
+  const needsUser = "needsUser" in next ? next.needsUser : task.needsUser;
+  if (outcome.failed || needsUser) {
+    return { ...next, settleRequested: false };
+  }
+  if (outcome.otherActiveRuns > 0 || task.queue?.length) {
+    return next;
+  }
+  return {
+    ...next,
+    status: "settled",
+    settledAt: outcome.now,
+    snoozedUntil: null,
+    watches: [],
+    settleRequested: false,
+  };
 }
 
 /** The outcome badge a run leaves when it hands the task back without needing the person. */
@@ -174,6 +255,10 @@ function ruleStatus(task: Task, outcome: RunOutcome): Partial<Task> {
   }
   if (task.pendingActionIds?.length) {
     return task.status === "inbox" && task.needsUser === "approval" ? {} : surface("approval", now);
+  }
+  // v0.4: an unanswered question (ask_user) waits on the person like an approval.
+  if (waitingOn(task) === "question") {
+    return task.status === "inbox" && task.needsUser === "question" ? {} : surface("question", now);
   }
   if (outcome.otherActiveRuns > 0) {
     return hidden(task.status) ? {} : { status: "working" };

@@ -23,6 +23,7 @@ import {
 } from "@passport/types";
 import { ApiError } from "../errors.js";
 import { contextItems, taskByAction } from "./context.js";
+import { answeredRequest } from "./questions.js";
 import { type RunCeilings, type RunDescription, TaskRunner } from "./runner.js";
 import { taskSessionOptions } from "./session.js";
 import { frameUntrusted } from "./untrusted.js";
@@ -111,10 +112,13 @@ export class TaskService {
     return level;
   }
 
-  /** Creates a task and its first run; `done` settles when that run ends. */
+  /**
+   * Creates a task and its first run; `done` settles when that run ends. `system` carries
+   * server-owned fields (a fixed id, voice learning, a subtask's `delegation`).
+   */
   async create(
     input: CreateTaskInput,
-    system: Pick<Partial<Task>, "id" | "voiceLearning"> = {},
+    system: Pick<Partial<Task>, "id" | "voiceLearning" | "delegation"> = {},
   ): Promise<{ task: Task; run: TaskRun; done: Promise<AgentRun> }> {
     const now = this.now();
     const accountIds = input.accountIds?.length
@@ -137,6 +141,7 @@ export class TaskService {
       createdAt: now,
       watches: [],
       pendingActionIds: [],
+      ...(system.delegation ? { delegation: system.delegation } : {}),
     });
     this.options.bus.emit({ type: "task.updated", task });
     const started = await this.message(task, { text: input.message, mode: "queue" }, input);
@@ -145,14 +150,15 @@ export class TaskService {
 
   /**
    * A follow-up: `queue` runs after the active run; `steer` restarts it with both messages.
-   * `runId` starts a queued entry under the TaskRun id it was given (`TaskQueue`).
+   * `runId` starts a queued entry under the TaskRun id it was given (`TaskQueue`). `answers`
+   * lists the `question` items the message answers (v0.4).
    */
-  async sendMessage(id: string, message: TaskMessage, runId?: string) {
+  async sendMessage(id: string, message: TaskMessage, runId?: string, answers?: string[]) {
     const task = await this.task(id);
     if (task.kind !== "task" && message.mode === "steer") {
       message = { ...message, mode: "queue" };
     }
-    const { run } = await this.message(task, message, {}, runId);
+    const { run } = await this.message(task, message, {}, runId, answers);
     return { task: await this.task(id), run };
   }
 
@@ -161,6 +167,7 @@ export class TaskService {
     message: TaskMessage,
     context: Pick<CreateTaskInput, "emailIds" | "matterId"> = {},
     presetRunId?: string,
+    answers?: string[],
   ) {
     const mode = message.mode ?? "queue";
     let steered: string[] = [];
@@ -173,9 +180,12 @@ export class TaskService {
       runId,
       kind: "user_message",
       at: this.now(),
-      payload: { text: message.text },
+      payload: { text: message.text, ...(answers?.length ? { answers } : {}) },
     });
-    const texts = [...steered, message.text];
+    const request = answers?.length
+      ? await answeredRequest(this.tasks, task, answers, message.text)
+      : message.text;
+    const texts = [...steered, request];
     this.requests.set(runId, texts);
     const instruction = await this.instruction(task, texts, item.seq);
     const session = this.sessionOptions(task.id, { texts, beforeSeq: item.seq });
@@ -255,15 +265,21 @@ export class TaskService {
               : "";
       history = `${history}${line}\n`.slice(-HISTORY_CHARS);
     }
+    const from = task.delegation
+      ? "The request from your parent task (another Passport agent working for the same person)"
+      : "The person's request";
     const parts = [
       `You are working on the task "${task.title}" (task id ${task.id}).`,
+      task.delegation
+        ? "This task is a subtask: your parent task's agent delegated it and reads your final reply. Ask it, not the person, with ask_user."
+        : "",
       task.interactionMode === "plan"
         ? "Plan mode: investigate with read tools and answer with a concrete numbered proposal list. Write tools do not execute in this mode."
         : "",
       history ? `Earlier in this task:\n${frameUntrusted("task-history", history)}` : "",
       texts.length > 1
-        ? `The person's request (they added to it while you worked):\n${texts.join("\n\n")}`
-        : `The person's request:\n${texts[0] ?? ""}`,
+        ? `${from} (${task.delegation ? "added to" : "they added to it"} while you worked):\n${texts.join("\n\n")}`
+        : `${from}:\n${texts[0] ?? ""}`,
     ];
     return parts.filter(Boolean).join("\n\n");
   }

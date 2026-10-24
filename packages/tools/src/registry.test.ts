@@ -175,7 +175,7 @@ describe("shared tool catalogue", () => {
     });
   });
   it("covers every catalogue entry exactly once and adapters only reshape definitions", () => {
-    expect(tools).toHaveLength(64);
+    expect(tools).toHaveLength(69);
     expect(
       new Set([
         ...reads.map(([name]) => name),
@@ -186,6 +186,11 @@ describe("shared tool catalogue", () => {
         "unwatch_conversation",
         "request_secret",
         "render",
+        "ask_user",
+        "task_delegate",
+        "task_status",
+        "task_cancel",
+        "task_organize",
       ]),
     ).toEqual(new Set(tools.map((tool) => tool.name)));
     for (const [index, tool] of tools.entries()) {

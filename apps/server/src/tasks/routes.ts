@@ -13,6 +13,7 @@ import { readEmail } from "../ondemand-wiring.js";
 import { csv, jsonBody, limit } from "../route-input.js";
 import { integer, member, string } from "../validation.js";
 import { installTaskLifecycleRoutes } from "./routes-lifecycle.js";
+import { installTaskOrchestrationRoutes } from "./routes-orchestration.js";
 import type { TaskSystem } from "./wiring.js";
 
 const MESSAGE_MAX = 20_000;
@@ -105,6 +106,7 @@ export function installTaskRoutes(app: Hono, backend: Backend): void {
         status: csv(q.status)?.map((s) => member(s, TASK_STATUSES, "status")),
         kind: csv(q.kind)?.map((k) => member(k, KINDS, "kind")),
         pinned: q.pinned === undefined ? undefined : q.pinned === "true",
+        ...(q.parentTaskId ? { parentTaskId: q.parentTaskId } : {}),
         limit: limit(q.limit),
         cursor: q.cursor,
       }),
@@ -210,4 +212,5 @@ export function installTaskRoutes(app: Hono, backend: Backend): void {
     );
   });
   installTaskLifecycleRoutes(app, backend);
+  installTaskOrchestrationRoutes(app, backend);
 }

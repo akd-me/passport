@@ -62,6 +62,17 @@ describe("store.tasks", () => {
     await expect(repo.update("missing", {})).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("lists the children of a task (v0.4 subtasks)", async () => {
+    const repo = await tasks();
+    await repo.insert(task("parent"));
+    await repo.insert(task("a", { parentTaskId: "parent", lastActivityAt: at(1) }));
+    await repo.insert(task("b", { parentTaskId: "parent", lastActivityAt: at(2) }));
+    await repo.insert(task("other", { parentTaskId: "elsewhere" }));
+    const children = await repo.list({ parentTaskId: "parent" });
+    expect(children.items.map((t) => t.id)).toEqual(["b", "a"]);
+    expect(children.total).toBe(2);
+  });
+
   it("finds inbox, routine and watching tasks", async () => {
     const repo = await tasks();
     await repo.insert(task("inbox", { kind: "inbox", accountIds: ["acc-1"] }));

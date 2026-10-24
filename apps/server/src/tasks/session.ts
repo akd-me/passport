@@ -89,6 +89,8 @@ async function resumeInstruction(
       `- ${clip(item.payload.summary, 120)}: ${action ? action.status : "unknown"} (action ${item.payload.actionId})`,
     );
   }
+  // A subtask's messages come from its parent task's agent (v0.4).
+  const from = task.delegation ? "The request from your parent task" : "The person's request";
   const parts = [
     `Follow-up on the task "${task.title}" (task id ${task.id}). Your session holds the earlier turns.`,
     task.interactionMode === "plan"
@@ -99,8 +101,8 @@ async function resumeInstruction(
       ? `Your proposals in this task and their status now:\n${frameUntrusted("task-approvals", approvals.join("\n"))}`
       : "",
     texts.length > 1
-      ? `The person's request (they added to it while you worked):\n${texts.join("\n\n")}`
-      : `The person's request:\n${texts[0] ?? ""}`,
+      ? `${from} (${task.delegation ? "added to" : "they added to it"} while you worked):\n${texts.join("\n\n")}`
+      : `${from}:\n${texts[0] ?? ""}`,
   ];
   return parts.filter(Boolean).join("\n\n");
 }

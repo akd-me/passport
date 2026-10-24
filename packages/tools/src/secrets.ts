@@ -111,8 +111,11 @@ export function registerSecrets(ctx: Context) {
             : null,
         ),
       );
+      // Questions from ask_user keep the task waiting on the person (v0.4).
       const updated = await tasks.update(taskId, (current) => ({
-        ...(current.needsUser === "question" && !pending.some((item) => item?.status === "pending")
+        ...(current.needsUser === "question" &&
+        !current.pendingQuestions?.length &&
+        !pending.some((item) => item?.status === "pending")
           ? { needsUser: null }
           : {}),
       }));

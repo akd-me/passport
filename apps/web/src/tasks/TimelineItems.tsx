@@ -38,7 +38,13 @@ export function MailRowCard({ row }: { row: MailRow }) {
   );
 }
 
-const sourceIcon = { arrival: "mail", watch: "watch", schedule: "routine", system: "alert" };
+const sourceIcon = {
+  arrival: "mail",
+  watch: "watch",
+  schedule: "routine",
+  system: "alert",
+  subtask: "agent",
+};
 /** Notices that report a recovery or a pause are calm; other codes are problems. */
 const noticeTone = (code?: string) =>
   !code || ["RUN_CANCELLED", "RETRY", "RESTARTED"].includes(code)

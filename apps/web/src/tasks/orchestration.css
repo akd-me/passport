@@ -1,0 +1,75 @@
+/* W2A: question card, Lineage panel and the collapsed subtasks line. Calm on purpose: a left
+   rule and a surface step, no nested cards; the v0.4 restyle reskins these with its tokens. */
+
+.question-panel {
+  border-left: 2px solid var(--ink-line);
+  background: var(--surface);
+  border-radius: var(--r);
+  padding: 8px 12px;
+}
+.question-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.question-card + .question-card {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.question-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: var(--t-s);
+  font-weight: 500;
+  color: var(--ink);
+}
+.question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.question-hint {
+  margin: 8px 0 0;
+  font-size: var(--t-xs);
+}
+
+.lineage-parent {
+  margin: 0 0 8px;
+  font-size: var(--t-s);
+}
+.lineage-children li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+.lineage-children li a {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lineage-children small {
+  font-variant-numeric: tabular-nums;
+}
+
+.subtasks-line {
+  margin: 16px 0 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  font-size: var(--t-s);
+  color: var(--muted);
+}
+.subtasks-line summary {
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.subtasks-line[open] summary {
+  margin-bottom: 4px;
+}

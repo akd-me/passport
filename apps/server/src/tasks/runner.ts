@@ -9,6 +9,7 @@ import {
   type StoreTasks,
   type Task,
   type TaskItemInput,
+  type TaskOrchestrator,
   type TaskRun,
   type TaskRunTrigger,
   type TaskRunUsage,
@@ -19,7 +20,7 @@ import {
 import { logger } from "../logger.js";
 import { sessionObserver } from "./session.js";
 import { stampTask } from "./stamps.js";
-import { type RunOutcome, statusAfterRun, statusDuringRun, surface } from "./status.js";
+import { type RunOutcome, statusAfterRun, statusDuringRun, surface, waitingOn } from "./status.js";
 import { clip, costOf, neutralize, summarizeInput, summarizeResult } from "./untrusted.js";
 
 /** Item without its run (the runner fills `runId`). */
@@ -93,6 +94,10 @@ export class TaskRunner {
   autoApprove?: (taskId: string, action: ActionRecord) => Promise<ActionRecord | null>;
   /** v0.4 lifecycle (limits, titles, the follow-up queue): a run ended, before its status rules. */
   onRunEnded?: (run: TaskRun) => Promise<void>;
+  /** v0.4 subtasks: a run ended and its status rules applied (not after a steer). */
+  afterRunEnded?: (run: TaskRun) => Promise<void>;
+  /** v0.4: the host behind ask_user, task_delegate, task_status, task_cancel, task_organize. */
+  orchestrator?: TaskOrchestrator;
 
   constructor(
     private readonly store: Store,
@@ -202,6 +207,7 @@ export class TaskRunner {
         signal: active.controller.signal,
         readOnly: task.interactionMode === "plan",
         ...(task.voiceLearning ? { voiceLearning: task.voiceLearning } : {}),
+        ...(this.orchestrator ? { orchestrator: this.orchestrator } : {}),
         observer: {
           toolCall: (event) => this.queue(active, () => this.onToolCall(active, event)),
           assistantMessage: (text) => this.queue(active, () => this.onText(active, text)),
@@ -359,9 +365,11 @@ export class TaskRunner {
       }
       await this.updateTask(task.id, (current) => {
         const pending = (current.pendingActionIds ?? []).filter((id) => id !== action.id);
+        // The last decided approval hands over to a pending question, if any (v0.4).
+        const next = waitingOn({ ...current, pendingActionIds: pending });
         return {
           pendingActionIds: pending,
-          ...(pending.length || current.needsUser !== "approval" ? {} : { needsUser: null }),
+          ...(pending.length || current.needsUser !== "approval" ? {} : { needsUser: next }),
         };
       });
     })().catch(() => {
@@ -419,5 +427,11 @@ export class TaskRunner {
       error: done.error ?? null,
     };
     await this.updateTask(run.taskId, (task) => statusAfterRun(task, outcome));
+    try {
+      await this.afterRunEnded?.(done);
+    } catch {
+      // The run is finished and recorded; only a subtask notification or wake is missed.
+      logger.warn("Task after-run hook failed");
+    }
   }
 }

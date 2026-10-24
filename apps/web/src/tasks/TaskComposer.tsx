@@ -5,6 +5,7 @@ import { logger } from "../logger";
 import { useUi } from "../ui-state";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { taskApi } from "./api";
+import { QuestionCard } from "./QuestionCard";
 import { QueueStrip } from "./QueueStrip";
 import { useTasks } from "./store";
 import { type Clamp, ClampNotice, PlanToggle, TaskModePicker } from "./TaskModes";
@@ -85,6 +86,7 @@ export function TaskComposer({
   return (
     <div className="composer-wrap task-composer">
       <ApprovalPanel task={task} summaries={summaries} onSelect={onSelectApproval} />
+      <QuestionCard task={task} />
       <ClampNotice clamp={clamp} />
       <QueueStrip task={task} live={live} />
       <form

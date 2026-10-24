@@ -129,6 +129,11 @@ export function createTasksRepository(db: StoreDatabase): StoreTasks {
         where.push("pinned = ?");
         params.push(q.pinned ? 1 : 0);
       }
+      if (q.parentTaskId) {
+        // Children of one task (v0.4 subtasks); few rows, so no dedicated column.
+        where.push("json_extract(data, '$.parentTaskId') = ?");
+        params.push(q.parentTaskId);
+      }
       const clause = () => (where.length ? `WHERE ${where.join(" AND ")}` : "");
       const total = Number(
         db.one(`SELECT COUNT(*) AS count FROM tasks ${clause()}`, params)!.count,

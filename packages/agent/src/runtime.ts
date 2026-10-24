@@ -184,6 +184,7 @@ class PersonalAgentRuntime implements AgentRuntime {
           ...context,
           runId: run.id,
           ...(options.taskId ? { taskId: options.taskId } : {}),
+          ...(options.orchestrator ? { orchestrator: options.orchestrator } : {}),
         });
         voice?.result(name, result);
         const data = result;

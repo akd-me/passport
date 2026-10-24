@@ -76,6 +76,11 @@ const toolNames = [
   "request_secret",
   "profile_update",
   "render",
+  "ask_user",
+  "task_delegate",
+  "task_status",
+  "task_cancel",
+  "task_organize",
 ];
 
 describe("mailbox MCP over SDK InMemoryTransport", () => {

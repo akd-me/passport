@@ -10,6 +10,7 @@ import {
 import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
 import type { TaskService } from "./service.js";
+import { resolveTaskStatus } from "./status.js";
 
 /** Limited-state recovery the queue needs: a new message resumes a limited task first. */
 export interface QueueLimits {
@@ -34,15 +35,46 @@ export class TaskQueueService {
     return view(await this.service.task(taskId));
   }
 
-  /** `POST /api/tasks/:id/messages`: the person's message, run now or queued. */
-  send(taskId: string, message: TaskMessage): Promise<{ task: Task; run: TaskRun }> {
+  /**
+   * `POST /api/tasks/:id/messages`: the person's message, run now or queued. It answers every
+   * pending question (v0.4), or only `answers` when given (the answer route, a parent's reply).
+   */
+  send(
+    taskId: string,
+    message: TaskMessage,
+    options: { answers?: string[] } = {},
+  ): Promise<{ task: Task; run: TaskRun }> {
     return this.locked(taskId, async () => {
       // The person is looking at the task, and a new message releases a held queue.
-      let task = await this.update(taskId, (current) => ({
-        seenAt: this.service.now(),
-        unseenOutcome: null,
-        ...(current.queueHeld ? { queueHeld: false } : {}),
-      }));
+      let answers: string[] = [];
+      let task = await this.update(taskId, (current) => {
+        const pending = current.pendingQuestions ?? [];
+        const open = pending.map((question) => question.itemId);
+        // Only questions still open: a dismiss may have won the race with an answer.
+        answers = (options.answers ?? open).filter((itemId) => open.includes(itemId));
+        if (options.answers && !answers.length) {
+          throw new ApiError(
+            "QUESTION_RESOLVED",
+            "This question was already answered or dismissed",
+            409,
+          );
+        }
+        const left = pending.filter((question) => !answers.includes(question.itemId));
+        return {
+          seenAt: this.service.now(),
+          unseenOutcome: null,
+          ...(current.queueHeld ? { queueHeld: false } : {}),
+          ...(left.length === pending.length
+            ? {}
+            : {
+                pendingQuestions: left,
+                ...resolveTaskStatus(
+                  { ...current, pendingQuestions: left },
+                  { kind: "question_resolved" },
+                ),
+              }),
+        };
+      });
       if (task.limited) {
         await this.limits?.resumeLocked(task);
         task = await this.service.task(taskId);
@@ -51,9 +83,9 @@ export class TaskQueueService {
       // Only a person's task steers; a steer to an inbox or routine task queues (R5-8).
       const steer = message.mode === "steer" && task.kind === "task";
       if (steer || !busy) {
-        return this.service.sendMessage(taskId, message);
+        return this.service.sendMessage(taskId, message, undefined, answers);
       }
-      const run = await this.enqueue(task, message.text);
+      const run = await this.enqueue(task, message.text, answers);
       await this.drainLocked(taskId);
       return { task: await this.service.task(taskId), run };
     });
@@ -105,7 +137,12 @@ export class TaskQueueService {
     return this.locked(taskId, async () => {
       const entry = await this.entry(taskId, runId);
       await this.take(taskId, runId);
-      return this.service.sendMessage(taskId, { text: entry.text, mode: "steer" }, runId);
+      return this.service.sendMessage(
+        taskId,
+        { text: entry.text, mode: "steer" },
+        runId,
+        entry.answers,
+      );
     });
   }
 
@@ -169,7 +206,12 @@ export class TaskQueueService {
     }
     await this.take(taskId, entry.runId);
     try {
-      await this.service.sendMessage(taskId, { text: entry.text, mode: "queue" }, entry.runId);
+      await this.service.sendMessage(
+        taskId,
+        { text: entry.text, mode: "queue" },
+        entry.runId,
+        entry.answers,
+      );
     } catch {
       // The entry already left the queue; end its run so it does not look queued forever.
       logger.warn("Queued task message could not start");
@@ -182,7 +224,7 @@ export class TaskQueueService {
       .length;
   }
 
-  private async enqueue(task: Task, text: string): Promise<TaskRun> {
+  private async enqueue(task: Task, text: string, answers: string[] = []): Promise<TaskRun> {
     if ((task.queue?.length ?? 0) >= TASK_LIMITS.queueMax) {
       throw new ApiError("QUEUE_FULL", `At most ${TASK_LIMITS.queueMax} queued messages`, 409);
     }
@@ -200,7 +242,12 @@ export class TaskQueueService {
       actionIds: [],
     });
     this.service.options.bus.emit({ type: "task.run.updated", run });
-    const entry: TaskQueueEntry = { runId: id, text, createdAt: now };
+    const entry: TaskQueueEntry = {
+      runId: id,
+      text,
+      createdAt: now,
+      ...(answers.length ? { answers } : {}),
+    };
     await this.update(task.id, (current) => ({ queue: [...(current.queue ?? []), entry] }));
     return run;
   }
