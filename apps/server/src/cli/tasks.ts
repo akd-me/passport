@@ -30,6 +30,24 @@ Exit codes: 0 success, 2 needs you (approval, question, failed/stopped run), 1 e
 type Request = NonNullable<Awaited<ReturnType<typeof serverClient>>>;
 type Started = { task: Task; run: TaskRun };
 type Items = { items: TaskItem[]; lastSeq: number };
+const MAX_POLL_FAILURES = 5;
+
+function transientPollError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return [
+      "SERVER_UNAVAILABLE",
+      "SERVICE_UNAVAILABLE",
+      "REQUEST_FAILED",
+      "INTERNAL_ERROR",
+      "RATE_LIMITED",
+    ].includes(error.code);
+  }
+  return (
+    error instanceof TypeError ||
+    error instanceof SyntaxError ||
+    (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name))
+  );
+}
 
 function invalid(message: string): never {
   throw new ApiError("INVALID_COMMAND", `${message} Run passport task --help.`);
@@ -63,18 +81,27 @@ function itemLine(item: TaskItem): string {
 }
 
 async function waitForRun(request: Request, started: Started): Promise<Started> {
+  let failures = 0;
+  const taskPath = `/api/tasks/${encodeURIComponent(started.task.id)}`;
+  const path = `${taskPath}/runs/${encodeURIComponent(started.run.id)}`;
   for (;;) {
-    const detail = (await request(
-      `/api/tasks/${encodeURIComponent(started.task.id)}`,
-    )) as TaskDetail;
-    const run = detail.runs.find((run) => run.id === started.run.id);
-    if (!run) {
-      throw new ApiError("RUN_UNAVAILABLE", "The server no longer lists the requested run.");
+    let delay = 1000;
+    try {
+      const run = (await request(path)) as TaskRun;
+      if (["completed", "failed", "cancelled"].includes(run.status)) {
+        // Read the current task once for needsUser/exit status; its recent-runs list is irrelevant.
+        const { task } = (await request(taskPath)) as TaskDetail;
+        return { task, run };
+      }
+      failures = 0;
+    } catch (error) {
+      // Polling is read-only: tolerate a short outage, but surface permanent or repeated failures.
+      if (!transientPollError(error) || ++failures >= MAX_POLL_FAILURES) {
+        throw error;
+      }
+      delay = Math.min(1000, 250 * 2 ** (failures - 1));
     }
-    if (["completed", "failed", "cancelled"].includes(run.status)) {
-      return { task: detail.task, run };
-    }
-    await setTimeout(1000);
+    await setTimeout(delay);
   }
 }
 

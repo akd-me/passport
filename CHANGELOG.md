@@ -127,6 +127,8 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 
 - Saving a draft now shares the action executor's approval lock, preserves the agent's original
   for edited-approval trust feedback, and returns `409 ACTION_DECIDED` if approval wins the race.
+- `passport task start/send --wait` polls a durable run lookup instead of the latest 50 runs,
+  and tolerates brief connection or server errors with bounded retries.
 
 ## [0.3.2] — 2026-10-24
 
