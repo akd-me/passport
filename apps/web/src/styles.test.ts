@@ -74,6 +74,7 @@ describe("instructional text contrast", () => {
     expect(users.sort()).toEqual([
       ".crumb-sep",
       ".empty .icon",
+      ".queue-grip",
       ".section-toggle .icon",
       ".send-btn:disabled",
       ".task-glyph.idle",

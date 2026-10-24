@@ -5,6 +5,7 @@ import { AccountDot } from "../accounts/AccountFilter";
 import { Empty, Loading } from "../components/ui";
 import { Surface } from "../shell/Surface";
 import { useTaskActions, useTaskDetail, useTaskItems } from "../tasks/hooks";
+import { LimitedActions } from "../tasks/LimitedActions";
 import { isActiveRun, kindLabel, taskState } from "../tasks/model";
 import { useTasks } from "../tasks/store";
 import { TaskComposer } from "../tasks/TaskComposer";
@@ -12,7 +13,9 @@ import { statusLabel, TaskDetails } from "../tasks/TaskDetails";
 import { StateWord } from "../tasks/TaskGlyph";
 import { TaskMenu } from "../tasks/TaskMenu";
 import type { Clamp } from "../tasks/TaskModes";
+import { TaskTitle } from "../tasks/TaskTitle";
 import { Timeline } from "../tasks/Timeline";
+import { useMarkSeen } from "../tasks/use-mark-seen";
 
 /** The store and the detail request can each be ahead; the higher revision wins. */
 const newest = (a?: Task, b?: Task) =>
@@ -27,7 +30,7 @@ function TaskHeader({ task, running }: { task: Task; running: boolean }) {
   const kind = kindLabel(task);
   return (
     <header className="task-head">
-      <h1>{task.title}</h1>
+      <TaskTitle task={task} />
       <div className="task-meta">
         <StateWord state={taskState(task, running)} />
         <span className={`task-status ${task.status}`}>{statusLabel(task)}</span>
@@ -40,6 +43,7 @@ function TaskHeader({ task, running }: { task: Task; running: boolean }) {
           </span>
         )}
       </div>
+      <LimitedActions task={task} />
     </header>
   );
 }
@@ -54,6 +58,7 @@ export function TaskPage() {
     detail = useTaskDetail(id),
     timeline = useTaskItems(id);
   const task = newest(tasks.get(id), detail.task);
+  useMarkSeen(id, task);
   const actions = useTaskActions(task),
     { records, loadRun } = actions;
   const focus = params.get("approval") ?? undefined;

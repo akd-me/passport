@@ -9,7 +9,8 @@
  *   screens     the shell, the task page, Needs you, context pages, settings
  *
  * New feature styles go in a new file under ./styles, imported into the screens layer
- * (scheduler.css holds the Automations, Deliveries and private-input rows).
+ * (scheduler.css holds the Automations, Deliveries and private-input rows; lifecycle.css the
+ * queue strip, the usage-limit actions, the renamable title and the restart notice).
  */
 @layer tokens, base, components, screens;
 
@@ -22,3 +23,4 @@
 @import "./styles/pages.css" layer(screens);
 @import "./styles/settings.css" layer(screens);
 @import "./styles/scheduler.css" layer(screens);
+@import "./styles/lifecycle.css" layer(screens);
