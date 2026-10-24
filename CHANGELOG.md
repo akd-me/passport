@@ -54,6 +54,18 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 - ⌘1–⌘9 open the first nine sidebar tasks, Escape closes the details panel, ⌘Enter sends with
   the opposite of the default send mode, and ⌘Z undoes a pin or unpin while its five-second
   toast shows.
+- The web UI wires the lifecycle: the sidebar orders tasks by when they came back to you
+  (`returnedAt`), rows recede once seen and come forward with Done and Woke marks, opening a task
+  marks it seen, and the row menu has Mark unread. Settle, snooze and archive now offer Undo in
+  their toast and on ⌘Z, through the reopen routes, putting back a snooze or settle they
+  replaced.
+- A queue strip above the task composer: queued follow-ups as rows you edit in place, drag (or
+  Alt+↑/↓) to reorder, steer now or remove; after Stop it reads "Queue held · Resume".
+- Limited tasks show when the limit resets with Resume, Resume at reset and Snooze until reset,
+  in the task header and on Needs you.
+- Task titles rename in place from the header; a title Passport suggested reads muted until you
+  rename it. A restart that interrupted a run shows as "Picked up after a restart" with what was
+  in flight.
 
 ### Changed
 
@@ -87,6 +99,13 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   the sidebar, the task header, Needs you and the task list.
 - `styles.css` and `styles-tasks.css` are now tokens plus layered component and screen sheets
   under `apps/web/src/styles/`; dead rules are removed.
+- Needs you groups the tasks waiting on you by what they wait on (Approvals, Paused at a usage
+  limit, Failed, then anything else), from one list in `apps/web/src/views/needs-you-groups.ts`
+  that later kinds join with one entry.
+- The status mark comes from `taskBadge` in `@passport/types`, so a pending approval now
+  outranks a failure.
+- `docs/screenshots/task-dark.png` is a dark capture again (it was the light one); the task and
+  Needs you screenshots are recaptured and `queue-strip-light/dark.png` are new.
 
 
 ## [0.3.2] — 2026-10-24

@@ -9,7 +9,7 @@ Passport is an open-source, local-first email harness. AI agents work on your ma
   <img alt="A Passport task: the task list in the sidebar, the timeline with collapsed tool calls, a per-run change summary, inline approvals, and the approval panel above the composer" src="docs/screenshots/task-light.png">
 </picture>
 
-More screens: [starting a task](docs/screenshots/new-task.png), [Needs you](docs/screenshots/queue-light.png), [permission mode](docs/screenshots/permission-mode.png), [a matter](docs/screenshots/matter.png), [connecting an account](docs/screenshots/connect.png), [settings](docs/screenshots/settings.png) and the [command palette](docs/screenshots/command-palette.png).
+More screens: [starting a task](docs/screenshots/new-task.png), [Needs you](docs/screenshots/queue-light.png), [queued follow-ups](docs/screenshots/queue-strip-light.png), [permission mode](docs/screenshots/permission-mode.png), [a matter](docs/screenshots/matter.png), [connecting an account](docs/screenshots/connect.png), [settings](docs/screenshots/settings.png) and the [command palette](docs/screenshots/command-palette.png).
 
 ## Why
 

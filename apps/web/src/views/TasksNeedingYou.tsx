@@ -1,10 +1,12 @@
 import type { Task } from "@passport/types";
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { useAccountId } from "../accounts/AccountFilter";
 import { relativeTime } from "../components/ui";
-import { needsYou } from "../tasks/model";
+import { needsYou, returnedOf } from "../tasks/model";
 import { useTasks } from "../tasks/store";
 import { TaskGlyph } from "../tasks/TaskGlyph";
+import { groupNeedsYou } from "./needs-you-groups";
 
 export function needText(task: Task) {
   const pending = task.pendingActionIds?.length ?? 0;
@@ -15,17 +17,18 @@ export function needText(task: Task) {
       return "Stopped with an error";
     case "question":
       return "Has a question for you";
+    case "limited":
+      return "Paused at a usage limit";
     default:
-      // Sent by servers with the usage-limit state (W1B); the type does not carry it yet.
-      return (task.needsUser as string | null) === "limited" ? "Paused at a usage limit" : "";
+      return "";
   }
 }
 
-/** One line per task: what it needs and when it came back. */
-export function TaskCard({ task }: { task: Task }) {
+/** One line per task: what it needs and when it came back; `actions` sit beside the link. */
+export function TaskCard({ task, actions }: { task: Task; actions?: ReactNode }) {
   const { running } = useTasks();
   return (
-    <li>
+    <li className={actions ? "task-card-row" : undefined}>
       <Link
         to={`/tasks/${encodeURIComponent(task.id)}`}
         className="task-card"
@@ -36,13 +39,18 @@ export function TaskCard({ task }: { task: Task }) {
           <strong>{task.title}</strong>
           {needText(task) && <span className={`need ${task.needsUser}`}>{needText(task)}</span>}
         </span>
-        <time dateTime={task.lastActivityAt}>{relativeTime(task.lastActivityAt)}</time>
+        <time dateTime={returnedOf(task)}>{relativeTime(returnedOf(task))}</time>
       </Link>
+      {actions}
     </li>
   );
 }
 
-/** Tasks that came back needing the person, at the top of "Needs you". */
+/**
+ * Tasks that came back needing the person, at the top of "Needs you", grouped by what they wait
+ * on (`needs-you-groups.ts`): approvals, then usage limits with their recovery actions, then
+ * failures.
+ */
 export function TasksNeedingYou() {
   const { tasks, available } = useTasks(),
     accountId = useAccountId();
@@ -52,16 +60,28 @@ export function TasksNeedingYou() {
     return null;
   }
   return (
-    <section className="group" aria-labelledby="tasks-need-you">
-      <div className="group-head">
-        <h2 id="tasks-need-you">Tasks waiting on you</h2>
-        <span className="count">{list.length}</span>
-      </div>
-      <ul className="task-cards">
-        {list.map((task) => (
-          <TaskCard key={task.id} task={task} />
-        ))}
-      </ul>
-    </section>
+    <>
+      {groupNeedsYou(list).map(({ group, tasks: members }) => {
+        const Actions = group.actions;
+        return (
+          <section
+            key={group.id}
+            className="group needs-group"
+            aria-labelledby={`needs-${group.id}`}
+            data-needs={group.id}
+          >
+            <div className="group-head">
+              <h2 id={`needs-${group.id}`}>{group.label}</h2>
+              <span className="count">{members.length}</span>
+            </div>
+            <ul className="task-cards">
+              {members.map((task) => (
+                <TaskCard key={task.id} task={task} actions={Actions && <Actions task={task} />} />
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </>
   );
 }

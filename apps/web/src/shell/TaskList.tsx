@@ -7,6 +7,7 @@ import {
   isFresh,
   jumpOrder,
   kindLabel,
+  returnedOf,
   SECTIONS,
   type SectionId,
   taskState,
@@ -131,10 +132,10 @@ export function TaskRow({
               <span className="sr-only"> waiting for approval</span>
             </span>
           ) : (
-            <time dateTime={task.snoozedUntil ?? task.lastActivityAt}>
+            <time dateTime={task.snoozedUntil ?? returnedOf(task)}>
               {task.status === "snoozed" && task.snoozedUntil
                 ? wakeText(task.snoozedUntil)
-                : relativeTime(task.lastActivityAt)}
+                : relativeTime(returnedOf(task))}
             </time>
           )}
         </span>

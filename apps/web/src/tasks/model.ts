@@ -1,4 +1,10 @@
-import type { Task, TaskRun, TaskRunStatus, TaskRunTrigger } from "@passport/types";
+import {
+  type Task,
+  type TaskRun,
+  type TaskRunStatus,
+  type TaskRunTrigger,
+  taskBadge,
+} from "@passport/types";
 
 export type SectionId = "pinned" | "inbox" | "working" | "snoozed" | "settled";
 export const SECTIONS: { id: SectionId; label: string }[] = [
@@ -9,9 +15,12 @@ export const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "settled", label: "Settled" },
 ];
 
-/** Most recent first: "when it last came back to you", then id for a stable order. */
+/** "When it last came back to you" (T3's inbox order); rows written before v0.4 lack it. */
+export const returnedOf = (task: Task) => task.returnedAt ?? task.lastActivityAt;
+
+/** Most recent first by `returnedAt`, then id for a stable order. */
 export function byActivity(a: Task, b: Task) {
-  return b.lastActivityAt.localeCompare(a.lastActivityAt) || b.id.localeCompare(a.id);
+  return returnedOf(b).localeCompare(returnedOf(a)) || b.id.localeCompare(a.id);
 }
 
 /** The sidebar section a task sits in; archived tasks are not listed. */
@@ -51,62 +60,20 @@ export const needsYou = (tasks: Iterable<Task>) =>
 
 /**
  * The one status vocabulary, shared by the sidebar, the task header, Needs you and the task
- * list. `idle` is the absence of a state. Limited, Woke and Done read fields the server does not
- * send yet (`needsUser: "limited"`, `limited`, `unseenOutcome`); the glyphs are defined now so
- * every surface already speaks the same language when it does.
+ * list: `taskBadge` from `@passport/types`, with `idle` for the absence of a badge.
  */
-export type TaskState =
-  | "approval"
-  | "input"
-  | "waiting"
-  | "working"
-  | "limited"
-  | "failed"
-  | "woke"
-  | "done"
-  | "idle";
-
-/** Lifecycle fields added after v0.3; read loosely until `@passport/types` carries them. */
-type Lifecycle = {
-  needsUser?: string | null;
-  limited?: unknown;
-  unseenOutcome?: "done" | "woke" | null;
-  returnedAt?: string | null;
-  seenAt?: string | null;
-};
-const lifecycle = (task: Task) => task as Task & Lifecycle;
+export type TaskState = NonNullable<ReturnType<typeof taskBadge>> | "idle";
 
 /**
  * What the task's status mark shows. `active` is true when a run of the task is known to be
- * queued or running (from `task.run.updated`); a working task without watches is running too.
+ * queued or running (from `task.run.updated`); a working task without watches is running too,
+ * since its runs may not have reached this client yet.
  */
 export function taskState(task: Task, active = false): TaskState {
-  const t = lifecycle(task);
-  if (t.needsUser === "failure") {
-    return "failed";
-  }
-  if (t.needsUser === "approval") {
-    return "approval";
-  }
-  if (t.needsUser === "question") {
-    return "input";
-  }
-  if (t.needsUser === "limited" || t.limited) {
-    return "limited";
-  }
-  if (active || (task.status === "working" && !task.watches.length)) {
-    return "working";
-  }
-  if (task.watches.length) {
-    return "waiting";
-  }
-  if (t.unseenOutcome === "woke") {
-    return "woke";
-  }
-  if (t.unseenOutcome === "done") {
-    return "done";
-  }
-  return "idle";
+  const running = active || (task.status === "working" && !task.watches.length);
+  // `limited` without `needsUser` (an older frame, or a resume-at-reset that kept it) still reads Limited.
+  const needsUser = task.needsUser ?? (task.limited ? "limited" : null);
+  return taskBadge({ ...task, needsUser }, { activeRuns: running ? 1 : 0 }) ?? "idle";
 }
 
 /** The badge word for each state, as T3 Code names them. */
@@ -136,16 +103,14 @@ export const stateText: Record<TaskState, string> = {
 };
 
 /**
- * Something came back that the person has not looked at: it needs them, it finished or woke
- * unseen, or it returned after they last opened it.
+ * Something came back that the person has not looked at: it needs them, or it finished or woke
+ * unseen. Everything else recedes (the server's rule, docs/tasks.md "Returned, seen").
  */
-export function isFresh(task: Task): boolean {
-  const t = lifecycle(task);
-  if (t.needsUser || t.unseenOutcome) {
-    return true;
-  }
-  return !!t.returnedAt && (!t.seenAt || t.returnedAt > t.seenAt);
-}
+export const isFresh = (task: Task) => !!(task.needsUser || task.unseenOutcome);
+
+/** The task has news `POST /seen` would clear: an unseen outcome, or a return after the last look. */
+export const needsSeen = (task: Task) =>
+  !!task.unseenOutcome || (!!task.returnedAt && !!task.seenAt && task.returnedAt > task.seenAt);
 
 /**
  * The tasks ⌘1–⌘9 open: the sidebar's open sections in order (Pinned, Inbox, Working, Snoozed).

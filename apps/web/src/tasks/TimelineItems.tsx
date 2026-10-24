@@ -39,8 +39,21 @@ export function MailRowCard({ row }: { row: MailRow }) {
 }
 
 const sourceIcon = { arrival: "mail", watch: "watch", schedule: "routine", system: "alert" };
+/** Notices that report a recovery or a pause are calm; other codes are problems. */
 const noticeTone = (code?: string) =>
-  code === "RUN_CANCELLED" || code === "RETRY" ? "" : code ? "warn" : "";
+  !code || ["RUN_CANCELLED", "RETRY", "RESTARTED"].includes(code)
+    ? ""
+    : code === "USAGE_LIMITED"
+      ? "limited"
+      : "warn";
+const noticeIcon = (code?: string) =>
+  code === "RUN_CANCELLED"
+    ? "stop"
+    : code === "RESTARTED"
+      ? "restart"
+      : code === "USAGE_LIMITED"
+        ? "limit"
+        : "alert";
 
 /** Every item kind except tool calls (grouped) and approvals (actionable). */
 export function TimelineItem({ item }: { item: TaskItem }) {
@@ -80,9 +93,22 @@ export function TimelineItem({ item }: { item: TaskItem }) {
         </div>
       );
     case "system_notice":
+      if (item.payload.code === "RESTARTED") {
+        // Passport restarted mid-run and carries on: what was in flight, as the server lists it.
+        return (
+          <div className="tl-notice restarted">
+            <Icon name="restart" size={13} />
+            <div className="tl-notice-body">
+              <span className="tl-notice-title">Picked up after a restart</span>
+              <PlainText text={item.payload.text} />
+            </div>
+            <time dateTime={item.at}>{relativeTime(item.at)}</time>
+          </div>
+        );
+      }
       return (
         <div className={`tl-notice ${noticeTone(item.payload.code)}`}>
-          <Icon name={item.payload.code === "RUN_CANCELLED" ? "stop" : "alert"} size={13} />
+          <Icon name={noticeIcon(item.payload.code)} size={13} />
           <PlainText text={item.payload.text} />
         </div>
       );
