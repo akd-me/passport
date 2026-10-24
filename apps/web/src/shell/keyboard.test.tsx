@@ -69,6 +69,8 @@ describe("⌘1–⌘9", () => {
   it("open the first nine tasks in sidebar order, with ⌘ or Ctrl", async () => {
     renderShell();
     await screen.findByText("Newest inbox");
+    // ⌘1 targets the pinned row; under load its section can mount a tick after the inbox.
+    await screen.findByText("Pinned");
     fireEvent.keyDown(window, { key: "1", metaKey: true });
     expect(where()).toBe("/tasks/pin");
     fireEvent.keyDown(window, { key: "3", metaKey: true });
