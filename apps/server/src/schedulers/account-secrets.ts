@@ -1,5 +1,6 @@
 import type { ProviderSetupDescriptor, Store } from "@passport/types";
 import { ApiError } from "../errors.js";
+import { secretReferences } from "./secret-references.js";
 
 export function isSecretReference(value: unknown): value is { secretRef: string } {
   return (
@@ -28,7 +29,7 @@ export async function resolveAccountSecrets(
     if (!field.secret || !isSecretReference(value)) {
       throw new ApiError("INVALID_FIELD", "Only secret fields accept a secretRef");
     }
-    const secret = await store.secrets?.take(value.secretRef);
+    const secret = await secretReferences(store).peek(value.secretRef);
     if (secret == null) {
       throw new ApiError("SECRET_REF_INVALID", "Secret reference is missing or already used");
     }

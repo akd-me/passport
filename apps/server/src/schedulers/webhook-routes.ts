@@ -1,3 +1,4 @@
+import type { HttpBindings } from "@hono/node-server";
 import type { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Backend } from "../backend.js";
@@ -11,7 +12,8 @@ export function installWebhookRoutes(app: Hono, backend: Backend) {
     async (c, next) => {
       const service = getSchedulerService(backend);
       await service.ready;
-      const source = c.env?.incoming?.socket?.remoteAddress ?? "unknown";
+      const source =
+        (c.env as Partial<HttpBindings> | undefined)?.incoming?.socket.remoteAddress ?? "unknown";
       const status = service.webhooks.authorize(c.req.param("token"), source);
       if (status) {
         if (status === 429) {

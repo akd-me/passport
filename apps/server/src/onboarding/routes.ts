@@ -117,7 +117,7 @@ export function registerOnboarding(
         },
       },
     };
-    const account = await addAccount(transient, input);
+    const account = await addAccount(transient, input, undefined, { probeOnly: true });
     try {
       await probeAccount(backend, account, credentials);
     } catch {

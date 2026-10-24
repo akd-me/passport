@@ -132,6 +132,8 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 - Invalid webhook signatures have a separate rejection budget. Unknown URLs are throttled
   before reading request bodies, deep JSON is rejected with a delivery record, and credential
   substrings are redacted from request headers and query values.
+- Account connection tests peek at private references and never queue voice learning. Account
+  and webhook setup consume references only after persistence succeeds, cleaning up failed installs.
 
 ## [0.3.2] — 2026-10-24
 

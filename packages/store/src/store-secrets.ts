@@ -32,7 +32,13 @@ export function createEncryptedKv(db: StoreDatabase): EncryptedKv {
   };
 }
 
-export function createSecretsRepository(db: StoreDatabase): StoreSecrets {
+export interface SecretReferenceStore extends StoreSecrets {
+  peek(ref: string): Promise<string | null>;
+  /** Atomically consume a set after every consumer write has succeeded. */
+  consume(refs: string[]): Promise<boolean>;
+}
+
+export function createSecretsRepository(db: StoreDatabase): SecretReferenceStore {
   const read = (id: string): SecretRequest | null => {
     const row = db.one("SELECT value FROM kv WHERE key = ?", ["secret-request:" + id]);
     return row ? (JSON.parse(row.value as string) as SecretRequest) : null;
@@ -54,8 +60,28 @@ export function createSecretsRepository(db: StoreDatabase): StoreSecrets {
   const encrypted = createEncryptedKv(db);
   return {
     put: async (value) => put(value),
+    peek: (ref) => (/^secret:[a-f0-9]{64}$/.test(ref) ? encrypted.get(ref) : Promise.resolve(null)),
     take: (ref) =>
       /^secret:[a-f0-9]{64}$/.test(ref) ? encrypted.take(ref) : Promise.resolve(null),
+    consume: async (refs) => {
+      const values = await Promise.all(refs.map((ref) => encrypted.get(ref)));
+      return db.transaction(() => {
+        // Re-read under the write lock: concurrent consumers can install a ref only once.
+        for (const [index, ref] of refs.entries()) {
+          if (!/^secret:[a-f0-9]{64}$/.test(ref) || values[index] === null) {
+            return false;
+          }
+          const row = db.one("SELECT value FROM kv WHERE key = ?", ["encrypted:" + ref]);
+          if (!row) {
+            return false;
+          }
+        }
+        for (const ref of refs) {
+          db.run("DELETE FROM kv WHERE key = ?", ["encrypted:" + ref]);
+        }
+        return true;
+      });
+    },
     requests: {
       create: async (input) =>
         db.transaction(() => {

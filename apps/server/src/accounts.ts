@@ -7,8 +7,10 @@ import type {
 } from "@passport/types";
 import type { Backend } from "./backend.js";
 import { ApiError } from "./errors.js";
+import { logger } from "./logger.js";
 import { learnVoiceOnConnect } from "./onboarding/voice.js";
 import { isSecretReference, resolveAccountSecrets } from "./schedulers/account-secrets.js";
+import { consumeSecretReferences } from "./schedulers/secret-references.js";
 import { member, object, string } from "./validation.js";
 
 /** Descriptor fields marked secret are sent exclusively to the credential store. */
@@ -16,6 +18,7 @@ export async function addAccount(
   backend: Backend,
   input: unknown,
   oauthCredentials?: AccountCredentials,
+  options: { probeOnly?: boolean } = {},
 ): Promise<Account> {
   const body = object(input),
     kind = member(body.kind, backend.providerKinds, "provider") as ProviderKind;
@@ -105,8 +108,8 @@ export async function addAccount(
       credentials[field.id] = resolvedFields[field.id] as string;
     }
   }
-  await backend.store.accounts.upsert(account);
   try {
+    await backend.store.accounts.upsert(account);
     delete credentials.codeVerifier;
     await backend.store.accounts.setCredentials(account.id, {
       ...credentials,
@@ -115,12 +118,23 @@ export async function addAccount(
     await backend.updateConfig({
       accounts: await backend.store.accounts.list(),
     });
+    if (!options.probeOnly) {
+      const refs = Object.values(fields)
+        .filter(isSecretReference)
+        .map((value) => value.secretRef);
+      await consumeSecretReferences(backend.store, refs);
+    }
   } catch (error) {
     // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
 
     await backend.store.accounts.delete(account.id);
+    await backend.updateConfig({ accounts: await backend.store.accounts.list() }).catch(() => {
+      logger.warn("Could not restore account configuration after setup failed");
+    });
     throw error;
   }
-  await learnVoiceOnConnect(backend, account);
+  if (!options.probeOnly) {
+    await learnVoiceOnConnect(backend, account);
+  }
   return account;
 }

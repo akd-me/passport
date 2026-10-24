@@ -348,7 +348,7 @@ export class SchedulerService {
       routine: instruction(body.routine),
     };
     return this.exclusive(async () => {
-      await prepareRoutineSignature(this.backend.store, def.id, def.schedule);
+      const signature = await prepareRoutineSignature(this.backend.store, def.id, def.schedule);
       this.routines.set(def.id, def);
       try {
         await this.saveRoutines();
@@ -356,14 +356,22 @@ export class SchedulerService {
         if (def.schedule.type === "webhook") {
           await this.webhooks.ensure(def.id);
         }
+        const job = this.list().find((j) => j.id === def.id)!;
+        await signature.commit();
+        return job;
       } catch (error) {
         // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
 
         this.routines.delete(def.id);
+        if (this.scheduler.get(def.id)) {
+          await this.scheduler.unregister(def.id);
+        }
+        this.definitions.delete(def.id);
+        await this.webhooks.remove(def.id);
+        await signature.rollback();
         await this.saveRoutines();
         throw error;
       }
-      return this.list().find((j) => j.id === def.id)!;
     });
   }
   async update(id: string, input: unknown) {
@@ -398,36 +406,57 @@ export class SchedulerService {
       const name = body.name === undefined ? undefined : text(body.name, "name", 200);
       const nextInstruction = body.routine === undefined ? undefined : instruction(body.routine);
       const runOn = body.runOn === undefined ? undefined : validateRunOn(body.runOn);
-      if (routine) {
-        if (schedule) {
-          await prepareRoutineSignature(this.backend.store, id, schedule, state.schedule);
-          if (schedule.type === "webhook") {
-            await this.webhooks.ensure(id);
-          } else if (state.schedule.type === "webhook") {
-            await this.webhooks.remove(id);
+      const previousRoutine = routine ? structuredClone(routine) : undefined;
+      const signature =
+        routine && schedule
+          ? await prepareRoutineSignature(this.backend.store, id, schedule, state.schedule)
+          : undefined;
+      try {
+        if (routine) {
+          if (schedule) {
+            if (schedule.type === "webhook") {
+              await this.webhooks.ensure(id);
+            } else if (state.schedule.type === "webhook") {
+              await this.webhooks.remove(id);
+            }
           }
+          if (runOn) {
+            routine.runOn = runOn;
+          }
+          if (name) {
+            routine.name = name;
+            this.definitions.get(id)!.name = name;
+          }
+          if (schedule) {
+            routine.schedule = schedule;
+          }
+          if (nextInstruction) {
+            routine.routine = nextInstruction;
+          }
+          await this.saveRoutines();
         }
-        if (runOn) {
-          routine.runOn = runOn;
+        await this.scheduler.update(id, {
+          schedule,
+          enabled: body.enabled as boolean | undefined,
+          name,
+        });
+        const job = this.list().find((j) => j.id === id)!;
+        await signature?.commit();
+        return job;
+      } catch (error) {
+        if (previousRoutine) {
+          this.routines.set(id, previousRoutine);
+          this.definitions.get(id)!.name = state.name;
+          await this.saveRoutines();
+          await this.scheduler.update(id, {
+            schedule: state.schedule,
+            enabled: state.enabled,
+            name: state.name,
+          });
         }
-        if (name) {
-          routine.name = name;
-          this.definitions.get(id)!.name = name;
-        }
-        if (schedule) {
-          routine.schedule = schedule;
-        }
-        if (nextInstruction) {
-          routine.routine = nextInstruction;
-        }
-        await this.saveRoutines();
+        await signature?.rollback();
+        throw error;
       }
-      await this.scheduler.update(id, {
-        schedule,
-        enabled: body.enabled as boolean | undefined,
-        name,
-      });
-      return this.list().find((j) => j.id === id)!;
     });
   }
   async remove(id: string) {
