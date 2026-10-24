@@ -12,7 +12,7 @@ const timeText = (d: Date) =>
 const localInput = (d: Date) =>
   new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
-/** Row and header actions: pin, snooze until…, settle, archive. No dragging needed. */
+/** Row and header actions: pin, mark unread, snooze until…, settle, archive. No dragging needed. */
 export function TaskMenu({
   task,
   placement = "below",
@@ -106,6 +106,12 @@ function MenuBody({
         <Icon name="pin" size={14} />
         <span>{task.pinned ? "Unpin" : "Pin"}</span>
       </button>
+      {!task.unseenOutcome && !task.needsUser && (
+        <button type="button" className="menu-item" onClick={() => run({ kind: "mark_unread" })}>
+          <Icon name="unread" size={14} />
+          <span>Mark unread</span>
+        </button>
+      )}
       <button type="button" className="menu-item" onClick={() => setSnoozing(true)}>
         <Icon name="snooze" size={14} />
         <span>Snooze until…</span>

@@ -4,6 +4,7 @@ import {
   groupTasks,
   isFresh,
   jumpOrder,
+  needsSeen,
   needsYou,
   snoozePresets,
   stateLabel,
@@ -49,6 +50,25 @@ describe("sidebar grouping", () => {
     expect(groups.inbox.map((t) => t.id)).toEqual(["z", "y", "x"]);
   });
 
+  it("orders the inbox by returnedAt, falling back to lastActivityAt on older rows", () => {
+    const groups = groupTasks([
+      // Busy in the background a minute ago, but it came back to you an hour ago.
+      task("quiet", { lastActivityAt: minutesAgo(1), returnedAt: minutesAgo(60) }),
+      task("back", { lastActivityAt: minutesAgo(20), returnedAt: minutesAgo(2) }),
+      task("old-row", { lastActivityAt: minutesAgo(10) }),
+    ]);
+    expect(groups.inbox.map((t) => t.id)).toEqual(["back", "old-row", "quiet"]);
+    const needs = needsYou([
+      task("a", {
+        needsUser: "approval",
+        lastActivityAt: minutesAgo(1),
+        returnedAt: minutesAgo(9),
+      }),
+      task("b", { needsUser: "failure", lastActivityAt: minutesAgo(5), returnedAt: minutesAgo(5) }),
+    ]);
+    expect(needs.map((t) => t.id)).toEqual(["b", "a"]);
+  });
+
   it("lists what needs the person, not archived tasks", () => {
     const list = needsYou([
       task("a", { needsUser: "approval", lastActivityAt: minutesAgo(9) }),
@@ -64,11 +84,26 @@ describe("task state", () => {
   const watches = [
     { threadHandle: "th", account: "acc-1", since: minutesAgo(5), consecutiveWakes: 0 },
   ];
-  /** Fields the server adds later (W1B); the state reads them when present. */
-  const later = (fields: Record<string, unknown>) => fields as Partial<Task>;
+  /** v0.4 lifecycle fields (W1B). */
+  const later = (fields: Partial<Task>) => fields;
 
-  it("prefers what needs the person over activity", () => {
+  it("prefers what needs the person over activity, in taskBadge's order", () => {
     expect(taskState(task("a", { needsUser: "failure", status: "working" }), true)).toBe("failed");
+    expect(taskState(task("a", { needsUser: "approval", unseenOutcome: "done" }))).toBe("approval");
+    // `limited` without `needsUser` still reads Limited.
+    expect(
+      taskState(
+        task("a", {
+          limited: {
+            runId: "r",
+            resetAt: null,
+            autoResume: true,
+            source: "host_agent",
+            at: minutesAgo(1),
+          },
+        }),
+      ),
+    ).toBe("limited");
     expect(taskState(task("a", { needsUser: "approval" }), true)).toBe("approval");
     expect(taskState(task("a", { needsUser: "question" }), true)).toBe("input");
     expect(taskState(task("a", later({ needsUser: "limited" })), true)).toBe("limited");
@@ -110,16 +145,24 @@ describe("task state", () => {
     expect(states.every((s) => stateText[s])).toBe(true);
   });
 
-  it("brings a row forward only when something came back unseen", () => {
+  it("brings a row forward only when it needs the person or an outcome is unseen", () => {
     expect(isFresh(task("a"))).toBe(false);
     expect(isFresh(task("a", { needsUser: "approval" }))).toBe(true);
     expect(isFresh(task("a", later({ unseenOutcome: "done" })))).toBe(true);
+    expect(isFresh(task("a", later({ unseenOutcome: "woke", seenAt: minutesAgo(1) })))).toBe(true);
+    // The server's rule: a return without an outcome (a reopen) recedes.
     expect(isFresh(task("a", later({ returnedAt: minutesAgo(2), seenAt: minutesAgo(5) })))).toBe(
-      true,
-    );
-    expect(isFresh(task("a", later({ returnedAt: minutesAgo(5), seenAt: minutesAgo(2) })))).toBe(
       false,
     );
+  });
+
+  it("asks /seen only when there is something to clear", () => {
+    expect(needsSeen(task("a"))).toBe(false);
+    expect(needsSeen(task("a", { unseenOutcome: "done" }))).toBe(true);
+    expect(needsSeen(task("a", { returnedAt: minutesAgo(2), seenAt: minutesAgo(5) }))).toBe(true);
+    expect(needsSeen(task("a", { returnedAt: minutesAgo(5), seenAt: minutesAgo(2) }))).toBe(false);
+    // Never seen and nothing to clear: no request.
+    expect(needsSeen(task("a", { returnedAt: minutesAgo(5) }))).toBe(false);
   });
 });
 
