@@ -122,6 +122,42 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 - `docs/screenshots/task-dark.png` is a dark capture again (it was the light one); the task and
   Needs you screenshots are recaptured and `queue-strip-light/dark.png` are new.
 
+### Fixed
+
+- Arrival triage sessions may call only the tools the triage prompt names (mail, notes and people
+  reads, matters, notes, reply drafts, scheduling, and label/archive/mark-read of the arrival
+  itself); `task_delegate`, `ask_user`, `task_organize`, `request_secret`, `render` and the rest
+  answer `INPUT_TRIAGE` (R1-1).
+- The category the model picks for an arrival applies to that arrival's own organize call only;
+  later drafts and mail operations keep their inferred policy categories (R1-2).
+- A failed arrival session is no longer acknowledged on retry because people-resolution actions
+  exist: inference is repeated unless the session organized the arrival, and a session that
+  stopped after partial work fails so the arrival queue surfaces it (R1-3).
+- Only resumable task runs (message, watch, wake) keep a CLI transcript; arrivals, routines and
+  voice learning run with `--no-session-persistence` / `--ephemeral` and record no provider
+  session (R1-5).
+- A failed resume starts a fresh session only when the CLI reports the session missing
+  (`HOST_AGENT_SESSION_MISSING`), and the fresh id is recorded once that attempt succeeds (R1-6).
+- Codex sessions offer only Passport's MCP tools: native-tool features and `request_user_input`
+  are off, and a rewritten model catalog removes code-mode `exec`, `apply_patch`, sub-agents and
+  clock tools (R1-7).
+- Task account scope is enforced on tool calls (`AgentRunOptions.accountIds`,
+  `ACCOUNT_FORBIDDEN`) (R1-10).
+- `request_secret` follows the question status rules and records `pendingSecretRequestIds`, so
+  a question and a secret request no longer clear each other's Input state; tool-side task
+  writes stamp `returnedAt`, and the watch tools no longer move `lastActivityAt` (R1-18, R1-19).
+- The render sanitiser runs in linear time, keeps a stray `<` in text, decodes common named
+  entities and link URLs once; failed renders count toward the 10-per-run limit (R1-25, R1-50,
+  R1-51).
+- Usage limits reported only on stderr or as Claude result text are classified as limits, and an
+  API 429's `Retry-After` becomes the reset time (R1-33).
+- An expired time budget aborts tool calls still running after a 10 s grace (R1-37).
+- Claude sessions read the system prompt (with USER.md) from a private file instead of argv
+  (R1-39).
+- The tool belt's MCP tool timeout exceeds the longest `request_secret` wait (R1-46).
+- A pending profile proposal ends voice-learning sampling for the account, so a restarted run
+  cannot propose a second profile (R1-49).
+
 
 ## [0.3.2] — 2026-10-24
 
