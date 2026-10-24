@@ -181,11 +181,11 @@ describe("task stamping (R1-19)", () => {
     let row = task({ returnedAt: f.at });
     store.tasks = {
       get: async () => structuredClone(row),
-      update: async (_id, patch) => {
+      update: async (_id: string, patch: Partial<Task> | ((task: Task) => Partial<Task>)) => {
         row = { ...row, ...(typeof patch === "function" ? patch(row) : patch) };
         return structuredClone(row);
       },
-    } as StoreTasks;
+    } as unknown as StoreTasks;
     const tools = build();
     const later = createToolRegistry({
       store,
