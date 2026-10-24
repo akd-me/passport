@@ -10,10 +10,14 @@ import { logger } from "../logger.js";
 import { TaskApprovals } from "./approvals.js";
 import { TaskLifecycle } from "./lifecycle.js";
 import { LimitLog, limitAware, TaskLimits } from "./limits.js";
+import { taskOrchestrator } from "./orchestrator.js";
+import { TaskOrganizer } from "./organize.js";
+import { TaskQuestions } from "./questions.js";
 import { TaskQueueService } from "./queue.js";
 import { recoverRuns } from "./restart.js";
 import type { RunCeilings } from "./runner.js";
 import { TaskService } from "./service.js";
+import { TaskSubtasks } from "./subtasks.js";
 import { TaskTitles, type TitleModel } from "./titles.js";
 import { TaskTriggers } from "./triggers.js";
 import { TaskWatchMonitor } from "./watches.js";
@@ -36,6 +40,10 @@ export interface TaskSystem {
   readonly limits: TaskLimits;
   /** v0.4: fast-model titles after the first run. */
   readonly titles: TaskTitles;
+  /** v0.4 (W2A): `ask_user` questions and their answer and dismiss routes. */
+  readonly questions: TaskQuestions;
+  /** v0.4 (W2A): subtasks (`task_delegate`, `task_status`, `task_cancel`) and the lineage. */
+  readonly subtasks: TaskSubtasks;
   /** `tasks.maintenance` job: snooze wake-ups, 3-day auto-settle, 14-day watch expiry. */
   maintain(): Promise<string>;
   close(): Promise<void>;
@@ -71,6 +79,16 @@ export function createTaskSystem(input: {
   queue.limits = limits;
   const titles = new TaskTitles(service, input.titleModel);
   const lifecycle = new TaskLifecycle(service, queue);
+  const questions = new TaskQuestions(service, queue);
+  const subtasks = new TaskSubtasks(service, queue);
+  questions.forwarding = subtasks;
+  subtasks.questions = questions;
+  service.runner.orchestrator = taskOrchestrator({
+    questions,
+    subtasks,
+    organizer: new TaskOrganizer(service, lifecycle),
+  });
+  service.runner.afterRunEnded = (run) => subtasks.afterRunEnded(run);
   service.runner.onRunEnded = async (run) => {
     try {
       await limits.onRunEnded(run);
@@ -105,6 +123,8 @@ export function createTaskSystem(input: {
     queue,
     limits,
     titles,
+    questions,
+    subtasks,
     async maintain() {
       await recovered;
       const { settled, woken } = await service.maintain();
