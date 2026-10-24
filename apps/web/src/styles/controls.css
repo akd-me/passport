@@ -12,7 +12,7 @@
   height: var(--control-h);
   padding: 0 var(--s-3);
   border-radius: var(--r-control);
-  background: var(--sunken);
+  background: var(--hover);
   color: var(--text);
   font-size: var(--t-s);
   font-weight: var(--w-medium);
@@ -23,7 +23,7 @@
     color var(--dur) var(--ease);
 }
 .btn:hover:not(:disabled) {
-  background: var(--hover);
+  background: var(--selected);
 }
 .btn:disabled {
   opacity: 0.5;
@@ -105,13 +105,13 @@
   height: var(--control-h-sm);
   padding: 0 10px;
   border-radius: var(--r-control);
-  background: var(--sunken);
+  background: var(--hover);
   color: var(--text-2);
   font-size: var(--t-s);
   transition: background-color var(--dur) var(--ease);
 }
 .chip:hover {
-  background: var(--hover);
+  background: var(--selected);
   color: var(--text);
 }
 .kbd {

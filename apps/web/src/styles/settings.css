@@ -279,6 +279,7 @@
 }
 .job-failure {
   display: grid;
+  justify-items: start;
   gap: 2px;
   margin-top: var(--s-1);
   font-size: var(--t-xs);
@@ -323,7 +324,6 @@
   gap: 6px;
   margin: calc(-1 * var(--s-1)) 0 var(--s-3);
 }
-.settings-block.inset .chip,
 .settings-block.inset .chip-toggle {
   background: var(--hover);
 }

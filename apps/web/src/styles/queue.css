@@ -157,15 +157,6 @@
   gap: 6px;
   margin-top: var(--s-3);
 }
-.proposal .btn:not(.btn-primary):not(.btn-ghost) {
-  background: var(--hover);
-}
-.proposal .btn:not(.btn-primary):not(.btn-ghost):hover:not(:disabled) {
-  background: var(--selected);
-}
-.tl-approval .proposal .btn:not(.btn-primary):not(.btn-ghost) {
-  background: var(--sunken);
-}
 .key-hints {
   margin-left: auto;
   display: inline-flex;
@@ -231,9 +222,6 @@
   color: var(--amber);
   font-weight: var(--w-medium);
   font-size: var(--t-s);
-}
-.outbox .btn {
-  background: var(--hover);
 }
 .handled {
   margin-top: var(--s-6);

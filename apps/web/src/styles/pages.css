@@ -22,11 +22,15 @@
   align-items: center;
   gap: var(--s-3);
   min-height: 52px;
+  padding: var(--s-2) 0;
+  color: inherit;
+  line-height: var(--lh-row);
+}
+/* A row that opens something gets a hover step, set into the gutter. */
+a.row {
   padding: var(--s-2) 10px;
   margin: 0 -10px;
-  color: inherit;
   border-radius: var(--r-control);
-  line-height: var(--lh-row);
   transition: background-color var(--dur) var(--ease);
 }
 a.row:hover {
