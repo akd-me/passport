@@ -56,7 +56,12 @@ export class TaskQuestions {
     private readonly queue: TaskQueueService,
   ) {}
 
-  async ask(caller: TaskToolCaller, input: TaskAskInput): Promise<TaskAskResult> {
+  /** Serialized per task with the queue, so parallel calls respect `QUESTION_LIMIT` (R1-35). */
+  ask(caller: TaskToolCaller, input: TaskAskInput): Promise<TaskAskResult> {
+    return this.queue.locked(caller.taskId, () => this.askLocked(caller, input));
+  }
+
+  private async askLocked(caller: TaskToolCaller, input: TaskAskInput): Promise<TaskAskResult> {
     const task = await this.service.task(caller.taskId);
     if ((task.pendingQuestions?.length ?? 0) >= SUBTASK_LIMITS.maxPendingQuestions) {
       throw new ApiError(
@@ -114,10 +119,33 @@ export class TaskQuestions {
     return this.queue.send(taskId, { text, mode: "queue" }, { answers: [itemId] });
   }
 
-  /** `POST /api/tasks/:id/questions/:itemId/dismiss`: resolved without an answer. */
-  async dismiss(taskId: string, itemId: string): Promise<Task> {
+  /**
+   * `POST /api/tasks/:id/questions/:itemId/dismiss`: resolved without an answer. Runs under the
+   * queue lock like an answer, removes the question inside the write and answers `409
+   * QUESTION_RESOLVED` when another dismiss or a message got there first; only the removal
+   * appends the notice (R1-34).
+   */
+  dismiss(taskId: string, itemId: string): Promise<Task> {
+    return this.queue.locked(taskId, () => this.dismissLocked(taskId, itemId));
+  }
+
+  private async dismissLocked(taskId: string, itemId: string): Promise<Task> {
     const question = await this.pending(taskId, itemId);
-    const task = await this.resolve(taskId, [itemId]);
+    const task = await this.service.runner.updateTask(taskId, (current) => {
+      const pending = current.pendingQuestions ?? [];
+      const left = pending.filter((entry) => entry.itemId !== itemId);
+      if (left.length === pending.length) {
+        throw new ApiError(
+          "QUESTION_RESOLVED",
+          "This question was already answered or dismissed",
+          409,
+        );
+      }
+      return {
+        pendingQuestions: left,
+        ...resolveTaskStatus({ ...current, pendingQuestions: left }, { kind: "question_resolved" }),
+      };
+    });
     await this.service.runner.appendItem({
       taskId,
       runId: null,

@@ -12,7 +12,7 @@ import type {
   TaskItemInput,
   TaskRun,
 } from "@passport/types";
-import { clip, frameUntrusted } from "./untrusted.js";
+import { clip, frameUntrusted, taskLabel } from "./untrusted.js";
 
 const SINCE_CHARS = 4000;
 const APPROVALS = 10;
@@ -57,11 +57,7 @@ async function resumeInstruction(
   beforeSeq: number,
 ): Promise<string> {
   const recent = (
-    await tasks.items.recent(
-      task.id,
-      ["user_message", "notification", "system_notice", "approval_request"],
-      40,
-    )
+    await tasks.items.recent(task.id, ["user_message", "notification", "system_notice"], 40)
   ).filter((item) => item.seq < beforeSeq);
   const previousMessage = recent.find((item) => item.kind === "user_message")?.seq ?? 0;
   let since = "";
@@ -79,9 +75,13 @@ async function resumeInstruction(
       since = `${since}${line}\n`.slice(-SINCE_CHARS);
     }
   }
+  // Their own query: on a busy task the notices above would push older proposals out (R1-40).
+  const proposals = (await tasks.items.recent(task.id, ["approval_request"], APPROVALS * 2))
+    .filter((item) => item.seq < beforeSeq)
+    .slice(0, APPROVALS);
   const approvals: string[] = [];
-  for (const item of recent) {
-    if (item.kind !== "approval_request" || approvals.length >= APPROVALS) {
+  for (const item of proposals) {
+    if (item.kind !== "approval_request") {
       continue;
     }
     const action = await store.actions.get(item.payload.actionId);
@@ -92,7 +92,7 @@ async function resumeInstruction(
   // A subtask's messages come from its parent task's agent (v0.4).
   const from = task.delegation ? "The request from your parent task" : "The person's request";
   const parts = [
-    `Follow-up on the task "${task.title}" (task id ${task.id}). Your session holds the earlier turns.`,
+    `Follow-up on ${taskLabel(task)}. Your session holds the earlier turns.`,
     task.interactionMode === "plan"
       ? "Plan mode: investigate with read tools and answer with a concrete numbered proposal list. Write tools do not execute in this mode."
       : "Mode for this turn: default. Write tools run under policy.",

@@ -12,7 +12,7 @@ import { logger } from "../logger.js";
 import { arrivalContext } from "../watch/arrival.js";
 import { describeAgentRun, type TaskService } from "./service.js";
 import { hidden, surface } from "./status.js";
-import { clip, frameUntrusted, neutralize, safeRow } from "./untrusted.js";
+import { clip, frameUntrusted, neutralize, safeRow, taskLabel } from "./untrusted.js";
 import { classifyWake, quoteHandle, sameThread, WAKE_LABEL } from "./watch-classify.js";
 import { type PendingWake, PendingWakes, pendingKey, SeenKeys } from "./watch-pending.js";
 
@@ -363,7 +363,7 @@ export class TaskWatchMonitor {
         ],
       },
       async (options) => {
-        const instruction = `You are working on the task "${task.title}" (task id ${task.id}).\n\n${input.instruction}`;
+        const instruction = `You are working on ${taskLabel(task)}.\n\n${input.instruction}`;
         return this.agent.run(
           { kind: "manual", instruction, ...(input.emailIds ? { emailIds: input.emailIds } : {}) },
           {

@@ -26,7 +26,8 @@ import { contextItems, taskByAction } from "./context.js";
 import { answeredRequest } from "./questions.js";
 import { type RunCeilings, type RunDescription, TaskRunner } from "./runner.js";
 import { taskSessionOptions } from "./session.js";
-import { frameUntrusted } from "./untrusted.js";
+import { resolveTaskStatus } from "./status.js";
+import { frameUntrusted, taskLabel } from "./untrusted.js";
 
 export interface TaskServiceOptions {
   store: Store;
@@ -201,6 +202,7 @@ export class TaskService {
         runId,
         cancellable: true,
         onCreated: created,
+        request: texts,
         items: await contextItems(this.options.store, context),
       },
       (options) =>
@@ -244,6 +246,31 @@ export class TaskService {
   }
 
   private async instruction(task: Task, texts: string[], beforeSeq: number): Promise<string> {
+    const history = await this.history(task, beforeSeq);
+    const from = task.delegation
+      ? "The request from your parent task (another Passport agent working for the same person)"
+      : "The person's request";
+    const parts = [
+      `You are working on ${taskLabel(task)}.`,
+      task.delegation
+        ? "This task is a subtask: your parent task's agent delegated it and reads your final reply. Ask it, not the person, with ask_user."
+        : "",
+      task.interactionMode === "plan"
+        ? "Plan mode: investigate with read tools and answer with a concrete numbered proposal list. Write tools do not execute in this mode."
+        : "",
+      history,
+      texts.length > 1
+        ? `${from} (${task.delegation ? "added to" : "they added to it"} while you worked):\n${texts.join("\n\n")}`
+        : `${from}:\n${texts[0] ?? ""}`,
+    ];
+    return parts.filter(Boolean).join("\n\n");
+  }
+
+  /**
+   * Up to 16 recent user, assistant and notification items before `beforeSeq`, framed as
+   * untrusted data ("Earlier in this task"), or "" when there are none. Continuations reuse it.
+   */
+  async history(task: Task, beforeSeq: number): Promise<string> {
     const recent = (
       await this.tasks.items.recent(
         task.id,
@@ -265,23 +292,7 @@ export class TaskService {
               : "";
       history = `${history}${line}\n`.slice(-HISTORY_CHARS);
     }
-    const from = task.delegation
-      ? "The request from your parent task (another Passport agent working for the same person)"
-      : "The person's request";
-    const parts = [
-      `You are working on the task "${task.title}" (task id ${task.id}).`,
-      task.delegation
-        ? "This task is a subtask: your parent task's agent delegated it and reads your final reply. Ask it, not the person, with ask_user."
-        : "",
-      task.interactionMode === "plan"
-        ? "Plan mode: investigate with read tools and answer with a concrete numbered proposal list. Write tools do not execute in this mode."
-        : "",
-      history ? `Earlier in this task:\n${frameUntrusted("task-history", history)}` : "",
-      texts.length > 1
-        ? `${from} (${task.delegation ? "added to" : "they added to it"} while you worked):\n${texts.join("\n\n")}`
-        : `${from}:\n${texts[0] ?? ""}`,
-    ];
-    return parts.filter(Boolean).join("\n\n");
+    return history ? `Earlier in this task:\n${frameUntrusted("task-history", history)}` : "";
   }
 
   /** Stops every cancellable run of the task. */
@@ -310,17 +321,23 @@ export class TaskService {
    */
   async settle(id: string): Promise<Task> {
     await this.interrupt(id);
-    return this.runner.updateTask(id, {
+    return this.runner.updateTask(id, (current) => ({
       status: "settled",
       settledAt: this.now(),
       watches: [],
       snoozedUntil: null,
-    });
+      ...noAutoResume(current),
+    }));
   }
 
   async archive(id: string): Promise<Task> {
     await this.interrupt(id);
-    return this.runner.updateTask(id, { status: "archived", watches: [], snoozedUntil: null });
+    return this.runner.updateTask(id, (current) => ({
+      status: "archived",
+      watches: [],
+      snoozedUntil: null,
+      ...noAutoResume(current),
+    }));
   }
 
   async pin(id: string, pinned: boolean): Promise<Task> {
@@ -353,7 +370,11 @@ export class TaskService {
     });
   }
 
-  /** Auto-settle idle inbox tasks and wake snoozed ones whose time came. */
+  /**
+   * Auto-settle idle inbox tasks and wake snoozed ones whose time came. Each write re-checks the
+   * task it read, so a person's change in between wins, and a wake goes through the status rules
+   * (`reopened`: Working while it watches or waits on subtasks) (R1-27).
+   */
   async maintain(): Promise<{ settled: number; woken: number }> {
     const now = this.now();
     let settled = 0;
@@ -370,13 +391,22 @@ export class TaskService {
       cursor = page.nextCursor;
     } while (cursor);
     for (const id of due) {
-      await this.runner.updateTask(id, {
-        status: "inbox",
-        snoozedUntil: null,
-        lastActivityAt: now,
-        unseenOutcome: "woke",
+      let woke = false;
+      await this.runner.updateTask(id, (current) => {
+        woke =
+          current.status === "snoozed" && !!current.snoozedUntil && current.snoozedUntil <= now;
+        return woke
+          ? {
+              ...resolveTaskStatus(current, {
+                kind: "reopened",
+                activeRuns: this.runner.activeRuns(id).length,
+                now,
+              }),
+              unseenOutcome: "woke" as const,
+            }
+          : {};
       });
-      woken++;
+      woken += woke ? 1 : 0;
     }
     const cutoff = new Date(Date.parse(now) - 3 * 86_400_000).toISOString();
     do {
@@ -384,12 +414,25 @@ export class TaskService {
       for (const task of page.items) {
         const idle = task.lastActivityAt < cutoff && !task.pinned && !task.needsUser;
         if (idle && !this.runner.activeRuns(task.id).length) {
-          await this.runner.updateTask(task.id, { status: "settled", settledAt: now });
-          settled++;
+          let done = false;
+          await this.runner.updateTask(task.id, (current) => {
+            done =
+              current.status === "inbox" &&
+              !current.pinned &&
+              !current.needsUser &&
+              current.lastActivityAt < cutoff;
+            return done ? { status: "settled" as const, settledAt: now } : {};
+          });
+          settled += done ? 1 : 0;
         }
       }
       cursor = page.nextCursor;
     } while (cursor);
     return { settled, woken };
   }
+}
+
+/** Settle and archive end a pending resume-at-reset: the timer must not bring the task back (R1-15). */
+function noAutoResume(task: Task): Partial<Task> {
+  return task.limited?.autoResume ? { limited: { ...task.limited, autoResume: false } } : {};
 }

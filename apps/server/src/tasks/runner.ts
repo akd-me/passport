@@ -39,6 +39,15 @@ export interface RunSpec {
   items?: RunItem[];
   /** Called once the TaskRun is persisted, before the agent is invoked. */
   onCreated?: (run: TaskRun) => void;
+  /** The request texts the run carries (`TaskRun.request`), for a later continuation (R1-17). */
+  request?: string[];
+  /** The run a restart interrupted and this one continues, written with the insert. */
+  restartOf?: string;
+  /**
+   * A restart continuation or limit resume: not the person's new message, so a snooze they chose
+   * stays (R1-16).
+   */
+  continuation?: boolean;
 }
 
 export interface RunDescription {
@@ -56,6 +65,8 @@ interface ActiveRun {
   produced: boolean;
   /** Cancelled by a steer: the replacement run owns the status. */
   steered: boolean;
+  /** A restart continuation or limit resume (`RunSpec.continuation`). */
+  continuation: boolean;
   writes: Promise<unknown>;
 }
 
@@ -68,17 +79,34 @@ const DECIDED = [
   "action.undone",
 ] as const;
 
-/** Per-run trust ceilings consulted by the policy engine (`PolicyEngineOptions.ceiling`). */
+/**
+ * Per-run trust ceilings consulted by the policy engine (`PolicyEngineOptions.ceiling`). The
+ * level set at run start is the most a run gets; `live` is read on every decision, so lowering a
+ * task's or an ancestor's mode (or switching to plan) reaches a running session at its next
+ * action. Raising waits for the next run (R1-9).
+ */
 export class RunCeilings {
-  private readonly levels = new Map<string, TrustLevel>();
-  set(agentRunId: string, level: TrustLevel): void {
-    this.levels.set(agentRunId, level);
+  private readonly levels = new Map<
+    string,
+    { level: TrustLevel; live?: () => Promise<TrustLevel> }
+  >();
+  set(agentRunId: string, level: TrustLevel, live?: () => Promise<TrustLevel>): void {
+    this.levels.set(agentRunId, { level, ...(live ? { live } : {}) });
   }
   delete(agentRunId: string): void {
     this.levels.delete(agentRunId);
   }
-  readonly lookup = (request: { runId?: string | null }): TrustLevel | undefined =>
-    request.runId ? this.levels.get(request.runId) : undefined;
+  readonly lookup = async (request: { runId?: string | null }): Promise<TrustLevel | undefined> => {
+    const entry = request.runId ? this.levels.get(request.runId) : undefined;
+    if (!entry?.live) {
+      return entry?.level;
+    }
+    try {
+      return minTrust(entry.level, await entry.live());
+    } catch {
+      return entry.level;
+    }
+  };
 }
 
 /**
@@ -111,6 +139,13 @@ export class TaskRunner {
         const active = this.byAgent.get(runId);
         if (active) {
           this.queue(active, () => this.markRunning(active));
+        }
+      }),
+      // The runtime reports the run done before `invoke` settles; from here it is settling (R1-8).
+      bus.on("agent.run.finished", ({ runId }) => {
+        const active = this.byAgent.get(runId);
+        if (active) {
+          active.cancellable = false;
         }
       }),
       bus.on("action.proposed", ({ action }) => this.onAction(action)),
@@ -171,6 +206,8 @@ export class TaskRunner {
       agentRunId: spec.agentRunId ?? id,
       createdAt: this.now(),
       actionIds: [],
+      ...(spec.request?.length ? { request: spec.request } : {}),
+      ...(spec.restartOf ? { restartOf: spec.restartOf } : {}),
     });
     this.bus.emit({ type: "task.run.updated", run });
     spec.onCreated?.(run);
@@ -181,13 +218,16 @@ export class TaskRunner {
       preStatus: task.status,
       produced: false,
       steered: false,
+      continuation: spec.continuation === true,
       writes: Promise.resolve(),
     };
     this.active.set(run.id, active);
     this.byAgent.set(run.agentRunId, active);
     try {
       // Inside `try`: a failure here still finishes the run and releases its ceiling (R4-22).
-      this.ceilings.set(run.agentRunId, await this.effectiveMode(task));
+      this.ceilings.set(run.agentRunId, await this.effectiveMode(task), () =>
+        this.liveCeiling(task),
+      );
       for (const item of spec.items ?? []) {
         await this.appendItem({
           ...item,
@@ -197,7 +237,7 @@ export class TaskRunner {
         } as TaskItemInput);
       }
       const started = await this.updateTask(task.id, (current) =>
-        statusDuringRun(current, spec.trigger, this.now()),
+        statusDuringRun(current, spec.trigger, this.now(), spec.continuation),
       );
       active.startStatus = started.status;
       const options: AgentRunOptions = {
@@ -206,6 +246,7 @@ export class TaskRunner {
         taskId: task.id,
         signal: active.controller.signal,
         readOnly: task.interactionMode === "plan",
+        ...(runAccounts(task) ? { accountIds: runAccounts(task) } : {}),
         ...(task.voiceLearning ? { voiceLearning: task.voiceLearning } : {}),
         ...(this.orchestrator ? { orchestrator: this.orchestrator } : {}),
         observer: {
@@ -223,10 +264,13 @@ export class TaskRunner {
         },
       };
       const value = await invoke(options);
+      // Settling: a late Stop or steer can no longer cancel a run that already finished (R1-8).
+      active.cancellable = false;
       const description = describe(value);
       await this.finish(active, description.error ? "failed" : "completed", description);
       return value;
     } catch (error) {
+      active.cancellable = false;
       const code = (error as { code?: unknown })?.code;
       const cancelled = active.controller.signal.aborted || code === "RUN_CANCELLED";
       const safe = typeof code === "string" && SAFE_CODE.test(code) ? code : "RUN_FAILED";
@@ -248,6 +292,21 @@ export class TaskRunner {
       parentId = parent.parentTaskId;
     }
     return level;
+  }
+
+  /**
+   * The ceiling now: the task's effective mode as it is, and the lowest level once the person
+   * switched a running task to plan mode (its writes then ask instead of executing).
+   */
+  private async liveCeiling(started: Task): Promise<TrustLevel> {
+    const task = await this.tasks.get(started.id);
+    if (!task) {
+      return started.permissionMode;
+    }
+    if (task.interactionMode === "plan" && started.interactionMode !== "plan") {
+      return "supervised";
+    }
+    return this.effectiveMode(task);
   }
 
   private queue(active: ActiveRun, write: () => Promise<unknown>): void {
@@ -421,6 +480,8 @@ export class TaskRunner {
       preStatus: active.preStatus,
       ...(active.startStatus ? { startStatus: active.startStatus } : {}),
       failed: status === "failed",
+      cancelled: status === "cancelled",
+      ...(active.continuation ? { continuation: true } : {}),
       produced: active.produced || done.actionIds.length > 0,
       otherActiveRuns: this.activeRuns(run.taskId).length,
       now: this.now(),
@@ -434,4 +495,18 @@ export class TaskRunner {
       logger.warn("Task after-run hook failed");
     }
   }
+}
+
+/**
+ * The accounts a run's tools may use (`AgentRunOptions.accountIds`, R1-10): the task's own.
+ * Routine tasks and their fresh per-run children follow every connected account, so they are not
+ * limited to the accounts that existed when the routine was created; neither is a task without
+ * accounts.
+ */
+function runAccounts(task: Task): string[] | undefined {
+  const freshRoutineChild = task.createdBy === "system" && !!task.parentTaskId && !task.delegation;
+  if (!task.accountIds.length || task.kind === "routine" || freshRoutineChild) {
+    return undefined;
+  }
+  return task.accountIds;
 }

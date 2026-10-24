@@ -122,6 +122,36 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 - `docs/screenshots/task-dark.png` is a dark capture again (it was the light one); the task and
   Needs you screenshots are recaptured and `queue-strip-light/dark.png` are new.
 
+### Fixed
+
+- Restart continuations and limit resumes run as host-agent sessions with the tool belt and
+  resume the task's provider session; they repeat the run's whole request (a steer's cancelled
+  message, an answer's question) and, on a fresh session, the task history (R1-4, R1-17).
+- A continuation keeps a snooze the person chose; resume-at-reset no longer brings back a task
+  the person settled or archived; snoozing a busy task holds its queued follow-up (R1-15,
+  R1-16, R1-32).
+- `request_secret` and `ask_user` keep separate Input state: resolving one leaves the task
+  waiting while the other is open (R1-18, server side).
+- The permission ceiling is read on every policy decision, so lowering a task's or a parent's
+  mode, or switching to plan, reaches a running session; runs pass the task's accounts to the
+  tools (R1-9, R1-10).
+- A Stop or steer that lands while a run is finishing no longer cancels it, re-sends its
+  request or skips its run-end hooks (R1-8).
+- Subtasks: the person's Stop, settle or archive of a subtask notifies its parent without
+  waking it, and the parent cannot undo it; Stop on a parent, or a limited parent, is not woken
+  by finishing subtasks; the depth limit counts the real ancestry; restart recovery reports a
+  subtask's end to its parent; arrival and scheduled runs cannot delegate (R1-11 to R1-14,
+  R1-1).
+- `/resume` keeps Approval or Input when proposals or questions wait; snooze wake-ups and
+  auto-settle re-check the task and follow the status rules; "try again in 340ms" parses as
+  milliseconds; a steered or continued first run still gets a generated title; Stop leaves no
+  Done badge (R1-26 to R1-29, R1-31).
+- Dismissing a question twice answers 409 with one notice; parallel `ask_user` and
+  `task_delegate` calls respect their limits; `task_organize` no longer overrides the person's
+  snooze, settle or title; prompts quote task titles as labels and frame a subtask's request in
+  the title prompt; the resumed turn lists the last 10 proposals however busy the task is
+  (R1-30, R1-34 to R1-36, R1-40).
+
 
 ### Fixed
 

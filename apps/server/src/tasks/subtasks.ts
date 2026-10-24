@@ -14,7 +14,8 @@ import { ApiError } from "../errors.js";
 import type { TaskQuestions } from "./questions.js";
 import type { TaskQueueService } from "./queue.js";
 import { describeAgentRun, type TaskService } from "./service.js";
-import { clip, frameUntrusted, neutralize } from "./untrusted.js";
+import { idleStatus } from "./status.js";
+import { clip, frameUntrusted, neutralize, taskLabel } from "./untrusted.js";
 
 /** The wake run reason for subtask completions; one active wake absorbs later ones. */
 export const SUBTASK_WAKE = "subtasks";
@@ -33,14 +34,32 @@ export class TaskSubtasks {
   questions?: TaskQuestions;
   /** Completions per parent, one at a time, so a second one finds the first one's wake. */
   private readonly chains = new Map<string, Promise<unknown>>();
+  /** Delegations per parent, one at a time, so parallel tool calls respect the limits (R1-35). */
+  private readonly delegations = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly service: TaskService,
     private readonly queue: TaskQueueService,
   ) {}
 
-  async delegate(caller: TaskToolCaller, input: TaskDelegateInput): Promise<TaskSubtaskStatus> {
+  delegate(caller: TaskToolCaller, input: TaskDelegateInput): Promise<TaskSubtaskStatus> {
+    return serial(this.delegations, caller.taskId, () => this.delegateLocked(caller, input));
+  }
+
+  private async delegateLocked(
+    caller: TaskToolCaller,
+    input: TaskDelegateInput,
+  ): Promise<TaskSubtaskStatus> {
     const parent = await this.service.task(caller.taskId);
+    // Defence in depth for R1-1: mail-driven and scheduled runs never start or steer subtasks.
+    const trigger = (await this.runOf(caller))?.trigger.kind;
+    if (parent.kind === "inbox" || trigger === "arrival" || trigger === "schedule") {
+      throw new ApiError(
+        "DELEGATE_UNAVAILABLE",
+        "Arrival triage and scheduled runs cannot start subtasks; do the work in this run.",
+        409,
+      );
+    }
     if (parent.status === "settled" || parent.status === "archived") {
       throw new ApiError(
         "TASK_SETTLED",
@@ -51,7 +70,9 @@ export class TaskSubtasks {
     if (input.taskId) {
       return this.followUp(parent, input.taskId, input);
     }
-    const depth = (parent.delegation?.depth ?? 0) + 1;
+    // The real ancestry, not only `delegation.depth`: fresh routine children and tasks created
+    // with `parentTaskId` count too (R1-14).
+    const depth = Math.max(await this.ancestors(parent), parent.delegation?.depth ?? 0) + 1;
     if (depth > SUBTASK_LIMITS.maxDepth) {
       throw new ApiError(
         "DEPTH_LIMIT",
@@ -196,17 +217,42 @@ export class TaskSubtasks {
     const question = (child.pendingQuestions?.length ?? 0) > 0;
     // The question itself was forwarded when it was asked.
     const summary = question ? null : clip(await this.outcome(child, run), 600);
-    const away = parent.status === "settled" || parent.status === "archived";
+    // The person put the child away or stopped it: the parent hears of it but is not woken to
+    // undo that (R1-12). A parent the person stopped, settled or archived, or that is stopped at
+    // a usage limit, is not woken either (R1-13).
+    const childAway =
+      run.status === "cancelled" ||
+      child.status === "settled" ||
+      child.status === "archived" ||
+      child.queueHeld === true;
+    const parentAway =
+      parent.status === "settled" ||
+      parent.status === "archived" ||
+      parent.queueHeld === true ||
+      !!parent.limited;
     const wake =
-      !away &&
+      !childAway &&
+      !parentAway &&
       (question ||
         wasWaiting ||
         child.delegation.completionWake === "always" ||
         !(await this.children(parent.id)).some((other) => this.working(other)));
     if (wake) {
       await this.wake(parent, child, summary);
-    } else if (summary) {
+      return;
+    }
+    if (summary) {
       await this.service.runner.appendItem(this.notification(parent.id, child, summary));
+    }
+    if (wasWaiting) {
+      // Not woken: a parent that rested in Working for this child comes back to the inbox.
+      await this.service.runner.updateTask(parent.id, (current) =>
+        current.status === "working" &&
+        !this.service.runner.activeRuns(parent.id).length &&
+        idleStatus(current) === "inbox"
+          ? { status: "inbox" as const, lastActivityAt: this.service.now() }
+          : {},
+      );
     }
   }
 
@@ -229,7 +275,7 @@ export class TaskSubtasks {
       return;
     }
     const instruction = [
-      `You are working on the task "${parent.title}" (task id ${parent.id}).`,
+      `You are working on ${taskLabel(parent)}.`,
       "Your subtasks reported back. Call task_status for every subtask's current result, answer any question with task_delegate and its taskId, then continue the request or hand back to the person.",
       summary ? frameUntrusted("subtask-report", summary) : "",
     ]
@@ -395,12 +441,22 @@ export class TaskSubtasks {
     input: TaskDelegateInput,
   ): Promise<TaskSubtaskStatus> {
     const child = await this.childOf(parent, childId);
+    if (child.status === "settled" || child.status === "archived") {
+      throw new ApiError(
+        "TASK_SETTLED",
+        "The person settled or archived that subtask; it takes no more messages.",
+        409,
+      );
+    }
     if (child.delegation?.cancelledByParent) {
+      // This task's own task_cancel held the child's queue; its follow-up releases that hold.
       await this.service.runner.updateTask(child.id, (current) => ({
         delegation: current.delegation ? { ...current.delegation, cancelledByParent: false } : null,
+        ...(current.queueHeld ? { queueHeld: false } : {}),
       }));
     }
-    await this.queue.send(child.id, { text: input.message, mode: "queue" });
+    // A hold or a limit the person owns stays: the message waits for them (R1-12).
+    await this.queue.send(child.id, { text: input.message, mode: "queue" }, { agent: true });
     if (input.mode === "wait") {
       await this.service.runner.updateTask(parent.id, (current) => ({
         waitingOnTaskIds: [...new Set([...(current.waitingOnTaskIds ?? []), child.id])],
@@ -432,4 +488,37 @@ export class TaskSubtasks {
   private async runOf(caller: TaskToolCaller): Promise<TaskRun | null> {
     return caller.runId ? this.service.tasks.runs.byAgentRunId(caller.runId) : null;
   }
+
+  /** How many tasks are above this one (bounded, like `effectiveMode`). */
+  private async ancestors(task: Task): Promise<number> {
+    let count = 0;
+    let parentId = task.parentTaskId;
+    while (parentId && count < 8) {
+      const parent = await this.service.tasks.get(parentId);
+      if (!parent) {
+        break;
+      }
+      count++;
+      parentId = parent.parentTaskId;
+    }
+    return count;
+  }
+}
+
+/** Runs `work` after the previous work queued under `key` settled. */
+function serial<T>(
+  chains: Map<string, Promise<unknown>>,
+  key: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const previous = chains.get(key) ?? Promise.resolve();
+  const next = previous.then(work, work);
+  const settled = next.catch(() => undefined);
+  chains.set(key, settled);
+  void settled.finally(() => {
+    if (chains.get(key) === settled) {
+      chains.delete(key);
+    }
+  });
+  return next;
 }

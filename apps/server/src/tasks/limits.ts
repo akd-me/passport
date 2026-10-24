@@ -11,7 +11,7 @@ import { logger } from "../logger.js";
 import { continueRun } from "./continuation.js";
 import type { TaskQueueService } from "./queue.js";
 import type { TaskService } from "./service.js";
-import { isLimitCode } from "./status.js";
+import { isLimitCode, waitingOn } from "./status.js";
 
 export interface DetectedLimit {
   resetAt: string | null;
@@ -24,6 +24,8 @@ const MAX_RESET_MS = 31 * 86_400_000;
 /** Longest single timer; later resets are re-armed when it fires (setTimeout caps near 24.8 d). */
 const MAX_TIMER_MS = 86_400_000;
 const UNIT_MS: Record<string, number> = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1000 };
+/** Millisecond units, checked before the first-letter lookup (else "340ms" reads as minutes). */
+const MS_UNIT = /^(ms|msecs?|millis(econds?)?|milliseconds?)$/;
 
 /** A run stopped at a usage limit; `code` becomes the run's error (`needsUser: "limited"`). */
 export class UsageLimitedError extends Error {
@@ -76,6 +78,10 @@ export function parseResetAt(text: string, now: string): string | null {
     let total = 0;
     for (const [, amount, unit = ""] of relative[1].matchAll(/(\d+)\s*([a-z]+)/gi)) {
       const lower = unit.toLowerCase();
+      if (MS_UNIT.test(lower)) {
+        total += Number(amount);
+        continue;
+      }
       const key = lower.startsWith("mo") ? "" : lower.charAt(0);
       total += Number(amount) * (UNIT_MS[key] ?? Number.NaN);
     }
@@ -166,7 +172,8 @@ export class TaskLimits {
     this.disarm(task.id);
     await this.service.runner.updateTask(task.id, (current) => ({
       limited: null,
-      ...(current.needsUser === "limited" ? { needsUser: null } : {}),
+      // Pending approvals or questions keep the task waiting on the person (R1-26).
+      ...(current.needsUser === "limited" ? { needsUser: waitingOn(current) } : {}),
     }));
     const previous = await this.service.tasks.runs.get(limited.runId);
     if (!previous) {
@@ -270,7 +277,9 @@ export class TaskLimits {
         const task = await this.service.tasks.get(taskId);
         const limited = task?.limited;
         const due = limited?.autoResume && limited.resetAt && limited.resetAt <= this.service.now();
-        if (!task || !due) {
+        // A task the person put away is not brought back by the timer (R1-15).
+        const away = task?.status === "settled" || task?.status === "archived";
+        if (!task || !due || away) {
           return false;
         }
         await this.resumeLocked(task);

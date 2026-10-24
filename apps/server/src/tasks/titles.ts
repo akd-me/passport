@@ -62,8 +62,17 @@ export class TaskTitles {
     const [first] = (await this.service.tasks.items.list({ taskId: task.id, limit: 20 })).filter(
       (item) => item.kind === "user_message",
     );
-    // Only after the first run, and only for a title taken from the message.
-    if (first?.kind !== "user_message" || first.runId !== run.id) {
+    // Only for a title taken from the message, after the first run that got through: a steered,
+    // restarted or limited first run hands over to the run that continues it (R1-29).
+    if (first?.kind !== "user_message") {
+      return;
+    }
+    const runs = await this.service.tasks.runs.list(task.id, 50);
+    const earlier = runs.some(
+      (other) =>
+        other.id !== run.id && other.trigger.kind === "message" && other.status === "completed",
+    );
+    if (earlier) {
       return;
     }
     if (task.title !== taskTitleFrom(first.payload.text)) {
@@ -81,7 +90,10 @@ export class TaskTitles {
         {
           role: "user",
           content: [
-            `The person's request:\n${first.payload.text.slice(0, 2000)}`,
+            // A subtask's first message comes from its parent agent and may quote mail (R1-30).
+            task.delegation || task.createdBy !== "user"
+              ? `The request:\n${frameUntrusted("task-request", first.payload.text.slice(0, 2000))}`
+              : `The person's request:\n${first.payload.text.slice(0, 2000)}`,
             outcome ? `The assistant's answer:\n${frameUntrusted("task-reply", outcome)}` : "",
           ]
             .filter(Boolean)

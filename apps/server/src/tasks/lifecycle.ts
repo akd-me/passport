@@ -51,8 +51,13 @@ export class TaskLifecycle {
     });
   }
 
+  /** Holds the queue like settle, so a queued follow-up does not un-snooze the task (R1-32). */
   snooze(id: string, until: string): Promise<TaskWithPrevious> {
-    return this.change(id, () => this.service.snooze(id, until));
+    return this.change(id, async () => {
+      const task = await this.service.snooze(id, until);
+      await this.queue.hold(id);
+      return this.service.task(task.id);
+    });
   }
 
   unsettle(id: string): Promise<TaskWithPrevious> {

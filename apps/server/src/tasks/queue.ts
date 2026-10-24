@@ -38,11 +38,13 @@ export class TaskQueueService {
   /**
    * `POST /api/tasks/:id/messages`: the person's message, run now or queued. It answers every
    * pending question (v0.4), or only `answers` when given (the answer route, a parent's reply).
+   * `agent` (a parent task's follow-up to its subtask) never releases a queue the person held or
+   * resumes a limit: the message then waits in the queue for the person (R1-12).
    */
   send(
     taskId: string,
     message: TaskMessage,
-    options: { answers?: string[] } = {},
+    options: { answers?: string[]; agent?: boolean } = {},
   ): Promise<{ task: Task; run: TaskRun }> {
     return this.locked(taskId, async () => {
       // The person is looking at the task, and a new message releases a held queue.
@@ -61,9 +63,8 @@ export class TaskQueueService {
         }
         const left = pending.filter((question) => !answers.includes(question.itemId));
         return {
-          seenAt: this.service.now(),
-          unseenOutcome: null,
-          ...(current.queueHeld ? { queueHeld: false } : {}),
+          ...(options.agent ? {} : { seenAt: this.service.now(), unseenOutcome: null }),
+          ...(current.queueHeld && !options.agent ? { queueHeld: false } : {}),
           ...(left.length === pending.length
             ? {}
             : {
@@ -75,13 +76,16 @@ export class TaskQueueService {
               }),
         };
       });
-      if (task.limited) {
+      if (task.limited && !options.agent) {
         await this.limits?.resumeLocked(task);
         task = await this.service.task(taskId);
       }
-      const busy = this.activeMessageRuns(taskId) > 0 || !!task.queue?.length;
+      const busy =
+        this.activeMessageRuns(taskId) > 0 ||
+        !!task.queue?.length ||
+        (options.agent === true && (!!task.queueHeld || !!task.limited));
       // Only a person's task steers; a steer to an inbox or routine task queues (R5-8).
-      const steer = message.mode === "steer" && task.kind === "task";
+      const steer = message.mode === "steer" && task.kind === "task" && !options.agent;
       if (steer || !busy) {
         return this.service.sendMessage(taskId, message, undefined, answers);
       }
@@ -154,18 +158,23 @@ export class TaskQueueService {
     });
   }
 
-  /** `POST /api/tasks/:id/interrupt`: hold the queue, then stop every cancellable run. */
+  /**
+   * `POST /api/tasks/:id/interrupt`: hold the queue, then stop every cancellable run. The hold is
+   * set even with nothing queued: it records the Stop, so subtasks finishing later notify the
+   * task without waking it, and an agent's message waits, until the person's next message or
+   * `/queue/resume` (R1-13).
+   */
   async interrupt(taskId: string): Promise<Task> {
-    await this.hold(taskId);
+    await this.hold(taskId, true);
     await this.service.interrupt(taskId);
     return this.service.task(taskId);
   }
 
-  /** Holds a non-empty queue so runs ending now do not start the next message. */
-  hold(taskId: string): Promise<void> {
+  /** Holds a non-empty queue (or any, with `always`) so runs ending now do not start the next message. */
+  hold(taskId: string, always = false): Promise<void> {
     return this.locked(taskId, async () => {
       const task = await this.service.task(taskId);
-      if (task.queue?.length && !task.queueHeld) {
+      if ((always || task.queue?.length) && !task.queueHeld) {
         await this.update(taskId, { queueHeld: true });
       }
     });

@@ -106,7 +106,9 @@ export function createTaskSystem(input: {
   const off = input.watcher?.onAdded((accountId, emails) =>
     watches.observeLater(accountId, emails),
   );
-  const recovered = recoverRuns(service, queue)
+  const recovered = recoverRuns(service, queue, {
+    afterRunEnded: (run) => subtasks.afterRunEnded(run),
+  })
     .then(() => limits.maintain())
     .catch(() => {
       // Stale runs stay visible as open; the next maintenance pass does not depend on them.
