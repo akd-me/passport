@@ -41,6 +41,13 @@ an isolated SDK server per session, sharing the injected collaborators, and
 supports POST, GET/SSE and DELETE session termination. `close()` is idempotent.
 Use the returned handle to shut down the entire HTTP host, including its sessions.
 
+`new ToolBeltListener(options?)` serves agent-run tool belts to host-agent sessions:
+`bind({ tools, call })` returns `{ server: { url, headers, timeouts }, release }` with a fresh
+32-byte bearer on a loopback listener (stateless Streamable HTTP, POST only, no browser
+origins). Calls run the host's `call` in-process, so the agent runtime keeps its actor, task and
+policy ceiling; responses use the same byte budget as the mailbox server. The listener closes
+when the last binding is released. `createToolBeltServer(belt)` is the single-belt SDK server.
+
 The listener binds to `127.0.0.1` by default, validates Host/Origin, and requires
 `Authorization: Bearer <token>` on every request. An explicit `host` option overrides
 the bind address. TLS termination remains the host's responsibility. Client names are audit labels, not authenticated
