@@ -175,7 +175,7 @@ describe("shared tool catalogue", () => {
     });
   });
   it("covers every catalogue entry exactly once and adapters only reshape definitions", () => {
-    expect(tools).toHaveLength(63);
+    expect(tools).toHaveLength(64);
     expect(
       new Set([
         ...reads.map(([name]) => name),
@@ -185,6 +185,7 @@ describe("shared tool catalogue", () => {
         "watch_conversation",
         "unwatch_conversation",
         "request_secret",
+        "render",
       ]),
     ).toEqual(new Set(tools.map((tool) => tool.name)));
     for (const [index, tool] of tools.entries()) {
@@ -198,7 +199,9 @@ describe("shared tool catalogue", () => {
         function: { name: tool.name, description: tool.description, parameters: tool.inputSchema },
       });
       expect(toMcpTools(tools)[index]?.inputSchema).toBe(tool.inputSchema);
-      expect(toMcpTools(tools)[index]?.annotations.readOnlyHint).toBe(tool.risk === "read");
+      expect(toMcpTools(tools)[index]?.annotations.readOnlyHint).toBe(
+        tool.annotations?.readOnlyHint ?? tool.risk === "read",
+      );
     }
   });
   it.each(["allow", "ask", "hold", "deny"] as const)(

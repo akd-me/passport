@@ -22,3 +22,5 @@
 @import "./styles/pages.css" layer(screens);
 @import "./styles/settings.css" layer(screens);
 @import "./styles/scheduler.css" layer(screens);
+
+@import "./styles/render.css" layer(screens);

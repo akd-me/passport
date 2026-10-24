@@ -887,6 +887,7 @@ export type DomainEvent =
   | { type: "email.received"; email: Email }
   | { type: "email.updated"; emailId: Id }
   | { type: "action.proposed"; action: ActionRecord }
+  | { type: "action.updated"; action: ActionRecord }
   | { type: "action.decided"; action: ActionRecord }
   | { type: "action.held"; action: ActionRecord }
   | { type: "action.executed"; action: ActionRecord }

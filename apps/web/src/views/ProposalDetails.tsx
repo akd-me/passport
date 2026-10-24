@@ -5,6 +5,7 @@ import { Avatar, Icon, MailVerification, Verification } from "../components/ui";
 import { categoryLabel } from "../labels";
 import { useResource } from "../state";
 import { useUi } from "../ui-state";
+import { DraftReview } from "./DraftReview";
 import { draftOf } from "./decision-model";
 import { modeLabel, TrustLadder } from "./Trust";
 
@@ -66,6 +67,7 @@ export function ProposalDetails({ action }: { action?: ActionRecord }) {
           Adjust trust for this category
         </button>
       </section>
+      <DraftReview action={action} />
       {source.data && (
         <section>
           <h3>In reply to</h3>

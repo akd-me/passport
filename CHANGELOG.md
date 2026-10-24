@@ -15,7 +15,12 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   50 quote-collapsed messages, and one reversible Voice/Signature/VIP `profile_update` proposal.
   The new category always asks the person, with proposed USER.md visible before approval and
   executor-backed undo. IMAP without Sent skips learning; CLI connects defer it to the server.
-
+- `render` rich task output: server-sanitised restricted HTML in a themed, opaque sandbox,
+  full-size viewing, a 64 KiB limit and ten renders per run. Daily digest routines request
+  one render; every render counts against the tool-call budget.
+- Side-by-side draft review from task approvals and Needs you, with conversation context,
+  inline body saves that leave approval pending, and an “As they will see it” preview through
+  the same sanitiser and sandbox. One-click approval stays available.
 - `passport task start`, `send`, `show`, `list`, `approve` and `reject`, with human-readable
   output and `--json`. `start` and `send` support `--wait` for the submitted run's summary
   (exit 2 when the person is needed). Task commands require the running server and never

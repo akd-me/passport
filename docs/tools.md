@@ -213,6 +213,50 @@ field to change classifications or override an action’s inferred policy catego
 prompt is under 4 KiB and frames the `MailRow`, heuristic evidence and matter-watch matches as
 untrusted data. Routine mail uses the deterministic playbooks described in [tasks](tasks.md#arrival-triage-migration-v04).
 
+## Rich output (v0.4)
+
+`render({ title, html, height? })` publishes a structured summary, daily digest or triage
+comparison as a task timeline item. Use ordinary messages for plain prose. The trusted
+`ToolContext.taskId` and `runId` must identify an active run, otherwise `TASK_REQUIRED`.
+This is local presentation, available even in plan mode; it does not execute a mail action.
+Every attempt counts against the run's tool-call budget. At most **10 successful renders
+per run** are stored, including concurrent calls and recreated registries (`RENDER_LIMIT`).
+
+- Title: 1–200 characters. HTML: at most **64 KiB UTF-8**, both before and after sanitising
+  (`RENDER_TOO_LARGE`). Height: integer **80–1200 px**, or a bounded content estimate.
+- The dependency-free server parser reconstructs only `h1`–`h6`, `p`, `ul`, `ol`, `li`,
+  `table`, `thead`, `tbody`, `tr`, `th`, `td`, `strong`, `em`, `code`, `pre`, `blockquote`,
+  `hr`, `span` and `div`. Only `span`/`div` may keep `class` (bounded plain class names).
+  All other attributes disappear. Links become visible label text followed by their URL;
+  no anchors survive, including for `javascript:` URLs. Active subtrees, scripts, styles,
+  forms, iframes, images, external assets and event handlers never reach the document.
+- Output is `{ status: "rendered", itemId, title, height }`; HTML stays in the `render`
+  item `{ title, html, height }`, marked `untrusted: true`. Text and decoded entities have
+  their command sigils neutralised. Tool-call summaries redact the HTML body as usual.
+- The UI uses a fluid-width `<iframe sandbox="" srcdoc=…>` with no scripts or same-origin
+  access, an internal deny-by-default CSP, Passport's original theme variables for both
+  themes, and **Open full size**. There is no surrounding card.
+
+Task-bound daily digest routines keep the saved Markdown digest and ask the agent for one
+render from framed daily evidence. Host agents use the native tool belt; API providers use
+the same budgeted loop. Standalone digests without task storage keep the saved text only.
+
+Pending `draft_create` proposals (including `reply_draft` tool results) and inline sends
+have **Review draft** in task approvals and Needs you: conversation on the left through the
+existing message/thread read routes, editable draft on the right. **Save draft** persists
+only text through `PATCH /api/actions/:id/draft`, reusing approval-edit validation; it keeps
+status `proposed`, policy and recipients unchanged and clears stale `htmlBody`. Approval
+still goes through the executor. Existing one-click Approve remains available. **As they
+will see it** sends the draft plus quoted history to `POST /api/render/preview` and displays
+the sanitised result through the very same sandbox.
+
+Known limitations: iframe height is estimated because an opaque, script-free sandbox cannot
+report its layout; long output scrolls or opens full size. Draft preview is a safe reading
+approximation using the loaded conversation's text, not an email client's exact layout;
+attachments and remote assets are absent. Preview shares the 64 KiB limit and reports an
+error rather than silently omitting oversized content. Saving edits changes only the body;
+recipients and subject remain those of the proposal.
+
 ## Private secrets (v0.4)
 
 `request_secret({ text, clientRequestId, timeoutSeconds?=300 })` asks for a secret through a

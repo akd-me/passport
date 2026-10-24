@@ -31,6 +31,7 @@ Item payloads by `kind`:
 | `tool_call` | `{ name, inputSummary, resultSummary, cost?, durationMs, isError, planned? }`; summaries are redacted (bodies, secrets, token-shaped strings) and at most 200 characters |
 | `approval_request` | `{ actionId, summary }`; approve or reject with `/api/actions/:id/{approve,reject}` |
 | `question` | `{ text }` (reserved: nothing emits it yet) |
+| `render` | `{ title, html, height }`; server-sanitised restricted HTML, `untrusted: true`, 64 KiB and 10 per run; see [rich output](tools.md#rich-output-v04) |
 | `secret_request` | `{ requestId, text, expiresAt }`; private password field, never the value; see [request_secret](tools.md#private-secrets-v04) |
 | `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code (`USAGE_LIMITED` for a usage limit), `RESTARTED`, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`), `BUDGET_EXHAUSTED` (the run reached its [budget](#sessions)) |
 | `notification` | `{ source: "arrival" \| "watch" \| "schedule" \| "system", summary, row? }`; `row` is a `MailRow`. A task created with `matterId` or `emailIds` gets a `system` one on its first run ("With matter “…” and 2 messages “…”, “…”"; `row` when there is exactly one message) |
@@ -39,8 +40,10 @@ Item payloads by `kind`:
 senders, snippets, tool arguments and results, model text). Their `$`, mention-style `@` and
 line-leading `/` carry an invisible U+200B so host agents never treat them as commands (fullwidth
 `＄`/`／`/`＠`, Unicode indentation and NEL included; an `@` inside `local@dotted.domain` is
-kept). Render them as plain text, never as HTML. Passport's own `assistant_message` and
-`question` text is rendered as a markdown subset (structure and emphasis only): no raw HTML, and
+kept). Render them as plain text. The `render` kind is the explicit exception: only server-sanitised
+restricted HTML inside an opaque, script-free sandbox, never in the application document.
+Passport's own `assistant_message` and `question` text uses a Markdown subset (structure and
+emphasis only): no raw HTML, and
 links and images become visible text with their URL, never anchors or `<img>` that load or lead
 somewhere unseen.
 
@@ -152,6 +155,8 @@ natively, streaming as it goes. There is no JSON tool protocol and no per-step C
   the session stopped; a run that hits either limit completes with a `BUDGET_EXHAUSTED` notice,
   and the work done so far (including proposals) is kept. Routine scheduler timeouts are one
   minute longer than the configured runtime budget, so the runtime can report exhaustion first.
+  Task-bound daily digests keep their deterministic saved evidence and ask the same session for
+  one `render` summarising the day.
 - **Resume.** The provider session id is recorded on the task (`providerSessionId`,
   `providerSessionKind`) as soon as the session starts. The next run resumes it
   (`claude --resume <session_id>`, `codex exec resume <thread_id>`), resolved when that run
@@ -440,6 +445,8 @@ Every route requires the bearer token. Errors use the standard body
 | `POST /api/tasks/:id/unwatch` | `{ threadHandle? }` (omit to stop every watch) | `Task` |
 | `PATCH /api/tasks/:id` | `{ title?, permissionMode?, interactionMode? }` | `Task` (mode clamped) |
 | `POST /api/actions/:id/approve` | `{ request?, scope?: "once" \| "task" \| "always" }` | `ActionRecord`; with `task` or `always` also `approvalScope: ApprovalScopeResult` (`{ requested, applied, taskId?, pinnedLevel?, code? }`). The task's `pendingActionIds` and `needsUser` follow |
+| `PATCH /api/actions/:id/draft` | `{ textBody }` (1–100,000 characters) | Pending proposal only; `ActionRecord`, still `proposed`; only body changes, stale HTML cleared; `409 ACTION_NOT_PENDING` after a decision |
+| `POST /api/render/preview` | `{ html, height? }` | `{ html, height }` through the render tool's parser, without persisting an item; same 64 KiB and 80–1200 px limits |
 | `POST /api/actions/:id/reject` | unchanged | `ActionRecord` |
 | `POST /api/agent/run` | unchanged v0.2 body `{ instruction?, emailIds?, matterId? }` | the finished `AgentRun` plus `taskId`; a `kind: "task"` task is created per call |
 
@@ -542,7 +549,8 @@ lifecycle change (seen, mark-unread, reopen, queue edits and holds, limits, gene
 renames) is a `task.updated` frame, because the queue, the limit and the seen state ride on the
 task row; queued runs and their removal are `task.run.updated` frames. After a
 reconnect, refetch `GET /api/tasks/:id` and page items with `afterSeq=<last seen seq>`.
-`agent.run.*` and `action.*` events continue as before.
+`action.updated` carries an `ActionRecord` after a pending draft is saved (without an
+approval or execution). Other `agent.run.*` and `action.*` events continue as before.
 
 ## Scheduler
 
@@ -589,7 +597,9 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   frames patch records in place. Consecutive `tool_call` items of a run collapse into one line
   that names at most two categories, writes first ("Archived 40, read 4 messages and 1 other
   step"). Proposals read "asked to", plan mode "planned to", and failed calls are counted apart.
-  Every item is rendered as plain text, whether or not it is `untrusted`.
+  Messages use the safe Markdown subset or text. A `render` item displays server-sanitised
+  HTML in an opaque `<iframe sandbox="">`, with theme variables, fluid width, a bounded
+  content-derived height and Open full size. Rich output is a document block without a card.
 - **Approvals.** A pending `approval_request` (in `pendingActionIds`, or with a `proposed`
   record) is the queue's decision card: Approve, Approve for this task, Always (`scope` `once`,
   `task`, `always` on `/approve`), edit a draft, reject. Approve is never offered before the
@@ -598,7 +608,11 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   instead. The composer's approval panel lists every pending action with its type, badge and
   draft recipients, and approves all the reversible ones in one click (`once`). A decision's
   busy state is shared by every control for that action; decided actions leave the panel at
-  once.
+  once. **Review draft** opens a side-by-side conversation and editable body from both a
+  timeline approval and Needs you (also its context panel). Save uses the existing approval
+  edit validator through the pending-draft route and leaves approval pending; Approve keeps
+  the executor path. The **As they will see it** toggle previews the draft and quoted history
+  through the shared server sanitiser and sandbox.
 - **Composer.** Enter sends in the default mode (`"queue"`) and ⌘Enter in the opposite one
   (`"steer"`); without an active run both queue. Stop calls
   `/interrupt`. Stop and steer are only offered while a run is active on a `kind: "task"` task;
@@ -702,3 +716,13 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   `Task.queue`, before its run started) is lost; its run ends `failed` (`SERVER_RESTARTED`).
 - Title generation runs outside the agent lane, so on a host CLI it can start a second CLI
   process next to an active run.
+
+## Known limitations (W2D rich output and review)
+
+- Opaque sandboxes cannot measure their own height without scripts; the tool estimates within
+  80–1200 px, with scrolling and a full-size dialog for long output.
+- Draft preview uses the loaded conversation text as quoted history and omits attachments and
+  remote assets. It approximates what a recipient reads; client-specific mail layout is not
+  reproduced. The 64 KiB preview limit reports oversized content instead of truncating it.
+- Review edits only the text body. Saving clears stale HTML and leaves recipients, subject,
+  policy and approval status unchanged. Existing one-click approval and edit-and-approve stay.

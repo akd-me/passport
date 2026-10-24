@@ -154,6 +154,43 @@ describe.each(kinds)("%s task sessions", (kind) => {
     ]);
   });
 
+  it("streams sanitised renders through native tool calls and charges the run budget", async () => {
+    const env = await sessionBackend(
+      kind,
+      [
+        {
+          steps: [
+            {
+              tool: "render",
+              args: {
+                title: "Day",
+                html: '<p onclick="bad()">Today</p><script>bad()</script>',
+                height: 240,
+              },
+            },
+            { tool: "render", args: { title: "Blocked", html: "<p>Over budget</p>" } },
+          ],
+        },
+      ],
+      { maxToolCalls: 1 },
+    );
+    const { task, done } = await env.service.create({ message: "Show my day" });
+    await done;
+    const timeline = await env.items(task.id);
+    expect(timeline.filter((item) => item.kind === "render")).toEqual([
+      expect.objectContaining({
+        untrusted: true,
+        payload: { title: "Day", html: "<p>Today</p>", height: 240 },
+      }),
+    ]);
+    expect(timeline.filter((item) => item.kind === "tool_call")).toHaveLength(1);
+    expect(timeline.at(-1)).toMatchObject({
+      kind: "system_notice",
+      payload: { code: "BUDGET_EXHAUSTED" },
+    });
+    expect((await env.service.get(task.id)).runs[0]?.usage?.toolCalls).toBe(1);
+  });
+
   it("falls back to the history prompt when the provider no longer has the session", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const env = await sessionBackend(kind, [

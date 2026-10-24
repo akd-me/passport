@@ -1,0 +1,109 @@
+.tl-render {
+  padding: var(--s-4) 0;
+  min-width: 0;
+}
+.render-heading,
+.draft-review-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+.render-heading h3,
+.draft-review-heading h3,
+.draft-review-thread h3 {
+  margin: 0;
+  font-size: var(--t-m);
+  font-weight: var(--w-medium);
+}
+.render-heading {
+  margin-bottom: var(--s-2);
+}
+.render-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: var(--canvas);
+}
+.render-dialog,
+.draft-review-dialog {
+  width: min(90rem, calc(100vw - 48px));
+  max-width: none;
+}
+.render-dialog .full-size {
+  height: calc(100dvh - 160px);
+  padding: var(--s-4);
+}
+.draft-review-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 320px;
+  overflow: auto;
+}
+.draft-review-thread,
+.draft-review-editor {
+  min-width: 0;
+  padding: var(--s-5);
+}
+.draft-review-thread {
+  background: var(--sunken);
+}
+.draft-review-mail {
+  padding: var(--s-4) 0;
+}
+.draft-review-mail + .draft-review-mail {
+  border-top: 1px solid var(--line);
+}
+.draft-review-mail > div {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.draft-review-mail strong {
+  font-weight: var(--w-medium);
+}
+.draft-review-mail time {
+  color: var(--muted);
+  font-size: var(--t-xs);
+}
+.draft-review-mail pre {
+  margin: var(--s-4) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 400 var(--t-l) / var(--lh-prose) var(--font-mail);
+}
+.draft-review-body {
+  display: grid;
+  gap: var(--s-2);
+  color: var(--muted);
+  font-size: var(--t-s);
+}
+.draft-review-body textarea {
+  min-height: 320px;
+  resize: vertical;
+  width: 100%;
+  color: var(--text);
+  font: 400 var(--t-l) / var(--lh-prose) var(--font-mail);
+}
+.draft-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-5);
+  border-top: 1px solid var(--line);
+}
+.draft-review-actions > .muted {
+  margin-right: auto;
+}
+@media (max-width: 720px) {
+  .draft-review-columns {
+    grid-template-columns: 1fr;
+  }
+  .render-dialog,
+  .draft-review-dialog {
+    width: calc(100vw - 16px);
+  }
+}

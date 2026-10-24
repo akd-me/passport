@@ -23,6 +23,7 @@ import { extractJson, isObject, validateJson } from "./llm/json.js";
 import type { LlmClient } from "./llm/types.js";
 import { manual } from "./manual.js";
 import { getUserProfile, setUserProfile } from "./profile.js";
+import { digestRenderPrompt } from "./prompts/digest.js";
 import { frameUntrusted } from "./prompts/frame.js";
 import { systemPrompt } from "./prompts/index.js";
 import { RunQueue } from "./queue.js";
@@ -273,8 +274,9 @@ class PersonalAgentRuntime implements AgentRuntime {
               await dailyDigest(ctx, policy);
               await session({
                 kind: "manual",
-                instruction:
-                  "Prepare today's daily digest. Use get_daily_log, list_pending_decisions, get_trust and matter notes to explain completed actions, pending decisions and matters that moved. Report actual statuses; do not send mail.",
+                instruction: ctx.digest
+                  ? `Prepare today's daily digest. Use get_daily_log, list_pending_decisions, get_trust and matter notes to explain completed actions, pending decisions and matters that moved. Report actual statuses; do not send mail.\n\n${digestRenderPrompt(ctx.digest.markdown)}`
+                  : "Prepare today's daily digest. Use get_daily_log, list_pending_decisions, get_trust and matter notes to explain completed actions, pending decisions and matters that moved. Report actual statuses; do not send mail.",
               });
               break;
             case "matter_review":

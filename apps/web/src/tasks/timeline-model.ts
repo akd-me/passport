@@ -123,10 +123,16 @@ const CATEGORIES: Record<string, Category> = {
     write: false,
     phrase: (n) => `checked the calendar ${times(n)}`,
   },
+  render: {
+    id: "render",
+    write: false,
+    phrase: (n) => `rendered ${plural(n, "summary", "summaries")}`,
+  },
   other: { id: "other", write: false, phrase: (n) => `checked ${plural(n, "thing", "things")}` },
 };
 
 const TOOLS: Record<string, keyof typeof CATEGORIES> = {
+  render: "render",
   send: "send",
   archive_emails: "archive",
   batch_archive_by_query: "archive",

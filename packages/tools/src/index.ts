@@ -8,6 +8,7 @@ import { registerReads } from "./reads.js";
 import { registerOnDemandReads } from "./reads-ondemand.js";
 import { registerOnDemandExtra } from "./reads-ondemand-extra.js";
 import { registerMailRead } from "./reads-ondemand-read.js";
+import { registerRender } from "./render.js";
 import { responseByteBudget } from "./response-budget.js";
 import { registerSecrets } from "./secrets.js";
 import { registerTaskWatches } from "./tasks-watch.js";
@@ -30,6 +31,7 @@ export function createToolRegistry(options: ToolRegistryOptions): Tool[] {
   registerTaskWatches(ctx);
   registerSecrets(ctx);
   registerProfile(ctx);
+  registerRender(ctx);
   return ctx.tools;
 }
 
@@ -67,6 +69,12 @@ export { SCRATCH_MAX_AGE_MS, sweepScratchDir } from "./mail-export.js";
 export { neutralize, UNTRUSTED_NOTICE } from "./ondemand-support.js";
 export { ToolError } from "./presentation.js";
 export { collapseQuoted, htmlToText } from "./quoted.js";
+export {
+  escapeRenderText,
+  RENDER_MAX_BYTES,
+  renderHeight,
+  sanitizeRenderHtml,
+} from "./render-html.js";
 export {
   DEFAULT_RESPONSE_BYTE_BUDGET,
   limitResponse,
