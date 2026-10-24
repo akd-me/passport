@@ -113,6 +113,11 @@ describe("task state", () => {
     expect(taskState(task("a"))).toBe("idle");
   });
 
+  it("R2-27: a held queue with no run known to be active is not Working", () => {
+    expect(taskState(task("a", { status: "working", queueHeld: true }))).toBe("idle");
+    expect(taskState(task("a", { status: "working", queueHeld: true }), true)).toBe("working");
+  });
+
   it("shows Woke and Done only while the outcome is unseen", () => {
     expect(taskState(task("a", later({ unseenOutcome: "woke" })))).toBe("woke");
     expect(taskState(task("a", later({ unseenOutcome: "done" })))).toBe("done");

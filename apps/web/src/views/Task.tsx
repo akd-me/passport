@@ -34,7 +34,10 @@ function TaskHeader({ task, running }: { task: Task; running: boolean }) {
       <TaskTitle task={task} />
       <div className="task-meta">
         <StateWord state={taskState(task, running)} />
-        <span className={`task-status ${task.status}`}>{statusLabel(task)}</span>
+        {/* The state word covers Working, and the sidebar already says Inbox. */}
+        {(task.status === "snoozed" || task.status === "settled" || task.status === "archived") && (
+          <span className={`task-status ${task.status}`}>{statusLabel(task)}</span>
+        )}
         {kind && <span className={`kind-badge ${task.kind}`}>{kind}</span>}
         {task.accountIds.length > 0 && (
           <span className="account-dots">

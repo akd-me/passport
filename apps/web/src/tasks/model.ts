@@ -71,7 +71,8 @@ export type TaskState = NonNullable<ReturnType<typeof taskBadge>> | "idle";
  * since its runs may not have reached this client yet.
  */
 export function taskState(task: Task, active = false): TaskState {
-  const running = active || (task.status === "working" && !task.watches.length);
+  // After Stop the queue is held: a `working` task with no run known to be active is not Working.
+  const running = active || (task.status === "working" && !task.watches.length && !task.queueHeld);
   // `limited` without `needsUser` (an older frame, or a resume-at-reset that kept it) still reads Limited.
   const needsUser = task.needsUser ?? (task.limited ? "limited" : null);
   return taskBadge({ ...task, needsUser }, { activeRuns: running ? 1 : 0 }) ?? "idle";

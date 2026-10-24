@@ -224,6 +224,20 @@ describe("approvals", () => {
   });
 });
 
+describe("task header", () => {
+  it("R2-5: says Working once, and the status only when it adds something", async () => {
+    setup({
+      task: task("t1", { status: "working" }),
+      runs: [run("r1", "t1", { status: "running", endedAt: null })],
+      records: [],
+      items: [item("user_message", { text: "Start" }, { seq: 1 })],
+    });
+    const head = (await screen.findByRole("heading", { level: 1 })).closest("header")!;
+    await waitFor(() => expect(within(head).getAllByText("Working")).toHaveLength(1));
+    expect(head.querySelector(".task-status")).toBeNull();
+  });
+});
+
 describe("approval cards under a real pointer", () => {
   it("acts on the first click on an unselected draft card: pressing does not select and reflow it", async () => {
     const draft = (id: string) =>
