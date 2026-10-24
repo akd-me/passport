@@ -127,7 +127,7 @@ describe("categorize", () => {
     ["unsubscribe", "unsubscribe"],
     ["calendar_respond", "scheduling"],
     ["calendar_propose", "scheduling"],
-    ["profile_update", "matters"],
+    ["profile_update", "profile_update"],
     ["matter_create", "matters"],
     ["matter_update", "matters"],
     ["matter_attach", "matters"],

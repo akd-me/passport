@@ -7,6 +7,7 @@ import { Feedback, Icon, Kbd, relativeTime } from "../components/ui";
 import { actionLabel } from "../labels";
 import { useResource, useTask } from "../state";
 import { useDecision } from "../tasks/actions-store";
+import { ProfileProposal } from "../tasks/ProfileProposal";
 import { draftOf, recipients } from "./decision-model";
 
 function Countdown({ until }: { until: string }) {
@@ -120,6 +121,7 @@ export function DecisionCard({
         <p className="proposal-detail">{action.decision.reason}</p>
       )}
       <Feedback error={task.error || decision.error} />
+      <ProfileProposal action={action} />
       <div className="proposal-actions">
         {held ? (
           <>
@@ -155,24 +157,28 @@ export function DecisionCard({
               <Icon name="check" size={14} />
               {busy ? "Saving…" : editing ? "Edit & approve" : "Approve"}
             </button>
-            <button
-              className="btn btn-sm"
-              data-action="approve-task"
-              disabled={busy || (editing && !body.trim())}
-              title="Approve this, and changes like it for the rest of this task"
-              onClick={() => void approve("task")}
-            >
-              Approve for this task
-            </button>
-            <button
-              className="btn btn-sm btn-ghost"
-              data-action="approve-always"
-              disabled={busy || (editing && !body.trim())}
-              title="Approve this, and stop asking about changes like it"
-              onClick={() => void approve("always")}
-            >
-              Always
-            </button>
+            {action.request.category !== "profile_update" && (
+              <>
+                <button
+                  className="btn btn-sm"
+                  data-action="approve-task"
+                  disabled={busy || (editing && !body.trim())}
+                  title="Approve this, and changes like it for the rest of this task"
+                  onClick={() => void approve("task")}
+                >
+                  Approve for this task
+                </button>
+                <button
+                  className="btn btn-sm btn-ghost"
+                  data-action="approve-always"
+                  disabled={busy || (editing && !body.trim())}
+                  title="Approve this, and stop asking about changes like it"
+                  onClick={() => void approve("always")}
+                >
+                  Always
+                </button>
+              </>
+            )}
             {draft && (
               <button
                 className="btn btn-sm"

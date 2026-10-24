@@ -48,3 +48,29 @@ it("R12 captures and restores the complete default profile on the first edit", a
   await executor.undo(action.id);
   expect(await store.kv.get("user_profile")).toBe(DEFAULT_USER_PROFILE);
 });
+
+it.each(["supervised", "auto_accept_edits", "auto", "full_access"] as const)(
+  "learned profiles always ask at %s, then approve and undo through the executor",
+  async (level) => {
+    const { executor, store, policy } = await setup();
+    await policy.setConfig({ globalMode: level, alwaysAsk: [] });
+    await policy.pinLevel("profile_update", level);
+    const before = "# USER.md\n\n## Voice\nOld voice\n";
+    await store.kv.set("user_profile", before);
+    const action = await executor.submit(
+      request("profile_update", { markdown: "Learned voice" }, { category: "profile_update" }),
+    );
+    expect(action).toMatchObject({
+      status: "proposed",
+      decision: {
+        reversibility: "reversible",
+        reason: "Profile learning requires the person's approval.",
+      },
+    });
+    expect(await store.kv.get("user_profile")).toBe(before);
+    await executor.approve(action.id);
+    expect(await store.kv.get("user_profile")).toBe("Learned voice");
+    await executor.undo(action.id);
+    expect(await store.kv.get("user_profile")).toBe(before);
+  },
+);

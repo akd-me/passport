@@ -114,13 +114,15 @@ export class TaskService {
   /** Creates a task and its first run; `done` settles when that run ends. */
   async create(
     input: CreateTaskInput,
+    system: Pick<Partial<Task>, "id" | "voiceLearning"> = {},
   ): Promise<{ task: Task; run: TaskRun; done: Promise<AgentRun> }> {
     const now = this.now();
     const accountIds = input.accountIds?.length
       ? input.accountIds
       : (await this.options.store.accounts.list()).map((account) => account.id);
     const task = await this.tasks.insert({
-      id: newId(),
+      id: system.id ?? newId(),
+      ...(system.voiceLearning ? { voiceLearning: system.voiceLearning } : {}),
       title: input.title?.trim() ? taskTitleFrom(input.title) : taskTitleFrom(input.message),
       accountIds,
       status: "working",

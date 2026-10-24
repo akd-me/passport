@@ -5,6 +5,7 @@ import { useTask } from "../state";
 import { draftOf, recipients } from "../views/decision-model";
 import { QuickDecision } from "./ApprovalItem";
 import { useActions } from "./actions-store";
+import { ProfileProposal } from "./ProfileProposal";
 
 /** Reversible proposals among `ids`: the ones "approve all" may take in one click. */
 export const reversibleIds = (ids: string[], records: Map<string, ActionRecord>) =>
@@ -100,6 +101,7 @@ export function ApprovalPanel({
                 )}
                 {record && <DraftLine record={record} />}
               </button>
+              <ProfileProposal action={record} />
               <QuickDecision
                 actionId={id}
                 label={label}

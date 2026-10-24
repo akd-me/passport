@@ -14,6 +14,7 @@ export const categories: ActionCategory[] = [
   "unsubscribe",
   "matters",
   "other",
+  "profile_update",
 ];
 export const statuses = [
   "proposed",

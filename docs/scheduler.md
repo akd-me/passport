@@ -42,7 +42,10 @@ scheduler handle's `registerAccount(accountId)` / `unregisterAccount(accountId)`
 
 A routine stores a name, schedule, and instruction. For example, every weekday at 07:30:
 “Triage anything new, then prepare my day's digest.” The scheduler calls
-`agent.run({ kind: "manual", instruction })` in the background lane.
+`agent.run({ kind: "manual", instruction })` in the background lane, requesting a task
+session. Codex and Claude Code run one native session with Passport’s MCP tool belt; API
+providers use the native tool loop. The built-in `schedule` triggers for digest and matter review
+use that path too. Each tick starts fresh and reads notes for durable context.
 
 Each routine, and each of the model-backed built-ins `agent.daily_digest` and
 `agent.matter_review`, is bound to its own `kind: "routine"` [task](tasks.md). The job's
@@ -53,7 +56,9 @@ produced something brings the task back to the inbox, and a failure surfaces it 
 `SchedulerOptions.runOnTask(taskId, ctx, run)` seam. The host records the run and passes
 `ctx.agentRunOptions`, which the job forwards to `AgentRuntime.run`. Deleting a routine keeps
 its task and timeline. The runtime's existing tools and policy engine
-control every action. A routine cannot grant itself permissions or bypass the outbox.
+control every action. Runs share the configurable 200-tool-call / 30-minute budget. Their outer
+scheduler timeout is one minute longer, allowing a `BUDGET_EXHAUSTED` notice before cancellation.
+A routine cannot grant itself permissions or bypass the outbox.
 
 The form supports interval, daily, weekly and webhook schedules, a named time zone, and three example
 instructions. Weekly `days` use Sunday = 0 through Saturday = 6. The API also supports manual
@@ -230,8 +235,8 @@ Handlers receive `{ jobId, runId, signal, now }`. A timeout aborts the signal an
 error. A handler ignoring abort retains its execution lock until it actually settles, even
 if its timeout result has already been recorded. Shutdown aborts handlers, clears timers and
 waits up to 5 seconds for active work before detaching it. Integrations should honor the
-signal to finish cleanly; AgentRuntime currently has no cancellation argument, so an agent
-run can finish after the scheduler's timeout. The real backend drains its agent queue before
+signal to finish cleanly; task-bound sessions receive the scheduler’s signal through
+`AgentRunOptions.signal` and stop the host process and subsequent tool calls on cancellation. The real backend drains its agent queue before
 closing persistence.
 
 ## Events and package API

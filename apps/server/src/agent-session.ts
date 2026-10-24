@@ -16,6 +16,11 @@ export interface AgentBudgetConfig {
   maxRunMinutes?: number;
 }
 
+/** Let the runtime report its budget before the scheduler's outer cancellation fires. */
+export function agentJobTimeout(config: AgentBudgetConfig | undefined): number {
+  return ((config?.maxRunMinutes ?? 30) + 1) * 60_000;
+}
+
 /** The tool belt and budget the agent runtime takes. */
 export function agentSessionOptions(
   budget: AgentBudgetConfig | undefined,

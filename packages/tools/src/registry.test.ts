@@ -112,6 +112,11 @@ const writes: Array<[string, object, string]> = [
   ["undo_action", { actionId: "action-fixture" }, "unarchive"],
   ["batch_archive_by_query", { query: { text: "project" } }, "archive"],
   ["apply_label_by_query", { query: { text: "project" }, label: "Work" }, "label"],
+  [
+    "profile_update",
+    { voice: "Concise.", signature: "Alex", vips: [], reason: "Learn voice" },
+    "profile_update",
+  ],
   ["add_standing_rule", { rule: "Archive newsletters." }, "profile_update"],
   ["remove_standing_rule", { rule: "Ask before sending." }, "profile_update"],
   [
@@ -170,7 +175,7 @@ describe("shared tool catalogue", () => {
     });
   });
   it("covers every catalogue entry exactly once and adapters only reshape definitions", () => {
-    expect(tools).toHaveLength(62);
+    expect(tools).toHaveLength(63);
     expect(
       new Set([
         ...reads.map(([name]) => name),
@@ -365,7 +370,7 @@ describe("new workflow tools", () => {
     });
     expect(executor.submitted[0]).toMatchObject({
       type: "profile_update",
-      category: "matters",
+      category: "profile_update",
       params: {
         markdown:
           "# USER.md\n\n## Standing rules\n- Ask before sending.\n- Archive newsletters.\n\n## Voice\nConcise.\n",

@@ -54,6 +54,9 @@ export function registerMatterWrites(ctx: Context) {
     "Create a living workspace under policy. accountId is required when multiple accounts exist. Attached emails become provider refs; notes holds markdown knowledge and watch a saved query triage checks on arrival.",
     {
       accountId: s.id.optional(),
+      category: s.category
+        .optional()
+        .describe("Arrival triage classification; used only by the built-in arrival run."),
       matter: z.strictObject({
         ...s.matterFields,
         summary: s.matterFields.summary.default(""),
@@ -110,6 +113,9 @@ export function registerMatterWrites(ctx: Context) {
     "Attach emails (handles or ids), events or people to a matter through an audited action. Each email is stored as a provider ref (account, providerId, Message-ID, thread, date, subject) that survives cache eviction. Provide at least one attachment.",
     {
       accountId: s.id.optional(),
+      category: s.category
+        .optional()
+        .describe("Arrival triage classification; used only by the built-in arrival run."),
       matterId: s.id,
       emailIds: s.ids.optional(),
       eventIds: s.ids.optional(),

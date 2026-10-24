@@ -42,7 +42,7 @@ async function fixture(llm?: { complete: (options: CompleteOptions) => Promise<L
   vi.spyOn(providers, "mail").mockReturnValue(mail);
   vi.spyOn(providers, "calendar").mockReturnValue(calendar);
   const backend = await createRealBackend(
-    { ...defaultConfig(), accounts: [account] },
+    { ...defaultConfig(), triage: { mode: "pipeline" }, accounts: [account] },
     { storePath: ":memory:", providers, llm },
   );
   backends.push(backend);

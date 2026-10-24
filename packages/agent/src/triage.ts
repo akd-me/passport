@@ -45,7 +45,7 @@ export function heuristicCategory(email: Email): ActionCategory | undefined {
 }
 
 /** Sensitive evidence precedes bulk-mail signals. Routine receipts alone are not money requests. */
-function sensitiveCategory(
+export function sensitiveCategory(
   email: Email,
   people: readonly Person[] = [],
 ): ActionCategory | undefined {
@@ -208,11 +208,11 @@ async function withBodies(
   };
 }
 
-export async function triage(
+export async function prepareTriage(
   ctx: RunContext,
   emailId: string,
   bus: import("@passport/types").EventBus,
-): Promise<void> {
+) {
   const step = ctx.triageStep ?? (async <T>(_name: string, task: () => Promise<T>) => task());
   const stored = await ctx.store.emails.get(emailId, ctx.reads.storeRead({ includeBodies: true }));
   if (!stored) {
@@ -245,8 +245,23 @@ export async function triage(
     }),
   );
   ctx.downgrades.push(...resolved.downgraded);
+  return { email, reader, resolved };
+}
+
+export async function triage(
+  ctx: RunContext,
+  emailId: string,
+  bus: import("@passport/types").EventBus,
+  prepared?: Awaited<ReturnType<typeof prepareTriage>>,
+  deterministic = false,
+): Promise<void> {
+  const step = ctx.triageStep ?? (async <T>(_name: string, task: () => Promise<T>) => task());
+  const { email, reader, resolved } = prepared ?? (await prepareTriage(ctx, emailId, bus));
   const category = await step("classify", async () => {
     let category = sensitiveCategory(email, resolved.people);
+    if (!category && deterministic) {
+      category = heuristicCategory(email);
+    }
     if (!category) {
       const modelCategory = (
         await ctx.structured(
@@ -291,6 +306,7 @@ export async function triage(
       resolved.persistedIds,
       reader,
       watched,
+      deterministic,
     );
     const sender = resolved.people.find(
       (person) =>

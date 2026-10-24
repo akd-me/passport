@@ -62,6 +62,8 @@ export interface ConversationWatch {
 }
 
 export interface Task {
+  /** One-time, bounded Sent sampling on first connect (v0.4). Trusted server metadata. */
+  voiceLearning?: { accountId: Id; sentContainer: string };
   id: Id;
   title: string;
   accountIds: Id[];
@@ -384,6 +386,8 @@ export interface AgentRunObserver {
 
 declare module "./agent-ondemand.js" {
   interface AgentRunOptions {
+    /** Trusted limits for the one-time voice-learning task; never model-supplied. */
+    voiceLearning?: { accountId: Id; sentContainer: string };
     /** Use this run id instead of a generated one (task runs: `TaskRun.agentRunId`). */
     runId?: string;
     observer?: AgentRunObserver;

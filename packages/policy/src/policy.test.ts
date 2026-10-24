@@ -253,7 +253,7 @@ describe("trust ladder", () => {
       approvals: 8,
     });
     expect(bus.events.filter((event) => event.type === "trust.changed")).toHaveLength(8);
-    expect(await policy.getTrust()).toHaveLength(12);
+    expect(await policy.getTrust()).toHaveLength(13);
   });
 
   it("uses threshold boundaries, clamps scores, and applies minimum edit penalties", async () => {

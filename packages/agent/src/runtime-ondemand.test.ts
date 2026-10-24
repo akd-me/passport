@@ -27,6 +27,7 @@ async function setup(script: unknown[], opts: { reader?: boolean } = {}) {
   const executor = new FakeExecutor(store, policy);
   const readers = vi.fn(async () => mock.reader());
   const runtime = createAgentRuntime({
+    triage: { mode: "pipeline" },
     store,
     executor,
     policy,
@@ -156,7 +157,13 @@ describe("triage on on-demand readers", () => {
 describe("matter review", () => {
   it("fetches only the newest referenced emails and never scans by matter", async () => {
     const env = await setup([
-      { summary: "Quiet for a while", nextStep: "Follow up", status: "waiting" },
+      toolOutput("update_matter", {
+        accountId: "account-1",
+        matterId: "matter-1",
+        reason: "Review inactive matter",
+        patch: { summary: "Quiet for a while", nextStep: "Follow up", status: "waiting" },
+      }),
+      "Reviewed.",
     ]);
     const ids = Array.from({ length: 30 }, (_, i) => `old-${i}`);
     await env.store.matters.upsert(matterFixture({ emailIds: ids }));
@@ -170,7 +177,7 @@ describe("matter review", () => {
 
 describe("run queue priority", () => {
   it("starts interactive runs before queued background runs", async () => {
-    const env = await setup(["Done.", "Done."]);
+    const env = await setup(["Done.", "Done.", "Done."]);
     const runs = [
       env.runtime.run({ kind: "schedule", name: "outbox" }),
       env.runtime.run({ kind: "schedule", name: "daily_digest" }),

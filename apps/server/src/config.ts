@@ -32,6 +32,8 @@ export interface PassportConfig {
   hostAgents?: { claudePath?: string; codexPath?: string };
   /** Run budget of task runs (default 200 tool calls, 30 minutes); see agent-session.ts. */
   agentBudget?: AgentBudgetConfig;
+  /** One-release arrival fallback; session is the default. */
+  triage?: { mode: "session" | "pipeline" };
   accounts: Account[];
 }
 
@@ -119,6 +121,12 @@ export function validateConfig(config: PassportConfig): PassportConfig {
   }
   validateHostAgentPaths(config.hostAgents);
   validateAgentBudget(config.agentBudget);
+  if (
+    config.triage !== undefined &&
+    (!config.triage || !["session", "pipeline"].includes(config.triage.mode))
+  ) {
+    throw new ApiError("INVALID_CONFIG", 'triage.mode must be "session" or "pipeline"');
+  }
   return config;
 }
 

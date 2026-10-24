@@ -7,6 +7,15 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 
 ### Added
 
+- Arrival triage and routines run as agentic task sessions with Passport’s tool belt and notes.
+  Newsletters, receipts and service notifications keep model-free policy playbooks; a one-release
+  `triage.mode: "pipeline"` fallback and fixture parity coverage remain available. Stable arrival
+  IDs, action/checkpoint retry acknowledgement, backlog drop notices and loop guards are preserved.
+- First account connect creates a one-time “Learn how you write” task: one Sent search, at most
+  50 quote-collapsed messages, and one reversible Voice/Signature/VIP `profile_update` proposal.
+  The new category always asks the person, with proposed USER.md visible before approval and
+  executor-backed undo. IMAP without Sent skips learning; CLI connects defer it to the server.
+
 - `passport task start`, `send`, `show`, `list`, `approve` and `reject`, with human-readable
   output and `--json`. `start` and `send` support `--wait` for the submitted run's summary
   (exit 2 when the person is needed). Task commands require the running server and never

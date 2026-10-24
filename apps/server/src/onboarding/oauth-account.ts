@@ -4,6 +4,7 @@ import type { Backend } from "../backend.js";
 import { ApiError, required } from "../errors.js";
 import { logger } from "../logger.js";
 import { accountSync } from "./sync.js";
+import { learnVoiceOnConnect } from "./voice.js";
 
 export type OAuthKind = "gmail" | "graph";
 
@@ -233,6 +234,9 @@ export async function connectOAuthAccount(
 
       /* Sync persists and broadcasts the bounded error code. */
     });
+  }
+  if (!existing) {
+    await learnVoiceOnConnect(backend, mail);
   }
   return mail;
 }

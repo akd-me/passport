@@ -1,5 +1,6 @@
 import type { JobDefinition, Schedule } from "@passport/scheduler";
 import type { Store } from "@passport/types";
+import { agentJobTimeout } from "../agent-session.js";
 import type { Backend } from "../backend.js";
 import { registerTaskJobs, routineBinding } from "../tasks/jobs.js";
 export async function registerSystemJobs(
@@ -54,7 +55,10 @@ export async function registerSystemJobs(
       }
       return { summary: run.summary };
     },
-    { timeoutMs: 300000, ...(await routineBinding(backend, "agent.daily_digest", "Daily digest")) },
+    {
+      timeoutMs: agentJobTimeout(backend.config.agentBudget),
+      ...(await routineBinding(backend, "agent.daily_digest", "Daily digest")),
+    },
   );
   await system(
     "agent.matter_review",
@@ -71,7 +75,7 @@ export async function registerSystemJobs(
       return { summary: run.summary };
     },
     {
-      timeoutMs: 300000,
+      timeoutMs: agentJobTimeout(backend.config.agentBudget),
       ...(await routineBinding(backend, "agent.matter_review", "Review active matters")),
     },
   );

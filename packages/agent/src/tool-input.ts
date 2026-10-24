@@ -8,6 +8,12 @@ export function prepareToolInput(ctx: RunContext, name: string, input: unknown):
   if (!isObject(input)) {
     return input;
   }
+  if (ctx.arrival && name === "create_matter" && isObject(input.matter)) {
+    return { ...input, matter: { ...input.matter, personIds: ctx.arrival.personIds } };
+  }
+  if (ctx.arrival && name === "attach_to_matter") {
+    return { ...input, personIds: ctx.arrival.personIds };
+  }
   if (isObject(input.draft)) {
     const draft = input.draft as unknown as DraftInput;
     return {

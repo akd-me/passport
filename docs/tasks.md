@@ -61,12 +61,18 @@ loses its `<` (becomes `‹`), so mail can neither close the frame nor open a de
   the task gets `titleGenerated: true`. Any later rename (`PATCH`) sets it to `false`; a rename
   before the proposal arrives wins. Without a configured model the message title stays.
 - **`inbox`**: one per mail account, created by the system on the first arrival. Every triage
-  run of a new message is recorded on it. Each one starts with a `notification` item carrying
+  run of a new message runs in the background on it. Non-routine arrivals use one host-agent
+  session with the tool belt (the native tool loop on API providers); deterministic newsletters,
+  receipts and service notifications use a model-free playbook. Each run starts with a
+  `notification` item carrying
   the arrival's `MailRow`, and a retry starts with a `RETRY` notice. Its run's `agentRunId` is
   `arrival:<emailId>`.
 - **`routine`**: one per model-backed scheduler job (`agent.daily_digest`,
   `agent.matter_review`, every user routine). The job's `taskId` points at it, and each job run
-  is a `schedule` run on it.
+  is a `schedule` run on it, using the same session/tool loop as a message run. Built-in matter
+  review supplies at most ten deterministically selected inactive matters as framed data; the
+  digest retains its deterministic audit snapshot and adds the session’s explanation to the
+  timeline.
 
 User routines may set `runOn: "fresh"`: each scheduled/webhook run creates a new `kind: "task"`
 child with the routine task as `parentTaskId`, instead of appending a run to the bound task.
@@ -123,8 +129,8 @@ System tasks (`inbox`, `routine`) follow the global trust dial: before each run 
 
 ### Sessions
 
-On a host agent (Codex or Claude Code), each message run and each watch or wake run of a task
-is **one agentic session**: the CLI gets Passport's tools as an MCP server and calls them
+On a host agent (Codex or Claude Code), each message, watch, wake, non-routine arrival and
+routine run of a task is **one agentic session**: the CLI gets Passport's tools as an MCP server and calls them
 natively, streaming as it goes. There is no JSON tool protocol and no per-step CLI process.
 
 - **Tool belt.** The run's own registry tools (the same ones an API-provider run gets, under
@@ -144,8 +150,8 @@ natively, streaming as it goes. There is no JSON tool protocol and no per-step C
   in `passport.config.json`, 1–10,000 calls and 1–1,440 minutes, or
   `PASSPORT_AGENT_MAX_TOOL_CALLS` and `PASSPORT_AGENT_MAX_RUN_MINUTES`). A session's next tool call past the budget is refused and
   the session stopped; a run that hits either limit completes with a `BUDGET_EXHAUSTED` notice,
-  and the work done so far (including proposals) is kept. Arrival triage and the built-in
-  digest and matter review keep their fixed pipelines.
+  and the work done so far (including proposals) is kept. Routine scheduler timeouts are one
+  minute longer than the configured runtime budget, so the runtime can report exhaustion first.
 - **Resume.** The provider session id is recorded on the task (`providerSessionId`,
   `providerSessionKind`) as soon as the session starts. The next run resumes it
   (`claude --resume <session_id>`, `codex exec resume <thread_id>`), resolved when that run
@@ -160,8 +166,9 @@ natively, streaming as it goes. There is no JSON tool protocol and no per-step C
   calls return. A steer's replacement run resumes the cancelled session with both messages.
 - **API providers** (Anthropic, OpenAI, OpenAI-compatible, Ollama) keep the native tool loop
   in-process with the same budget, and task runs get the same orchestration section. A host
-  agent outside a task (a user routine, `passport` CLI runs without a server) keeps the
-  completion loop, with the budget instead of the former 12-call cap.
+  agent without a tool belt keeps the completion loop, with the same budget. Each arrival and
+  scheduled run starts a fresh session; a person’s follow-up may resume the last session recorded
+  on that Inbox or routine task. Native tool reads retain the run’s quota lane and cancellation.
 
 ## Status rules
 
@@ -326,6 +333,72 @@ backfill when one is configured later. An arrival whose message is gone at the p
 dropped after one retry. Drops are reported as one `ARRIVALS_DROPPED` notice per account on its
 Inbox task. `POST /api/agent/triage/:id` answers `409 TRIAGE_PENDING` while the message is still
 queued for automatic triage.
+
+## Arrival triage migration (v0.4)
+
+`triage: { "mode": "session" }` is the default in `passport.config.json`. Set
+`triage: { "mode": "pipeline" }` for the one-release structured-completion fallback.
+The flag changes arrivals only; routines use sessions in either mode.
+
+Before inference Passport resolves people from bounded provider evidence, applies verification
+and downgrade rules, and screens deterministic sensitive evidence before routine signals. Plain
+newsletters, receipts and service notifications never reach a model: they receive their category,
+a matter, a dated notes line, and the existing label/archive or mark-read/archive playbook through
+policy. `alwaysAsk` keeps the playbook as a human-review decision. Receipt matters stay under
+`Purchases/<vendor>`; other routine buckets use `<category>/<vendor>`.
+
+A material arrival gets a prompt under 4 KiB containing its `MailRow`, heuristic and sensitive
+pre-classification, and matching matter-watch IDs, all framed with `frameUntrusted`. The session
+reads mail and notes, organizes the arrival with `create_matter` / `attach_to_matter` plus `category`,
+logs notes, and proposes a reply only when warranted. Code preserves sensitive classifications,
+clamps `replies_known` to actual known senders, and attaches the resolved people. Scheduling uses
+availability tools and `respond_to_event` / `propose_meeting`; a reply draft covers a request with
+no available slots. Triage cannot send, unsubscribe or change USER.md. Human-review decisions
+are retained for sensitive/stranger/other mail and `alwaysAsk` categories.
+
+Session retries with existing ActionRecords, or a successfully completed run checkpoint, acknowledge
+the arrival without repeating inference. If a crash left partial work, the prior actions and run
+remain the review record rather than replaying the session. The pipeline fallback keeps its
+step-level recovery. Stable `arrival:<emailId>` IDs, queue claims, retry/backlog limits,
+`ARRIVALS_DROPPED` and the conversation-watch loop guard are unchanged.
+
+**Parity and accepted differences.** `packages/agent/src/triage-parity.test.ts` runs both modes
+against eleven shared email/person/matter fixtures, comparing categories, people links, matter
+create/attach outcomes, draft presence and scheduling response presence. Two additional comparisons
+cover `alwaysAsk`. Routine organization uses deterministic vendor buckets and factual summaries;
+model wording, titles, notes wording and the number of inference calls need not match.
+Three original fast-screen fixtures script money/legal/stranger output for otherwise neutral bulk
+mail. Those are explicit accepted category differences: session mode does not make that model
+screening call. Deterministic sensitive content and stored money/legal classifications still win
+before the bulk pre-filter. Real semantic classification quality requires later live evaluation.
+
+## Learn how you write (v0.4)
+
+First connect of a real mail provider creates one system `kind: "task"` task titled
+**Learn how you write**, in the interactive lane, with permission mode at most `auto_accept_edits`.
+The task ID `voice:<accountId>` prevents duplicate creation on reconnect. A CLI connection without
+a task owner persists a request that the next server picks up. Existing accounts are not sampled
+on upgrade; mock/demo connections do not create this task.
+
+Trusted run metadata enforces one `mail_search` over that account’s Sent folder, limit 50,
+without pagination or thread expansion. Only sampled message IDs may be read, once each, using
+`mail_read` in text/message view with quotes collapsed and an 8,000-character body window.
+The run may read USER.md and submit one `profile_update` proposal after a successful body read;
+other tools, further searches and further proposals are refused. IMAP without an advertised or
+configured Sent folder skips the task. Empty or unusable samples should produce an explanation
+without a proposal.
+
+Voice, Signature and VIP suggestions form one reversible `profile_update` action in the new
+`profile_update` category. It always asks the person, even at full access or with an approval grant.
+The approval panel and Decisions show the proposed USER.md. The executor leaves the profile
+unchanged until approval and captures its value at execution for undo. VIP suggestions are knowledge,
+not relationship or verification changes.
+
+Known limitations: the sample is small and may not represent every writing context. Voice and
+Signature suggestions are single lines; at most twenty VIP entries are accepted. The learned
+proposal replaces the whole effective profile while preserving unrelated sections when proposed;
+review it against any human edits made while it was pending. A failed or empty learning run can be
+revisited by sending a message in its task; it does not automatically sample again on reconnect.
 
 ## HTTP API
 
@@ -596,7 +669,8 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 - `llmCalls` counts sessions (one per run, two when a failed resume fell back), not model turns
   inside a session. Claude Code reports a list-price cost that Passport ignores; usage has no
   cost for subscriptions.
-- Arrival triage and routines still use the completion path (W2C moves them onto sessions).
+- Session triage parity is fixture-based; live model judgments and draft wording are not asserted.
+  The structured arrival pipeline remains available for one release (see the migration notes above).
 
 ## Known limitations (review R4)
 

@@ -88,11 +88,14 @@ describe("real backend end to end", () => {
     const providers = createProviderRegistry();
     vi.spyOn(providers, "mail").mockReturnValue(mail);
     vi.spyOn(providers, "calendar").mockReturnValue(calendar);
-    const backend = await createRealBackend(defaultConfig(), {
-      storePath: ":memory:",
-      providers,
-      ...(triage ? { llm: new FixtureLlm() } : {}),
-    });
+    const backend = await createRealBackend(
+      { ...defaultConfig(), triage: { mode: "pipeline" } },
+      {
+        storePath: ":memory:",
+        providers,
+        ...(triage ? { llm: new FixtureLlm() } : {}),
+      },
+    );
     backends.push(backend);
     const account = await addAccount(backend, {
       kind: "mock",
@@ -339,11 +342,14 @@ describe("real backend end to end", () => {
       const result = await complete(options);
       return { ...result, json: { status: "tentative", textBody: "Can we meet?", slots: [slot] } };
     });
-    const backend = await createRealBackend(defaultConfig(), {
-      storePath: ":memory:",
-      clientMode: true,
-      llm,
-    });
+    const backend = await createRealBackend(
+      { ...defaultConfig(), triage: { mode: "pipeline" } },
+      {
+        storePath: ":memory:",
+        clientMode: true,
+        llm,
+      },
+    );
     backends.push(backend);
     const account = await addAccount(backend, {
       kind: "mock",
@@ -454,10 +460,13 @@ describe("real backend end to end", () => {
   );
 
   it("R9: client mode queues outward submissions even when the configured hold is zero", async () => {
-    const backend = await createRealBackend(defaultConfig(), {
-      storePath: ":memory:",
-      clientMode: true,
-    });
+    const backend = await createRealBackend(
+      { ...defaultConfig(), triage: { mode: "pipeline" } },
+      {
+        storePath: ":memory:",
+        clientMode: true,
+      },
+    );
     backends.push(backend);
     const account = await addAccount(backend, {
       kind: "mock",
@@ -485,9 +494,12 @@ describe("real backend end to end", () => {
     expect(action.status).toBe("proposed");
   });
   it("creates an MCP reply draft through the default registry using mail handles and the original thread", async () => {
-    const backend = await createRealBackend(defaultConfig(), {
-      storePath: ":memory:",
-    });
+    const backend = await createRealBackend(
+      { ...defaultConfig(), triage: { mode: "pipeline" } },
+      {
+        storePath: ":memory:",
+      },
+    );
     backends.push(backend);
     const account = await addAccount(backend, {
       kind: "mock",

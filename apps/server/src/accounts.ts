@@ -7,6 +7,7 @@ import type {
 } from "@passport/types";
 import type { Backend } from "./backend.js";
 import { ApiError } from "./errors.js";
+import { learnVoiceOnConnect } from "./onboarding/voice.js";
 import { isSecretReference, resolveAccountSecrets } from "./schedulers/account-secrets.js";
 import { member, object, string } from "./validation.js";
 
@@ -120,5 +121,6 @@ export async function addAccount(
     await backend.store.accounts.delete(account.id);
     throw error;
   }
+  await learnVoiceOnConnect(backend, account);
   return account;
 }

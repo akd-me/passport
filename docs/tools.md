@@ -172,9 +172,9 @@ Write tools accept mail handles (`acc:email:…`) as well as local ids.
 | `unsubscribe` | IW | Header one-click/mailto, HTTPS link, or explicit reply | unsubscribe / unsubscribe |
 | `respond_to_event` | RW | Accept, decline or tentatively respond to an invite | scheduling / calendar_respond |
 | `propose_meeting` | IW | Submit supplied slots and invitation draft | scheduling / calendar_propose |
-| `create_matter` | RW | Create a living workspace and initial attachments, notes, refs and watch | matters / matter_create |
+| `create_matter` | RW | Create a living workspace and initial attachments, notes, refs and watch; optional `category` for built-in arrival triage | matters / matter_create |
 | `update_matter` | RW | Patch editable workspace fields, including notes, refs and watch | matters / matter_update |
-| `attach_to_matter` | RW | Attach existing emails (stored as provider refs), events or people | matters / matter_attach |
+| `attach_to_matter` | RW | Attach existing emails (stored as provider refs), events or people; optional `category` for built-in arrival triage | matters / matter_attach |
 | `update_person` | RW | Patch editable contact fields | matters / person_update |
 | `notes_write` | RW | Append a dated line to, or replace, person or matter notes | matters / person_update or matter_update |
 | `snooze` | RW | Snooze mail and/or a matter until a future UTC time | Mail inference, or matters for matter-only snooze / snooze |
@@ -182,8 +182,36 @@ Write tools accept mail handles (`acc:email:…`) as well as local ids.
 | `cancel_held_action` | RW | Cancel this actor's own held action | Original action category / executor.cancelHold lifecycle |
 | `batch_archive_by_query` | RW | One archive action for a query's matches (1,000 via reader, 200 from the store); supports dryRun | Mail inference / archive |
 | `apply_label_by_query` | RW | One label action for a query's matches (1,000 via reader, 200 from the store); supports dryRun | Mail inference / label |
-| `add_standing_rule` | RW | Append an exact one-line rule; preserve other USER.md sections | matters / profile_update |
-| `remove_standing_rule` | RW | Remove an exact bullet rule; preserve other sections | matters / profile_update |
+| `profile_update` | RW | Propose Voice, Signature and VIPs together; preserve other USER.md sections, always ask the person | profile_update / profile_update |
+| `add_standing_rule` | RW | Append an exact one-line rule; preserve other USER.md sections | profile_update / profile_update |
+| `remove_standing_rule` | RW | Remove an exact bullet rule; preserve other sections | profile_update / profile_update |
+
+## Learned profile proposals (v0.4)
+
+`profile_update({ accountId?, voice, signature, vips, reason })` proposes Voice, Signature and
+VIP entries for USER.md as **one** `profile_update` action. Voice and Signature are single lines
+of at most 2,000 characters; `vips` contains at most twenty such lines. The tool reads the current
+effective profile, preserves Identity (apart from Signature), Standing rules, Draft settings and
+other sections, and submits the proposed Markdown to the executor. It never writes a pending
+proposal. The person can inspect the proposed USER.md in the approval panel or Decisions.
+
+The new `profile_update` policy category always asks for human approval, even at full access;
+trust pins and task approval grants cannot bypass it. Standing-rule tools now use this category
+too. The existing action type, inverse and human settings route remain compatible, including
+legacy actions in category `matters`. Undo restores the profile captured immediately before
+execution, including when the person changed it while the proposal was pending.
+
+On first connect, [Learn how you write](tasks.md#learn-how-you-write-v04) uses this tool after
+one Sent search of at most fifty messages and quote-collapsed `mail_read` evidence. Its tool
+calls are enforced to that sample and one profile proposal. It never changes people’s security
+state or trusts a VIP merely because they appeared in the sample.
+
+Arrival sessions can supply `category` on `create_matter` / `attach_to_matter`; the runtime
+validates the arrival ID, preserves sensitive/known-sender constraints, and supplies the
+executor’s trusted `emailPatch` alongside resolved people IDs. External callers cannot use this
+field to change classifications or override an action’s inferred policy category. The arrival
+prompt is under 4 KiB and frames the `MailRow`, heuristic evidence and matter-watch matches as
+untrusted data. Routine mail uses the deterministic playbooks described in [tasks](tasks.md#arrival-triage-migration-v04).
 
 ## Private secrets (v0.4)
 
@@ -416,7 +444,7 @@ in each format before advancing. No provider request is made.
 On the store path, `search_emails`, `batch_archive_by_query`, and `apply_label_by_query`
 exclude provider tombstones by default. Set `includeDeleted: true` in the email query for history access.
 `get_email` by ID still returns a tombstone with `deleted: true`; thread/matter histories
-include tombstones. Triage screens money/legal/stranger requests before routine signals,
+include tombstones. Triage screens deterministic money/legal/stranger evidence before routine signals,
 preserves existing money/legal classifications, and only proposes playbooks for categories
 in `alwaysAsk`, explaining the approval requirement. Always-ask label edits also ask.
 
@@ -517,7 +545,7 @@ Resources and prompts remain available at `passport://matters/{id}`,
 `triage_inbox` and `summarize_matter`.
 
 The built-in runtime uses `{kind:"agent",id:runId}` with the same definitions and
-handlers. Its triage pipeline supplies trusted, code-derived identity snapshots
+handlers. Arrival triage supplies trusted, code-derived identity snapshots
 and classification/email metadata context; this is not part of model-facing
 schemas and is ignored for external actors. Manual instructions and task runs
 have a budget of 200 tool calls and 30 minutes across reads and writes
@@ -702,15 +730,19 @@ permission ceiling (looked up by run id), plan-mode read-only and the injected `
 `call` validates arguments against the tool's schema, applies the draft signature, counts
 the budget and refuses calls once the run is cancelled or out of budget. A stdio child
 was rejected: it would need its own store handle, quota governor and reader credentials,
-and could not keep the run's actor and timeline observer. The runtime uses a session when
-the trigger is `manual`, the run asks for one (`AgentRunOptions.session`, set by task runs),
-a tool belt is configured and the LLM client is a host agent (`HostAgentLlmClient.session`).
+and could not keep the run's actor and timeline observer. The runtime uses a session when a
+tool belt is configured and the LLM client is a host agent
+(`HostAgentLlmClient.session`): task messages request one through `AgentRunOptions.session`,
+and non-routine arrivals and scheduled work use it directly. Routine tasks start fresh sessions
+for their ticks; Inbox tasks start fresh for each material arrival. API providers use the native
+tool loop with the same budget. Tool readers keep the run’s quota lane and abort signal.
 `HostAgentSessionRequest` gains `persistSession` and `resumeSessionId`; Claude Code then
 drops `--no-session-persistence` (and adds `--resume <id>`), Codex drops `--ephemeral`
 (`codex exec resume <id>`, read-only sandbox through `-c sandbox_mode`). Session ids are
 validated before they reach argv.
 
-Custom executors must implement `profile_update` in category `matters`: capture
+Custom executors must implement `profile_update` in category `profile_update` (legacy
+`matters` requests remain valid): capture
 prior USER.md immediately before execution, write `store.kv["user_profile"]`,
 and persist a `profile_update` inverse containing the prior Markdown. The
 reference executor does this; custom/in-memory fakes need the new case if they

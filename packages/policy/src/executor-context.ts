@@ -205,12 +205,12 @@ export function createExecutorContext(options: ActionExecutorOptions) {
     };
     if (
       request.type === "profile_update" &&
-      (request.category !== "matters" ||
+      (!["matters", "profile_update"].includes(request.category) ||
         typeof (request.params as ActionParams["profile_update"]).markdown !== "string")
     ) {
       throw new PolicyError(
         "INVALID_PARAMS",
-        "Profile updates require matters category and markdown",
+        "Profile updates require matters or profile_update category and markdown",
       );
     }
     assertKnowledge(request);

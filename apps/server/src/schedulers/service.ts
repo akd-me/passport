@@ -7,6 +7,7 @@ import {
   validateSchedule,
 } from "@passport/scheduler";
 import type { Account, RoutineRunOn } from "@passport/types";
+import { agentJobTimeout } from "../agent-session.js";
 import type { Backend } from "../backend.js";
 import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
@@ -184,7 +185,7 @@ export class SchedulerService {
       name: def.name,
       kind: "user",
       schedule: def.schedule,
-      timeoutMs: 300000,
+      timeoutMs: agentJobTimeout(this.backend.config.agentBudget),
       ...(await routineBinding(this.backend, def.id, def.name)),
       run: async ({ agentRunOptions, webhookPrompt }) => {
         const run = await this.backend.agent.run(

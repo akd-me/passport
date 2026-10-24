@@ -109,7 +109,7 @@ export class TaskTriggers {
                   },
             ],
           },
-          (runOptions) => agent.run(trigger, { ...options, ...runOptions }),
+          (runOptions) => agent.run(trigger, { ...options, ...runOptions, session: {} }),
           describeAgentRun,
         );
       },
@@ -143,6 +143,7 @@ export class TaskTriggers {
           ...ctx,
           agentRunOptions: {
             ...options,
+            session: {},
             signal: options.signal ? AbortSignal.any([options.signal, ctx.signal]) : ctx.signal,
           },
         }),

@@ -3,7 +3,7 @@ import type { Email, MailRef } from "@passport/types";
 import { describe, expect, it, vi } from "vitest";
 import { createAgentRuntime } from "./runtime.js";
 import { FakeExecutor, FakePolicy, MemoryBus } from "./testing/collaborators.js";
-import { FakeLlm } from "./testing/fake-llm.js";
+import { FakeLlm, toolOutput } from "./testing/fake-llm.js";
 import {
   accountFixture,
   matterFixture,
@@ -27,6 +27,7 @@ async function setup(script: unknown[]) {
   const reader = mock.reader();
   const search = vi.spyOn(reader, "search");
   const runtime = createAgentRuntime({
+    triage: { mode: "pipeline" },
     store,
     executor,
     policy,
@@ -166,7 +167,15 @@ describe("matter review over refs", () => {
   });
 
   it("reads refs through the envelope cache and skips matters with recent refs without reads", async () => {
-    const env = await setup([{ summary: "Quiet", nextStep: "Nudge Dana", status: "waiting" }]);
+    const env = await setup([
+      toolOutput("update_matter", {
+        accountId: "account-1",
+        matterId: "matter-1",
+        reason: "Review inactive matter",
+        patch: { summary: "Quiet", nextStep: "Nudge Dana", status: "waiting" },
+      }),
+      "Reviewed.",
+    ]);
     const refs = Array.from({ length: 25 }, (_, i) =>
       ref(`p${i}`, `2026-09-${String(1 + i).padStart(2, "0")}T00:00:00.000Z`),
     );

@@ -356,7 +356,8 @@ export type ActionCategory =
   | "legal"
   | "unsubscribe"
   | "matters" // creating/editing matters and people (internal, always reversible)
-  | "other";
+  | "other"
+  | "profile_update"; // learned voice/signature/VIPs, always reviewed by the person
 
 export type ActionType =
   | "label"

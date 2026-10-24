@@ -300,7 +300,7 @@ export function registerExtra(ctx: Context) {
     register(
       ctx,
       name,
-      `${remove ? "Remove" : "Add"} one exact bullet rule in USER.md; submits a reversible matters/profile_update action. Other sections are preserved.`,
+      `${remove ? "Remove" : "Add"} one exact bullet rule in USER.md; submits a reversible profile_update action that always asks the person. Other sections are preserved.`,
       {
         rule: z
           .string()
