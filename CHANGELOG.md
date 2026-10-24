@@ -124,6 +124,8 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 
 ### Fixed
 
+- A provider's successful session result stays completed if Stop or steer arrives while the
+  agent is settling its result, instead of retroactively cancelling it (R1-8 integration).
 - Secret responses and expiry clear pending request IDs even after the requesting run ended;
   regression coverage includes saved, declined, cancelled and timed-out requests (R1-18).
 - Server lifecycle and tool writes share the types package's waiting-state and task-stamping

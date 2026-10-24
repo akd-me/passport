@@ -67,7 +67,7 @@ async function sessionBackend(
   });
   const service = backend.tasks!.service;
   const items = async (taskId: string) => service.items(taskId, 0, 500);
-  return { backend, cli, mail, service, items, account };
+  return { backend, cli, mail, service, items, account, llm };
 }
 
 const search = { tool: "mail_search", args: { query: "from:alice@example.com", limit: 5 } };
@@ -77,6 +77,28 @@ const resumeArgs = (kind: HostAgentKind, id: string) =>
 const kinds_of = (items: TaskItem[]) => items.map((item) => item.kind);
 
 describe.each(kinds)("%s task sessions", (kind) => {
+  it("keeps a provider-completed run successful when a steer abort arrives while it settles", async () => {
+    const env = await sessionBackend(kind, [{ steps: [{ text: "Finished the request." }] }]);
+    const controller = new AbortController();
+    const session = env.llm.session.bind(env.llm);
+    vi.spyOn(env.llm, "session").mockImplementation((input, onEvent) =>
+      session(input, (event) => {
+        onEvent(event);
+        if (event.type === "completed") {
+          controller.abort();
+        }
+      }),
+    );
+    const run = await env.backend.agent.run(
+      { kind: "manual", instruction: "Finish the request" },
+      { session: {}, signal: controller.signal },
+    );
+    expect(controller.signal.aborted).toBe(true);
+    expect(run.error).toBeUndefined();
+    expect(run.summary).toContain("Session completed");
+    expect(await env.cli.calls()).toHaveLength(1);
+  });
+
   it("runs one session whose native tool calls reach the provider reader, then resumes it", async () => {
     const env = await sessionBackend(kind, [
       {

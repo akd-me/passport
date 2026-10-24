@@ -218,7 +218,9 @@ export async function agenticSession(
       }
     }
     await Promise.allSettled([...inflight]);
-    if (signal?.aborted) {
+    // A steer can arrive after the provider's successful result while usage and tool calls
+    // settle. That completed result is authoritative; only an unfinished run was cancelled.
+    if (!result.ok && signal?.aborted) {
       throw new AgentError("Run cancelled", "RUN_CANCELLED");
     }
     if (fatal) {
