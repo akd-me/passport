@@ -123,6 +123,11 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   Needs you screenshots are recaptured and `queue-strip-light/dark.png` are new.
 
 
+### Fixed
+
+- Saving a draft now shares the action executor's approval lock, preserves the agent's original
+  for edited-approval trust feedback, and returns `409 ACTION_DECIDED` if approval wins the race.
+
 ## [0.3.2] — 2026-10-24
 
 ### Fixed

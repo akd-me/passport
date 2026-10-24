@@ -29,6 +29,7 @@ export function createExecutorContext(options: ActionExecutorOptions) {
   const requireAction = async (
     id: string,
     statuses: ActionRecord["status"][],
+    stateError = "INVALID_ACTION_STATE",
   ): Promise<ActionRecord> => {
     const action = await store.actions.get(id);
     if (!action) {
@@ -36,7 +37,7 @@ export function createExecutorContext(options: ActionExecutorOptions) {
     }
     if (!statuses.includes(action.status)) {
       throw new PolicyError(
-        "INVALID_ACTION_STATE",
+        stateError,
         `Cannot perform this operation on a ${action.status} action`,
       );
     }

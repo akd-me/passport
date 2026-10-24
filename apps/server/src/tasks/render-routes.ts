@@ -1,9 +1,10 @@
+import { type DraftEditingExecutor, PolicyError } from "@passport/policy";
 import { renderHeight, sanitizeRenderHtml } from "@passport/tools";
 import type { Hono } from "hono";
 import type { Backend } from "../backend.js";
-import { ApiError, required } from "../errors.js";
+import { ApiError } from "../errors.js";
 import { jsonBody } from "../route-input.js";
-import { editedRequest, integer, string } from "../validation.js";
+import { integer, string } from "../validation.js";
 
 /** Preview and save share the approval editor's validation; neither executes the proposal. */
 export function installRenderRoutes(app: Hono, backend: Backend): void {
@@ -29,19 +30,21 @@ export function installRenderRoutes(app: Hono, backend: Backend): void {
     if (Object.keys(body).some((key) => key !== "textBody")) {
       throw new ApiError("INVALID_FIELD", "Only the draft body is editable.");
     }
-    const original = required(await backend.store.actions.get(c.req.param("id")), "Action");
-    if (original.status !== "proposed") {
-      throw new ApiError("ACTION_NOT_PENDING", "This proposal has already been decided.", 409);
+    const executor = backend.executor as Partial<DraftEditingExecutor>;
+    if (!executor.editDraft) {
+      throw new ApiError("NOT_IMPLEMENTED", "Draft editing needs the real action executor.", 501);
     }
-    const request = editedRequest(
-      {
-        ...original.request,
-        params: { ...original.request.params, draft: { textBody: body.textBody } },
-      },
-      original.request,
-    );
-    const action = await backend.store.actions.update(original.id, { request });
-    backend.bus.emit({ type: "action.updated", action });
-    return c.json(action);
+    try {
+      return c.json(
+        await executor.editDraft(c.req.param("id"), string(body.textBody, "draft.textBody")),
+      );
+    } catch (error) {
+      if (error instanceof PolicyError) {
+        const status =
+          error.code === "ACTION_DECIDED" ? 409 : error.code === "ACTION_NOT_FOUND" ? 404 : 400;
+        throw new ApiError(error.code, error.message, status);
+      }
+      throw error;
+    }
   });
 }
