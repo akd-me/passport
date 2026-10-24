@@ -3,7 +3,7 @@ import type { Email } from "@passport/types";
 import { describe, expect, it, vi } from "vitest";
 import { createAgentRuntime } from "./runtime.js";
 import { FakeExecutor, FakePolicy, MemoryBus } from "./testing/collaborators.js";
-import { FakeLlm } from "./testing/fake-llm.js";
+import { FakeLlm, toolOutput } from "./testing/fake-llm.js";
 import {
   accountFixture,
   matterFixture,
@@ -199,5 +199,43 @@ describe("run queue priority", () => {
     const next = env.runtime.run({ kind: "schedule", name: "outbox" });
     await expect(failed).rejects.toMatchObject({ code: "EMAIL_NOT_FOUND" });
     await expect(next).resolves.toMatchObject({ summary: expect.stringContaining("Released") });
+  });
+});
+
+describe("manual runs on on-demand readers", () => {
+  it("serves mail_search through the runtime's readers rather than ON_DEMAND_UNSUPPORTED", async () => {
+    // Regression: the runtime built its tool registry without `readers`, so every `mail_*` tool
+    // failed for a connected Gmail account while the run's own reads worked.
+    const env = await setup([
+      toolOutput("mail_search", { query: "from:alice@example.com", limit: 5 }),
+      "Found the invoice.",
+    ]);
+    await env.arrive({
+      providerId: "invoice",
+      subject: "Invoice due Friday",
+      textBody: "Please pay by Friday.",
+      preview: "Please pay by Friday.",
+    });
+    const run = await env.runtime.run({ kind: "manual", instruction: "Anything due this week?" });
+    const reply = env.llm.calls[1]?.messages.at(-1);
+    expect(reply).toBeDefined();
+    expect(reply).not.toMatchObject({ isError: true });
+    const text = JSON.stringify(reply);
+    expect(text).not.toContain("ON_DEMAND_UNSUPPORTED");
+    expect(text).toContain("Invoice due Friday");
+    expect(env.mock.reader().costLog.map((entry) => entry.method)).toContain("search");
+    expect(env.readers).toHaveBeenCalled();
+    expect(run.toolBudget.callsMade).toBe(1);
+  });
+
+  it("still reports ON_DEMAND_UNSUPPORTED when the host injects no readers", async () => {
+    const env = await setup(
+      [toolOutput("mail_search", { query: "from:alice@example.com", limit: 5 }), "No reader."],
+      { reader: false },
+    );
+    await env.runtime.run({ kind: "manual", instruction: "Anything due this week?" });
+    const reply = env.llm.calls[1]?.messages.at(-1);
+    expect(reply).toMatchObject({ isError: true });
+    expect(JSON.stringify(reply)).toContain("no provider reader");
   });
 });

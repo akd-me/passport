@@ -66,7 +66,7 @@ export class Context {
     if (!reader) {
       throw new ToolError(
         "ON_DEMAND_UNSUPPORTED",
-        "On-demand mail reads are not available for this account; use the legacy store tools.",
+        "On-demand mail reads are not available for this account: the host configured no provider reader. search_emails and get_email still read the local cache.",
       );
     }
     return reader;

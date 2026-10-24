@@ -3,6 +3,16 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
+## [0.3.1] — 2026-10-23
+
+### Fixed
+
+- The built-in agent runtime built its tool registry without the on-demand readers, so in a task
+  every `mail_search` / `mail_read` / `mail_grep` call failed with `ON_DEMAND_UNSUPPORTED` for a
+  connected Gmail or Outlook account and the model fell back to the local cache. The runtime now
+  passes the same readers its own reads use. MCP clients were unaffected. The error message now
+  says what is missing (a provider reader) instead of pointing at "legacy store tools".
+
 ## [0.3.0] — 2026-10-22
 
 ### Added

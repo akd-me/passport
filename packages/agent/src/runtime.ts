@@ -172,6 +172,9 @@ class PersonalAgentRuntime implements AgentRuntime {
       selfAddresses: this.options.selfAddresses,
       now: this.now,
       freeBusy: this.options.freeBusy,
+      // The same on-demand readers the run's own reads use; without them every `mail_*` tool
+      // fails with ON_DEMAND_UNSUPPORTED and the model falls back to the local cache.
+      readers: this.options.readers,
       actor: { kind: "agent", id: run.id },
       observer: options.observer?.toolCall?.bind(options.observer),
       readOnly: options.readOnly,
