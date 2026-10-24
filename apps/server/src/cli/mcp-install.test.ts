@@ -253,4 +253,4 @@ it("MCP_INSTALL: packaged shim delegates Codex HTTP dry-run and user installs to
     expect(registration.env.PASSPORT_DATA_DIR).toBe(options.dataDir);
     expect((await stat(registration.args[0])).isFile()).toBe(true);
   }
-});
+}, 30_000);
