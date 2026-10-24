@@ -5,6 +5,7 @@ import type {
   HostAgentReasoning,
   HostAgentUsage,
 } from "@passport/types";
+import { LlmError } from "../errors.js";
 import type { JsonSchema } from "../llm/types.js";
 
 /** Everything one CLI invocation needs; shared by sessions and completions. */
@@ -18,6 +19,10 @@ export interface HostRunSpec {
   mcpServers?: Record<string, HostAgentMcpServer>;
   allowedTools?: string[];
   maxTurns?: number;
+  /** Resume this provider session (sessions only); implies `persistSession`. */
+  resumeSessionId?: string;
+  /** Keep the session resumable on disk (sessions only). */
+  persistSession?: boolean;
   /** Structured final output. */
   jsonSchema?: JsonSchema;
   /** A single completion: no tools, no MCP, no user customizations. */
@@ -74,3 +79,17 @@ export function record(value: unknown): Record<string, unknown> | undefined {
 
 /** MCP server names become tool-name prefixes and TOML keys; keep them simple. */
 export const SERVER_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Provider session ids travel in argv; never let one read as a flag. */
+export const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+/** The resume id of a session spec, validated; undefined for completions and fresh sessions. */
+export function resumeId(spec: HostRunSpec): string | undefined {
+  if (spec.completion || spec.resumeSessionId === undefined) {
+    return undefined;
+  }
+  if (!SESSION_ID.test(spec.resumeSessionId)) {
+    throw new LlmError("Invalid provider session id", "HOST_AGENT_CONFIG");
+  }
+  return spec.resumeSessionId;
+}

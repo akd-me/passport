@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { HOST_AGENT_DEFAULT_MODELS } from "@passport/agent";
 import type { Account, LlmConfig, LlmSelection } from "@passport/types";
+import { type AgentBudgetConfig, budgetFromEnv, validateAgentBudget } from "./agent-session.js";
 import { ApiError } from "./errors.js";
 import { warnDeprecatedSyncConfig, watchIntervalSeconds } from "./onboarding/config.js";
 
@@ -29,6 +30,8 @@ export interface PassportConfig {
    * `PASSPORT_CLAUDE_PATH` / `PASSPORT_CODEX_PATH` take precedence.
    */
   hostAgents?: { claudePath?: string; codexPath?: string };
+  /** Run budget of task runs (default 200 tool calls, 30 minutes); see agent-session.ts. */
+  agentBudget?: AgentBudgetConfig;
   accounts: Account[];
 }
 
@@ -115,6 +118,7 @@ export function validateConfig(config: PassportConfig): PassportConfig {
     throw new ApiError("INVALID_CONFIG", "llmSelection must be auto or explicit");
   }
   validateHostAgentPaths(config.hostAgents);
+  validateAgentBudget(config.agentBudget);
   return config;
 }
 
@@ -231,6 +235,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     delete config.llm.apiKey;
   }
   config.llmSelection = saved.llmSelection ?? inferSelection(saved.llm);
+  config.agentBudget = budgetFromEnv(saved.agentBudget, env);
   return validateConfig(config);
 }
 

@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { HostAgentKind, HostAgentReasoning } from "@passport/types";
+import type {
+  HostAgentEvent,
+  HostAgentKind,
+  HostAgentMcpServer,
+  HostAgentReasoning,
+  HostAgentSessionResult,
+} from "@passport/types";
 import { LlmError } from "../errors.js";
 import { extractJson, validateJson } from "../llm/json.js";
 import type {
@@ -13,7 +19,7 @@ import type {
   LlmTool,
   LlmToolCall,
 } from "../llm/types.js";
-import { runHostAgent } from "./session.js";
+import { runHostAgent, runHostAgentSession } from "./session.js";
 
 /** Defaults per host agent: a capable main model and a cheaper one for `model: "fast"`. */
 export const HOST_AGENT_DEFAULT_MODELS: Record<HostAgentKind, { main: string; fast: string }> = {
@@ -47,6 +53,32 @@ export interface HostAgentLlmClientOptions {
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   binaryPath?: string;
+}
+
+/** One agentic session turn on the client's CLI, model and scratch directory. */
+export interface HostAgentSessionInput {
+  prompt: string;
+  systemPrompt: string;
+  mcpServers: Record<string, HostAgentMcpServer>;
+  allowedTools?: string[];
+  /** Resume this provider session; the session is always kept resumable. */
+  resumeSessionId?: string;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}
+
+/** An `LlmClient` that can also run a whole agentic session (the host agents). */
+export interface SessionLlmClient extends LlmClient {
+  readonly hostKind: HostAgentKind;
+  session(
+    input: HostAgentSessionInput,
+    onEvent: (event: HostAgentEvent) => void,
+  ): { done: Promise<HostAgentSessionResult>; cancel(): void };
+}
+
+export function isSessionLlmClient(client: LlmClient): client is SessionLlmClient {
+  const candidate = client as Partial<SessionLlmClient>;
+  return typeof candidate.session === "function" && typeof candidate.hostKind === "string";
 }
 
 function toolSchema(tools: LlmTool[]): JsonSchema {
@@ -111,8 +143,11 @@ function transcript(messages: LlmMessage[]): string {
  * enforcement and is validated locally. Interactive tools are emulated as structured output,
  * so Passport (not the CLI) executes them under policy.
  */
-export class HostAgentLlmClient implements LlmClient {
+export class HostAgentLlmClient implements SessionLlmClient {
+  readonly hostKind: HostAgentKind;
+
   constructor(private readonly options: HostAgentLlmClientOptions) {
+    this.hostKind = options.kind;
     if (options.kind !== "claude-code" && options.kind !== "codex") {
       throw new LlmError("Unsupported host agent", "LLM_CONFIG");
     }
@@ -122,6 +157,37 @@ export class HostAgentLlmClient implements LlmClient {
     ) {
       throw new LlmError("Invalid host agent timeout", "LLM_CONFIG");
     }
+  }
+
+  /**
+   * A task run as one native session: the CLI calls the supplied MCP tools itself and streams
+   * events. Uses the main model and reasoning, and keeps the session resumable.
+   */
+  session(
+    input: HostAgentSessionInput,
+    onEvent: (event: HostAgentEvent) => void,
+  ): { done: Promise<HostAgentSessionResult>; cancel(): void } {
+    const { kind } = this.options;
+    const reasoning =
+      this.options.reasoning?.main ?? (kind === "codex" ? ("medium" as const) : undefined);
+    return runHostAgentSession(
+      {
+        kind,
+        model: this.options.model?.trim() || HOST_AGENT_DEFAULT_MODELS[kind].main,
+        ...(reasoning ? { reasoning } : {}),
+        prompt: input.prompt,
+        systemPrompt: input.systemPrompt,
+        cwd: this.options.cwd ?? join(tmpdir(), "passport-host-agent"),
+        mcpServers: input.mcpServers,
+        ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
+        ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
+        persistSession: true,
+        timeoutMs: input.timeoutMs,
+        ...(input.signal ? { signal: input.signal } : {}),
+      },
+      onEvent,
+      { log: this.options.log, env: this.options.env, binaryPath: this.options.binaryPath },
+    );
   }
 
   async complete(opts: CompleteOptions): Promise<LlmCompletion> {

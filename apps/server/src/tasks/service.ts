@@ -24,6 +24,7 @@ import {
 import { ApiError } from "../errors.js";
 import { contextItems, taskByAction } from "./context.js";
 import { type RunCeilings, type RunDescription, TaskRunner } from "./runner.js";
+import { taskSessionOptions } from "./session.js";
 import { idleStatus } from "./status.js";
 import { frameUntrusted } from "./untrusted.js";
 
@@ -191,6 +192,7 @@ export class TaskService {
     const texts = [...steered, message.text];
     this.requests.set(runId, texts);
     const instruction = await this.instruction(task, texts, item.seq);
+    const session = this.sessionOptions(task.id, { texts, beforeSeq: item.seq });
     let created!: (run: TaskRun) => void;
     const persisted = new Promise<TaskRun>((resolve) => {
       created = resolve;
@@ -213,7 +215,7 @@ export class TaskService {
             ...(context.emailIds?.length ? { emailIds: context.emailIds } : {}),
             ...(context.matterId ? { matterId: context.matterId } : {}),
           },
-          options,
+          { ...options, session },
         ),
       describeAgentRun,
     );
@@ -221,6 +223,11 @@ export class TaskService {
     done.catch(() => undefined).finally(() => this.requests.delete(runId));
     const run = await Promise.race([persisted, done.then(() => null)]);
     return { run: run ?? (await persisted), done };
+  }
+
+  /** How a run of this task resumes its provider session (W1A); see `session.ts`. */
+  sessionOptions(taskId: string, request: Parameters<typeof taskSessionOptions>[3]) {
+    return taskSessionOptions(this.options.store, this.tasks, taskId, request);
   }
 
   /** The task and run behind an action (`GET /api/tasks/by-action/:actionId`). */

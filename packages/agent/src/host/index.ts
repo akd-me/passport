@@ -1,5 +1,14 @@
-export type { HostAgentLlmClientOptions } from "./client.js";
-export { HOST_AGENT_DEFAULT_MODELS, HOST_AGENT_MODELS, HostAgentLlmClient } from "./client.js";
+export type {
+  HostAgentLlmClientOptions,
+  HostAgentSessionInput,
+  SessionLlmClient,
+} from "./client.js";
+export {
+  HOST_AGENT_DEFAULT_MODELS,
+  HOST_AGENT_MODELS,
+  HostAgentLlmClient,
+  isSessionLlmClient,
+} from "./client.js";
 
 export type { DetectHostAgentsOptions } from "./detect.js";
 export {

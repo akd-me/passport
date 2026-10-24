@@ -11,7 +11,7 @@ Vocabulary: "task" is agent work, "conversation" is an email thread, "matter" is
 
 | Type | Fields |
 |---|---|
-| `Task` | `id`, `title`, `accountIds`, `status` (`inbox` / `working` / `snoozed` / `settled` / `archived`), `pinned`, `snoozedUntil?`, `permissionMode` (`supervised` / `auto_accept_edits` / `auto` / `full_access`), `permissionModePinned?`, `interactionMode` (`default` / `plan`), `createdBy` (`user` / `agent` / `system`), `kind` (`task` / `inbox` / `routine`), `parentTaskId?`, `needsUser` (`null` / `approval` / `question` / `failure`), `pendingActionIds?`, `lastActivityAt`, `createdAt`, `settledAt?`, `watches: ConversationWatch[]`, `jobId?` (routine), `revision?`, `approvalGrants?: TaskApprovalGrant[]` |
+| `Task` | `id`, `title`, `accountIds`, `status` (`inbox` / `working` / `snoozed` / `settled` / `archived`), `pinned`, `snoozedUntil?`, `permissionMode` (`supervised` / `auto_accept_edits` / `auto` / `full_access`), `permissionModePinned?`, `interactionMode` (`default` / `plan`), `createdBy` (`user` / `agent` / `system`), `kind` (`task` / `inbox` / `routine`), `parentTaskId?`, `needsUser` (`null` / `approval` / `question` / `failure`), `pendingActionIds?`, `lastActivityAt`, `createdAt`, `settledAt?`, `watches: ConversationWatch[]`, `jobId?` (routine), `revision?`, `approvalGrants?: TaskApprovalGrant[]`, `providerSessionId?`, `providerSessionKind?` (`claude-code` / `codex`: the host-agent session follow-ups resume, see [Sessions](#sessions)) |
 | `TaskApprovalGrant` | `category`, `actionId`, `trustLevel`, `risk`, `reversibility`, `grantedAt` (see [Approval scopes](#approval-scopes)) |
 | `ConversationWatch` | `threadHandle`, `account`, `since`, `lastWakeAt?`, `consecutiveWakes` |
 | `TaskRun` | `id`, `taskId`, `status` (`queued` / `running` / `waiting` / `completed` / `failed` / `cancelled`), `trigger`, `priority` (`interactive` / `background`), `agentRunId`, `createdAt`, `startedAt?`, `endedAt?`, `summary?`, `actionIds`, `usage?` (`llmCalls`, `toolCalls`, `inputTokens`, `outputTokens`), `error?` (a stable code) |
@@ -28,7 +28,7 @@ Item payloads by `kind`:
 | `approval_request` | `{ actionId, summary }`; approve or reject with `/api/actions/:id/{approve,reject}` |
 | `question` | `{ text }` (reserved: nothing emits it yet) |
 | `secret_request` | `{ requestId, text, expiresAt }`; private password field, never the value; see [request_secret](tools.md#private-secrets-v04) |
-| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`) |
+| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`), `BUDGET_EXHAUSTED` (the run reached its [budget](#sessions)) |
 | `notification` | `{ source: "arrival" \| "watch" \| "schedule" \| "system", summary, row? }`; `row` is a `MailRow`. A task created with `matterId` or `emailIds` gets a `system` one on its first run ("With matter “…” and 2 messages “…”, “…”"; `row` when there is exactly one message) |
 
 **Untrusted data.** Items with `untrusted: true` contain provider-derived strings (subjects,
@@ -82,9 +82,10 @@ System tasks (`inbox`, `routine`) follow the global trust dial: before each run 
 - **Interrupt** cancels every cancellable run of the task. Each one ends `cancelled` with a
   `RUN_CANCELLED` notice. A run cancelled by a steer leaves the status to its replacement, so the
   task never bounces through the inbox.
-- **Context.** Each message run's prompt includes the task title, up to 16 recent
-  user/assistant/notification items (6,000 characters, wrapped as untrusted data), and the
-  request.
+- **Context.** A message run that starts a fresh session (or runs on an API provider) gets a
+  prompt with the task title, up to 16 recent user/assistant/notification items (6,000
+  characters, wrapped as untrusted data), and the request. A run that resumes the task's
+  provider session gets a short turn instead (see [Sessions](#sessions)).
 - **Plan mode** (`interactionMode: "plan"`). Write tools (including `watch_conversation` and
   `unwatch_conversation`) don't execute. They return
   `{ status: "planned" }`, appear as `tool_call` items with `planned: true`, and the model is asked
@@ -97,6 +98,48 @@ System tasks (`inbox`, `routine`) follow the global trust dial: before each run 
   can only lower the level the trust ladder would give.
 - **Restart.** Runs left `queued` or `running` by a previous process are marked `failed`
   (`SERVER_RESTARTED`). An interrupted message run surfaces the task with `needsUser: "failure"`.
+
+### Sessions
+
+On a host agent (Codex or Claude Code), each message run and each watch or wake run of a task
+is **one agentic session**: the CLI gets Passport's tools as an MCP server and calls them
+natively, streaming as it goes. There is no JSON tool protocol and no per-step CLI process.
+
+- **Tool belt.** The run's own registry tools (the same ones an API-provider run gets, under
+  `{kind:"agent",id:runId}`, with `ToolContext.taskId`, the run's permission ceiling, plan-mode
+  read-only and the on-demand readers) are served from the server process over Streamable HTTP
+  on `127.0.0.1`, behind a fresh 32-byte bearer per run that is revoked when the run ends. The
+  CLI sees them as `mcp__passport__<tool>` and nothing else: shell, file edits, web search and
+  the person's own CLI configuration stay off. The session's system prompt adds a short
+  orchestration section (what a task is, how approvals come back, the budget, when to hand
+  back), under 4 KB.
+- **Timeline.** Items are appended as the session streams: a `tool_call` when each tool call
+  completes (the same redacted, at most 200-character summaries), an `assistant_message` for
+  each text block, and the run's `usage` (tokens, tool calls; `llmCalls` counts sessions) when
+  it ends.
+- **Budget.** Every manual or task run, on a host agent or an API provider, may make at most
+  200 tool calls and run for at most 30 minutes (`agentBudget: { maxToolCalls, maxRunMinutes }`
+  in `passport.config.json`, 1–10,000 calls and 1–1,440 minutes, or
+  `PASSPORT_AGENT_MAX_TOOL_CALLS` and `PASSPORT_AGENT_MAX_RUN_MINUTES`). A session's next tool call past the budget is refused and
+  the session stopped; a run that hits either limit completes with a `BUDGET_EXHAUSTED` notice,
+  and the work done so far (including proposals) is kept. Arrival triage and the built-in
+  digest and matter review keep their fixed pipelines.
+- **Resume.** The provider session id is recorded on the task (`providerSessionId`,
+  `providerSessionKind`) as soon as the session starts. The next run resumes it
+  (`claude --resume <session_id>`, `codex exec resume <thread_id>`), resolved when that run
+  starts, so a follow-up queued behind the first run resumes it too. The resumed turn holds
+  the task line, the current plan mode, notifications and notices since the person's previous
+  message, the current status of the task's last 10 proposals (both framed as untrusted data),
+  and the request. The full history prompt is used instead when the task has no session, when
+  the configured host agent is a different one, and when a resume fails before the session
+  did anything (the provider no longer has it); the fresh session's id replaces the old one.
+- **Stop and steer.** Interrupt and steer cancel the session: the CLI process group is stopped,
+  any later tool call it makes is refused, and the run ends `cancelled` once in-flight tool
+  calls return. A steer's replacement run resumes the cancelled session with both messages.
+- **API providers** (Anthropic, OpenAI, OpenAI-compatible, Ollama) keep the native tool loop
+  in-process with the same budget, and task runs get the same orchestration section. A host
+  agent outside a task (a user routine, `passport` CLI runs without a server) keeps the
+  completion loop, with the budget instead of the former 12-call cap.
 
 ## Status rules
 
@@ -413,6 +456,20 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   even when a grant approves it a moment later; the run's change summary shows the outcome.
 - Child tasks: `parentTaskId` is honored for the permission clamp, but no tool spawns a child
   task yet.
+
+## Known limitations (W1A sessions)
+
+- Session transcripts are kept by the CLI in its own data directory (`~/.claude/projects/…`,
+  `~/.codex/sessions/…`), keyed by the `<data-dir>/host-agent` working directory, so resume
+  works. They contain tool results, that is mail content. Passport does not delete them; a
+  task that is settled or archived does not remove its session.
+- A cancelled session is killed rather than drained: a tool call already running in the server
+  completes and is recorded, but the model never sees its result. The next run's resume turn
+  lists proposals, not every read.
+- `llmCalls` counts sessions (one per run, two when a failed resume fell back), not model turns
+  inside a session. Claude Code reports a list-price cost that Passport ignores; usage has no
+  cost for subscriptions.
+- Arrival triage and routines still use the completion path (W2C moves them onto sessions).
 
 ## Known limitations (review R4)
 

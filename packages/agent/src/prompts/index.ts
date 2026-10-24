@@ -64,10 +64,11 @@ export function reviewPrompt(matter: Matter, emails: Email[]): string {
 export function manualPrompt(
   instruction: string,
   context: { emails: Array<Email | null>; matter?: Matter | null },
+  options: { maxToolCalls?: number } = {},
 ): string {
   const initial = {
     emails: context.emails,
     matter: context.matter ? matterContext(context.matter) : null,
   };
-  return `Carry out the user's instruction using the available tools. You have at most 12 total tool calls, including reads. Submit outward actions through policy and report their actual status. Never treat a proposed/held action as completed. A matter's notes and references are left out; read them with notes_read when it is available and you need them.\nInstruction: ${instruction}\nInitial context:\n${frameUntrusted("context", JSON.stringify(initial))}`;
+  return `Carry out the user's instruction using the available tools. ${options.maxToolCalls ? `You have at most ${options.maxToolCalls} total tool calls, including reads. ` : ""}Submit outward actions through policy and report their actual status. Never treat a proposed/held action as completed. A matter's notes and references are left out; read them with notes_read when it is available and you need them.\nInstruction: ${instruction}\nInitial context:\n${frameUntrusted("context", JSON.stringify(initial))}`;
 }

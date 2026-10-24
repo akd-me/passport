@@ -7,6 +7,7 @@ import {
   type ImageContent,
   limitResponse,
   responseByteBudget,
+  type ToolResult,
   toMcpTools,
 } from "@passport/tools";
 import { Context, type MailboxMcpDependencies } from "./context.js";
@@ -84,40 +85,8 @@ export function createMailboxMcpServer(input: MailboxMcpDependencies): McpServer
         isError: true,
       };
     }
-    let result = await tool.handler(request.params.arguments ?? {});
-    // Image attachments travel beside the JSON as an image block, outside the text budget.
-    const image = (result as { [IMAGE_CONTENT]?: ImageContent })[IMAGE_CONTENT];
-    const budget = responseByteBudget(deps.responseByteBudget);
-    const envelope = () => ({
-      content: [{ type: "text" as const, text: JSON.stringify(result) }],
-      ...(result.isError ? { isError: true } : {}),
-    });
-    // The protocol serializes tool JSON inside a string; account for that second escaping pass.
-    for (
-      let available = budget - 128;
-      Buffer.byteLength(JSON.stringify(envelope())) > budget;
-      available = Math.floor(available / 2)
-    ) {
-      try {
-        result = limitResponse(result, available);
-      } catch {
-        // MCP response exceeds the configured budget; returning the bounded error.
-        deps.log?.("MCP response exceeds the configured budget; returning the bounded error");
-
-        result = { isError: true, error: "RESPONSE_TOO_LARGE", reason: "Request fewer results." };
-        break;
-      }
-    }
-    const response = envelope();
-    return image
-      ? {
-          ...response,
-          content: [
-            ...response.content,
-            { type: "image" as const, data: image.data, mimeType: image.mimeType },
-          ],
-        }
-      : response;
+    const result = await tool.handler(request.params.arguments ?? {});
+    return toolCallResponse(result, deps.responseByteBudget, deps.log);
   });
   registerResources(context);
   registerPrompts(context);
@@ -135,4 +104,48 @@ export function cloneMailboxServer(server: McpServer): McpServer {
     );
   }
   return createMailboxMcpServer(deps);
+}
+
+/**
+ * A registry result as an MCP tool response within the byte budget; image attachments travel
+ * beside the JSON as an image block, outside the text budget. Shared with the tool belt.
+ */
+export function toolCallResponse(
+  input: ToolResult,
+  byteBudget: number | undefined,
+  log?: (message: string) => void,
+) {
+  let result = input;
+  const image = (result as { [IMAGE_CONTENT]?: ImageContent })[IMAGE_CONTENT];
+  const budget = responseByteBudget(byteBudget ?? DEFAULT_MCP_RESPONSE_BYTE_BUDGET);
+  const envelope = () => ({
+    content: [{ type: "text" as const, text: JSON.stringify(result) }],
+    ...(result.isError ? { isError: true } : {}),
+  });
+  // The protocol serializes tool JSON inside a string; account for that second escaping pass.
+  for (
+    let available = budget - 128;
+    Buffer.byteLength(JSON.stringify(envelope())) > budget;
+    available = Math.floor(available / 2)
+  ) {
+    try {
+      result = limitResponse(result, available);
+    } catch {
+      // MCP response exceeds the configured budget; returning the bounded error.
+      log?.("MCP response exceeds the configured budget; returning the bounded error");
+
+      result = { isError: true, error: "RESPONSE_TOO_LARGE", reason: "Request fewer results." };
+      break;
+    }
+  }
+  const response = envelope();
+  return image
+    ? {
+        ...response,
+        content: [
+          ...response.content,
+          { type: "image" as const, data: image.data, mimeType: image.mimeType },
+        ],
+      }
+    : response;
 }

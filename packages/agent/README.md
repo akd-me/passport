@@ -81,6 +81,10 @@ most 250 ms for inherited stdio to close. Descendants that create a separate gro
 group cleanup; Windows retains direct-child termination, and host termination that bypasses Node's
 exit hooks (such as SIGKILL) cannot run cleanup.
 
+`persistSession` keeps the session resumable (no `--no-session-persistence` / `--ephemeral`) and
+`resumeSessionId` continues one (`claude --resume <id>`, `codex exec resume <id>`); ids are
+validated before they reach argv.
+
 `maxTurns` is optional. Claude Code enforces it with `--max-turns`. Codex requires a positive safe
 integer and counts JSON-stream turn starts plus tool-call starts (MCP, shell and web search); the
 initial turn consumes one unit, so `maxTurns: 1` allows a final reply but cancels on the first tool
@@ -172,8 +176,17 @@ reviews invoke those handlers too. The system prompt lists registry tool names, 
 new tools become available automatically. The full [catalogue](../../docs/tools.md)
 describes inputs, results and policy categories.
 
-Reads and writes both count toward an absolute 12-tool-call manual limit, including
-batched calls. Recoverable input errors return to the model; dependency/LLM failures
+Reads and writes both count toward the run budget (`budget`, default 200 tool calls and
+30 minutes), including batched calls; a run that reaches it ends with a `BUDGET_EXHAUSTED`
+notice through `observer.notice`.
+
+**Sessions (v0.4).** With a `toolBelt` (`ToolBeltHost`, e.g. `ToolBeltListener` from
+`@passport/mcp`), a host-agent LLM client and `run(manual, { session })`, the run is one native
+`HostAgentLlmClient.session()`: the CLI calls the run's registry tools over MCP, text streams to
+`observer.assistantMessage`, the provider session to `observer.providerSession`, and
+`session.resume` / `resolveResume` continue an earlier session (falling back to the full
+instruction when the agent kind differs or the resume fails before any activity). See
+`src/session-run.ts`. Recoverable input errors return to the model; dependency/LLM failures
 persist the failed run before throwing. `run()` returns an `AgentRunResult` with
 `toolBudget: {callsMade,llmCalls,inputTokens,outputTokens,totalTokens}`, also persisted
 with the run. Triage calls count in that budget too. Token counts use reported usage.
@@ -261,7 +274,7 @@ client and keeps all mail/calendar credentials in its own provider/executor comp
 Add deterministic rules to `heuristicCategory`, a new branch in `triage`, and short prompt/schema
 functions when needed. Invoke the shared registry through the run context; keep provider access
 and policy overrides out of playbooks. Add tools in `@passport/tools` so both MCP and the agent receive them with shared
-validation; retain the manual call cap. Add fixture tests with `src/testing/memory-store.ts`'s `MemoryStore`,
+validation; keep runs inside the run budget. Add fixture tests with `src/testing/memory-store.ts`'s `MemoryStore`,
 `FakeExecutor`, `FakePolicy`, `MemoryBus`, and scripted `FakeLlm`; no network is used in tests.
 
 Run `pnpm --filter @passport/agent typecheck`, `pnpm --filter @passport/agent test`, and

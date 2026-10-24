@@ -12,6 +12,7 @@ import {
   type HostRunSpec,
   type HostStreamParser,
   record,
+  resumeId,
   SERVER_NAME,
 } from "./types.js";
 
@@ -19,15 +20,19 @@ import {
  * `claude -p --output-format stream-json --verbose`. Completions run in safe mode with every
  * tool disabled and the system prompt replaced. Sessions load only the supplied MCP servers
  * (`--strict-mcp-config`) and ignore user/project settings; anything not allowed is denied
- * rather than prompted.
+ * rather than prompted. Sessions that may be resumed keep Claude Code's own transcript
+ * (`persistSession`, `resumeSessionId`); everything else runs with `--no-session-persistence`.
  */
 export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocation> {
+  const resume = resumeId(spec);
+  const persist = !spec.completion && (spec.persistSession === true || !!resume);
   const args = [
     "-p",
     "--output-format",
     "stream-json",
     "--verbose",
-    "--no-session-persistence",
+    ...(persist ? [] : ["--no-session-persistence"]),
+    ...(resume ? ["--resume", resume] : []),
     "--setting-sources",
     "",
     "--disable-slash-commands",

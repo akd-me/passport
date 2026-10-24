@@ -1,64 +1,72 @@
-import type { AgentTrigger, DraftInput } from "@passport/types";
+import type { AgentTrigger } from "@passport/types";
 import type { RunContext } from "./context.js";
 import { AgentError } from "./errors.js";
-import { isObject } from "./llm/json.js";
 import type { LlmMessage } from "./llm/types.js";
-import { formatDraft } from "./profile.js";
 import { manualPrompt, systemPrompt } from "./prompts/index.js";
+import { orchestrationPrompt } from "./prompts/orchestration.js";
+import { prepareToolInput } from "./tool-input.js";
 
-/** The manual loop consumes the registry directly; no private tool schemas or dispatcher. */
-export async function manual(
+/** The selected messages and matter a manual trigger names, read for its first prompt. */
+export async function manualContext(
   ctx: RunContext,
   trigger: Extract<AgentTrigger, { kind: "manual" }>,
-): Promise<void> {
-  const selected = await Promise.all(
+) {
+  const emails = await Promise.all(
     (trigger.emailIds ?? []).map((id) => ctx.store.emails.get(id, ctx.reads.storeRead())),
   );
   const matter = trigger.matterId ? await ctx.store.matters.get(trigger.matterId) : undefined;
+  return { emails, matter };
+}
+
+/**
+ * The completion loop (API providers, and host agents outside task sessions): the registry's
+ * tools as native tool definitions, bounded by the run budget instead of a fixed call count.
+ */
+export async function manual(
+  ctx: RunContext,
+  trigger: Extract<AgentTrigger, { kind: "manual" }>,
+  options: { orchestration?: boolean } = {},
+): Promise<void> {
+  const { budget } = ctx;
   const messages: LlmMessage[] = [
-    { role: "user", content: manualPrompt(trigger.instruction, { emails: selected, matter }) },
+    {
+      role: "user",
+      content: manualPrompt(trigger.instruction, await manualContext(ctx, trigger), {
+        maxToolCalls: budget.limits.maxToolCalls,
+      }),
+    },
   ];
   const tools = ctx.tools.map(({ name, description, inputSchema }) => ({
     name,
     description,
     inputSchema,
   }));
-  let calls = 0;
-  while (calls < 12) {
-    const response = await ctx.complete({
-      system: systemPrompt(
-        ctx.profile,
-        ctx.drafts,
-        tools.map((tool) => tool.name),
-      ),
-      messages,
-      tools,
-      model: "main",
-    });
+  const system = [
+    systemPrompt(
+      ctx.profile,
+      ctx.drafts,
+      tools.map((tool) => tool.name),
+    ),
+    options.orchestration ? orchestrationPrompt(budget.limits, false) : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  while (budget.checkTime()) {
+    const response = await ctx.complete({ system, messages, tools, model: "main" });
     if (!response.toolCalls.length) {
-      ctx.notes.push(`Manual instruction completed with ${calls} tool calls.`);
+      ctx.notes.push(`Manual instruction completed with ${budget.used} tool calls.`);
       return;
     }
     messages.push({ role: "assistant", content: response.text, toolCalls: response.toolCalls });
     for (const call of response.toolCalls) {
-      if (calls === 12) {
+      if (!budget.take()) {
         break;
       }
-      calls++;
-      let input = call.arguments;
-      if (isObject(input)) {
-        if (isObject(input.draft)) {
-          const draft = input.draft as unknown as DraftInput;
-          input = {
-            ...input,
-            draft: { ...draft, textBody: formatDraft(draft.textBody, ctx.profile, ctx.drafts) },
-          };
-        } else if (call.name === "reply_draft" && typeof input.textBody === "string") {
-          input = { ...input, textBody: formatDraft(input.textBody, ctx.profile, ctx.drafts) };
-        }
-      }
       try {
-        const result = await ctx.callTool(call.name, input);
+        const result = await ctx.callTool(
+          call.name,
+          prepareToolInput(ctx, call.name, call.arguments),
+        );
         messages.push({
           role: "tool",
           toolCallId: call.id,
@@ -79,6 +87,18 @@ export async function manual(
         });
       }
     }
+    if (budget.exhausted) {
+      break;
+    }
   }
-  ctx.notes.push("Manual tool-call limit reached (12); remaining work requires another run.");
+  budgetExhausted(ctx);
+}
+
+/** The run stops at its budget: a note on the run and a `BUDGET_EXHAUSTED` timeline notice. */
+export function budgetExhausted(ctx: RunContext): void {
+  const notice = ctx.budget.notice();
+  ctx.notes.push(
+    `Run budget reached (${ctx.budget.exhausted === "time" ? "time" : `${ctx.budget.limits.maxToolCalls} tool calls`}); remaining work requires another run.`,
+  );
+  ctx.observer?.notice?.(notice);
 }

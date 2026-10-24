@@ -17,6 +17,7 @@ import {
   type TrustLevel,
 } from "@passport/types";
 import { logger } from "../logger.js";
+import { sessionObserver } from "./session.js";
 import { type RunOutcome, statusAfterRun, statusDuringRun, surface } from "./status.js";
 import { clip, costOf, neutralize, summarizeInput, summarizeResult } from "./untrusted.js";
 
@@ -200,6 +201,15 @@ export class TaskRunner {
         observer: {
           toolCall: (event) => this.queue(active, () => this.onToolCall(active, event)),
           assistantMessage: (text) => this.queue(active, () => this.onText(active, text)),
+          ...sessionObserver(
+            {
+              appendItem: (item) => this.appendItem(item),
+              updateTask: (id, patch) => this.updateTask(id, patch),
+              now: this.now,
+            },
+            () => active.run,
+            (write) => this.queue(active, write),
+          ),
         },
       };
       const value = await invoke(options);

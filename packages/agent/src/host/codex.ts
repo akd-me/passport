@@ -13,6 +13,7 @@ import {
   type HostRunSpec,
   type HostStreamParser,
   record,
+  resumeId,
   SERVER_NAME,
 } from "./types.js";
 
@@ -88,24 +89,40 @@ export function strictCompatible(schema: JsonSchema): boolean {
 /**
  * `codex exec --json` in a read-only sandbox outside any repository, with the user's
  * config.toml ignored so only the supplied MCP servers load. Completions also disable the
- * shell and every other tool so untrusted mail cannot drive local commands.
+ * shell and every other tool so untrusted mail cannot drive local commands. Resumable
+ * sessions drop `--ephemeral`; `resumeSessionId` runs `codex exec resume <thread_id>`.
  */
 export async function codexInvocation(spec: HostRunSpec): Promise<HostInvocation> {
   if (spec.maxTurns !== undefined && (!Number.isSafeInteger(spec.maxTurns) || spec.maxTurns <= 0)) {
     throw new LlmError("Codex maxTurns must be a positive safe integer", "HOST_AGENT_CONFIG");
   }
-  const args = [
-    "exec",
-    "--json",
-    "--skip-git-repo-check",
-    "--ephemeral",
-    "--ignore-user-config",
-    "--ignore-rules",
-    "-s",
-    "read-only",
-    "--color",
-    "never",
-  ];
+  const resume = resumeId(spec);
+  const persist = !spec.completion && (spec.persistSession === true || !!resume);
+  // `exec resume` takes neither `-s` nor `--color`; the sandbox is set through config instead.
+  const args = resume
+    ? [
+        "exec",
+        "resume",
+        resume,
+        "--json",
+        "--skip-git-repo-check",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "-c",
+        `sandbox_mode=${toml("read-only")}`,
+      ]
+    : [
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        ...(persist ? [] : ["--ephemeral"]),
+        "--ignore-user-config",
+        "--ignore-rules",
+        "-s",
+        "read-only",
+        "--color",
+        "never",
+      ];
   const env: Record<string, string> = {};
   if (spec.model) {
     args.push("-m", spec.model);

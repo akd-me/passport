@@ -510,9 +510,9 @@ describe("manual tools", () => {
     expect(env.llm.calls.every((call) => call.system.includes("USER.md"))).toBe(true);
   });
 
-  it("caps total tool invocations across multiple rounds at twelve", async () => {
+  it("caps total tool invocations across rounds at the configured budget", async () => {
     const env = await setup(
-      Array.from({ length: 13 }, (_, i) =>
+      Array.from({ length: 14 }, (_, i) =>
         toolOutput(
           "archive_emails",
           { reason: "Organize mail", emailIds: ["email-1"] },
@@ -520,13 +520,21 @@ describe("manual tools", () => {
         ),
       ),
     );
-    const run = await env.runtime.run({ kind: "manual", instruction: "Keep organizing" });
-    expect(env.llm.calls).toHaveLength(12);
+    const runtime = createAgentRuntime({ ...env, budget: { maxToolCalls: 12 } });
+    const notices: unknown[] = [];
+    const run = await runtime.run(
+      { kind: "manual", instruction: "Keep organizing" },
+      { observer: { notice: (notice) => notices.push(notice) } },
+    );
+    // The 13th model turn asks for a 13th call, which the budget refuses.
+    expect(env.llm.calls).toHaveLength(13);
     expect(env.executor.requests).toHaveLength(12);
-    expect(run.summary).toContain("limit reached (12)");
+    expect(run.summary).toContain("Run budget reached (12 tool calls)");
+    expect(notices).toEqual([expect.objectContaining({ code: "BUDGET_EXHAUSTED" })]);
+    expect(env.llm.calls[0]?.messages[0]?.content).toContain("at most 12 total tool calls");
   });
 
-  it("caps a single batch of thirteen tool calls at twelve", async () => {
+  it("caps a single batch of tool calls at the configured budget", async () => {
     const response = toolOutput("archive_emails", {
       reason: "Organize mail",
       emailIds: ["email-1"],
@@ -537,9 +545,45 @@ describe("manual tools", () => {
       arguments: { reason: "Organize mail", emailIds: ["email-1"] },
     }));
     const env = await setup([response]);
-    await env.runtime.run({ kind: "manual", instruction: "Archive selected mail" });
+    const runtime = createAgentRuntime({ ...env, budget: { maxToolCalls: 12 } });
+    await runtime.run({ kind: "manual", instruction: "Archive selected mail" });
     expect(env.executor.requests).toHaveLength(12);
     expect(env.llm.calls).toHaveLength(1);
+  });
+
+  it("defaults the manual budget to 200 tool calls and rejects invalid limits", async () => {
+    const env = await setup(["Done."]);
+    await env.runtime.run({ kind: "manual", instruction: "Say done" });
+    expect(env.llm.calls[0]?.messages[0]?.content).toContain("at most 200 total tool calls");
+    expect(() => createAgentRuntime({ ...env, budget: { maxToolCalls: 0 } })).toThrow(
+      /positive integers/,
+    );
+  });
+
+  it("ends the completion loop with BUDGET_EXHAUSTED when the time budget is spent", async () => {
+    let now = Date.parse(TEST_NOW);
+    const env = await setup([
+      () => {
+        now += 61_000;
+        return toolOutput("archive_emails", { reason: "Organize", emailIds: ["email-1"] });
+      },
+      "never reached",
+    ]);
+    const runtime = createAgentRuntime({
+      ...env,
+      now: () => new Date(now).toISOString(),
+      budget: { maxDurationMs: 60_000 },
+    });
+    const notices: Array<{ code: string; text: string }> = [];
+    const run = await runtime.run(
+      { kind: "manual", instruction: "Organize" },
+      { observer: { notice: (notice) => notices.push(notice) } },
+    );
+    expect(env.llm.calls).toHaveLength(1);
+    expect(env.executor.requests).toEqual([]);
+    expect(notices[0]).toMatchObject({ code: "BUDGET_EXHAUSTED" });
+    expect(notices[0]?.text).toContain("1 minute");
+    expect(run.summary).toContain("Run budget reached (time)");
   });
 
   it("returns repairable read errors to the model", async () => {
