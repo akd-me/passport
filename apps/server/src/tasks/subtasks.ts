@@ -310,7 +310,10 @@ export class TaskSubtasks {
           {
             ...options,
             priority: "background",
-            session: this.service.sessionOptions(parent.id, { instruction }),
+            session: {
+              ...this.service.sessionOptions(parent.id, { instruction }),
+              ...options.session,
+            },
           },
         ),
       describeAgentRun,

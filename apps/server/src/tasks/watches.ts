@@ -369,7 +369,10 @@ export class TaskWatchMonitor {
           {
             ...options,
             priority: "background",
-            session: this.service.sessionOptions(task.id, { instruction }),
+            session: {
+              ...this.service.sessionOptions(task.id, { instruction }),
+              ...options.session,
+            },
           },
         );
       },

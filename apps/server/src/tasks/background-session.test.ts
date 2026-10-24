@@ -56,6 +56,48 @@ async function fixture(kind: HostAgentKind, invocations: FakeInvocation[]) {
 }
 
 describe.each(["codex", "claude-code"] as const)("%s background sessions", (kind) => {
+  it("keeps Inbox and routine wakes ephemeral while user messages keep their transcript", async () => {
+    const env = await fixture(kind, [{ steps: [{ text: "Reviewed." }] }]);
+    const inbox = await env.backend.tasks!.triggers.ensureInbox(env.account.id);
+    const routine = await env.backend.tasks!.triggers.ensureRoutine("review", "Review");
+    for (const task of [inbox, routine]) {
+      // Even a session left by an older build must not be resumed by these tasks.
+      await env.service.runner.updateTask(task.id, {
+        providerSessionId: "old-session",
+        providerSessionKind: kind,
+        watches: [
+          {
+            threadHandle: mailHandle(env.account.id, "thread", task.id),
+            account: env.account.id,
+            since: "2020-01-01T00:00:00.000Z",
+            consecutiveWakes: 0,
+          },
+        ],
+      });
+    }
+    expect(await env.backend.tasks!.watches.expire()).toBe(2);
+    await env.backend.tasks!.watches.idle();
+    const { task, done } = await env.service.create({ message: "Review my mail" });
+    await done;
+    const calls = await env.cli.calls();
+    const flag = kind === "claude-code" ? "--no-session-persistence" : "--ephemeral";
+    expect(calls).toHaveLength(3);
+    for (const call of calls.slice(0, 2)) {
+      expect(call.args).toContain(flag);
+      expect(call.args).not.toContain("--resume");
+      expect(call.args).not.toContain("resume");
+    }
+    expect(calls[2]!.args).not.toContain(flag);
+    expect((await env.service.task(task.id)).providerSessionId).toBe("session-2");
+    for (const system of [inbox, routine]) {
+      expect((await env.service.task(system.id)).providerSessionId).toBe("old-session");
+      expect((await env.service.get(system.id)).runs[0]).toMatchObject({
+        trigger: { kind: "wake" },
+        status: "completed",
+      });
+    }
+  });
+
   it("triages on the Inbox tool belt, records notes and proposals, and acknowledges retry without inference", async () => {
     const id = mailHandle("background", "email", "arrival");
     const env = await fixture(kind, [

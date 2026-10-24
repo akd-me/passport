@@ -213,7 +213,7 @@ export class TaskService {
             ...(context.emailIds?.length ? { emailIds: context.emailIds } : {}),
             ...(context.matterId ? { matterId: context.matterId } : {}),
           },
-          { ...options, session },
+          { ...options, session: { ...session, ...options.session } },
         ),
       describeAgentRun,
     );

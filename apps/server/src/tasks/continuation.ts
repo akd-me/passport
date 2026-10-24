@@ -95,7 +95,10 @@ export async function continueRun(
         {
           ...options,
           ...(fromPerson ? {} : { priority: "background" as const }),
-          session: service.sessionOptions(task.id, { instruction: resumed }),
+          session: {
+            ...service.sessionOptions(task.id, { instruction: resumed }),
+            ...options.session,
+          },
         },
       ),
     describeAgentRun,

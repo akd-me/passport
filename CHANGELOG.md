@@ -124,6 +124,8 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 
 ### Fixed
 
+- Inbox and routine message, watch and wake runs stay ephemeral, including continuations;
+  only user tasks keep resumable CLI transcripts (R1-5 integration).
 - Restart continuations and limit resumes run as host-agent sessions with the tool belt and
   resume the task's provider session; they repeat the run's whole request (a steer's cancelled
   message, an answer's question) and, on a fresh session, the task history (R1-4, R1-17).

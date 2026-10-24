@@ -246,6 +246,7 @@ export class TaskRunner {
         taskId: task.id,
         signal: active.controller.signal,
         readOnly: task.interactionMode === "plan",
+        session: { persist: task.kind === "task" && !task.voiceLearning },
         ...(runAccounts(task) ? { accountIds: runAccounts(task) } : {}),
         ...(task.voiceLearning ? { voiceLearning: task.voiceLearning } : {}),
         ...(this.orchestrator ? { orchestrator: this.orchestrator } : {}),
