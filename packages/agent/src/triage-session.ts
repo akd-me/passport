@@ -36,6 +36,11 @@ ${frame("arrival", { heuristic: preclassification ?? null, sensitive: sensitive 
 ${frame("matter-watch-matches", watched, 300)}`;
 }
 
+/** KV marker: the arrival session organized its email; a retry acknowledges without inference. */
+export function arrivalSessionKey(runId: string): string {
+  return `arrival-session:${runId}`;
+}
+
 /** Routine mail never enters inference. Other mail gets one native session/tool loop. */
 export async function sessionTriage(
   ctx: RunContext,
@@ -76,6 +81,8 @@ export async function sessionTriage(
   if (!organized && !ctx.budget.exhausted && !ctx.readOnly) {
     throw new AgentError("Arrival session did not organize the message", "TRIAGE_INCOMPLETE");
   }
+  // Checkpoint (R1-3): only past this point may a retry skip inference.
+  await ctx.store.kv.set(arrivalSessionKey(ctx.run.id), JSON.stringify({ at: ctx.now() }));
   const category = ctx.arrival.category ?? "other";
   if (
     !ctx.readOnly &&
@@ -94,21 +101,101 @@ export async function sessionTriage(
   ctx.notes.push(`Triaged ${email.id} as ${ctx.arrival.category ?? "other"}.`);
 }
 
-/** Classification is model output; sensitive and known-sender floors remain code-derived. */
+/**
+ * The tools an arrival session may call: the ones its prompt names. Mail is untrusted input, so
+ * everything else (orchestration, secrets, rich output, sends, standing rules, USER.md) is refused
+ * with `INPUT_TRIAGE` rather than left to a denylist (R1-1).
+ */
+export const ARRIVAL_TOOLS: ReadonlySet<string> = new Set([
+  // Mail reads
+  "mail_read",
+  "mail_search",
+  "mail_list",
+  "mail_count",
+  "mail_grep",
+  "mail_labels",
+  "mail_accounts",
+  "mail_attachment_read",
+  "search_emails",
+  "get_email",
+  "get_email_body",
+  "get_thread",
+  "summarize_thread",
+  "list_mailboxes",
+  // People and notes
+  "people_lookup",
+  "people_history",
+  "search_people",
+  "list_people",
+  "get_person",
+  "list_recent_from_person",
+  "notes_read",
+  "notes_search",
+  "notes_write",
+  // Matters
+  "list_matters",
+  "get_matter",
+  "create_matter",
+  "attach_to_matter",
+  "update_matter",
+  // Replies
+  "reply_draft",
+  "create_draft",
+  // Scheduling
+  "list_events",
+  "free_busy",
+  "find_free_slots",
+  "respond_to_event",
+  "propose_meeting",
+  // Organising the arrival itself (only its own email id)
+  "archive_emails",
+  "label_emails",
+  "mark_read",
+]);
+
+/** Mail operations an arrival session may apply to its own email only. */
+const ARRIVAL_EMAIL_ONLY = new Set(["archive_emails", "label_emails", "mark_read"]);
+
+/** Categories the model may choose for an arrival; matters, unsubscribe and profile_update are not mail categories. */
+const ARRIVAL_CATEGORIES: ReadonlySet<string> = new Set<ActionCategory>([
+  "triage",
+  "newsletters",
+  "receipts",
+  "notifications",
+  "scheduling",
+  "replies_known",
+  "replies_stranger",
+  "money",
+  "legal",
+  "other",
+]);
+
+function onlyArrival(ids: unknown, emailId: string): boolean {
+  return Array.isArray(ids) && ids.length === 1 && ids[0] === emailId;
+}
+
+/**
+ * Classification is model output; sensitive and known-sender floors remain code-derived. The
+ * chosen category describes the arrival email only: it reaches policy and the email record
+ * through the organize call itself, never through the session's other drafts and mail
+ * operations, whose categories stay inferred (R1-2).
+ */
 export function arrivalToolContext(ctx: RunContext, name: string, input: unknown): ToolContext {
   const arrival = ctx.arrival;
   if (!arrival) {
     return {};
   }
-  if (
-    ["send", "unsubscribe", "profile_update", "add_standing_rule", "remove_standing_rule"].includes(
-      name,
-    )
-  ) {
+  if (!ARRIVAL_TOOLS.has(name)) {
     throw new AgentError(
-      "Arrival triage organizes and proposes; this action requires a separate task",
+      "Arrival triage organizes and proposes; this tool is not available while triaging mail",
       "INPUT_TRIAGE",
     );
+  }
+  if (
+    ARRIVAL_EMAIL_ONLY.has(name) &&
+    !(isObject(input) && onlyArrival(input.emailIds, arrival.email.id))
+  ) {
+    throw new AgentError("Organize only this arrival's email id", "INPUT_TRIAGE");
   }
   if (
     ["create_draft", "reply_draft", "propose_meeting", "respond_to_event"].includes(name) &&
@@ -123,11 +210,14 @@ export function arrivalToolContext(ctx: RunContext, name: string, input: unknown
   if (["create_matter", "attach_to_matter"].includes(name) && isObject(input)) {
     const ids =
       name === "create_matter" && isObject(input.matter) ? input.matter.emailIds : input.emailIds;
-    if (!Array.isArray(ids) || ids.length !== 1 || ids[0] !== arrival.email.id) {
+    if (!onlyArrival(ids, arrival.email.id)) {
       throw new AgentError("Organize only this arrival's email id", "INPUT_TRIAGE");
     }
-    if (typeof input.category !== "string" || input.category === "profile_update") {
-      throw new AgentError("Provide the arrival category on the matter tool", "INPUT_TRIAGE");
+    if (typeof input.category !== "string" || !ARRIVAL_CATEGORIES.has(input.category)) {
+      throw new AgentError(
+        `Provide the arrival category on the matter tool: one of ${[...ARRIVAL_CATEGORIES].join(", ")}`,
+        "INPUT_TRIAGE",
+      );
     }
     let category =
       sensitiveCategory(arrival.email, arrival.people) ?? (input.category as ActionCategory);
@@ -143,10 +233,12 @@ export function arrivalToolContext(ctx: RunContext, name: string, input: unknown
       category = "replies_stranger";
     }
     arrival.category = category;
+    return {
+      classification: category,
+      classificationEmailIds: [arrival.email.id],
+      projectedPeople: arrival.people,
+      emailPatch: { category, personIds: arrival.personIds },
+    };
   }
-  return {
-    classification: arrival.category,
-    projectedPeople: arrival.people,
-    emailPatch: { category: arrival.category, personIds: arrival.personIds },
-  };
+  return { projectedPeople: arrival.people };
 }

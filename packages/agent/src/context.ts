@@ -101,6 +101,8 @@ export interface RunContext {
     alwaysAsk: import("@passport/types").ActionCategory[];
   };
   readOnly?: boolean;
+  /** Aborts the signal tool calls and on-demand reads run under (the time budget ran out). */
+  stopTools?: () => void;
   callTool: (name: string, input: unknown, context?: ToolContext) => Promise<ToolResult>;
 }
 
