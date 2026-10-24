@@ -220,6 +220,22 @@ describe("queue strip", () => {
     expect(backend.writes()).toHaveLength(1);
   });
 
+  it("R2-7: reorders with Alt+arrows from the row's text button, where Tab lands", async () => {
+    const backend = open(withQueue());
+    await screen.findByRole("region", { name: "Queued messages" });
+    const button = screen.getByRole("button", { name: "Edit queued message: First follow-up" });
+    expect(button).toHaveAccessibleDescription("Alt+Up or Alt+Down moves it");
+    act(() => button.focus());
+    fireEvent.keyDown(button, { key: "ArrowDown", altKey: true });
+    expect(queued()).toEqual(["Second", "First follow-up", "Third"]);
+    await waitFor(() => expect(backend.calls.at(-1)?.body).toEqual({ runIds: ["q2", "q1", "q3"] }));
+    // Focus stays on the moved message, so the next Alt+↓ moves it again.
+    const moved = screen.getByRole("button", { name: "Edit queued message: First follow-up" });
+    expect(moved).toHaveFocus();
+    fireEvent.keyDown(moved, { key: "ArrowDown", altKey: true });
+    expect(queued()).toEqual(["Second", "Third", "First follow-up"]);
+  });
+
   it("reorders by dragging a row onto another", async () => {
     const backend = open(withQueue());
     await screen.findByRole("region", { name: "Queued messages" });
