@@ -1,7 +1,12 @@
 import { InMemoryEventBus, openStore } from "@passport/store";
 import type { Store } from "@passport/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type HookRoutine, RoutineWebhooks } from "./webhooks.js";
+import {
+  type HookRoutine,
+  MAX_PENDING_GLOBAL,
+  MAX_PENDING_PER_ROUTINE,
+  RoutineWebhooks,
+} from "./webhooks.js";
 
 describe("durable webhook delivery windows", () => {
   let store: Store;
@@ -114,6 +119,111 @@ describe("durable webhook delivery windows", () => {
     expect(
       hooks.deliveries(routine.id).some((delivery) => delivery.outcome === "dispatch_failed"),
     ).toBe(true);
+  });
+  it("counts only accepted new windows after filtered, duplicate and expired deliveries", async () => {
+    routine.schedule.filters = [{ path: "body.action", op: "equals", value: "opened" }];
+    routine.schedule.maxDeliveryAgeMinutes = 1;
+    const token = hooks.path(routine.id)!.split("/").at(-1)!;
+    // R1 repro: ten filtered events must leave all ten real windows available.
+    for (let index = 0; index < 10; index++) {
+      expect((await send(token, "filtered-" + index, "ignored")).outcome).toBe("filtered");
+    }
+    const request = {
+      body: { action: "opened" },
+      headers: { "x-webhook-timestamp": "2026-10-24T11:00:00.000Z" },
+      query: {},
+    };
+    expect((await hooks.receive(token, Buffer.from("{}"), request)).outcome).toBe("expired");
+    expect((await send(token, "one", "opened")).outcome).toBe("accepted");
+    for (let index = 0; index < 10; index++) {
+      expect((await send(token, "one", "opened")).outcome).toBe("duplicate");
+    }
+    for (let index = 1; index < 10; index++) {
+      expect((await send(token, "real-" + index, "opened", index + 1)).outcome).toBe("accepted");
+    }
+    expect((await send(token, "excess", "opened", 11)).status).toBe(429);
+  });
+  it("caps queued work across minutes while dispatch is blocked and keeps full prompts out of history", async () => {
+    // Adapted from the R1 pending-growth and 28 MB shared-blob reproductions.
+    routine.schedule = { type: "webhook" };
+    routine.instruction = "{{body}}{{body}}{{body}}{{body}}";
+    dispatch.mockImplementation(() => new Promise(() => {}));
+    const token = hooks.path(routine.id)!.split("/").at(-1)!;
+    for (let index = 0; index < MAX_PENDING_PER_ROUTINE; index++) {
+      const body = "x".repeat(250 * 1024);
+      expect(
+        (
+          await hooks.receive(token, Buffer.from(body), {
+            body,
+            bodyText: body,
+            headers: {},
+            query: {},
+          })
+        ).status,
+      ).toBe(202);
+      await vi.advanceTimersByTimeAsync(60000);
+    }
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect((await send(token, "overflow", "opened")).status).toBe(429);
+    const state = JSON.parse((await store.kv.get("scheduler:webhooks:" + routine.id))!);
+    expect(state.pending).toHaveLength(MAX_PENDING_PER_ROUTINE);
+    expect(state.pending[0].prompt.length).toBeGreaterThan(250000);
+    expect(
+      state.deliveries.every(
+        (entry: { prompt?: string }) => !entry.prompt || entry.prompt.length <= 2048,
+      ),
+    ).toBe(true);
+    expect(await store.kv.get("scheduler:webhooks")).toBeNull();
+    await hooks.stop();
+    hooks = new RoutineWebhooks(store, bus, () => routine, dispatch);
+    await hooks.load();
+    expect((await send(token, "restart-overflow", "opened")).status).toBe(429);
+  });
+  it("caps windows globally, releases capacity on removal and writes only the receiving routine", async () => {
+    await hooks.stop();
+    const routines = new Map<string, HookRoutine>();
+    hooks = new RoutineWebhooks(store, bus, (id) => routines.get(id), dispatch);
+    await hooks.load();
+    for (let index = 0; index <= MAX_PENDING_GLOBAL / MAX_PENDING_PER_ROUTINE; index++) {
+      const id = "global-" + index;
+      routines.set(id, { ...routine, id, schedule: { type: "webhook" } });
+      await hooks.ensure(id);
+    }
+    const writes = vi.spyOn(store.kv, "set");
+    for (let index = 0; index < MAX_PENDING_GLOBAL; index++) {
+      const id = "global-" + Math.floor(index / MAX_PENDING_PER_ROUTINE);
+      const token = hooks.path(id)!.split("/").at(-1)!;
+      expect((await send(token, String(index), "opened")).status).toBe(202);
+      expect(writes.mock.lastCall?.[0]).toBe("scheduler:webhooks:" + id);
+    }
+    expect(writes.mock.calls.every(([key]) => key.startsWith("scheduler:webhooks:global-"))).toBe(
+      true,
+    );
+    const token = hooks.path("global-10")!.split("/").at(-1)!;
+    expect((await send(token, "full", "opened")).status).toBe(429);
+    await hooks.stop();
+    hooks = new RoutineWebhooks(store, bus, (id) => routines.get(id), dispatch);
+    await hooks.load();
+    expect((await send(token, "still-full", "opened")).status).toBe(429);
+    await hooks.remove("global-0");
+    expect((await send(token, "room", "opened")).status).toBe(202);
+  });
+  it("migrates the shared record with tokens, windows, replay and rate limits intact", async () => {
+    const token = hooks.path(routine.id)!.split("/").at(-1)!;
+    await send(token, "one", "opened");
+    const saved = await store.kv.get("scheduler:webhooks:" + routine.id);
+    await hooks.stop();
+    await store.kv.set("scheduler:webhooks", JSON.stringify({ [routine.id]: JSON.parse(saved!) }));
+    await store.kv.delete("scheduler:webhooks:index");
+    await store.kv.delete("scheduler:webhooks:" + routine.id);
+    hooks = new RoutineWebhooks(store, bus, () => routine, dispatch);
+    await hooks.load();
+    expect(hooks.path(routine.id)).toBe("/api/hooks/" + token);
+    expect((await send(token, "one", "opened")).outcome).toBe("duplicate");
+    hooks.start();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(await store.kv.get("scheduler:webhooks")).toBeNull();
   });
   it("expires an overdue window and drops paused or deleted work on restart", async () => {
     routine.schedule.maxDeliveryAgeMinutes = 1;

@@ -45,7 +45,11 @@ export interface HookResult {
   status: 202 | 200 | 401 | 410 | 429;
 }
 const KEY = "scheduler:webhooks";
+const INDEX_KEY = KEY + ":index";
 const REPLAY_MS = 7 * 86400_000;
+export const MAX_PENDING_PER_ROUTINE = 10;
+export const MAX_PENDING_GLOBAL = 100;
+const PREVIEW_CHARS = 2048;
 
 /** Durable intake queue. Mutations serialize; dispatch never holds the intake lock. */
 export class RoutineWebhooks {
@@ -53,6 +57,7 @@ export class RoutineWebhooks {
   private queue: Promise<unknown> = Promise.resolve();
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private active = new Set<string>();
+  private pendingCount = 0;
   private stopped = false;
   constructor(
     private store: Store,
@@ -62,16 +67,45 @@ export class RoutineWebhooks {
     private now = () => Date.now(),
   ) {}
   async load() {
-    const saved = await this.store.kv.get(KEY);
-    this.states = saved ? JSON.parse(saved) : {};
+    const index = await this.store.kv.get(INDEX_KEY);
+    if (index) {
+      for (const id of JSON.parse(index) as string[]) {
+        const saved = await this.store.kv.get(KEY + ":" + id);
+        if (saved) {
+          this.states[id] = JSON.parse(saved);
+        }
+      }
+    } else {
+      // Migrate the old shared record once, preserving accepted work and replay state.
+      const legacy = await this.store.kv.get(KEY);
+      this.states = legacy ? JSON.parse(legacy) : {};
+      for (const id of Object.keys(this.states)) {
+        this.states[id]!.deliveries = this.states[id]!.deliveries.map((delivery) => ({
+          ...delivery,
+          ...(delivery.prompt === undefined
+            ? {}
+            : { prompt: delivery.prompt.slice(0, PREVIEW_CHARS) }),
+        }));
+        await this.save(id);
+      }
+      await this.saveIndex();
+    }
+    await this.store.kv.delete(KEY);
+    this.pendingCount = Object.values(this.states).reduce(
+      (total, state) => total + state.pending.length,
+      0,
+    );
   }
   private exclusive<T>(run: () => Promise<T>): Promise<T> {
     const result = this.queue.then(run);
     this.queue = result.catch(() => logger.warn("Webhook state update failed"));
     return result;
   }
-  private save() {
-    return this.store.kv.set(KEY, JSON.stringify(this.states));
+  private save(id: string) {
+    return this.store.kv.set(KEY + ":" + id, JSON.stringify(this.states[id]));
+  }
+  private saveIndex() {
+    return this.store.kv.set(INDEX_KEY, JSON.stringify(Object.keys(this.states)));
   }
   async ensure(id: string) {
     return this.exclusive(async () => {
@@ -83,7 +117,8 @@ export class RoutineWebhooks {
           deliveries: [],
           rate: { minute: 0, deliveries: 0, updates: 0, requests: 0, rejected: 0 },
         };
-        await this.save();
+        await this.save(id);
+        await this.saveIndex();
       }
       return this.path(id);
     });
@@ -99,7 +134,7 @@ export class RoutineWebhooks {
         throw new ApiError("NOT_FOUND", "Webhook routine not found", 404);
       }
       state.token = randomBytes(32).toString("hex");
-      await this.save();
+      await this.save(id);
       return { webhookUrl: this.path(id)! };
     });
   }
@@ -110,8 +145,10 @@ export class RoutineWebhooks {
     await this.exclusive(async () => {
       clearTimeout(this.timers.get(id));
       this.timers.delete(id);
+      this.pendingCount -= this.states[id]?.pending.length ?? 0;
       delete this.states[id];
-      await this.save();
+      await this.saveIndex();
+      await this.store.kv.delete(KEY + ":" + id);
       await this.store.encryptedKv?.delete("webhook-signature:" + id);
     });
   }
@@ -135,7 +172,7 @@ export class RoutineWebhooks {
       jobId: id,
       receivedAt: new Date(this.now()).toISOString(),
       outcome,
-      ...(prompt === undefined ? {} : { prompt }),
+      ...(prompt === undefined ? {} : { prompt: prompt.slice(0, PREVIEW_CHARS) }),
     };
     state.deliveries = [...state.deliveries, delivery].slice(-50);
     this.bus.emit({ type: "job.delivery", delivery });
@@ -167,7 +204,7 @@ export class RoutineWebhooks {
           return { outcome, status };
         }
         this.log(id, state, outcome);
-        await this.save();
+        await this.save(id);
         return { outcome, status };
       };
       const minute = Math.floor(this.now() / 60000);
@@ -180,14 +217,12 @@ export class RoutineWebhooks {
         return reject("rate_limited", 429);
       }
       if (!routine.enabled) {
-        state.rate.deliveries++;
         return reject("disabled", 410);
       }
       const schedule = routine.schedule;
       if (schedule.signature) {
         const secret = await this.store.encryptedKv?.get("webhook-signature:" + id);
         if (!secret || !verifyWebhookSignature(raw, request.headers, schedule.signature, secret)) {
-          state.rate.deliveries++;
           return reject("rejected_signature", 401);
         }
       }
@@ -201,12 +236,10 @@ export class RoutineWebhooks {
           : Date.parse(value ?? "");
         const timestamp = Number.isFinite(parsed) ? Math.min(parsed, this.now()) : this.now();
         if (this.now() - timestamp > schedule.maxDeliveryAgeMinutes * 60000) {
-          state.rate.deliveries++;
           return reject("expired", 200);
         }
       }
       if (!matchesWebhookFilters(request, schedule.filters)) {
-        state.rate.deliveries++;
         return reject("filtered", 200);
       }
       state.replay = Object.fromEntries(
@@ -214,7 +247,6 @@ export class RoutineWebhooks {
       );
       const replay = webhookKey(schedule.dedupe?.replayKey, request);
       if (replay && state.replay[replay] !== undefined) {
-        state.rate.deliveries++;
         return reject("duplicate", 200);
       }
       const key = webhookKey(schedule.dedupe?.coalesceKey, request);
@@ -222,6 +254,12 @@ export class RoutineWebhooks {
         ? state.pending.find((window) => window.key === key && window.dueAt > this.now())
         : undefined;
       if (pending ? state.rate.updates >= 60 : state.rate.deliveries >= 10) {
+        return reject("rate_limited", 429);
+      }
+      if (
+        !pending &&
+        (state.pending.length >= MAX_PENDING_PER_ROUTINE || this.pendingCount >= MAX_PENDING_GLOBAL)
+      ) {
         return reject("rate_limited", 429);
       }
       // The agent sees a scrubbed request, never bearer/cookie credentials.
@@ -260,8 +298,9 @@ export class RoutineWebhooks {
           prompt,
           dueAt: this.now() + (key ? (schedule.dedupe?.coalesceWindowSeconds ?? 120) * 1000 : 0),
         });
+        this.pendingCount++;
       }
-      await this.save();
+      await this.save(id);
       this.arm(id);
       return { outcome: pending ? "coalesced" : "accepted", status: 202 };
     });
@@ -322,7 +361,9 @@ export class RoutineWebhooks {
         if (!state) {
           return;
         }
-        state.pending = state.pending.filter((entry) => entry.deliveryId !== window.deliveryId);
+        const remaining = state.pending.filter((entry) => entry.deliveryId !== window.deliveryId);
+        this.pendingCount -= state.pending.length - remaining.length;
+        state.pending = remaining;
         const delivery =
           state.deliveries.find((entry) => entry.id === window.deliveryId) ??
           state.deliveries.find((entry) => entry.id === window.latestDeliveryId);
@@ -330,7 +371,7 @@ export class RoutineWebhooks {
           delivery.outcome = outcome;
           this.bus.emit({ type: "job.delivery", delivery });
         }
-        await this.save();
+        await this.save(id);
       });
     } finally {
       this.active.delete(id);

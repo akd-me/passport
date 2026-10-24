@@ -123,6 +123,13 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   Needs you screenshots are recaptured and `queue-strip-light/dark.png` are new.
 
 
+### Fixed
+
+- Webhook new-window budgets count accepted windows only; filtered, duplicate and rejected
+  deliveries leave room for eligible events.
+- Webhook queues are bounded per routine and globally, persist in separate routine records,
+  and retain only prompt previews in delivery history.
+
 ## [0.3.2] — 2026-10-24
 
 ### Fixed
