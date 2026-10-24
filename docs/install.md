@@ -134,6 +134,73 @@ pnpm build
 pnpm --dir apps/server/dist/package pack --pack-destination ..
 ```
 
+## CLI
+
+Start `passport serve` in one terminal, then use task commands in another with the same
+`PASSPORT_DATA_DIR`, host and port. They authenticate with `PASSPORT_API_TOKEN` or the existing
+`<data-dir>/api-token`, like `passport jobs`. Task commands always use the running server; an
+unreachable server, a stale token or a demo server is an error. They never open the store or
+start a model locally. Use `passport task --help` for the complete syntax.
+
+```sh
+passport task start "Find this month's invoices" --account <account-id> --mode supervised --wait
+passport task start "Plan a cleanup of newsletters" --plan --wait
+passport task send <task-id> "Only the PDFs" --steer --wait
+passport task show <task-id> --items 30
+passport task list --status inbox,working
+passport task approve <action-id>
+passport task reject <action-id>
+```
+
+`start` accepts one optional `--account <id>`; omitting it uses the server's account selection.
+`--mode` accepts `supervised`, `auto_accept_edits`, `auto` or `full_access`; the server clamps
+the requested mode to the trust dial. `--plan` investigates without executing writes. `send`
+queues by default; `--steer` cancels the active message run and starts its replacement, following
+the [task API's rules](tasks.md#runs). Approve and reject take an **action id**, shown in the
+timeline and pending approvals, and decide only that action (approval scope `once`). A successful
+approval can still return `held` while the outbox delay runs.
+
+Without `--wait`, start/send print the task and accepted run immediately. With it, they poll
+`GET /api/tasks/:id` once per second until that specific run ends, then print its summary, error
+code (if any), action ids and pending approvals. A task can remain `working` to watch mail after
+its run ends. An approval raised during a run does not end the wait early.
+
+Exit codes: **0** for a successful command; **2** after a waited run when the task needs you
+(approval, question, failure or another `needsUser` reason), or when that run failed or was
+stopped; **1** for argument, connection, authentication or API errors. Approving an action whose
+execution fails also exits 2. Show/list are inspection commands and exit 0 even when they display
+tasks that need you.
+
+Every task command accepts `--json`: one JSON result on stdout, or `{ "error": { "code",
+"message" } }` on stderr for an error. Start/send return `{ task, run }` (the final run with
+`--wait`); show returns `{ task, runs, items, lastSeq }`; list returns `{ items, total,
+nextCursor }`; approve/reject return the server's `ActionRecord`. Show defaults to the latest
+20 timeline items in sequence order; `--items 0` omits them. List follows all server pages,
+optionally filtering any comma-separated combination of `inbox,working,snoozed,settled,archived`.
+
+For example, with offline fixture ids abbreviated:
+
+```text
+$ passport task start "Review my day" --wait
+01K…  inbox  Review my day
+Run 01R…: completed
+Manual instruction completed with 0 tool calls. 0 actions submitted; 1 LLM calls.
+
+$ passport task list --status snoozed
+No tasks.
+
+$ passport task approve 01A…
+Action 01A…: executed
+```
+
+**Known limitations:** task commands require a persistent server (`serve`), so `--demo` and
+offline task execution are unavailable. Waiting uses polling rather than streaming; output
+arrives when the run ends. The detail API retains only the latest 50 runs, so a wait errors if
+its run falls out of that window. Showing a long timeline walks its pages to retain the latest
+N items. To use the CLI from another machine, run it over SSH on the server, or forward its
+loopback API port and supply that server's token; there is no separate CLI remote-URL option.
+The [remote access guide](deploy.md#remote-access) covers private browser access.
+
 ## Configuration
 
 The default data directory is `~/.passport`; set `PASSPORT_DATA_DIR` to override

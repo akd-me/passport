@@ -8,9 +8,11 @@ export function createApp(
   backend: Backend,
   options: Parameters<typeof unauthenticatedApp>[1] = {},
 ) {
-  const auth = new PassportAuth(backend, {
-    PASSPORT_API_TOKEN: randomBytes(32).toString("hex"),
-  });
+  const auth =
+    options.auth ??
+    new PassportAuth(backend, {
+      PASSPORT_API_TOKEN: randomBytes(32).toString("hex"),
+    });
   const app = unauthenticatedApp(backend, { ...options, auth });
   const request = app.request.bind(app);
   app.request = (input, init, env, executionCtx) => {

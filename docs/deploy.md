@@ -87,7 +87,81 @@ same loopback address in your browser. Native CLI initialization also supports
 a one-shot callback on port 53682; that separate listener needs its own tunnel.
 `passport init --llm none --skip-account` initializes without prompts or account consent.
 
-## Remote access and reverse proxies
+## Remote access
+
+Keep Passport listening on loopback and put Tailscale Serve in front of it for private browser
+access. Install and sign in to Tailscale on the server and your other device, allow only your
+devices/users through the tailnet's access rules, and enable MagicDNS and HTTPS certificates
+when Serve prompts. This recipe uses HTTPS Serve on port 443, available within your tailnet;
+see the [Tailscale Serve reference](https://tailscale.com/docs/reference/tailscale-cli/serve).
+
+On the server, replace `passport.example-tailnet.ts.net` with its actual Tailscale DNS name
+(shown by `tailscale status --json` under `Self.DNSName`, without the trailing dot). Start
+Passport in a terminal, or put these variables in the environment of its existing service and
+restart that one server:
+
+```sh
+export PASSPORT_HOST=127.0.0.1
+export PASSPORT_PORT=3000
+export PASSPORT_ALLOWED_HOSTS=passport.example-tailnet.ts.net
+export PASSPORT_TRUST_PROXY=true
+passport serve
+```
+
+Use your existing `PASSPORT_DATA_DIR` consistently; the default is `~/.passport`. Do not start a
+second server for the same workspace. In a second terminal on that host:
+
+```sh
+tailscale serve --bg http://127.0.0.1:3000
+tailscale serve status
+passport token
+```
+
+Serve prints the HTTPS address. Open
+`https://passport.example-tailnet.ts.net/?token=<token>` on the other device, replacing `<token>`
+with the output of `passport token` from the same workspace (or the server's explicit
+`PASSPORT_API_TOKEN`). URL-encode a custom token if it contains URL punctuation. The startup
+login URL uses loopback; replace that origin with the Serve HTTPS origin and keep its
+`/?token=…` suffix. Passport exchanges it for an HttpOnly, SameSite=Strict session cookie and
+redirects to `/`, removing the token from the address bar. Treat the initial URL as a password.
+Tailscale identity headers do not replace Passport authentication. After a server restart or
+token rotation, sign in again. Stop this mapping with `tailscale serve --https=443 off`.
+
+**Host and Origin checks.** `PASSPORT_ALLOWED_HOSTS` accepts exact hostnames (optionally
+`host:port`), comma-separated; omit schemes, paths, wildcards and trailing dots. Allowing the
+tailnet hostname admits its Host header and browser Origin; it does not authenticate requests.
+Loopback remains allowed for local clients. An unknown Host returns **421 INVALID_HOST**;
+an unallowed or malformed Origin on writes, token login or WebSocket upgrades returns
+**403 INVALID_ORIGIN** (HTTP) or 403 on the upgrade. The bearer token cannot bypass these
+checks. Preserve the browser's Origin and intended Host through any proxy; never rewrite an
+arbitrary Origin to a trusted one. Cookie-authenticated writes also require
+`X-Requested-With: passport`, which the web app sends.
+
+`PASSPORT_TRUST_PROXY=true` lets Serve's `X-Forwarded-Proto: https` produce a Secure cookie.
+Use it only with the backend confined to loopback and a proxy that overwrites that header.
+Serve must forward cookies, Authorization and WebSocket upgrades as well as normal HTTP.
+With Docker, keep Compose's host mapping at `127.0.0.1:3000:3000`, retain the container's
+internal `PASSPORT_HOST=0.0.0.0`, and set the allowed-host/trust-proxy variables **inside the
+container**. Run Serve on the Docker host against its loopback port.
+
+**Mac app notifications.** Remote browser access does not provide native Mac notifications,
+menu-bar counts or Dock badges on the viewing device. Those come from a running Passport.app
+attached to its local workspace; the Mac app has no remote-server setting. There is no browser
+push delivery while the page is closed. A headless server keeps working, but check **Needs you**
+in its browser UI or use `passport task … --wait` over SSH for the result of an individual run.
+
+**Validation and known limitations.** Offline tests in `apps/server/src/remote-access.test.ts`
+parse the documented loopback/port settings and allowed-host configuration, simulate forwarded
+HTTPS token login and Secure cookies, and check accepted/rejected Hosts, write Origins, CSRF,
+authentication and WebSocket upgrade authorization through the server's auth checks. The recipe's
+Serve command and flags were checked with Tailscale 1.102.4's local `--help`. No tailnet or Serve
+configuration was changed for these tests: device sign-in, MagicDNS/certificate provisioning,
+access rules, actual proxy header/WebSocket forwarding, access from another device and native
+notification delivery still require a live deployment check. Do not use public Tailscale Funnel
+for this private-access recipe. Provider OAuth still needs the loopback callback forwarding
+described above.
+
+### SSH and other reverse proxies
 
 For a simple home-server connection, keep the default Compose port mapping and
 use an SSH tunnel:
@@ -96,9 +170,7 @@ use an SSH tunnel:
 ssh -N -L 3000:127.0.0.1:3000 your-server
 ```
 
-Then open http://127.0.0.1:3000. Tailscale can also provide private reachability;
-limit ACLs to you and keep the API behind a proxy with authentication. Never use
-public Tailscale Funnel without verifying the authenticated proxy deployment described in [security](security.md).
+Then open the startup login URL at `http://127.0.0.1:3000/?token=<token>`.
 
 A proxy must preserve Authorization, cookies, browser Origin, the intended Host,
 WebSocket upgrades and `X-Requested-With`. Configure exact allowed hosts with
