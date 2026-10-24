@@ -1,0 +1,93 @@
+/*
+ * Tokens: the only place colours, sizes and timings are chosen. Every pair is light, dark.
+ *
+ * Surfaces are warm-grey steps, not borders: canvas (the reading column), sunken (sidebar,
+ * details, quiet blocks), raised (fields, the composer, popovers). One accent, a desaturated
+ * indigo, for the primary action, focus and the "needs you" count. Amber, red and green are for
+ * status words and dots only, never a background larger than a badge.
+ */
+:root {
+  color-scheme: light dark;
+  --font-ui:
+    "Public Sans Variable", "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mail: "Source Serif 4 Variable", "Source Serif 4", Georgia, serif;
+  --font-code: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Surfaces, lightest to darkest in light mode. */
+  --raised: light-dark(#ffffff, #232321);
+  --canvas: light-dark(#fcfcfb, #1b1b1a);
+  --sunken: light-dark(#f4f3f1, #151514);
+  --hover: light-dark(#ecebe8, #272725);
+  --selected: light-dark(#e6e5e1, #2e2e2b);
+  /* Hairlines, only where a tone step cannot separate two things (fields, tables). */
+  --line: light-dark(#e8e7e3, #2c2c29);
+  --line-strong: light-dark(#d5d4cf, #3d3c39);
+
+  --text: light-dark(#1c1c1a, #ecebe7);
+  --text-2: light-dark(#474641, #bdbcb6);
+  --muted: light-dark(#65645e, #9a9992);
+  /* Decorative strokes and disabled glyphs only; readable text uses --muted or stronger. */
+  --faint: light-dark(#a3a29b, #5e5d58);
+
+  --accent: light-dark(#5546b0, #a39de6);
+  --accent-fill: light-dark(#5546b0, #6d62cf);
+  --accent-fill-hover: light-dark(#4a3c9f, #7a70d8);
+  --accent-soft: light-dark(#eeecf7, #26243a);
+  --on-accent: #ffffff;
+
+  --amber: light-dark(#94590c, #dca457);
+  --amber-soft: light-dark(#f8efdf, #30281b);
+  --red: light-dark(#b4372b, #ec8574);
+  --red-soft: light-dark(#faebe8, #362220);
+  --green: light-dark(#2d7650, #6cbf93);
+  --green-soft: light-dark(#e6f1ea, #1c2b23);
+  --blue: light-dark(#2f64c8, #82a8f5);
+
+  --shadow-color: light-dark(rgb(40 38 30 / 0.14), rgb(0 0 0 / 0.5));
+  --scrim: light-dark(rgb(30 28 24 / 0.24), rgb(0 0 0 / 0.55));
+  /* The one elevation: popovers, dialogs, the toast. */
+  --elevation:
+    0 16px 40px -16px var(--shadow-color), 0 2px 8px -2px var(--shadow-color),
+    0 0 0 1px var(--line-strong);
+
+  /* Five sizes. Weight carries emphasis: 500 names and titles, 400 elsewhere, 600 page title. */
+  --t-xs: 0.75rem;
+  --t-s: 0.8125rem;
+  --t-m: 0.875rem;
+  --t-l: 1rem;
+  --t-xl: 1.375rem;
+  --w-medium: 500;
+  --w-title: 600;
+  --lh-prose: 1.5;
+  --lh-row: 1.3;
+
+  /* One radius for controls, one for panels. */
+  --r-control: 6px;
+  --r-panel: 10px;
+
+  /* 8 px grid. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --row-h: 36px;
+  --control-h: 32px;
+  --control-h-sm: 28px;
+
+  --column: 46rem;
+  --sidebar-w: 264px;
+  --details-w: 320px;
+  --topbar-h: 48px;
+
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur: 160ms;
+  --dur-slow: 200ms;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}

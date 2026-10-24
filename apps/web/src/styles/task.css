@@ -1,0 +1,904 @@
+/*
+ * Tasks: the task page reads like a document. Your messages sit right in a tinted block, the
+ * agent writes plain prose, tool groups are one quiet line, run headers are a hairline with the
+ * trigger and what changed. Approvals wait above the composer as a calm list.
+ */
+
+/* ---------------------------------------------------------------- Header */
+.task-head {
+  margin-bottom: var(--s-5);
+}
+.task-head h1 {
+  font-size: var(--t-xl);
+  font-weight: var(--w-title);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1) var(--s-3);
+  margin-top: var(--s-2);
+  font-size: var(--t-s);
+  color: var(--muted);
+}
+.task-meta .state-word {
+  font-weight: var(--w-medium);
+}
+.task-meta .account-dots {
+  display: inline-flex;
+  gap: var(--s-1);
+}
+
+/* ---------------------------------------------------------------- Timeline */
+.task-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-4);
+}
+.tl-entry {
+  min-width: 0;
+  animation: rise-in var(--dur-slow) var(--ease);
+}
+.tl-empty {
+  font-size: var(--t-s);
+}
+.timeline-older {
+  display: flex;
+  justify-content: center;
+  padding: var(--s-1) 0 var(--s-3);
+}
+.plain-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--lh-prose);
+}
+.tl-message {
+  display: grid;
+  gap: var(--s-1);
+  min-width: 0;
+}
+.tl-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.tl-message.from-user {
+  justify-self: end;
+  max-width: min(36rem, 88%);
+  padding: 10px var(--s-3);
+  border-radius: var(--r-panel);
+  background: var(--accent-soft);
+}
+.tl-message.from-agent {
+  max-width: 40rem;
+}
+.tl-message.question {
+  padding-left: var(--s-3);
+  border-left: 2px solid var(--accent);
+}
+.tl-message.question .tl-author {
+  color: var(--accent);
+  font-weight: var(--w-medium);
+}
+.tl-line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+.tl-line > .icon {
+  margin-top: 3px;
+  color: var(--muted);
+  flex: none;
+}
+.tl-line .plain-text {
+  flex: 1;
+  min-width: 0;
+}
+.tl-line time {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  margin-top: 2px;
+}
+.tl-notification {
+  display: grid;
+  gap: var(--s-2);
+  font-size: var(--t-s);
+  color: var(--text-2);
+}
+.tl-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  font-size: var(--t-s);
+  color: var(--muted);
+}
+.tl-notice .icon {
+  margin-top: 3px;
+  flex: none;
+}
+.tl-notice.warn {
+  color: var(--red);
+}
+
+/* A message the item refers to: a quotation with a left rule, in the correspondence face. */
+.mail-row-card {
+  margin-left: 22px;
+  padding: 2px 0 2px var(--s-3);
+  border-left: 2px solid var(--line-strong);
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.mail-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.mail-row-from {
+  font-size: var(--t-s);
+  font-weight: var(--w-medium);
+  color: var(--text-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mail-row-card.unread .mail-row-from {
+  color: var(--text);
+}
+.mail-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.mail-row-head time {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.mail-row-subject,
+.mail-row-snippet {
+  font-family: var(--font-mail);
+  overflow-wrap: anywhere;
+}
+.mail-row-subject {
+  font-size: var(--t-l);
+  color: var(--text);
+}
+.mail-row-snippet {
+  font-size: var(--t-m);
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- Run headers */
+.tl-run:not(:first-child) {
+  margin-top: var(--s-3);
+}
+.run-header {
+  display: grid;
+  gap: var(--s-1);
+}
+.run-header-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1) var(--s-3);
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+/* The hairline the run hangs from. */
+.run-header-line::after {
+  content: "";
+  flex: 1 1 40px;
+  height: 1px;
+  background: var(--line);
+}
+.run-trigger {
+  font-weight: var(--w-medium);
+  color: var(--text-2);
+}
+/* Run state: a status word with its dot, no fill. */
+.run-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.run-chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.run-chip .icon {
+  display: none;
+}
+.run-chip.running,
+.run-chip.queued,
+.run-chip.waiting {
+  color: var(--accent);
+}
+.run-chip.running::before,
+.run-chip.queued::before,
+.run-chip.waiting::before {
+  background: var(--accent);
+}
+.run-chip.completed::before {
+  background: var(--green);
+}
+.run-chip.failed {
+  color: var(--red);
+}
+.run-chip.failed::before {
+  background: var(--red);
+}
+.change-none {
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.change-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0 6px 0 0;
+  border-radius: var(--r-control);
+  font-size: var(--t-s);
+  color: var(--text-2);
+}
+.change-toggle:hover {
+  color: var(--text);
+}
+.change-toggle .icon {
+  color: var(--muted);
+}
+.change-counts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+}
+.change-count strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.change-list {
+  list-style: none;
+  margin: var(--s-1) 0 0;
+  padding: 0 0 0 var(--s-3);
+  border-left: 1px solid var(--line-strong);
+}
+.change-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: var(--t-s);
+  line-height: var(--lh-row);
+}
+.change-list li + li {
+  border-top: 1px solid var(--line);
+}
+.change-what {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.change-what span {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.change-status {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.change-status.failed {
+  color: var(--red);
+}
+.change-status.proposed {
+  color: var(--accent);
+}
+.undo-gap {
+  width: 74px;
+  flex: none;
+}
+
+/* ---------------------------------------------------------------- Tool groups */
+.tool-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 2px var(--s-2) 2px var(--s-1);
+  margin-left: calc(-1 * var(--s-1));
+  border-radius: var(--r-control);
+  font-size: var(--t-s);
+  color: var(--muted);
+  text-align: left;
+  transition:
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.tool-group-head:hover,
+.tool-group.open .tool-group-head {
+  color: var(--text-2);
+}
+.tool-group-head:hover {
+  background: var(--sunken);
+}
+.tool-group-head .icon {
+  color: var(--faint);
+  flex: none;
+}
+.tool-group-summary {
+  min-width: 0;
+}
+.tool-group-meta {
+  margin-left: auto;
+  padding-left: 10px;
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tool-group.has-error .tool-group-summary {
+  color: var(--red);
+}
+.tool-calls {
+  list-style: none;
+  margin: var(--s-1) 0 2px 6px;
+  padding: var(--s-1) 0 var(--s-1) var(--s-3);
+  border-left: 1px solid var(--line-strong);
+  display: grid;
+  gap: var(--s-3);
+  animation: fade-in var(--dur) var(--ease);
+}
+.tool-call-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tool-call-time {
+  margin-left: auto;
+  font-size: var(--t-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tool-call-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px var(--s-3);
+  margin: var(--s-1) 0 0;
+  font-size: var(--t-s);
+}
+.tool-call-facts dt {
+  color: var(--muted);
+}
+.tool-call-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+.tool-calls li.error .tool-call-facts dd:nth-of-type(2) {
+  color: var(--red);
+}
+
+/* ---------------------------------------------------------------- Approvals in the timeline */
+/* A pending decision is a block hung from an accent rule, never a card in the column. */
+.tl-approval .proposal,
+.tl-approval.pending {
+  padding: 2px 0 2px var(--s-4);
+  margin: 0;
+  border-radius: 0;
+  background: none;
+  border-left: 2px solid var(--accent);
+}
+.tl-approval .proposal::before {
+  display: none;
+}
+.tl-approval .proposal.selected {
+  background: none;
+}
+.tl-approval.pending {
+  display: grid;
+  gap: var(--s-2);
+}
+.tl-approval.pending .tl-line > .icon {
+  color: var(--accent);
+}
+.tl-approval.decided {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-height: 28px;
+  padding: 2px var(--s-2) 2px var(--s-1);
+  margin-left: calc(-1 * var(--s-1));
+  border-radius: var(--r-control);
+  font-size: var(--t-s);
+  text-align: left;
+  color: var(--text-2);
+}
+.tl-approval.decided:hover,
+.tl-approval.decided.selected {
+  background: var(--sunken);
+}
+.tl-approval.decided .icon {
+  color: var(--muted);
+  flex: none;
+}
+.tl-approval-what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl-approval.decided .muted {
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+.quick-decision {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.quick-decision .loading-note,
+.quick-decision.unavailable {
+  font-size: var(--t-xs);
+}
+
+/* ---------------------------------------------------------------- Composer */
+.composer-wrap {
+  max-width: var(--column);
+  margin: 0 auto;
+}
+.task-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s-2);
+}
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--s-2);
+}
+/* One surface: the text, then one row of mode chips and the send affordance. */
+.composer {
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-panel);
+  padding: 10px 10px var(--s-2) var(--s-3);
+  transition: border-color var(--dur) var(--ease);
+}
+.composer:focus-within {
+  border-color: var(--accent);
+}
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 26px;
+  max-height: 220px;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  resize: none;
+  font-size: var(--t-m);
+  line-height: var(--lh-prose);
+}
+.composer textarea:focus-visible {
+  outline: none;
+}
+.composer textarea::placeholder {
+  color: var(--muted);
+}
+.composer-footer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: var(--s-2) -2px 0 calc(-1 * var(--s-2));
+}
+.composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-h-sm);
+  padding: 0 var(--s-2);
+  border-radius: var(--r-control);
+  color: var(--text-2);
+  font-size: var(--t-s);
+  min-width: 0;
+  max-width: 260px;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.composer-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Mode and Plan keep their size; the model and context chips give way first. */
+.composer-footer > .popover-root,
+.composer-footer > .plan-toggle {
+  flex: none;
+}
+.composer-footer .mode-trigger {
+  white-space: nowrap;
+}
+.composer-chip .model-name {
+  color: var(--muted);
+}
+.composer-chip.context {
+  background: var(--sunken);
+  padding-right: 3px;
+  max-width: 280px;
+}
+button.composer-chip:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.composer-chip .icon {
+  color: var(--muted);
+}
+.chip-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--muted);
+  flex: none;
+}
+.chip-x:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.plan-toggle.on,
+.plan-toggle.on .icon {
+  color: var(--accent);
+}
+.plan-toggle.on {
+  background: var(--accent-soft);
+}
+.composer-hint {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.composer-hint .kbd:not(:first-child) {
+  margin-left: 6px;
+}
+.send-btn {
+  display: grid;
+  place-items: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  border-radius: var(--r-control);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  flex: none;
+  transition: background-color var(--dur) var(--ease);
+}
+.send-btn:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
+}
+.send-btn:disabled {
+  background: var(--sunken);
+  color: var(--faint);
+}
+.stop-btn {
+  margin-right: 6px;
+}
+.run-status {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: -2px -2px var(--s-2) -6px;
+  padding: 6px var(--s-1) 6px 10px;
+  border-radius: var(--r-control);
+  background: var(--sunken);
+  font-size: var(--t-s);
+}
+.run-status.running .icon {
+  color: var(--accent);
+}
+.run-status.done > .icon {
+  color: var(--green);
+}
+.run-status.failed > .icon,
+.run-status.failed .run-result {
+  color: var(--red);
+}
+.run-instruction {
+  font-weight: var(--w-medium);
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-result {
+  flex: 1;
+  color: var(--muted);
+  min-width: 0;
+}
+.clamp-note {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--r-control);
+  background: var(--sunken);
+  font-size: var(--t-s);
+  color: var(--text-2);
+}
+/* Trust offers above the composer: one quiet line each. */
+.offers {
+  max-width: var(--column);
+  margin: 0 auto var(--s-2);
+  display: grid;
+  gap: 6px;
+}
+.offer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 6px 6px 6px var(--s-3);
+  border-radius: var(--r-panel);
+  background: var(--sunken);
+  font-size: var(--t-s);
+}
+.offer p {
+  color: var(--text-2);
+}
+.offer .error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.offer strong {
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- Approval list above the composer */
+.approval-panel {
+  padding: var(--s-1) 0 0;
+  animation: rise-in var(--dur-slow) var(--ease);
+}
+.approval-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: var(--control-h);
+  padding: 0 0 var(--s-1) 2px;
+}
+.approval-panel-head h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-s);
+  font-weight: var(--w-medium);
+  color: var(--text);
+}
+.approval-panel-head h2 .icon {
+  color: var(--accent);
+}
+.approval-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.approval-panel li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 40px;
+  padding: var(--s-1) 0 var(--s-1) 2px;
+  border-top: 1px solid var(--line);
+}
+.approval-what {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-s);
+  text-align: left;
+}
+.approval-what strong {
+  flex: none;
+}
+.approval-what span:not(.badge) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.approval-what:hover span:not(.badge) {
+  color: var(--text);
+}
+.approval-panel .approval-draft {
+  font-size: var(--t-xs);
+}
+
+/* ---------------------------------------------------------------- Details panel: runs and watches */
+.watch-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+.watch-list li > span:not(.account-dot) {
+  flex: 1;
+  min-width: 0;
+}
+.watch-list small,
+.run-list small {
+  display: block;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.watch-list .account-dot {
+  margin-top: 5px;
+}
+.run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-3);
+}
+.run-list li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.account-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------- Task lists in the column */
+.task-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+}
+.task-card {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 44px;
+  padding: 6px 10px;
+  margin: 0 -10px;
+  border-radius: var(--r-control);
+  color: var(--text);
+  line-height: var(--lh-row);
+  transition: background-color var(--dur) var(--ease);
+}
+.task-card:hover,
+.task-card:focus-visible {
+  background: var(--sunken);
+  text-decoration: none;
+}
+.task-card:focus-visible {
+  outline-offset: -2px;
+}
+.task-card-what {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+}
+.task-card-what strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-card-what .need {
+  flex: none;
+  font-size: var(--t-s);
+  color: var(--accent);
+}
+.task-card-what .need.failure {
+  color: var(--red);
+}
+.task-card-what .need.limited {
+  color: var(--amber);
+}
+.task-card time {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- Home: new task */
+.new-task {
+  max-width: 40rem;
+  margin: 10vh auto 0;
+}
+.new-task h1 {
+  font-size: var(--t-xl);
+  font-weight: var(--w-title);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.new-task > p.muted {
+  margin: var(--s-2) 0 var(--s-5);
+  max-width: 56ch;
+  font-size: var(--t-m);
+}
+.new-task .composer-wrap {
+  max-width: none;
+}
+.new-task-note {
+  margin: 0 0 var(--s-4);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-control);
+  background: var(--sunken);
+  font-size: var(--t-s);
+  color: var(--text-2);
+}
+.new-task-waiting {
+  margin-top: var(--s-6);
+}
+
+@media (max-width: 860px) {
+  .tl-message.from-user {
+    max-width: 100%;
+  }
+  .mail-row-card {
+    margin-left: 0;
+  }
+  .composer-hint {
+    display: none;
+  }
+  .offer {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .offer .btn {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .offer .icon-btn {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
