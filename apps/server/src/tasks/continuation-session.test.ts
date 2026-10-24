@@ -61,7 +61,7 @@ async function sessionBackend(kind: HostAgentKind) {
   const seen: Array<AgentRunOptions | undefined> = [];
   const agent = tasks.service.options.agent;
   const run = agent.run.bind(agent);
-  agent.run = (trigger, options) => {
+  agent.run = (trigger, options?: AgentRunOptions) => {
     seen.push(options);
     return run(trigger, options);
   };
