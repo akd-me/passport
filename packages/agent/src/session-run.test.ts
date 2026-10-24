@@ -119,7 +119,11 @@ describe("agentic session runs", () => {
         };
       },
     ]);
-    const run = await env.runtime.run(instruction, env.options());
+    // A run that can be resumed later (message, watch, wake) keeps its transcript.
+    const run = await env.runtime.run(
+      instruction,
+      env.options({ session: { resolveResume: async () => undefined } }),
+    );
     expect(JSON.stringify(reply)).toContain("Invoice due Friday");
     expect(JSON.stringify(reply)).not.toContain("ON_DEMAND_UNSUPPORTED");
     expect(env.mock.reader().costLog.map((entry) => entry.method)).toContain("search");
@@ -132,6 +136,7 @@ describe("agentic session runs", () => {
     // Native tools: the session sees the belt, not a JSON protocol, plus the orchestration notes.
     const input = env.llm.inputs[0]!;
     expect(input.allowedTools).toEqual(["mcp__passport"]);
+    expect(input.persist).toBe(true);
     expect(Object.keys(input.mcpServers)).toEqual(["passport"]);
     expect(input.systemPrompt).toContain("## How Passport runs you");
     expect(input.systemPrompt).not.toContain("argumentsJson");
@@ -174,7 +179,10 @@ describe("agentic session runs", () => {
 
   it("falls back to a fresh session when the resume fails before doing anything", async () => {
     const env = await setup([
-      async () => ({ ok: false, error: { code: "HOST_AGENT_FAILED", message: "No session" } }),
+      async () => ({
+        ok: false,
+        error: { code: "HOST_AGENT_SESSION_MISSING", message: "No session" },
+      }),
       async (_belt, emit) => {
         emit({ type: "started", sessionId: "s-2" });
         return {};
@@ -192,6 +200,77 @@ describe("agentic session runs", () => {
     expect(run.summary).toContain("could not be resumed");
   });
 
+  it("keeps the task's session when a resume fails for any other reason (R1-6)", async () => {
+    const env = await setup([
+      async (_belt, emit) => {
+        emit({ type: "started", sessionId: "orig" });
+        return { ok: false, error: { code: "HOST_AGENT_FAILED", message: "Overloaded (529)" } };
+      },
+    ]);
+    await expect(
+      env.runtime.run(
+        instruction,
+        env.options({
+          session: { resume: { kind: "claude-code", id: "orig", instruction: "Turn" } },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "HOST_AGENT_FAILED" });
+    expect(env.llm.inputs).toHaveLength(1);
+    expect(env.events.sessions).toEqual([{ kind: "claude-code", id: "orig" }]);
+  });
+
+  it("records a fallback session only once the fresh attempt succeeds (R1-6)", async () => {
+    const env = await setup([
+      async () => ({
+        ok: false,
+        error: { code: "HOST_AGENT_SESSION_MISSING", message: "No session" },
+      }),
+      async (_belt, emit) => {
+        emit({ type: "started", sessionId: "fresh" });
+        return { ok: false, error: { code: "HOST_AGENT_RATE_LIMIT", message: "Limited" } };
+      },
+    ]);
+    await expect(
+      env.runtime.run(
+        instruction,
+        env.options({
+          session: { resume: { kind: "claude-code", id: "gone", instruction: "Turn" } },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "HOST_AGENT_RATE_LIMIT" });
+    expect(env.llm.inputs).toHaveLength(2);
+    expect(env.events.sessions).toEqual([]);
+  });
+
+  it("runs one-off sessions without a transcript and records no provider session (R1-5)", async () => {
+    const env = await setup([
+      async (_belt, emit) => {
+        emit({ type: "started", sessionId: "ephemeral" });
+        return {};
+      },
+      async (_belt, emit) => {
+        emit({ type: "started", sessionId: "voice" });
+        return {};
+      },
+    ]);
+    // Arrivals and routines pass `session: {}`; voice learning never persists either.
+    await env.runtime.run(instruction, env.options());
+    await env.runtime.run(
+      instruction,
+      env.options({
+        session: {
+          resolveResume: async () => ({ kind: "claude-code", id: "x", instruction: "T" }),
+        },
+        voiceLearning: { accountId: "account-1", sentContainer: "Sent" },
+      }),
+    );
+    expect(env.llm.inputs.map((input) => [input.persist, input.resumeSessionId])).toEqual([
+      [false, undefined],
+      [false, undefined],
+    ]);
+    expect(env.events.sessions).toEqual([]);
+  });
+
   it("does not retry a resumed session that already did work", async () => {
     const env = await setup([
       async (belt) => {
@@ -206,6 +285,50 @@ describe("agentic session runs", () => {
       ),
     ).rejects.toMatchObject({ code: "HOST_AGENT_RATE_LIMIT" });
     expect(env.llm.inputs).toHaveLength(1);
+  });
+
+  it("limits the session's tools to the run's accounts (R1-10)", async () => {
+    let reply: unknown;
+    const env = await setup([
+      async (belt) => {
+        reply = await belt.call("mail_search", { query: "from:alice@example.com", limit: 5 });
+        return {};
+      },
+    ]);
+    await env.runtime.run(instruction, env.options({ accountIds: ["account-2"] }));
+    expect(reply).toMatchObject({
+      isError: true,
+      reason: expect.stringContaining("only its own accounts"),
+    });
+    expect(env.readers).not.toHaveBeenCalled();
+  });
+
+  it("ends voice sampling while a profile proposal for the account is pending (R1-49)", async () => {
+    let reply: unknown;
+    const env = await setup([
+      async (belt) => {
+        reply = await belt.call("mail_search", { query: "in:sent", limit: 50 });
+        return {};
+      },
+    ]);
+    await env.store.actions.insert({
+      id: "profile-1",
+      status: "proposed",
+      createdAt: TEST_NOW,
+      request: {
+        type: "profile_update",
+        accountId: "account-1",
+        params: {},
+        reason: "Learned voice",
+        actor: { kind: "agent", id: "earlier-run" },
+        category: "profile_update",
+      },
+    } as never);
+    await env.runtime.run(
+      instruction,
+      env.options({ voiceLearning: { accountId: "account-1", sentContainer: "Sent" } }),
+    );
+    expect(reply).toMatchObject({ isError: true, error: "INPUT_VOICE_LIMIT" });
   });
 
   it("returns schema and unknown-tool errors to the session and keeps going", async () => {

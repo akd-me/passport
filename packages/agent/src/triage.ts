@@ -166,7 +166,7 @@ async function scheduling(
           draft: replyDraft(ctx, email, String(response.textBody)),
           reason: `Draft scheduling response without available slots: ${email.subject}`,
         },
-        { classification: "scheduling", matterId },
+        { classification: "scheduling", classificationEmailIds: [email.id], matterId },
       );
       return;
     }
@@ -319,6 +319,7 @@ export async function triage(
   const common = { accountId: email.accountId, emailIds: [email.id] };
   const toolContext = {
     classification: category,
+    classificationEmailIds: [email.id],
     projectedPeople: resolved.people,
     matterId: matter.id,
   };

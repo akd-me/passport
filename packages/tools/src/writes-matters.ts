@@ -21,7 +21,7 @@ async function noteAccount(ctx: Context, accountId: string | undefined, refAccou
   if (accountId) {
     return (await ctx.account(accountId)).id;
   }
-  const accounts = await ctx.store.accounts.list();
+  const accounts = await ctx.accounts();
   const account = accounts.find((item) => item.id === refAccount) ?? accounts[0];
   if (!account) {
     throw new ToolError("ACCOUNT_REQUIRED", "Connect an account before writing notes.");

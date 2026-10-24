@@ -24,6 +24,11 @@ export interface ToolContext {
   runId?: string;
   /** Built-in triage evidence; ignored for external-agent callers and never exposed in schemas. */
   classification?: ActionCategory;
+  /**
+   * The emails `classification` describes. It overrides an action's inferred category only when
+   * every source email of that action is listed here; without this list it never applies.
+   */
+  classificationEmailIds?: string[];
   projectedPeople?: Person[];
   personSnapshot?: Person;
   emailPatch?: Partial<Pick<Email, "category" | "personIds">>;
@@ -32,6 +37,12 @@ export interface ToolContext {
   readers?: MailReaderResolver;
   /** Task the call belongs to (`watch_conversation`). Set by the host, never by the model. */
   taskId?: string;
+  /**
+   * Accounts the calling task may use (`Task.accountIds`). When set, reads and writes on any
+   * other account fail with `ACCOUNT_FORBIDDEN`, and account-less calls resolve within the list.
+   * Set by the host, never by the model.
+   */
+  accountIds?: string[];
   /** v0.4: the task host behind ask_user, task_delegate, task_status, task_cancel, task_organize. */
   orchestrator?: import("@passport/types").TaskOrchestrator;
 }

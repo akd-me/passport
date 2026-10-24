@@ -1,4 +1,4 @@
-import { type ConversationWatch, parseMailHandle, type Task } from "@passport/types";
+import { type ConversationWatch, parseMailHandle, stampTask, type Task } from "@passport/types";
 import type { Context } from "./context.js";
 import { json, ToolError } from "./presentation.js";
 import { register } from "./register.js";
@@ -89,15 +89,15 @@ export function registerTaskWatches(ctx: Context) {
         since: call.now(),
         consecutiveWakes: 0,
       };
+      // An agent action, not the person's: `lastActivityAt` and `returnedAt` stay (R1-19).
       const updated = await tasks.update(task.id, (current) => {
         refuseClosed(current);
-        return {
+        return stampTask(current, {
           watches: [
             ...current.watches.filter((item) => item.threadHandle !== watch.threadHandle),
             watch,
           ].slice(-MAX_WATCHES),
-          lastActivityAt: call.now(),
-        };
+        });
       });
       call.deps.bus.emit({ type: "task.updated", task: updated });
       return json({ watching: true, threadHandle: watch.threadHandle, since: watch.since });
@@ -111,12 +111,13 @@ export function registerTaskWatches(ctx: Context) {
     true,
     async (args, call) => {
       const { task, tasks } = await currentTask(call);
-      const updated = await tasks.update(task.id, (current) => ({
-        watches: args.threadHandle
-          ? current.watches.filter((item) => item.threadHandle !== args.threadHandle)
-          : [],
-        lastActivityAt: call.now(),
-      }));
+      const updated = await tasks.update(task.id, (current) =>
+        stampTask(current, {
+          watches: args.threadHandle
+            ? current.watches.filter((item) => item.threadHandle !== args.threadHandle)
+            : [],
+        }),
+      );
       call.deps.bus.emit({ type: "task.updated", task: updated });
       return json({ watching: updated.watches.map((item) => item.threadHandle) });
     },

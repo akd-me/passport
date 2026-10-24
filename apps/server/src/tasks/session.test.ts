@@ -103,7 +103,9 @@ describe.each(kinds)("%s task sessions", (kind) => {
       expect(args).not.toContain("--no-session-persistence");
       expect(args).not.toContain("--json-schema");
       expect(args[args.indexOf("--allowedTools") + 1]).toBe("mcp__passport");
-      expect(args[args.indexOf("--system-prompt") + 1]).toContain("## How Passport runs you");
+      // The session's system prompt (with USER.md) is read from a private file, not argv.
+      expect(args).toContain("--system-prompt-file");
+      expect(args.join(" ")).not.toContain("How Passport runs you");
     } else {
       expect(args).not.toContain("--ephemeral");
       expect(args).not.toContain("--output-schema");

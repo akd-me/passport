@@ -5,6 +5,7 @@ import type { HostAgentEvent } from "@passport/types";
 import { LlmError } from "../errors.js";
 import type { JsonSchema } from "../llm/types.js";
 import { isForwardedEnv, redact } from "./env.js";
+import { SESSION_MISSING_TEXT } from "./session-text.js";
 import {
   count,
   emptyUsage,
@@ -32,29 +33,71 @@ const seconds = (value: number): string => {
   return Number.isInteger(value) ? `${value}.0` : String(value);
 };
 
-/** Codex features that reach outside the model call. `-c features.x=false` tolerates unknown names. */
-const COMPLETION_FEATURES_OFF = [
-  "shell_tool",
-  "unified_exec",
+/**
+ * Codex features that add native tools: shell, code-mode `exec`, images, browsers, sub-agents,
+ * sleep, skills, goals. `-c features.x=false` tolerates unknown names. Sessions keep only
+ * Passport's MCP tools; completions keep none (R1-7).
+ */
+const NATIVE_TOOL_FEATURES = [
   "apps",
   "plugins",
   "multi_agent",
+  "multi_agent_v2",
   "image_generation",
   "browser_use",
+  "browser_use_external",
+  "browser_use_full_cdp_access",
+  "in_app_browser",
   "computer_use",
+  "code_mode",
+  "code_mode_host",
   "hooks",
   "goals",
   "skill_search",
+  "skill_mcp_dependency_install",
   "tool_suggest",
   "view_image",
+  "sleep_tool",
 ];
-const SESSION_FEATURES_OFF = [
-  "apps",
-  "plugins",
-  "multi_agent",
-  "image_generation",
-  "computer_use",
-  "hooks",
+const COMPLETION_FEATURES_OFF = ["shell_tool", "unified_exec", ...NATIVE_TOOL_FEATURES];
+const SESSION_FEATURES_OFF = NATIVE_TOOL_FEATURES;
+
+/**
+ * Some Codex tools come from the model catalog rather than a feature switch: `tool_mode:
+ * "code_mode_only"` wraps every tool in a JavaScript `exec` (with `apply_patch` inside it),
+ * `multi_agent_version` adds the `collaboration/*` sub-agent tools, `apply_patch_tool_type`
+ * adds `apply_patch`, and `experimental_supported_tools` adds clock tools. Rewrites a
+ * `codex debug models` catalog so every model calls tools directly and has none of those;
+ * undefined when the text is not a catalog.
+ */
+export function codexToolCatalog(raw: string): string | undefined {
+  let catalog: unknown;
+  try {
+    catalog = JSON.parse(raw);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) {
+      throw error;
+    }
+    return undefined;
+  }
+  const models = record(catalog)?.models;
+  if (!Array.isArray(models) || !models.length || !models.every((model) => record(model))) {
+    return undefined;
+  }
+  for (const model of models as Record<string, unknown>[]) {
+    model.tool_mode = "direct_model_only";
+    model.multi_agent_version = null;
+    model.apply_patch_tool_type = null;
+    model.experimental_supported_tools = [];
+  }
+  return JSON.stringify(catalog);
+}
+
+/** Codex tools besides Passport's MCP tools that the patched configuration still lists. */
+export const CODEX_RESIDUAL_TOOLS: readonly string[] = [
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
 ];
 
 /** Recursive property compatibility; scalar and array properties are allowed. */
@@ -138,6 +181,8 @@ export async function codexInvocation(spec: HostRunSpec): Promise<HostInvocation
   for (const feature of spec.completion ? COMPLETION_FEATURES_OFF : SESSION_FEATURES_OFF) {
     args.push("-c", `features.${feature}=false`);
   }
+  // `request_user_input` would stall a non-interactive run until its timeout.
+  args.push("-c", "tools.experimental_request_user_input={ enabled = false }");
   if (!shell && !spec.completion) {
     args.push("-c", "features.shell_tool=false", "-c", "features.unified_exec=false");
   }
@@ -218,12 +263,20 @@ export async function codexInvocation(spec: HostRunSpec): Promise<HostInvocation
     }
   }
   let dir: string | undefined;
+  const privateDir = async () => {
+    dir ??= await mkdtemp(join(tmpdir(), "passport-codex-"));
+    return dir;
+  };
   const schemaEnforced = !!spec.jsonSchema && strictCompatible(spec.jsonSchema);
   if (spec.jsonSchema && schemaEnforced) {
-    dir = await mkdtemp(join(tmpdir(), "passport-codex-"));
-    const path = join(dir, "schema.json");
+    const path = join(await privateDir(), "schema.json");
     await writeFile(path, JSON.stringify(spec.jsonSchema), { mode: 0o600 });
     args.push("--output-schema", path);
+  }
+  if (spec.modelCatalog) {
+    const path = join(await privateDir(), "models.json");
+    await writeFile(path, spec.modelCatalog, { mode: 0o600 });
+    args.push("-c", `model_catalog_json=${toml(path)}`);
   }
   args.push("-");
   return {
@@ -264,6 +317,9 @@ function failure(raw: unknown): { message: string; code: string } {
   function failureCode() {
     if (code === "invalid_json_schema") {
       return "HOST_AGENT_SCHEMA";
+    }
+    if (SESSION_MISSING_TEXT.test(lower)) {
+      return "HOST_AGENT_SESSION_MISSING";
     }
     if (
       status === 401 ||

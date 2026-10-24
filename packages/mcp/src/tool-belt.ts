@@ -3,7 +3,12 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { type Tool, type ToolResult, toMcpTools } from "@passport/tools";
+import {
+  MAX_SECRET_TIMEOUT_SECONDS,
+  type Tool,
+  type ToolResult,
+  toMcpTools,
+} from "@passport/tools";
 import type { HostAgentMcpServer } from "@passport/types";
 import { DEFAULT_MCP_RESPONSE_BYTE_BUDGET, toolCallResponse } from "./server.js";
 
@@ -18,7 +23,7 @@ export interface ToolBeltOptions {
   log?: (message: string) => void;
   /** Per tool response, default 64 KiB like the mailbox server. */
   responseByteBudget?: number;
-  /** Host-agent MCP tool timeout, default 10 minutes (a provider read can wait on quota). */
+  /** Host-agent MCP tool timeout, default 11 minutes: past the longest `request_secret` wait. */
   toolTimeoutSec?: number;
 }
 
@@ -80,7 +85,11 @@ export class ToolBeltListener {
       server: {
         url: `http://127.0.0.1:${port}/mcp`,
         headers: { Authorization: `Bearer ${token}` },
-        timeouts: { startupSec: 30, toolSec: this.options.toolTimeoutSec ?? 600 },
+        // Longer than the longest request_secret wait, so its answer reaches the model (R1-46).
+        timeouts: {
+          startupSec: 30,
+          toolSec: this.options.toolTimeoutSec ?? MAX_SECRET_TIMEOUT_SECONDS + 60,
+        },
       },
       release: async () => {
         if (!this.bindings.delete(token)) {

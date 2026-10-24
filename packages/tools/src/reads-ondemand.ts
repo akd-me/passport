@@ -170,7 +170,7 @@ export function registerOnDemandReads(ctx: Context) {
     {},
     false,
     async (_input, call) => {
-      const accounts = await store.accounts.list();
+      const accounts = await call.accounts();
       return withReadMeta({
         items: await Promise.all(
           accounts.map(async (account) => ({

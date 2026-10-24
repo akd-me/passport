@@ -143,16 +143,6 @@ abstract class HttpLlmClient implements LlmClient {
       }
       // Never include the response body, authorization header, or URL in an error/log.
       await response.body?.cancel();
-      if (
-        attempt >= retries ||
-        (response.status !== 429 && (response.status < 500 || response.status > 599))
-      ) {
-        throw new LlmError(
-          `LLM request failed (HTTP ${response.status})`,
-          "LLM_HTTP",
-          response.status,
-        );
-      }
       const retryAfter = response.headers.get("retry-after");
       const seconds = retryAfter === null ? NaN : Number(retryAfter);
       const serverDelay =
@@ -161,6 +151,22 @@ abstract class HttpLlmClient implements LlmClient {
           : Number.isFinite(seconds)
             ? seconds * 1000
             : Date.parse(retryAfter) - Date.now();
+      if (
+        attempt >= retries ||
+        (response.status !== 429 && (response.status < 500 || response.status > 599))
+      ) {
+        // A 429's Retry-After becomes the reset time the task's limit parser reads (R1-33).
+        const resetAt =
+          response.status === 429 && Number.isFinite(serverDelay) && serverDelay > 0
+            ? new Date(Date.now() + serverDelay).toISOString()
+            : undefined;
+        throw new LlmError(
+          `LLM request failed (HTTP ${response.status})${resetAt ? `; retry after ${resetAt}` : ""}`,
+          "LLM_HTTP",
+          response.status,
+          resetAt,
+        );
+      }
       const backoff = (this.options.retryBaseMs ?? 250) * 2 ** attempt;
       await sleep(
         Math.min(maxDelay, Math.max(backoff, Number.isFinite(serverDelay) ? serverDelay : 0)),
@@ -430,6 +436,7 @@ export function createLlmClient(config: LlmConfig, options?: LlmClientOptions): 
         model: config.model,
         ...(config.fastModel ? { fastModel: config.fastModel } : {}),
         ...(options?.hostAgentCwd ? { cwd: options.hostAgentCwd } : {}),
+        restrictCodexTools: true,
       });
     default:
       throw new LlmError("Unsupported LLM provider", "LLM_CONFIG");

@@ -32,7 +32,7 @@ import { dailyDigest, getJournal, type Journal, matterReviewContext } from "./sc
 import { agenticSession } from "./session-run.js";
 import { runToolReaders } from "./tool-readers.js";
 import { triage } from "./triage.js";
-import { arrivalToolContext, sessionTriage } from "./triage-session.js";
+import { arrivalSessionKey, arrivalToolContext, sessionTriage } from "./triage-session.js";
 import { VoiceLearningGuard } from "./voice-learning.js";
 
 class PersonalAgentRuntime implements AgentRuntime {
@@ -79,6 +79,7 @@ class PersonalAgentRuntime implements AgentRuntime {
   ): Promise<AgentRunResult> {
     const { store, executor, policy, bus } = this.options;
     const voice = options.voiceLearning ? new VoiceLearningGuard(options.voiceLearning) : undefined;
+    await voice?.seed(store);
     const run: AgentRunResult = {
       toolBudget: { callsMade: 0, llmCalls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       id: options.runId ?? this.options.runId?.(trigger) ?? newAgentId(),
@@ -95,14 +96,31 @@ class PersonalAgentRuntime implements AgentRuntime {
         return checkpoint;
       }
       if (actions.length && this.options.triage?.mode !== "pipeline") {
-        // A crash may leave a partial session. Logged writes are authoritative: never repeat
-        // inference or outward effects. Pending/failed actions remain available for review.
-        run.actionIds = actions.map((action) => action.id);
-        run.finishedAt = this.now();
-        run.summary =
-          "Acknowledged existing arrival actions; inference was not repeated. Review the prior run for incomplete work.";
-        await store.kv.set(`run:${run.id}`, JSON.stringify(run));
-        return run;
+        const organized = await store.kv.get(arrivalSessionKey(run.id));
+        // People resolution and the deterministic playbook replay through their own step
+        // checkpoints; only actions the session itself submitted count as its partial work.
+        const sessionActions = actions.filter(
+          (action) =>
+            action.request.type !== "person_update" &&
+            !action.request.reason.split("\n").at(-1)?.startsWith("[arrival-step="),
+        );
+        if (organized) {
+          // The session organized the arrival before the run failed: never repeat inference.
+          run.actionIds = actions.map((action) => action.id);
+          run.finishedAt = this.now();
+          run.summary =
+            "Acknowledged existing arrival actions; inference was not repeated. Review the prior run for incomplete work.";
+          await store.kv.set(`run:${run.id}`, JSON.stringify(run));
+          return run;
+        }
+        if (sessionActions.length) {
+          // A session that stopped part-way: repeating it could repeat its writes, so fail and
+          // let the arrival queue surface the email for review once its retries are spent.
+          throw new AgentError(
+            "Arrival triage stopped after partial work; review the prior run",
+            "TRIAGE_INTERRUPTED",
+          );
+        }
       }
     }
     const lane: QuotaLane =
@@ -111,9 +129,15 @@ class PersonalAgentRuntime implements AgentRuntime {
         : trigger.kind === "email.received"
           ? "arrivals"
           : "background";
+    // Tool calls stop on the run's cancellation and when its time budget runs out (R1-37).
+    const toolStop = new AbortController();
+    const toolSignal = options.signal
+      ? AbortSignal.any([options.signal, toolStop.signal])
+      : toolStop.signal;
     const ctx: RunContext = {
       run,
       lane,
+      stopTools: () => toolStop.abort(),
       reads: createRunReads({ readers: this.options.readers, lane, log: this.options.log }),
       store,
       policy,
@@ -179,11 +203,12 @@ class PersonalAgentRuntime implements AgentRuntime {
         cancelled(options.signal);
         ctx.toolCalls++;
         const result = await tool.handler(voice ? voice.input(name, input) : input, {
-          ...(options.signal ? { signal: options.signal } : {}),
+          signal: toolSignal,
           ...arrivalToolContext(ctx, name, input),
           ...context,
           runId: run.id,
           ...(options.taskId ? { taskId: options.taskId } : {}),
+          ...(options.accountIds ? { accountIds: options.accountIds } : {}),
           ...(options.orchestrator ? { orchestrator: options.orchestrator } : {}),
         });
         voice?.result(name, result);
@@ -210,7 +235,7 @@ class PersonalAgentRuntime implements AgentRuntime {
       freeBusy: this.options.freeBusy,
       // The same on-demand readers the run's own reads use; without them every `mail_*` tool
       // fails with ON_DEMAND_UNSUPPORTED and the model falls back to the local cache.
-      readers: runToolReaders(this.options.readers, lane, options.signal),
+      readers: runToolReaders(this.options.readers, lane, toolSignal),
       actor: { kind: "agent", id: run.id },
       observer: options.observer?.toolCall?.bind(options.observer),
       readOnly: options.readOnly,

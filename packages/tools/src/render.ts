@@ -7,6 +7,18 @@ import { renderHeight, sanitizeRenderHtml } from "./render-html.js";
 import { schema as z } from "./schema.js";
 
 const locks = new WeakMap<StoreTasks, Map<string, Promise<unknown>>>();
+/** Failed render attempts per run (in memory); they count toward the per-run limit (R1-25). */
+const failures = new WeakMap<StoreTasks, Map<string, number>>();
+const RENDER_RUN_LIMIT = 10;
+
+function failedRenders(tasks: StoreTasks): Map<string, number> {
+  let runs = failures.get(tasks);
+  if (!runs) {
+    runs = new Map();
+    failures.set(tasks, runs);
+  }
+  return runs;
+}
 
 /** Serialise concurrent calls, including calls through separate registries for the same store. */
 async function serial<T>(tasks: StoreTasks, runId: string, write: () => Promise<T>): Promise<T> {
@@ -48,22 +60,37 @@ export function registerRender(ctx: Context): void {
       if (!run || run.taskId !== taskId || !["queued", "running"].includes(run.status)) {
         throw new ToolError("TASK_REQUIRED", "Render from an active run of this task.");
       }
-      const html = sanitizeRenderHtml(args.html);
-      const height = renderHeight(html, args.height);
       return serial(tasks, run.id, async () => {
-        let count = 0;
+        const failed = failedRenders(tasks);
+        let count = failed.get(run.id) ?? 0;
         let afterSeq = 0;
         // Persisted items enforce the cap even when a registry is recreated or runs overlap.
+        // The cap is checked before the input is parsed, and failed attempts count too.
         for (;;) {
           const page = await tasks.items.list({ taskId, afterSeq, limit: 500 });
           count += page.filter((item) => item.runId === run.id && item.kind === "render").length;
-          if (count >= 10) {
-            throw new ToolError("RENDER_LIMIT", "At most 10 renders are allowed per run.");
+          if (count >= RENDER_RUN_LIMIT) {
+            throw new ToolError(
+              "RENDER_LIMIT",
+              "At most 10 renders, including failed ones, are allowed per run.",
+            );
           }
           if (page.length < 500) {
             break;
           }
           afterSeq = page.at(-1)!.seq;
+        }
+        let html: string, height: number;
+        try {
+          html = sanitizeRenderHtml(args.html);
+          height = renderHeight(html, args.height);
+        } catch (error) {
+          failed.set(run.id, (failed.get(run.id) ?? 0) + 1);
+          // Bound the in-memory record; the oldest runs are long finished.
+          if (failed.size > 1000) {
+            failed.delete(failed.keys().next().value!);
+          }
+          throw error;
         }
         if (call.callContext.signal?.aborted) {
           throw new ToolError("RUN_CANCELLED", "The run was stopped.");

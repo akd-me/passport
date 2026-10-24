@@ -33,7 +33,7 @@ async function served(ctx: Context, accountId?: string): Promise<boolean> {
   if (accountId) {
     return (await ctx.maybeReader(accountId)) !== null;
   }
-  const accounts = await ctx.store.accounts.list();
+  const accounts = await ctx.accounts();
   for (const account of accounts) {
     if (await ctx.maybeReader(account.id)) {
       return true;

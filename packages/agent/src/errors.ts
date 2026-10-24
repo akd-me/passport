@@ -14,6 +14,8 @@ export class LlmError extends AgentError {
     message: string,
     code = "LLM_ERROR",
     readonly status?: number,
+    /** HTTP 429: when the provider said to retry (`Retry-After`), as an ISO timestamp. */
+    readonly retryAfter?: string,
   ) {
     super(message, code);
     this.name = "LlmError";

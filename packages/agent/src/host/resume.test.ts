@@ -66,7 +66,7 @@ describe("resumable host sessions", () => {
     }
   });
 
-  it("parses Claude Code's recorded missing-session result as a failed run", () => {
+  it("parses Claude Code's recorded missing-session result as a missing session", () => {
     const parser = createClaudeParser();
     const lines = readFileSync(
       new URL("./fixtures/claude-resume-missing.jsonl", import.meta.url),
@@ -78,7 +78,7 @@ describe("resumable host sessions", () => {
     expect(parser.outcome()).toMatchObject({
       finished: true,
       error: {
-        code: "HOST_AGENT_FAILED",
+        code: "HOST_AGENT_SESSION_MISSING",
         message: expect.stringContaining("No conversation found"),
       },
     });

@@ -1,4 +1,4 @@
-import type { AgentRunOptions } from "@passport/types";
+import type { AgentRunOptions, Store } from "@passport/types";
 import { AgentError } from "./errors.js";
 import { isObject } from "./llm/json.js";
 
@@ -11,6 +11,28 @@ export class VoiceLearningGuard {
   private readSucceeded = false;
 
   constructor(private readonly limits: NonNullable<AgentRunOptions["voiceLearning"]>) {}
+
+  /**
+   * A profile proposal for this account already waiting on the person ends sampling: a second
+   * run (a restart continuation, a follow-up) must not propose a competing whole profile (R1-49).
+   */
+  async seed(store: Store): Promise<void> {
+    const pending = await store.actions.query({
+      status: ["proposed"],
+      category: "profile_update",
+      limit: 50,
+    });
+    if (
+      pending.items.some(
+        (action) =>
+          action.request.type === "profile_update" &&
+          action.request.accountId === this.limits.accountId,
+      )
+    ) {
+      this.searched = true;
+      this.proposed = true;
+    }
+  }
 
   input(name: string, input: unknown): unknown {
     const value = isObject(input) ? input : {};
