@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type Job, jobsApi } from "../scheduler-api";
+import { countdown } from "./JobTable";
 import { describeSchedule, JobsTable, NewRoutineForm } from "./Scheduler";
 
 function job(patch: Partial<Job> = {}): Job {
@@ -105,6 +106,20 @@ describe("jobs table", () => {
     expect(describeSchedule({ type: "manual" })).toBe("On demand");
   });
 });
+describe("next run countdown", () => {
+  it("R2-17: rounds to whole minutes once, never reading 60m", () => {
+    const now = Date.parse("2026-10-24T08:00:00Z");
+    const at = (seconds: number) => new Date(now + seconds * 1000).toISOString();
+    expect(countdown(at(20 * 3600 + 3590), now)).toBe("in 21h 0m");
+    expect(countdown(at(15 * 3600 + 3540 + 1), now)).toBe("in 16h 0m");
+    expect(countdown(at(3599), now)).toBe("in 1h 0m");
+    expect(countdown(at(3540), now)).toBe("in 59m");
+    expect(countdown(at(2 * 3600 + 61), now)).toBe("in 2h 2m");
+    expect(countdown(at(45), now)).toBe("in 45s");
+    expect(countdown(at(86399), now)).toBe("in 1d 0h");
+  });
+});
+
 describe("routine form", () => {
   it("builds a weekday routine from an example and submits the instruction", async () => {
     const add = vi.spyOn(jobsApi, "add").mockResolvedValue(job()),

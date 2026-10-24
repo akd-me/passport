@@ -32,6 +32,14 @@ function escape(text: string): string {
   );
 }
 
+/** A quoted message's date the way a mail client writes it ("24 Oct 2026, 09:00"). */
+const mailDate = (iso: string) => {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+};
+
 /** Only a fragment request: the server sanitises it before RenderFrame receives anything. */
 export function draftPreview(draft: DraftInput, body: string, emails: Email[]): string {
   const to = draft.to.map((p) => (p.name ? `${p.name} <${p.email}>` : p.email)).join(", ");
@@ -44,7 +52,7 @@ export function draftPreview(draft: DraftInput, body: string, emails: Email[]): 
     .map(
       (email) =>
         `<p>${escape(
-          `On ${email.receivedAt}, ${email.from.map((p) => p.name ?? p.email).join(", ")} wrote:`,
+          `On ${mailDate(email.receivedAt)}, ${email.from.map((p) => p.name ?? p.email).join(", ")} wrote:`,
         )}</p><blockquote><div class="mail"><p>${escape(email.textBody ?? email.preview)}</p></div></blockquote>`,
     )
     .join("");

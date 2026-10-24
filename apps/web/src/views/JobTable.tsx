@@ -30,7 +30,7 @@ export function describeSchedule(schedule: JobSchedule) {
 
 const duration = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
 
-function countdown(at: string, now: number) {
+export function countdown(at: string, now: number) {
   const seconds = Math.max(0, Math.ceil((Date.parse(at) - now) / 1000));
   if (seconds === 0) {
     return "Due now";
@@ -38,13 +38,15 @@ function countdown(at: string, now: number) {
   if (seconds < 60) {
     return `in ${seconds}s`;
   }
-  if (seconds < 3600) {
-    return `in ${Math.ceil(seconds / 60)}m`;
+  // Whole minutes, rounded up once, so a remainder never reads "60m".
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) {
+    return `in ${minutes}m`;
   }
-  if (seconds < 86400) {
-    return `in ${Math.floor(seconds / 3600)}h ${Math.ceil((seconds % 3600) / 60)}m`;
+  if (minutes < 1440) {
+    return `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   }
-  return `in ${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
+  return `in ${Math.floor(minutes / 1440)}d ${Math.floor((minutes % 1440) / 60)}h`;
 }
 
 function JobRow({ job, now, onHistory }: { job: Job; now: number; onHistory(job: Job): void }) {
@@ -98,7 +100,9 @@ function JobRow({ job, now, onHistory }: { job: Job; now: number; onHistory(job:
             {countdown(job.nextRunAt, now)}
           </time>
         ) : (
-          <span className="muted">On demand</span>
+          <span className="muted">
+            {job.schedule.type === "webhook" ? "On webhook delivery" : "On demand"}
+          </span>
         )}
       </td>
       <td>

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { type CSSProperties, useEffect, useLayoutEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useSearchParams } from "react-router";
 import { AccountScope, useAccounts } from "./accounts/AccountFilter";
 import { FIRST_RUN_CONNECTED } from "./accounts/api";
@@ -141,9 +141,24 @@ export function useGlobalShortcuts() {
   });
 }
 
+/**
+ * Where the toast sits: above the composer dock when one is on screen, so it never covers the
+ * mode chips or Send (R2-20); otherwise at the bottom edge.
+ */
+function useToastLift(notice: string): CSSProperties | undefined {
+  const [bottom, setBottom] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const dock = notice ? document.querySelector(".dock") : null;
+    const top = dock?.getBoundingClientRect().top;
+    setBottom(top ? Math.max(0, window.innerHeight - top) : null);
+  }, [notice]);
+  return bottom ? { bottom: `calc(${bottom}px + var(--s-3))` } : undefined;
+}
+
 function Shell() {
   const { notice, noticeAction, notify } = useWorkspace(),
-    ui = useUi();
+    ui = useUi(),
+    toastLift = useToastLift(notice);
   useGlobalShortcuts();
   useTaskListKeys();
   useTaskJumpKeys();
@@ -200,7 +215,7 @@ function Shell() {
       <SettingsDialog />
       <ConnectDialog />
       {notice && (
-        <div className="toast" role="status">
+        <div className="toast" role="status" style={toastLift}>
           <Icon name="check" size={15} />
           {notice}
           {noticeAction && (

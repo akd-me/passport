@@ -735,10 +735,14 @@
   .dock {
     padding: 0 10px 10px;
   }
+}
+/* Without hover (touch), the menu shows beside the trail, so counts and times stay visible. */
+@media (hover: none) {
   .task-row .task-menu {
     opacity: 1;
   }
-  .task-trail {
-    visibility: hidden;
+  .task-row .task-trail {
+    visibility: visible;
+    padding-right: 28px;
   }
 }
