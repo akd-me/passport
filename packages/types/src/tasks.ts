@@ -145,7 +145,8 @@ export type TaskItemKind =
   | "approval_request"
   | "question"
   | "system_notice"
-  | "notification";
+  | "notification"
+  | "secret_request";
 
 export interface TaskToolCallPayload {
   name: string;
@@ -161,6 +162,7 @@ export interface TaskToolCallPayload {
 }
 
 export interface TaskItemPayloads {
+  secret_request: { requestId: string; text: string; expiresAt: Timestamp };
   user_message: { text: string };
   assistant_message: { text: string };
   tool_call: TaskToolCallPayload;

@@ -7,6 +7,7 @@ import { createCalendarRepositories } from "./store-calendar.js";
 import { StoreDatabase } from "./store-database.js";
 import { createMailRepositories } from "./store-mail.js";
 import { createPeopleRepositories } from "./store-people.js";
+import { createEncryptedKv, createSecretsRepository } from "./store-secrets.js";
 import { createTasksRepository } from "./store-tasks.js";
 
 class SQLiteStore extends StoreDatabase implements Store {
@@ -24,6 +25,8 @@ class SQLiteStore extends StoreDatabase implements Store {
   trust: Store["trust"];
   kv: Store["kv"];
   tasks: StoreTasks;
+  encryptedKv: NonNullable<Store["encryptedKv"]>;
+  secrets: NonNullable<Store["secrets"]>;
   private resolver: MailReaderResolver | null = null;
   constructor(db: DatabaseSync, key: Buffer) {
     super(db, key);
@@ -45,6 +48,8 @@ class SQLiteStore extends StoreDatabase implements Store {
     this.trust = actions.trust;
     this.kv = actions.kv;
     this.tasks = createTasksRepository(this);
+    this.encryptedKv = createEncryptedKv(this);
+    this.secrets = createSecretsRepository(this);
   }
   setMailReaderResolver(resolver: MailReaderResolver): void {
     this.resolver = resolver;

@@ -7,6 +7,7 @@ import type {
 } from "@passport/types";
 import type { Backend } from "./backend.js";
 import { ApiError } from "./errors.js";
+import { resolveAccountSecrets } from "./schedulers/account-secrets.js";
 import { member, object, string } from "./validation.js";
 
 /** Descriptor fields marked secret are sent exclusively to the credential store. */
@@ -18,7 +19,7 @@ export async function addAccount(
   const body = object(input),
     kind = member(body.kind, backend.providerKinds, "provider") as ProviderKind;
   const descriptor = backend.providers.describe(kind),
-    fields = object(body.fields);
+    fields = await resolveAccountSecrets(backend.store, descriptor, object(body.fields));
   const settings: Account["settings"] = {},
     credentials: AccountCredentials = {};
   for (const key of Object.keys(fields)) {

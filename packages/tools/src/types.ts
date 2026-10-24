@@ -19,6 +19,8 @@ export interface ToolResult {
 
 /** Trusted caller context, never supplied by the model. */
 export interface ToolContext {
+  /** Trusted run cancellation, including private input requests. */
+  signal?: AbortSignal;
   runId?: string;
   /** Built-in triage evidence; ignored for external-agent callers and never exposed in schemas. */
   classification?: ActionCategory;
