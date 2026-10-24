@@ -54,7 +54,8 @@ export function createSecretsRepository(db: StoreDatabase): StoreSecrets {
   const encrypted = createEncryptedKv(db);
   return {
     put: async (value) => put(value),
-    take: (ref) => encrypted.take(ref),
+    take: (ref) =>
+      /^secret:[a-f0-9]{64}$/.test(ref) ? encrypted.take(ref) : Promise.resolve(null),
     requests: {
       create: async (input) =>
         db.transaction(() => {
@@ -88,6 +89,7 @@ export function createSecretsRepository(db: StoreDatabase): StoreSecrets {
             runId: input.runId ?? null,
             seq: Number(row?.seq ?? 0) + 1,
             kind: "secret_request",
+            untrusted: true,
             at: input.createdAt,
             payload: { requestId: id, text: input.text, expiresAt: input.expiresAt },
           };

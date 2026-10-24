@@ -226,7 +226,9 @@ export class RoutineWebhooks {
       const safe = structuredClone(request);
       for (const header of Object.keys(safe.headers)) {
         if (
-          /authorization|cookie|api[-_]?key|token|secret/i.test(header) ||
+          /auth|cookie|password|credential|key|token|secret|signature|hmac|jwt|assertion/i.test(
+            header,
+          ) ||
           header === schedule.signature?.header
         ) {
           delete safe.headers[header];

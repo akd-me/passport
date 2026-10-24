@@ -1,5 +1,6 @@
 import type { SecretRequest } from "@passport/types";
 import type { Context } from "./context.js";
+import { neutralize } from "./ondemand-support.js";
 import { json, ToolError } from "./presentation.js";
 import { register } from "./register.js";
 import { schema as z } from "./schema.js";
@@ -30,7 +31,7 @@ export function registerSecrets(ctx: Context) {
         taskId,
         runId: call.callContext.runId,
         clientRequestId: args.clientRequestId,
-        text: args.text,
+        text: neutralize(args.text),
         createdAt,
         expiresAt: new Date(Date.parse(createdAt) + args.timeoutSeconds * 1000).toISOString(),
       });

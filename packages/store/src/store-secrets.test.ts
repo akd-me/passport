@@ -29,13 +29,27 @@ describe("encrypted secrets", () => {
     let store = openStore({ path, masterKey: "test-master-key" });
     try {
       await store.migrate();
+      await store.tasks!.insert(task);
+      const requestInput = {
+        taskId: task.id,
+        clientRequestId: "persisted-request",
+        text: "Signing secret",
+        createdAt: now,
+        expiresAt: "2026-10-24T12:05:00.000Z",
+      };
+      const originalRequest = await store.secrets!.requests.create(requestInput);
       const secret = "very private password 🗝";
       const ref = await store.secrets!.put(secret);
       await store.encryptedKv!.set("signer", secret);
+      expect(await store.secrets!.take("signer")).toBeNull();
       await store.close();
       expect((await readFile(path)).includes(Buffer.from(secret))).toBe(false);
       store = openStore({ path, masterKey: "test-master-key" });
       await store.migrate();
+      const retriedRequest = await store.secrets!.requests.create(requestInput);
+      expect(retriedRequest.request.id).toBe(originalRequest.request.id);
+      expect(retriedRequest.item).toBeUndefined();
+      expect(await store.tasks!.items.list({ taskId: task.id })).toHaveLength(1);
       expect(await store.encryptedKv!.get("signer")).toBe(secret);
       const attempts = await Promise.all([store.secrets!.take(ref), store.secrets!.take(ref)]);
       expect(attempts.filter((value) => value === secret)).toHaveLength(1);
