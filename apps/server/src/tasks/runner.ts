@@ -201,6 +201,7 @@ export class TaskRunner {
         taskId: task.id,
         signal: active.controller.signal,
         readOnly: task.interactionMode === "plan",
+        ...(task.voiceLearning ? { voiceLearning: task.voiceLearning } : {}),
         observer: {
           toolCall: (event) => this.queue(active, () => this.onToolCall(active, event)),
           assistantMessage: (text) => this.queue(active, () => this.onText(active, text)),

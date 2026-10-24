@@ -99,7 +99,9 @@ export function categorize(input: CategorizeInput): {
     : null;
 
   let category: ActionCategory;
-  if (
+  if (input.type === "profile_update") {
+    category = "profile_update";
+  } else if (
     ["matter_create", "matter_update", "matter_attach", "person_update", "profile_update"].includes(
       input.type,
     ) ||

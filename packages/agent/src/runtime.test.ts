@@ -32,6 +32,7 @@ async function setup(script: unknown[], email: Email = emailFixture()) {
   await store.emails.upsertMany([email]);
   const executor = new FakeExecutor(store, policy);
   const options = {
+    triage: { mode: "pipeline" as const },
     store,
     executor,
     policy,
@@ -343,6 +344,7 @@ describe("schedules and run lifecycle", () => {
       category: "scheduling",
       reason: "Review this calendar invitation",
     });
+    env.llm.script.push("Digest reviewed.");
     await env.runtime.run({ kind: "schedule", name: "daily_digest" });
     const markdown = (await env.store.kv.get("digest:2026-10-20"))!;
     expect(markdown).toContain("What the agent did");
@@ -361,6 +363,7 @@ describe("schedules and run lifecycle", () => {
     const env = await setup([{ category: "replies_known" }, newMatterOutput]);
     await env.store.people.upsert(personFixture({ verification: "blue" }));
     await env.runtime.run({ kind: "email.received", emailId: "email-1" });
+    env.llm.script.push("Digest reviewed.");
     await env.runtime.run({ kind: "schedule", name: "daily_digest" });
     expect(await env.store.kv.get("digest:2026-10-20")).toContain(
       "Alice: previously blue verification is now green",
@@ -379,6 +382,7 @@ describe("schedules and run lifecycle", () => {
         reason: `Action ${i}`,
       });
     }
+    env.llm.script.push("Digest reviewed.");
     await env.runtime.run({ kind: "schedule", name: "daily_digest" });
     expect(await env.store.kv.get("digest:2026-10-20")).toContain("Action 204");
   });
@@ -397,6 +401,7 @@ describe("schedules and run lifecycle", () => {
       createdAt: "2026-10-19T23:58:00.000Z",
       executedAt: TEST_NOW,
     });
+    env.llm.script.push("Digest reviewed.");
     await env.runtime.run({ kind: "schedule", name: "daily_digest" });
     expect(await env.store.kv.get("digest:2026-10-20")).toContain(
       "Released from yesterday's queue",
@@ -409,11 +414,13 @@ describe("schedules and run lifecycle", () => {
     const runtime = createAgentRuntime({ ...env, now: () => instant });
     const run = await runtime.run({ kind: "email.received", emailId: "email-1" });
     instant = "2026-10-21T14:00:00.000Z";
+    env.llm.script.push("Digest reviewed.");
     await runtime.run({ kind: "schedule", name: "daily_digest" });
     expect(await env.store.kv.get("digest:2026-10-21")).toContain(
       "Decision needed for email-1: Alice asks for a review",
     );
     await env.store.kv.delete(`decision:${run.id}:email-1`);
+    env.llm.script.push("Digest reviewed.");
     await runtime.run({ kind: "schedule", name: "daily_digest" });
     expect(await env.store.kv.get("digest:2026-10-21")).not.toContain(
       "Decision needed for email-1",
@@ -423,11 +430,17 @@ describe("schedules and run lifecycle", () => {
 
   it("reviews old active matters and leaves recently active matters alone", async () => {
     const env = await setup([
-      {
-        summary: "Waiting for Alice's response",
-        nextStep: "Follow up next week",
-        status: "waiting",
-      },
+      toolOutput("update_matter", {
+        accountId: "account-1",
+        matterId: "matter-1",
+        reason: "Review inactive matter",
+        patch: {
+          summary: "Waiting for Alice's response",
+          nextStep: "Follow up next week",
+          status: "waiting",
+        },
+      }),
+      "Reviewed inactive matters.",
     ]);
     await env.store.matters.upsert(matterFixture());
     await env.store.matters.upsert(matterFixture({ id: "recent", emailIds: ["email-1"] }));

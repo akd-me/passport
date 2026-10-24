@@ -50,6 +50,7 @@ const categories: ActionCategory[] = [
   "unsubscribe",
   "matters",
   "other",
+  "profile_update",
 ];
 const risks: RiskLevel[] = ["low", "medium", "high", "critical"];
 const day = 86_400_000;
@@ -315,6 +316,8 @@ export function createPolicyEngine({
         ) {
           outcome = "deny";
           reason = "The external agent ceiling forbids this action.";
+        } else if (request.category === "profile_update" && request.actor.kind !== "human") {
+          reason = "Profile learning requires the person's approval.";
         } else if (selfChange || knownAddressAddition || downgradeAcknowledgement) {
           reason = "Identity changes and downgrade acknowledgements require human approval.";
         } else if (heldDraft) {

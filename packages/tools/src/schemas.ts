@@ -25,7 +25,7 @@ export const full = z
   .describe(
     "Return complete message bodies. Otherwise bodies are clipped to 2000 characters and marked truncated.",
   );
-const category = z.enum([
+export const category = z.enum([
   "triage",
   "newsletters",
   "receipts",
@@ -38,6 +38,7 @@ const category = z.enum([
   "unsubscribe",
   "matters",
   "other",
+  "profile_update",
 ]);
 const status = z.enum([
   "proposed",

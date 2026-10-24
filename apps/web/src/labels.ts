@@ -13,6 +13,7 @@ export const CATEGORIES: ActionCategory[] = [
   "unsubscribe",
   "matters",
   "other",
+  "profile_update",
 ];
 const categoryLabels: Record<ActionCategory, string> = {
   triage: "Triage",
@@ -27,6 +28,7 @@ const categoryLabels: Record<ActionCategory, string> = {
   unsubscribe: "Unsubscribing",
   matters: "Matters and people",
   other: "Everything else",
+  profile_update: "Voice and profile",
 };
 export const categoryLabel = (category: ActionCategory) => categoryLabels[category] ?? category;
 

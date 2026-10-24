@@ -146,6 +146,7 @@ export async function attachMatter(
   personIds: string[],
   reader?: AgentReader | null,
   watched: readonly Matter[] = [],
+  deterministic = false,
 ): Promise<{ id?: string; summary: string }> {
   const options = await matterCandidates(ctx, email, personIds, reader, watched);
   const vendor = (email.from[0]?.name || email.from[0]?.email.split("@")[1] || "Unknown vendor")
@@ -159,7 +160,16 @@ export async function attachMatter(
       }
     }
   }
-  const proposal = await ctx.structured(matterSchema, matterPrompt(email, options));
+  const routineTitle = category === "receipts" ? purchaseTitle : `${category}/${vendor}`;
+  const proposal = deterministic
+    ? {
+        matterId: options.find((matter) => matter.title === routineTitle)?.id ?? null,
+        title: routineTitle,
+        kind: category === "receipts" ? "purchase" : category,
+        summary: `Routine ${category} from ${vendor}`,
+        nextStep: "",
+      }
+    : await ctx.structured(matterSchema, matterPrompt(email, options));
   const selected =
     category === "receipts"
       ? options.find((matter) => matter.title === purchaseTitle)

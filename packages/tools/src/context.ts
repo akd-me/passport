@@ -135,7 +135,9 @@ export class Context {
     }
     if (
       trusted.classification &&
-      !["money", "legal", "matters", "unsubscribe", "scheduling"].includes(inference.category)
+      !["money", "legal", "matters", "unsubscribe", "scheduling", "profile_update"].includes(
+        inference.category,
+      )
     ) {
       inference.category = trusted.classification;
     }

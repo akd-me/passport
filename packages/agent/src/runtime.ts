@@ -23,12 +23,16 @@ import { extractJson, isObject, validateJson } from "./llm/json.js";
 import type { LlmClient } from "./llm/types.js";
 import { manual } from "./manual.js";
 import { getUserProfile, setUserProfile } from "./profile.js";
+import { frameUntrusted } from "./prompts/frame.js";
 import { systemPrompt } from "./prompts/index.js";
 import { RunQueue } from "./queue.js";
 import { createRunReads } from "./reads.js";
-import { dailyDigest, getJournal, type Journal, reviewMatters } from "./schedules.js";
+import { dailyDigest, getJournal, type Journal, matterReviewContext } from "./schedules.js";
 import { agenticSession } from "./session-run.js";
+import { runToolReaders } from "./tool-readers.js";
 import { triage } from "./triage.js";
+import { arrivalToolContext, sessionTriage } from "./triage-session.js";
+import { VoiceLearningGuard } from "./voice-learning.js";
 
 class PersonalAgentRuntime implements AgentRuntime {
   private readonly llm: LlmClient;
@@ -73,6 +77,7 @@ class PersonalAgentRuntime implements AgentRuntime {
     options: AgentRunOptions = {},
   ): Promise<AgentRunResult> {
     const { store, executor, policy, bus } = this.options;
+    const voice = options.voiceLearning ? new VoiceLearningGuard(options.voiceLearning) : undefined;
     const run: AgentRunResult = {
       toolBudget: { callsMade: 0, llmCalls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       id: options.runId ?? this.options.runId?.(trigger) ?? newAgentId(),
@@ -81,6 +86,24 @@ class PersonalAgentRuntime implements AgentRuntime {
       actionIds: [],
       summary: "Started.",
     };
+    if (trigger.kind === "email.received") {
+      const previous = await store.kv.get(`run:${run.id}`);
+      const checkpoint = previous ? (JSON.parse(previous) as AgentRunResult) : undefined;
+      const actions = (await store.actions.query({ runId: run.id, limit: 500 })).items;
+      if (checkpoint?.finishedAt && !checkpoint.error) {
+        return checkpoint;
+      }
+      if (actions.length && this.options.triage?.mode !== "pipeline") {
+        // A crash may leave a partial session. Logged writes are authoritative: never repeat
+        // inference or outward effects. Pending/failed actions remain available for review.
+        run.actionIds = actions.map((action) => action.id);
+        run.finishedAt = this.now();
+        run.summary =
+          "Acknowledged existing arrival actions; inference was not repeated. Review the prior run for incomplete work.";
+        await store.kv.set(`run:${run.id}`, JSON.stringify(run));
+        return run;
+      }
+    }
     const lane: QuotaLane =
       priority === "interactive"
         ? "interactive"
@@ -97,6 +120,7 @@ class PersonalAgentRuntime implements AgentRuntime {
       freeBusy: this.options.freeBusy,
       triageStep: this.options.triageStep,
       profile: "",
+      readOnly: options.readOnly,
       selfAddresses: new Set(this.options.selfAddresses.map(normalizeAddress)),
       drafts: this.options.drafts ?? {},
       tools: [],
@@ -153,12 +177,14 @@ class PersonalAgentRuntime implements AgentRuntime {
         }
         cancelled(options.signal);
         ctx.toolCalls++;
-        const result = await tool.handler(input, {
+        const result = await tool.handler(voice ? voice.input(name, input) : input, {
           ...(options.signal ? { signal: options.signal } : {}),
+          ...arrivalToolContext(ctx, name, input),
           ...context,
           runId: run.id,
           ...(options.taskId ? { taskId: options.taskId } : {}),
         });
+        voice?.result(name, result);
         const data = result;
         if (data.error === "DEPENDENCY_ERROR" || data.status === "failed") {
           throw new AgentError("Tool dependency failed", "ACTION_FAILED");
@@ -182,7 +208,7 @@ class PersonalAgentRuntime implements AgentRuntime {
       freeBusy: this.options.freeBusy,
       // The same on-demand readers the run's own reads use; without them every `mail_*` tool
       // fails with ON_DEMAND_UNSUPPORTED and the model falls back to the local cache.
-      readers: this.options.readers,
+      readers: runToolReaders(this.options.readers, lane, options.signal),
       actor: { kind: "agent", id: run.id },
       observer: options.observer?.toolCall?.bind(options.observer),
       readOnly: options.readOnly,
@@ -216,9 +242,23 @@ class PersonalAgentRuntime implements AgentRuntime {
       });
       ctx.profile = await this.getUserProfile();
       journal = await getJournal(ctx, policy);
+      const session = async (instruction: Extract<AgentTrigger, { kind: "manual" }>) => {
+        if (this.options.toolBelt && isSessionLlmClient(this.llm)) {
+          await agenticSession(ctx, instruction, this.llm, this.options.toolBelt, {
+            ...options,
+            session: options.session ?? {},
+          });
+        } else {
+          await manual(ctx, instruction, { orchestration: true });
+        }
+      };
       switch (trigger.kind) {
         case "email.received":
-          await triage(ctx, trigger.emailId, bus);
+          if (this.options.triage?.mode === "pipeline") {
+            await triage(ctx, trigger.emailId, bus);
+          } else {
+            await sessionTriage(ctx, trigger.emailId, bus, session);
+          }
           break;
         case "manual":
           if (options.session && this.options.toolBelt && isSessionLlmClient(this.llm)) {
@@ -231,9 +271,23 @@ class PersonalAgentRuntime implements AgentRuntime {
           switch (trigger.name) {
             case "daily_digest":
               await dailyDigest(ctx, policy);
+              await session({
+                kind: "manual",
+                instruction:
+                  "Prepare today's daily digest. Use get_daily_log, list_pending_decisions, get_trust and matter notes to explain completed actions, pending decisions and matters that moved. Report actual statuses; do not send mail.",
+              });
               break;
             case "matter_review":
-              await reviewMatters(ctx, this.options.matterReviewDays ?? 7);
+              {
+                const candidates = await matterReviewContext(
+                  ctx,
+                  this.options.matterReviewDays ?? 7,
+                );
+                await session({
+                  kind: "manual",
+                  instruction: `Review these at most 10 active matters inactive for ${this.options.matterReviewDays ?? 7} days. Use notes_read and get_matter for more context; read relevant mail with quotes collapsed. Refresh summary, nextStep and status with update_matter under policy. Silence alone never proves completion. Do not send mail.\n${frameUntrusted("inactive-matters", JSON.stringify(candidates))}`,
+                });
+              }
               break;
             case "outbox": {
               const released = await executor.releaseDue(this.now());

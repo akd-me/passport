@@ -69,6 +69,14 @@ async function rpc(server, id, method, params) {
 }
 
 async function main() {
+  // Title completions run concurrently with sessions. They must not consume the session plan
+  // or race a session's append-only log (W1A fixtures previously flaked here).
+  if (args.join(" ").includes("You name tasks")) {
+    const title = JSON.stringify({ title: "Fixture task" });
+    if (kind === "claude-code") out({ type: "result", subtype: "success", is_error: false, result: title, structured_output: { title: "Fixture task" }, session_id: "title-fixture" });
+    else { out({ type: "item.completed", item: { id: "title", type: "agent_message", text: title } }); out({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }); }
+    process.exit(0);
+  }
   const prior = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).length : 0;
   const entry = { args, stdin, pid: process.pid, results: [] };
   const invocation = plan.invocations[Math.min(prior, plan.invocations.length - 1)];

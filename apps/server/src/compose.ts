@@ -29,6 +29,7 @@ import { logger } from "./logger.js";
 import { checkMasterKey, resolveMasterKey } from "./master-key.js";
 import { persistOAuthCredentials } from "./onboarding/oauth.js";
 import { AccountSyncService, attachAccountSync } from "./onboarding/sync.js";
+import { resumeVoiceLearning } from "./onboarding/voice.js";
 import { withMcpReaders } from "./ondemand-wiring.js";
 import { installReaderTokenSecret } from "./reader-tokens.js";
 import { attachSetupTasks } from "./setup/routes.js";
@@ -224,6 +225,7 @@ export async function createRealBackend(
         freeBusy,
         readers,
         ...agentSessionOptions(config.agentBudget),
+        triage: config.triage,
         runId: () => currentTrigger?.runId,
         triageStep: async <T>(step: string, task: () => Promise<T>): Promise<T> => {
           if (currentTrigger?.kind !== "email.received" || !currentTrigger.runId) {
@@ -365,7 +367,7 @@ export async function createRealBackend(
     const mcpDependencies = withMcpReaders({ ...dependencies, freeBusy }, readers, config.dataDir);
     const mcp = createMailboxMcpServer(mcpDependencies);
     const servers = new Set([mcp]);
-    return attachSetupTasks(
+    const backend = attachSetupTasks(
       attachMailWatcher(
         attachAccountSync<RealBackend>(
           {
@@ -400,7 +402,14 @@ export async function createRealBackend(
               Object.assign(config, next);
               configureAgent();
             },
-            ...backendWatchHooks({ store, config, readers, sync, watcher, closed: () => stopped }),
+            ...backendWatchHooks({
+              store,
+              config,
+              readers,
+              sync,
+              watcher,
+              closed: () => stopped,
+            }),
             async waitForChanges(id, signal) {
               if (signal.aborted) {
                 return;
@@ -440,6 +449,7 @@ export async function createRealBackend(
         watcher,
       ),
     );
+    return resumeVoiceLearning(backend);
   } catch (error) {
     // Preserve the existing error code and propagation after cleanup; do not expose raw payloads.
 

@@ -103,6 +103,7 @@ export function registerOnboarding(
     let credentials = {};
     const transient: Backend = {
       ...backend,
+      tasks: undefined,
       updateConfig: async () => {},
       store: {
         ...backend.store,

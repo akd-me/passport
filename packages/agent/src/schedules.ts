@@ -122,15 +122,15 @@ async function reviewEmails(ctx: RunContext, matter: Matter): Promise<Email[]> {
   );
 }
 
-export async function reviewMatters(ctx: RunContext, days: number): Promise<void> {
+export async function matterReviewContext(ctx: RunContext, days: number) {
   const cutoff = Date.parse(ctx.now()) - days * 86_400_000;
-  let reviewed = 0;
+  const candidates: Array<{ matter: Matter; emails: Email[]; accountId: string }> = [];
   // Every active matter, oldest first: the stale ones are exactly those beyond a default page.
   const active = (await ctx.store.matters.list({ status: ["active"], limit: 2_147_483_647 })).sort(
     (a, b) => a.updatedAt.localeCompare(b.updatedAt),
   );
   for (const matter of active) {
-    if (reviewed >= MATTER_REVIEWS_PER_RUN || Date.parse(matter.updatedAt) > cutoff) {
+    if (candidates.length >= MATTER_REVIEWS_PER_RUN || Date.parse(matter.updatedAt) > cutoff) {
       // Sorted by updatedAt: every later matter moved recently too.
       break;
     }
@@ -150,13 +150,6 @@ export async function reviewMatters(ctx: RunContext, days: number): Promise<void
     if (Math.max(...activity.map((at) => Date.parse(at))) > cutoff) {
       continue;
     }
-    const update = await ctx.structured(
-      reviewSchema,
-      reviewPrompt(
-        matter,
-        emails.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).slice(0, 10),
-      ),
-    );
     const accountId =
       emails[0]?.accountId ??
       matter.refs?.at(-1)?.account ??
@@ -168,6 +161,20 @@ export async function reviewMatters(ctx: RunContext, days: number): Promise<void
         "ACCOUNT_NOT_FOUND",
       );
     }
+    candidates.push({
+      matter,
+      emails: emails.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt)).slice(0, 10),
+      accountId,
+    });
+  }
+  return candidates;
+}
+
+/** Compatibility structured reviewer; scheduled runs now use the session and these candidates. */
+export async function reviewMatters(ctx: RunContext, days: number): Promise<void> {
+  const candidates = await matterReviewContext(ctx, days);
+  for (const { matter, emails, accountId } of candidates) {
+    const update = await ctx.structured(reviewSchema, reviewPrompt(matter, emails));
     await ctx.callTool("update_matter", {
       accountId,
       matterId: matter.id,
@@ -178,7 +185,6 @@ export async function reviewMatters(ctx: RunContext, days: number): Promise<void
         status: update.status as "active" | "waiting" | "done",
       },
     });
-    reviewed++;
   }
-  ctx.notes.push(`Reviewed ${reviewed} inactive matters.`);
+  ctx.notes.push(`Reviewed ${candidates.length} inactive matters.`);
 }

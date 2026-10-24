@@ -56,6 +56,8 @@ export interface AgentRuntimeOptions {
   toolBelt?: import("./session-run.js").ToolBeltHost;
   /** Per-run ceiling for task and manual runs; default 200 tool calls and 30 minutes. */
   budget?: Partial<AgentRunBudget>;
+  /** One-release fallback for arrival inference; defaults to session. */
+  triage?: { mode: "session" | "pipeline" };
 }
 
 export interface RunContext {
@@ -90,6 +92,15 @@ export interface RunContext {
   budget: RunBudget;
   /** The task runner's timeline hooks, when the run belongs to a task. */
   observer?: AgentRunObserver;
+  /** Code-derived arrival evidence, retained across native tool calls. */
+  arrival?: {
+    email: import("@passport/types").Email;
+    people: import("@passport/types").Person[];
+    personIds: string[];
+    category?: import("@passport/types").ActionCategory;
+    alwaysAsk: import("@passport/types").ActionCategory[];
+  };
+  readOnly?: boolean;
   callTool: (name: string, input: unknown, context?: ToolContext) => Promise<ToolResult>;
 }
 
