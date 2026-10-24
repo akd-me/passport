@@ -36,11 +36,30 @@ export class Context {
     return label ? `${reason} [MCP client: ${JSON.stringify(label.slice(0, 200))}]` : reason;
   }
 
+  /** Refuses an account outside the calling task's accounts (`ToolContext.accountIds`). */
+  allowAccount(accountId: string): void {
+    const allowed = this.callContext.accountIds;
+    if (allowed && !allowed.includes(accountId)) {
+      throw new ToolError(
+        "ACCOUNT_FORBIDDEN",
+        `This task may use only its own accounts: ${allowed.join(", ") || "none"}.`,
+      );
+    }
+  }
+
+  /** Connected accounts this call may use: all of them, or the task's accounts. */
+  async accounts() {
+    const accounts = await this.store.accounts.list();
+    const allowed = this.callContext.accountIds;
+    return allowed ? accounts.filter((account) => allowed.includes(account.id)) : accounts;
+  }
+
   async account(accountId?: string) {
     if (accountId) {
+      this.allowAccount(accountId);
       return required(await this.store.accounts.get(accountId), "Account");
     }
-    const accounts = await this.store.accounts.list();
+    const accounts = await this.accounts();
     if (accounts.length !== 1) {
       throw new ToolError(
         "ACCOUNT_REQUIRED",
@@ -57,6 +76,7 @@ export class Context {
 
   /** On-demand reader for an account, or null when no resolver is configured or it has none. */
   async maybeReader(accountId: string): Promise<MailReader | null> {
+    this.allowAccount(accountId);
     return this.readers ? await this.readers(accountId) : null;
   }
 
@@ -73,7 +93,9 @@ export class Context {
   }
 
   async email(id: string, includeBodies = false) {
-    return required(await this.store.emails.get(id, { includeBodies }), "Email");
+    const email = required(await this.store.emails.get(id, { includeBodies }), "Email");
+    this.allowAccount(email.accountId);
+    return email;
   }
 
   async emailBatch(ids: string[], accountId?: string) {
@@ -102,6 +124,7 @@ export class Context {
       sensitiveCategory?: "money" | "legal";
     } = {},
   ) {
+    this.allowAccount(accountId);
     const accounts = await this.store.accounts.list();
     const addresses = [
       ...new Set(
@@ -133,8 +156,15 @@ export class Context {
     ) {
       inference.category = context.sensitiveCategory;
     }
+    // Triage's classification describes particular emails: it never reaches an action on
+    // other targets, or one without source emails (R1-2).
+    const sources = (context.emails ?? []).map((email) => email.id);
+    const scope = trusted.classificationEmailIds;
     if (
       trusted.classification &&
+      scope &&
+      sources.length > 0 &&
+      sources.every((id) => scope.includes(id)) &&
       !["money", "legal", "matters", "unsubscribe", "scheduling", "profile_update"].includes(
         inference.category,
       )

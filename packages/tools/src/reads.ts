@@ -28,11 +28,19 @@ export function registerReads(ctx: Context) {
       if (alias) {
         return alias;
       }
+      if (query.accountId) {
+        ctx.allowAccount(query.accountId);
+      }
+      const scope = ctx.callContext.accountIds;
       const page = await store.emails.query({
         ...query,
+        ...(!query.accountId && scope?.length === 1 ? { accountId: scope[0] } : {}),
         includeBodies: full || query.includeBodies,
       });
-      return json({ ...page, items: page.items.map((email) => emailView(email, full)) });
+      const items = scope
+        ? page.items.filter((email) => scope.includes(email.accountId))
+        : page.items;
+      return json({ ...page, items: items.map((email) => emailView(email, full)) });
     },
   );
   register(
@@ -101,6 +109,7 @@ export function registerReads(ctx: Context) {
         return alias;
       }
       const thread = required(await store.threads.get(threadId), "Thread");
+      ctx.allowAccount(thread.accountId);
       const page = await store.emails.query({
         threadId,
         accountId: thread.accountId,
@@ -129,7 +138,7 @@ export function registerReads(ctx: Context) {
       if (alias) {
         return alias;
       }
-      const accounts = accountId ? [await ctx.account(accountId)] : await store.accounts.list();
+      const accounts = accountId ? [await ctx.account(accountId)] : await ctx.accounts();
       return json({
         items: (
           await Promise.all(accounts.map((account) => store.mailboxes.list(account.id)))

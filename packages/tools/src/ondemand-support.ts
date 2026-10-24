@@ -245,7 +245,7 @@ export async function readerTargets(
   if (account && account !== "all") {
     return { targets: [await readerTarget(ctx, account)], skipped: [] };
   }
-  const accounts = await ctx.store.accounts.list();
+  const accounts = await ctx.accounts();
   if (!account && accounts.length === 1) {
     return { targets: [await readerTarget(ctx, accounts[0]?.id)], skipped: [] };
   }
