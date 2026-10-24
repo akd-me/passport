@@ -1,11 +1,11 @@
 /* W2A: question card, Lineage panel and the collapsed subtasks line. Calm on purpose: a left
-   rule and a surface step, no nested cards; the v0.4 restyle reskins these with its tokens. */
+   rule and a surface step, no nested cards. Tokens only from styles/tokens.css. */
 
 .question-panel {
-  border-left: 2px solid var(--ink-line);
-  background: var(--surface);
-  border-radius: var(--r);
-  padding: 8px 12px;
+  border-left: 2px solid var(--accent);
+  background: var(--sunken);
+  border-radius: 0 var(--r-panel) var(--r-panel) 0;
+  padding: var(--s-2) var(--s-3);
 }
 .question-panel ul {
   list-style: none;
@@ -15,7 +15,7 @@
 .question-card + .question-card {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
 }
 .question-label {
   display: inline-flex;
@@ -23,8 +23,8 @@
   gap: 6px;
   margin: 0 0 4px;
   font-size: var(--t-s);
-  font-weight: 500;
-  color: var(--ink);
+  font-weight: var(--w-medium);
+  color: var(--text-2);
 }
 .question-actions {
   display: flex;
@@ -42,13 +42,19 @@
   margin: 0 0 8px;
   font-size: var(--t-s);
 }
+/* The grid track must not grow to a long title: the row ellipsizes inside the panel. */
+.lineage-children {
+  grid-template-columns: minmax(0, 1fr);
+}
 .lineage-children li {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   min-height: 36px;
 }
 .lineage-children li a {
+  display: block;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -56,13 +62,15 @@
   white-space: nowrap;
 }
 .lineage-children small {
+  flex: none;
+  font-size: var(--t-xs);
   font-variant-numeric: tabular-nums;
 }
 
 .subtasks-line {
   margin: 16px 0 0;
   padding-left: 12px;
-  border-left: 2px solid var(--border);
+  border-left: 2px solid var(--line-strong);
   font-size: var(--t-s);
   color: var(--muted);
 }

@@ -542,6 +542,32 @@ fieldset.field legend {
   background: var(--accent);
 }
 
+/* ---------------------------------------------------------------- Disclosures */
+/* One disclosure mark everywhere: a small chevron that turns when open, never the UA triangle. */
+summary {
+  list-style: none;
+  cursor: pointer;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+summary::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 var(--s-2) 2px 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--dur) var(--ease);
+  vertical-align: middle;
+  opacity: 0.8;
+}
+details[open] > summary::before {
+  transform: rotate(45deg);
+}
+
 /* ---------------------------------------------------------------- Popovers and menus */
 .popover-root {
   position: relative;

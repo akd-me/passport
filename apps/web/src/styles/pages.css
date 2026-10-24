@@ -187,6 +187,10 @@ a.row:hover {
 .timeline summary::-webkit-details-marker {
   display: none;
 }
+/* History rows hang from their own glyph; no disclosure chevron. */
+.timeline summary::before {
+  content: none;
+}
 .timeline summary:hover {
   background: var(--sunken);
 }

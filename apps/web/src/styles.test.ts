@@ -2,14 +2,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-/** The entry plus every layer it imports, as one sheet. */
-const dir = new URL("./styles/", import.meta.url);
-const css = [
-  readFileSync(new URL("./styles.css", import.meta.url), "utf8"),
-  ...readdirSync(dir)
-    .filter((file) => file.endsWith(".css"))
-    .map((file) => readFileSync(new URL(file, dir), "utf8")),
-].join("\n");
+/** Every stylesheet under src (the entry, its layers, and feature sheets), as one sheet. */
+const src = new URL("./", import.meta.url);
+const files = readdirSync(src, { recursive: true, encoding: "utf8" })
+  .filter((file) => file.endsWith(".css"))
+  .sort();
+const sheets = files.map((file) => [file, readFileSync(new URL(file, src), "utf8")] as const);
+const css = sheets.map(([, text]) => text).join("\n");
 
 /** `[light, dark]` for a `--name: light-dark(#light, #dark)` token. */
 function token(name: string) {
@@ -80,6 +79,22 @@ describe("instructional text contrast", () => {
       ".task-glyph.idle",
       ".tool-group-head .icon",
     ]);
+  });
+});
+
+describe("stylesheets", () => {
+  it("reads every sheet, including feature sheets outside styles/", () => {
+    expect(files).toEqual(expect.arrayContaining(["styles.css", "tasks/orchestration.css"]));
+  });
+
+  it("uses no custom property that no sheet declares", () => {
+    const declared = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+    const unknown = sheets.flatMap(([file, text]) =>
+      [...text.matchAll(/var\((--[a-z0-9-]+)/g)]
+        .filter((m) => !declared.has(m[1]))
+        .map((m) => `${file}: ${m[1]}`),
+    );
+    expect(unknown).toEqual([]);
   });
 });
 
