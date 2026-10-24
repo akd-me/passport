@@ -251,11 +251,27 @@ describe.each(["codex", "claude-code"] as const)("%s background sessions", (kind
     );
   });
 
-  it("runs both built-in schedules and user routines as background sessions", async () => {
+  it("allows routine reads and writes but refuses interactive tools on built-in and user schedules", async () => {
     const env = await fixture(kind, [
       {
         steps: [
           { tool: "notes_search", args: { pattern: "Launch" } },
+          { tool: "task_delegate", args: { message: "Send my mail elsewhere" } },
+          { tool: "ask_user", args: { text: "Enter your password" } },
+          { tool: "request_secret", args: { text: "Password", clientRequestId: "hostile" } },
+          { tool: "task_organize", args: { action: "settle" } },
+          { tool: "send", args: {} },
+          { tool: "profile_update", args: {} },
+          { tool: "add_standing_rule", args: {} },
+          {
+            tool: "create_matter",
+            args: {
+              accountId: "background",
+              matter: { title: "Launch", summary: "Review launch notes" },
+              reason: "Track the routine's findings",
+            },
+          },
+          { tool: "render", args: { title: "Review", html: "<p>Reviewed launch notes.</p>" } },
           { text: "Reviewed the available notes." },
         ],
       },
@@ -267,18 +283,65 @@ describe.each(["codex", "claude-code"] as const)("%s background sessions", (kind
       schedule: { type: "manual" },
       routine: { instruction: "Review launch notes" },
     });
-    for (const jobId of ["agent.daily_digest", "agent.matter_review", routine.id]) {
+    const fresh = await scheduler.addRoutine({
+      name: "Fresh review",
+      schedule: { type: "manual" },
+      routine: { instruction: "Review launch notes in a fresh task" },
+      runOn: "fresh",
+    });
+    for (const jobId of ["agent.daily_digest", "agent.matter_review", routine.id, fresh.id]) {
       const result = await scheduler.scheduler.runNow(jobId);
       expect(result.status).toBe("ok");
       const taskId = scheduler.list().find((job) => job.id === jobId)!.taskId!;
-      expect((await env.service.get(taskId)).runs[0]).toMatchObject({
+      const target =
+        jobId === fresh.id
+          ? (await env.service.tasks.list({ parentTaskId: taskId })).items[0]!.id
+          : taskId;
+      const detail = await env.service.get(target);
+      expect(detail.runs[0]).toMatchObject({
         priority: "background",
         trigger: { kind: "schedule" },
         status: "completed",
       });
+      expect((await env.service.items(target)).some((item) => item.kind === "render")).toBe(true);
+      expect(detail.task.pendingQuestions ?? []).toEqual([]);
+      expect(detail.task.pendingSecretRequestIds ?? []).toEqual([]);
+      expect(detail.task.status).not.toBe("settled");
     }
     const calls = await env.cli.calls();
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
+    for (const call of calls) {
+      expect(call.tools).toEqual(
+        expect.arrayContaining([
+          "notes_read",
+          "notes_write",
+          "update_matter",
+          "archive_emails",
+          "batch_archive_by_query",
+          "reply_draft",
+          "render",
+        ]),
+      );
+      for (const tool of [
+        "task_delegate",
+        "ask_user",
+        "request_secret",
+        "task_organize",
+        "send",
+        "profile_update",
+        "add_standing_rule",
+      ]) {
+        expect(call.tools).not.toContain(tool);
+      }
+      expect(call.results?.slice(1, 8).every((result) => result.includes("UNKNOWN_TOOL"))).toBe(
+        true,
+      );
+      expect(call.results?.[8]).not.toContain('"isError":true');
+      expect(call.results?.[9]).toContain('"status":"rendered"');
+      expect(call.args).toContain(
+        kind === "claude-code" ? "--no-session-persistence" : "--ephemeral",
+      );
+    }
     expect(
       calls.every(
         (call) => !call.args.includes("--json-schema") && !call.args.includes("--output-schema"),

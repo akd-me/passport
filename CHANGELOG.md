@@ -124,6 +124,9 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 
 ### Fixed
 
+- Daily digest, matter review and user routine sessions expose an explicit allowlist of read,
+  notes, matter, mail-organizing, draft and render tools; scheduled input cannot delegate,
+  ask questions, request secrets or organize its task (R1-1 routines).
 - A provider's successful session result stays completed if Stop or steer arrives while the
   agent is settling its result, instead of retroactively cancelling it (R1-8 integration).
 - Secret responses and expiry clear pending request IDs even after the requesting run ended;

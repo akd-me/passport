@@ -26,6 +26,8 @@ declare module "./tasks.js" {
 
 declare module "./agent-ondemand.js" {
   interface AgentRunOptions {
+    /** Restrict scheduled manual instructions (including user routines) to routine tools. */
+    toolScope?: "routine";
     /**
      * Accounts the run's tools may use (`Task.accountIds`). Reads and writes on any other
      * account fail with `ACCOUNT_FORBIDDEN`; absent means every connected account.

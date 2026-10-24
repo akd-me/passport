@@ -28,6 +28,7 @@ import { frameUntrusted } from "./prompts/frame.js";
 import { systemPrompt } from "./prompts/index.js";
 import { RunQueue } from "./queue.js";
 import { createRunReads } from "./reads.js";
+import { ROUTINE_TOOLS } from "./routine-session.js";
 import { dailyDigest, getJournal, type Journal, matterReviewContext } from "./schedules.js";
 import { agenticSession } from "./session-run.js";
 import { runToolReaders } from "./tool-readers.js";
@@ -258,6 +259,9 @@ class PersonalAgentRuntime implements AgentRuntime {
         releaseDue: (...args) => executor.releaseDue(...args),
       },
     });
+    if (trigger.kind === "schedule" || options.toolScope === "routine") {
+      ctx.tools = ctx.tools.filter((tool) => ROUTINE_TOOLS.has(tool.name));
+    }
     await store.kv.set(`run:${run.id}`, JSON.stringify(run));
     let failure: AgentError | undefined;
     let journal: Journal | undefined;

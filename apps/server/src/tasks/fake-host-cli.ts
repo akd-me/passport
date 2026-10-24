@@ -26,6 +26,8 @@ export interface FakeCall {
   pid: number;
   /** Tool results the fake received, in order. */
   results?: string[];
+  /** Tools advertised by this run's MCP server. */
+  tools?: string[];
 }
 
 const SCRIPT = String.raw`
@@ -105,6 +107,9 @@ async function main() {
   const server = target();
   await rpc(server, 1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake", version: "1" } });
   let id = 2, last = "";
+  const listed = await rpc(server, id++, "tools/list", {});
+  entry.tools = (listed.result?.tools || []).map((tool) => tool.name);
+  log();
   for (const step of invocation.steps || []) {
     if (step.sleepMs) { await sleep(step.sleepMs); continue; }
     if (step.text) {
