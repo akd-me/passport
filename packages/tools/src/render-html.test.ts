@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { RENDER_MAX_BYTES, renderHeight, sanitizeRenderHtml } from "./render-html.js";
+import {
+  RENDER_MAX_BYTES,
+  RENDER_MAX_DEPTH,
+  renderHeight,
+  sanitizeRenderHtml,
+} from "./render-html.js";
 
 describe("restricted render parser", () => {
   it("keeps the full structural allowlist and only class on span/div", () => {
@@ -78,5 +83,66 @@ describe("restricted render parser", () => {
     for (const height of [79, 1201, 80.5, Number.NaN]) {
       expect(() => renderHeight("x", height)).toThrow(/height/);
     }
+  });
+});
+
+describe("render parser robustness (R1-25, R1-50, R1-51)", () => {
+  const time = (html: string) => {
+    const started = performance.now();
+    try {
+      sanitizeRenderHtml(html);
+    } catch {
+      // Over-size output is expected for some inputs; only the time matters here.
+    }
+    return performance.now() - started;
+  };
+  const fill = (unit: string) => unit.repeat(Math.floor(RENDER_MAX_BYTES / unit.length));
+
+  it("sanitises a 64 KiB adversarial input in under 100 ms", () => {
+    const inputs = [
+      // The review's 5.9 s input: deep opens, then closers that match nothing.
+      `${"<p>".repeat(10922)}${"</a>".repeat(8190)}`,
+      `${"<div>".repeat(6000)}${"</p>".repeat(8000)}`,
+      fill("<b"),
+      fill("<b x"),
+      fill("<p x='"),
+      fill('<a x="'),
+      fill("<p></p>"),
+      fill("</p>"),
+      fill("a<b then c, total > 5 "),
+      `<i${" a".repeat(32000)},>`,
+    ];
+    for (const html of inputs) {
+      expect(Buffer.byteLength(html)).toBeLessThanOrEqual(RENDER_MAX_BYTES);
+      sanitizeRenderHtml("<p>warm</p>");
+      expect(time(html)).toBeLessThan(100);
+    }
+  });
+
+  it("keeps a stray < in prose as text instead of swallowing what follows", () => {
+    expect(sanitizeRenderHtml("<p>if a<b then c, total > 5</p><p>keep me</p>")).toBe(
+      "<p>if a&lt;b then c, total &gt; 5</p><p>keep me</p>",
+    );
+    expect(sanitizeRenderHtml('Alice\'s note: x<y and "quoted" text</p><p>more</p>')).toBe(
+      "Alice&#39;s note: x&lt;y and &quot;quoted&quot; text<p>more</p>",
+    );
+    // Real tags outside the allowlist still disappear, keeping their text.
+    expect(sanitizeRenderHtml("<p>Hi<br>there <b>bold</b> <img src=x onerror=alert(1)></p>")).toBe(
+      "<p>Hithere bold </p>",
+    );
+  });
+
+  it("decodes named entities and link URLs exactly once", () => {
+    expect(sanitizeRenderHtml("<p>&eacute; &copy; &hellip; &Auml; &mdash; &bogus;</p>")).toBe(
+      "<p>\u00e9 \u00a9 \u2026 \u00c4 \u2014 &amp;bogus;</p>",
+    );
+    expect(sanitizeRenderHtml('<a href="&amp;lt;b&amp;gt;">x</a>')).toBe("x (&amp;lt;b&amp;gt;)");
+  });
+
+  it("drops opening tags past the depth cap but keeps their text", () => {
+    const html = sanitizeRenderHtml(`${"<div>".repeat(RENDER_MAX_DEPTH + 5)}deep`);
+    expect(html.match(/<div>/g)).toHaveLength(RENDER_MAX_DEPTH);
+    expect(html).toContain("deep");
+    expect(html.match(/<\/div>/g)).toHaveLength(RENDER_MAX_DEPTH);
   });
 });
