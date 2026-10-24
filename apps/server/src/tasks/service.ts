@@ -25,7 +25,6 @@ import { ApiError } from "../errors.js";
 import { contextItems, taskByAction } from "./context.js";
 import { type RunCeilings, type RunDescription, TaskRunner } from "./runner.js";
 import { taskSessionOptions } from "./session.js";
-import { idleStatus } from "./status.js";
 import { frameUntrusted } from "./untrusted.js";
 
 export interface TaskServiceOptions {
@@ -79,25 +78,6 @@ export class TaskService {
 
   close(): void {
     this.runner.close();
-  }
-
-  /** Marks runs a previous process left open as failed (T3: "interrupted by a server restart"). */
-  async recover(): Promise<void> {
-    for (const run of await this.tasks.runs.unfinished()) {
-      const done = await this.tasks.runs.update(run.id, {
-        status: "failed",
-        endedAt: this.now(),
-        error: "SERVER_RESTARTED",
-      });
-      this.options.bus.emit({ type: "task.run.updated", run: done });
-      const task = await this.tasks.get(run.taskId);
-      if (task?.status === "working") {
-        await this.runner.updateTask(task.id, {
-          status: idleStatus(task),
-          ...(run.trigger.kind === "message" ? { needsUser: "failure" as const } : {}),
-        });
-      }
-    }
   }
 
   list(q: TaskQuery): Promise<Page<Task>> {
@@ -161,13 +141,16 @@ export class TaskService {
     return { task: await this.task(task.id), ...started };
   }
 
-  /** A follow-up: `queue` runs after the active run; `steer` restarts it with both messages. */
-  async sendMessage(id: string, message: TaskMessage) {
+  /**
+   * A follow-up: `queue` runs after the active run; `steer` restarts it with both messages.
+   * `runId` starts a queued entry under the TaskRun id it was given (`TaskQueue`).
+   */
+  async sendMessage(id: string, message: TaskMessage, runId?: string) {
     const task = await this.task(id);
     if (task.kind !== "task" && message.mode === "steer") {
       message = { ...message, mode: "queue" };
     }
-    const { run } = await this.message(task, message);
+    const { run } = await this.message(task, message, {}, runId);
     return { task: await this.task(id), run };
   }
 
@@ -175,13 +158,14 @@ export class TaskService {
     task: Task,
     message: TaskMessage,
     context: Pick<CreateTaskInput, "emailIds" | "matterId"> = {},
+    presetRunId?: string,
   ) {
     const mode = message.mode ?? "queue";
     let steered: string[] = [];
     if (mode === "steer") {
       steered = await this.cancelForSteer(task.id);
     }
-    const runId = newId();
+    const runId = presetRunId ?? newId();
     const item = await this.runner.appendItem({
       taskId: task.id,
       runId,
@@ -372,6 +356,7 @@ export class TaskService {
         status: "inbox",
         snoozedUntil: null,
         lastActivityAt: now,
+        unseenOutcome: "woke",
       });
       woken++;
     }

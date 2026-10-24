@@ -20,6 +20,23 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 - `request_secret` and private task input with encrypted one-use references for webhook
   signing keys and IMAP credentials. Task details now include Automations; routine details
   include Deliveries.
+- Task lifecycle v2 (server; the web wiring follows): tasks carry `returnedAt`, `seenAt` and
+  `unseenOutcome` (`done` / `woke`) with `POST /api/tasks/:id/seen` and `/mark-unread`. Settle,
+  snooze and archive answer with the `previous` state, and `/unsettle`, `/unsnooze` and
+  `/unarchive` reopen a task, so every sidebar move can be undone.
+- A server-side follow-up queue: a message sent while the task is busy waits in `Task.queue`
+  and can be read, edited, reordered, removed or promoted to a steer under
+  `/api/tasks/:id/queue`. Stop (and settle, archive) hold the queue (`queueHeld`) until
+  `/queue/resume` or the next message.
+- The Limited state: a run stopped by a Codex or Claude Code subscription limit or a provider
+  429 sets `needsUser: "limited"` and `Task.limited { resetAt, autoResume }`. `/resume` continues
+  the run now, `/resume-at-reset` continues it when the limit resets, and the queue waits.
+- Restart continuation: a message, watch or wake run cut off by a restart continues once, with a
+  `RESTARTED` notice listing what was in flight, instead of failing.
+- Generated titles: after a task's first run the fast model proposes a title of at most 60
+  characters (`titleGenerated: true` until you rename it).
+- `@passport/types` exports `isTaskWorking` and `taskBadge` (Approval, Input, Working, Waiting,
+  Limited, Failed, Woke, Done); the server's status rules live in one `resolveTaskStatus`.
 
 ### Changed
 

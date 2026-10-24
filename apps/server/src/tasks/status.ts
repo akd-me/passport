@@ -1,8 +1,23 @@
 /**
  * Task lifecycle rules (docs/tasks.md "Status rules"). Pure functions over a fresh task row so
- * the service, the watch monitor and maintenance all agree.
+ * the service, the watch monitor and maintenance all agree. `resolveTaskStatus` is the single
+ * entry point; `statusDuringRun` and `statusAfterRun` are its two run events.
  */
-import type { Task, TaskNeedsUser, TaskRunTrigger, TaskStatus } from "@passport/types";
+import {
+  isTaskWorking,
+  type Task,
+  type TaskNeedsUser,
+  type TaskRunTrigger,
+  type TaskStatus,
+  type TaskUnseenOutcome,
+} from "@passport/types";
+
+/** Run error codes that mean a usage limit, not a failure (`needsUser: "limited"`). */
+export const LIMIT_CODES: readonly string[] = ["USAGE_LIMITED", "HOST_AGENT_RATE_LIMIT"];
+
+export function isLimitCode(code: string | null | undefined): boolean {
+  return !!code && LIMIT_CODES.includes(code);
+}
 
 /** Hidden from the sidebar's active sections; background work never brings these back. */
 export function hidden(status: TaskStatus): boolean {
@@ -14,25 +29,9 @@ export function idleStatus(task: Pick<Task, "watches">): TaskStatus {
   return task.watches.length ? "working" : "inbox";
 }
 
-/** Brings a task back to the person: approval, question, failure or their own message. */
+/** Brings a task back to the person: approval, question, failure, limit or their own message. */
 export function surface(needsUser: TaskNeedsUser, now: string): Partial<Task> {
   return { status: "inbox", needsUser, snoozedUntil: null, lastActivityAt: now };
-}
-
-/** Status while a run is queued or running. A user message also wakes a snoozed task. */
-export function statusDuringRun(task: Task, trigger: TaskRunTrigger, now: string): Partial<Task> {
-  if (trigger.kind === "message") {
-    return {
-      status: "working",
-      snoozedUntil: null,
-      settledAt: null,
-      needsUser: task.needsUser === "failure" ? null : task.needsUser,
-      lastActivityAt: now,
-    };
-  }
-  return hidden(task.status) || (task.status === "inbox" && task.needsUser)
-    ? {}
-    : { status: "working" };
 }
 
 export interface RunOutcome {
@@ -47,19 +46,53 @@ export interface RunOutcome {
   /** Other queued or running runs of the same task. */
   otherActiveRuns: number;
   now: string;
+  /** The run's error code; a limit code surfaces `needsUser: "limited"` instead of a failure. */
+  error?: string | null;
 }
 
-/** Settled, snoozed or archived by the person while the run was active (R4-9). */
-function putAwayDuringRun(task: Task, outcome: RunOutcome): boolean {
-  const away = task.status === "settled" || hidden(task.status);
-  return away && outcome.startStatus !== undefined && task.status !== outcome.startStatus;
+/** What happened to the task; `resolveTaskStatus` answers with the patch to apply. */
+export type StatusEvent =
+  | { kind: "run_started"; trigger: TaskRunTrigger; now: string }
+  | { kind: "run_ended"; outcome: RunOutcome }
+  /** Unsettle, unsnooze, unarchive and a snooze whose time came. */
+  | { kind: "reopened"; activeRuns: number; now: string };
+
+/**
+ * The status rules in one place (docs/tasks.md "Status rules"):
+ *
+ * - `run_started`: Working while a run is active, except hidden tasks and an inbox task already
+ *   waiting on the person. A user message also un-snoozes, un-settles and clears a failure.
+ * - `run_ended`: see `statusAfterRun`.
+ * - `reopened`: back to where the task rests (Working while the T3 Working predicate holds,
+ *   else the inbox), with a fresh `lastActivityAt` (so a fresh `returnedAt`).
+ */
+export function resolveTaskStatus(task: Task, event: StatusEvent): Partial<Task> {
+  switch (event.kind) {
+    case "run_started":
+      return started(task, event.trigger, event.now);
+    case "run_ended":
+      return ended(task, event.outcome);
+    case "reopened":
+      return {
+        status: isTaskWorking(task, { activeRuns: event.activeRuns }) ? "working" : "inbox",
+        snoozedUntil: null,
+        settledAt: null,
+        lastActivityAt: event.now,
+      };
+  }
+}
+
+/** Status while a run is queued or running. A user message also wakes a snoozed task. */
+export function statusDuringRun(task: Task, trigger: TaskRunTrigger, now: string): Partial<Task> {
+  return resolveTaskStatus(task, { kind: "run_started", trigger, now });
 }
 
 /**
  * Status when a run ends:
  *  0. a task the person settled, snoozed or archived during the run stays there; a failure
  *     only sets `needsUser`;
- *  1. a failed run (not arrivals, which retry) surfaces with `needsUser: "failure"`;
+ *  1. a failed run (not arrivals, which retry) surfaces with `needsUser: "failure"`, or
+ *     `"limited"` when it stopped at a usage limit;
  *  2. pending approvals surface with `needsUser: "approval"`;
  *  3. another run of the task still active keeps it Working;
  *  4. a run started by the person's message returns to the inbox (Working while watching);
@@ -68,23 +101,76 @@ function putAwayDuringRun(task: Task, outcome: RunOutcome): boolean {
  *     ones that produced nothing return to where they were;
  *  7. arrival triage never moves the task by itself.
  * A task that rested in Working (watching) and comes back to the inbox gets a fresh
- * `lastActivityAt` (R4-10), so auto-settle never takes it before the person saw it.
+ * `lastActivityAt` (R4-10), so auto-settle never takes it before the person saw it. A run that
+ * hands the task back records an unseen outcome: `done` for the person's runs, `woke` for
+ * schedule, watch and wake runs.
  */
 export function statusAfterRun(task: Task, outcome: RunOutcome): Partial<Task> {
+  return resolveTaskStatus(task, { kind: "run_ended", outcome });
+}
+
+function started(task: Task, trigger: TaskRunTrigger, now: string): Partial<Task> {
+  if (trigger.kind === "message") {
+    return {
+      status: "working",
+      snoozedUntil: null,
+      settledAt: null,
+      needsUser: task.needsUser === "failure" ? null : task.needsUser,
+      lastActivityAt: now,
+    };
+  }
+  return hidden(task.status) || (task.status === "inbox" && task.needsUser)
+    ? {}
+    : { status: "working" };
+}
+
+/** Settled, snoozed or archived by the person while the run was active (R4-9). */
+function putAwayDuringRun(task: Task, outcome: RunOutcome): boolean {
+  const away = task.status === "settled" || hidden(task.status);
+  return away && outcome.startStatus !== undefined && task.status !== outcome.startStatus;
+}
+
+function failureKind(outcome: RunOutcome): TaskNeedsUser {
+  return isLimitCode(outcome.error) ? "limited" : "failure";
+}
+
+function ended(task: Task, outcome: RunOutcome): Partial<Task> {
   if (putAwayDuringRun(task, outcome)) {
-    return outcome.failed && outcome.trigger.kind !== "arrival" ? { needsUser: "failure" } : {};
+    return outcome.failed && outcome.trigger.kind !== "arrival"
+      ? { needsUser: failureKind(outcome) }
+      : {};
   }
   const next = ruleStatus(task, outcome);
   // Resting in Working (watching) before the run and handed back now: the watch ended.
-  return outcome.preStatus === "working" && next.status === "inbox"
-    ? { ...next, lastActivityAt: outcome.now }
-    : next;
+  const handed =
+    outcome.preStatus === "working" && next.status === "inbox"
+      ? { ...next, lastActivityAt: outcome.now }
+      : next;
+  const unseen = unseenOutcome(task, handed, outcome);
+  return unseen ? { ...handed, unseenOutcome: unseen } : handed;
+}
+
+/** The outcome badge a run leaves when it hands the task back without needing the person. */
+function unseenOutcome(task: Task, next: Partial<Task>, outcome: RunOutcome): TaskUnseenOutcome {
+  const needsUser = "needsUser" in next ? next.needsUser : task.needsUser;
+  const returned = next.status === "inbox" && next.lastActivityAt !== undefined && !needsUser;
+  if (!returned || outcome.failed) {
+    return null;
+  }
+  switch (outcome.trigger.kind) {
+    case "message":
+      return "done";
+    case "arrival":
+      return null;
+    default:
+      return "woke";
+  }
 }
 
 function ruleStatus(task: Task, outcome: RunOutcome): Partial<Task> {
   const { trigger, now } = outcome;
   if (outcome.failed && trigger.kind !== "arrival") {
-    return surface("failure", now);
+    return surface(failureKind(outcome), now);
   }
   if (task.pendingActionIds?.length) {
     return task.status === "inbox" && task.needsUser === "approval" ? {} : surface("approval", now);

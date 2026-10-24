@@ -18,7 +18,7 @@ create a routine. Changes arrive through the existing WebSocket event stream.
 | `trust.decay`            | Daily 03:00                                                     | Apply trust decay                                                                                   |
 | `agent.daily_digest`     | Daily `dailyDigestHour` (`PASSPORT_DIGEST_HOUR`, default 08:00) | Agent daily digest                                                                                  |
 | `agent.matter_review`    | Daily 04:00                                                     | Agent matter review                                                                                 |
-| `tasks.maintenance`      | Every 10 minutes                                                | Wake snoozed tasks whose time came, auto-settle tasks idle 3 days, end conversation watches older than 14 days ([tasks](tasks.md)) |
+| `tasks.maintenance`      | Every 10 minutes                                                | Wake snoozed tasks whose time came, auto-settle tasks idle 3 days, end conversation watches older than 14 days, continue usage-limited runs whose `resume-at-reset` time passed ([tasks](tasks.md)) |
 | `store.maintenance`      | Sunday 03:30                                                    | Evict cached bodies/envelopes, then optional `maintenance()` or `vacuum()` / `optimizeFts()`         |
 
 Daily/weekly defaults use the machine's local IANA time zone, captured when registered.

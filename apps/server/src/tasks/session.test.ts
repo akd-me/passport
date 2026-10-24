@@ -34,7 +34,14 @@ async function sessionBackend(
 ) {
   const dir = await mkdtemp(join(tmpdir(), "passport-session-"));
   dirs.push(dir);
-  const cli = await fakeHostCli(dir, kind, invocations);
+  const hostCli = await fakeHostCli(dir, kind, invocations);
+  // Title generation (lifecycle v2) runs a fast-model completion after the first run; these
+  // tests assert on the session calls only.
+  const cli = {
+    ...hostCli,
+    calls: async () =>
+      (await hostCli.calls()).filter((call) => !call.args.join(" ").includes("You name tasks")),
+  };
   const mail = new MockMailProvider({ fixtures: false });
   const providers = createProviderRegistry();
   vi.spyOn(providers, "mail").mockReturnValue(mail);

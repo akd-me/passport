@@ -18,6 +18,7 @@ import {
 } from "@passport/types";
 import { logger } from "../logger.js";
 import { sessionObserver } from "./session.js";
+import { stampTask } from "./stamps.js";
 import { type RunOutcome, statusAfterRun, statusDuringRun, surface } from "./status.js";
 import { clip, costOf, neutralize, summarizeInput, summarizeResult } from "./untrusted.js";
 
@@ -90,6 +91,8 @@ export class TaskRunner {
   private readonly unsubscribe: Array<() => void> = [];
   /** Task-scoped approval grants (`TaskApprovals.autoApprove`): the decided record, or null. */
   autoApprove?: (taskId: string, action: ActionRecord) => Promise<ActionRecord | null>;
+  /** v0.4 lifecycle (limits, titles, the follow-up queue): a run ended, before its status rules. */
+  onRunEnded?: (run: TaskRun) => Promise<void>;
 
   constructor(
     private readonly store: Store,
@@ -139,7 +142,7 @@ export class TaskRunner {
   }
 
   async updateTask(id: string, patch: Partial<Task> | ((task: Task) => Partial<Task>)) {
-    const task = await this.tasks.update(id, patch);
+    const task = await this.tasks.update(id, (current) => stampTask(current, patch));
     this.bus.emit({ type: "task.updated", task });
     return task;
   }
@@ -400,6 +403,7 @@ export class TaskRunner {
       // The steer's replacement run is starting; moving the task now would bounce it (R4-20).
       return;
     }
+    await this.onRunEnded?.(done);
     const outcome: RunOutcome = {
       trigger: run.trigger,
       preStatus: active.preStatus,
@@ -408,6 +412,7 @@ export class TaskRunner {
       produced: active.produced || done.actionIds.length > 0,
       otherActiveRuns: this.activeRuns(run.taskId).length,
       now: this.now(),
+      error: done.error ?? null,
     };
     await this.updateTask(run.taskId, (task) => statusAfterRun(task, outcome));
   }

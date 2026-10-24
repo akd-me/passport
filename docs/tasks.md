@@ -11,10 +11,14 @@ Vocabulary: "task" is agent work, "conversation" is an email thread, "matter" is
 
 | Type | Fields |
 |---|---|
-| `Task` | `id`, `title`, `accountIds`, `status` (`inbox` / `working` / `snoozed` / `settled` / `archived`), `pinned`, `snoozedUntil?`, `permissionMode` (`supervised` / `auto_accept_edits` / `auto` / `full_access`), `permissionModePinned?`, `interactionMode` (`default` / `plan`), `createdBy` (`user` / `agent` / `system`), `kind` (`task` / `inbox` / `routine`), `parentTaskId?`, `needsUser` (`null` / `approval` / `question` / `failure`), `pendingActionIds?`, `lastActivityAt`, `createdAt`, `settledAt?`, `watches: ConversationWatch[]`, `jobId?` (routine), `revision?`, `approvalGrants?: TaskApprovalGrant[]`, `providerSessionId?`, `providerSessionKind?` (`claude-code` / `codex`: the host-agent session follow-ups resume, see [Sessions](#sessions)) |
+| `Task` | `id`, `title`, `accountIds`, `status` (`inbox` / `working` / `snoozed` / `settled` / `archived`), `pinned`, `snoozedUntil?`, `permissionMode` (`supervised` / `auto_accept_edits` / `auto` / `full_access`), `permissionModePinned?`, `interactionMode` (`default` / `plan`), `createdBy` (`user` / `agent` / `system`), `kind` (`task` / `inbox` / `routine`), `parentTaskId?`, `needsUser` (`null` / `approval` / `question` / `failure` / `limited`), `pendingActionIds?`, `lastActivityAt`, `createdAt`, `settledAt?`, `watches: ConversationWatch[]`, `jobId?` (routine), `revision?`, `approvalGrants?: TaskApprovalGrant[]`; v0.4, all optional: `returnedAt?`, `seenAt?`, `unseenOutcome?` (`done` / `woke` / `null`), `queue?: TaskQueueEntry[]`, `queueHeld?`, `limited?: TaskLimited \| null`, `titleGenerated?`, `providerSessionId?`, `providerSessionKind?` (`claude-code` / `codex`: the host-agent session follow-ups resume, see [Sessions](#sessions)) |
 | `TaskApprovalGrant` | `category`, `actionId`, `trustLevel`, `risk`, `reversibility`, `grantedAt` (see [Approval scopes](#approval-scopes)) |
 | `ConversationWatch` | `threadHandle`, `account`, `since`, `lastWakeAt?`, `consecutiveWakes` |
-| `TaskRun` | `id`, `taskId`, `status` (`queued` / `running` / `waiting` / `completed` / `failed` / `cancelled`), `trigger`, `priority` (`interactive` / `background`), `agentRunId`, `createdAt`, `startedAt?`, `endedAt?`, `summary?`, `actionIds`, `usage?` (`llmCalls`, `toolCalls`, `inputTokens`, `outputTokens`), `error?` (a stable code) |
+| `TaskQueueEntry` | `runId` (the `queued` TaskRun it runs as), `text`, `createdAt` (see [Follow-up queue](#follow-up-queue)) |
+| `TaskQueue` | `taskId`, `held`, `entries: TaskQueueEntry[]` |
+| `TaskLimited` | `runId` (the stopped run), `resetAt` (or `null` when unknown), `autoResume`, `source` (`host_agent` / `provider`), `at` (see [Usage limits](#usage-limits)) |
+| `TaskRestoreState` | `status`, `snoozedUntil`, `settledAt`: what settle, snooze and archive replaced (`TaskWithPrevious = Task & { previous }`) |
+| `TaskRun` | `id`, `taskId`, `status` (`queued` / `running` / `waiting` / `completed` / `failed` / `cancelled`), `trigger`, `priority` (`interactive` / `background`), `agentRunId`, `createdAt`, `startedAt?`, `endedAt?`, `summary?`, `actionIds`, `usage?` (`llmCalls`, `toolCalls`, `inputTokens`, `outputTokens`), `error?` (a stable code), `restartOf?` (v0.4: the run a restart interrupted and this one continues) |
 | `TaskRunTrigger` | `{ kind: "message", itemId, mode }` · `{ kind: "arrival", emailId }` · `{ kind: "schedule", jobId, name }` · `{ kind: "watch", threadHandle, emailId }` · `{ kind: "wake", reason }` |
 | `TaskItem` | `id`, `runId` (null for lifecycle notices), `taskId`, `seq` (per task, from 1), `kind`, `at`, `payload`, `untrusted?` |
 
@@ -28,7 +32,7 @@ Item payloads by `kind`:
 | `approval_request` | `{ actionId, summary }`; approve or reject with `/api/actions/:id/{approve,reject}` |
 | `question` | `{ text }` (reserved: nothing emits it yet) |
 | `secret_request` | `{ requestId, text, expiresAt }`; private password field, never the value; see [request_secret](tools.md#private-secrets-v04) |
-| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`), `BUDGET_EXHAUSTED` (the run reached its [budget](#sessions)) |
+| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code (`USAGE_LIMITED` for a usage limit), `RESTARTED`, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`), `BUDGET_EXHAUSTED` (the run reached its [budget](#sessions)) |
 | `notification` | `{ source: "arrival" \| "watch" \| "schedule" \| "system", summary, row? }`; `row` is a `MailRow`. A task created with `matterId` or `emailIds` gets a `system` one on its first run ("With matter “…” and 2 messages “…”, “…”"; `row` when there is exactly one message) |
 
 **Untrusted data.** Items with `untrusted: true` contain provider-derived strings (subjects,
@@ -51,7 +55,11 @@ loses its `<` (becomes `‹`), so mail can neither close the frame nor open a de
 ## Kinds
 
 - **`task`**: started from the composer (`POST /api/tasks`, or `/api/agent/run` for the v0.2
-  composer). Title: the `title` field or the first 60 characters of the message.
+  composer). Title: the `title` field or the first 60 characters of the message. Without a
+  `title`, when the first run ends a fast-model completion (`model: "fast"`, the request and the
+  framed first reply) proposes one of at most 60 characters, neutralized like model text, and
+  the task gets `titleGenerated: true`. Any later rename (`PATCH`) sets it to `false`; a rename
+  before the proposal arrives wins. Without a configured model the message title stays.
 - **`inbox`**: one per mail account, created by the system on the first arrival. Every triage
   run of a new message is recorded on it. Each one starts with a `notification` item carrying
   the arrival's `MailRow`, and a retry starts with a `RETRY` notice. Its run's `agentRunId` is
@@ -74,14 +82,17 @@ System tasks (`inbox`, `routine`) follow the global trust dial: before each run 
 - **Lanes.** User messages run in the interactive lane. Arrivals, routines and watch wakes run
   in the background lane. An interactive run starts before any waiting background run, and
   nothing preempts the run in progress.
-- **Queue vs steer.** `mode: "queue"` (the default) adds a run after the active one.
-  `mode: "steer"` cancels the task's active message runs and starts one new run whose prompt
-  holds both the cancelled message and the new one. A queued run leaves the lane immediately.
-  A running one stops at its next model or tool call, and the answer of an in-flight model call
+- **Queue vs steer.** `mode: "queue"` (the default) runs the message after the task's active
+  message run: it waits in the task's [follow-up queue](#follow-up-queue) and enters the lane
+  only when the run before it ends. `mode: "steer"` cancels the task's active message runs and
+  starts one new run whose prompt holds both the cancelled message and the new one; the queue
+  is left as it is and drains after it. A run waiting in the lane leaves it immediately. A
+  running one stops at its next model or tool call, and the answer of an in-flight model call
   is discarded. Arrival and routine runs can't be cancelled. Steering a system task queues.
-- **Interrupt** cancels every cancellable run of the task. Each one ends `cancelled` with a
-  `RUN_CANCELLED` notice. A run cancelled by a steer leaves the status to its replacement, so the
-  task never bounces through the inbox.
+- **Interrupt** holds the queue (`queueHeld: true` when it has entries) and cancels every
+  cancellable run of the task. Each one ends `cancelled` with a `RUN_CANCELLED` notice. A run
+  cancelled by a steer leaves the status to its replacement, so the task never bounces through
+  the inbox.
 - **Context.** A message run that starts a fresh session (or runs on an API provider) gets a
   prompt with the task title, up to 16 recent user/assistant/notification items (6,000
   characters, wrapped as untrusted data), and the request. A run that resumes the task's
@@ -96,8 +107,19 @@ System tasks (`inbox`, `routine`) follow the global trust dial: before each run 
   `PATCH`, and a child task's mode to its parent's. During a run, the policy engine also caps
   every action of that run at the task's effective mode (the minimum over the parent chain). It
   can only lower the level the trust ladder would give.
-- **Restart.** Runs left `queued` or `running` by a previous process are marked `failed`
-  (`SERVER_RESTARTED`). An interrupted message run surfaces the task with `needsUser: "failure"`.
+- **Restart continuation.** At startup, each message, watch or wake run a previous process left
+  `queued` or `running` ends `cancelled` (`SERVER_RESTARTED`) and is continued once: the task
+  gets one `RESTARTED` notice listing what was in flight (the interrupted runs, the conversations
+  it still watches, pending wakes that will still fire), and a new run starts with `restartOf`
+  set. A message run continues as a message run on the same `user_message` item (so the status
+  rules treat it as the person's); watch and wake runs continue as a background `wake` run
+  (`reason: "restarted"`). The prompt says the run was cut off, lists the watched and pending
+  handles (JSON-quoted), asks the agent to check what was already done before repeating a
+  write, and repeats the person's request (or the framed notification that started the run).
+  A run that already continued a restart, runs of a settled or archived task, and arrival and
+  schedule runs (which have their own retries), are marked `failed` (`SERVER_RESTARTED`) as before, and an interrupted message run
+  that is not continued surfaces the task with `needsUser: "failure"`. Queued follow-ups are not
+  runs yet: they stay in the queue and drain once recovery is done.
 
 ### Sessions
 
@@ -143,6 +165,15 @@ natively, streaming as it goes. There is no JSON tool protocol and no per-step C
 
 ## Status rules
 
+The rules below are one pure function, `resolveTaskStatus(task, event)` in
+`apps/server/src/tasks/status.ts`, with three events: `run_started`, `run_ended` and `reopened`
+(unsettle, unsnooze, unarchive). Its table test is `status.test.ts`. The T3 Working predicate
+is exported from `@passport/types` as `isTaskWorking(task, { activeRuns })`: false while the
+task waits on the person (`needsUser` set), otherwise true while a run is queued or running or
+a conversation is watched. `taskBadge(task, { activeRuns })` gives the one badge every surface
+shows, highest first: `approval`, `input` (question), `working` (a run), `waiting` (watching),
+`limited`, `failed`, `woke`, `done`, or `null` when nothing is new.
+
 While a run is active the task is `working`. Two exceptions: snoozed and archived tasks stay
 hidden, and an inbox task already waiting on the person stays in the inbox. A user message also
 un-snoozes and un-settles the task and clears a previous failure.
@@ -155,7 +186,8 @@ When a run ends, the first matching rule applies:
 
 0. The person settled, snoozed or archived the task while the run was active: it stays there. A
    failed run only sets `needsUser: "failure"`.
-1. Failed (not arrivals, which `ArrivalQueue` retries): `inbox` with `needsUser: "failure"`.
+1. Failed (not arrivals, which `ArrivalQueue` retries): `inbox` with `needsUser: "failure"`, or
+   `needsUser: "limited"` when the run stopped at a [usage limit](#usage-limits).
 2. Pending approvals: `inbox` with `needsUser: "approval"`.
 3. Another run of the task is still active: `working`.
 4. A run started by the person's message: `inbox`, or `working` while it watches a conversation.
@@ -167,6 +199,16 @@ When a run ends, the first matching rule applies:
 `lastActivityAt` ("when it last came back to you") moves only when the task surfaces or the
 person acts. Background no-op runs don't count, so auto-settle is not reset by them. A task that
 rested in Working (watching) and is handed back to the inbox when a run ends counts as surfacing.
+
+**Returned, seen and unseen outcomes (v0.4).** `returnedAt` is stamped on every write that moves
+`lastActivityAt` (T3's inbox order: a run the person requested, a run that handed the task
+back, a surfacing approval, failure or limit, a reopen, a snooze wake). Order the inbox by
+`returnedAt ?? lastActivityAt`. A run that hands the task back to the inbox without needing the
+person sets `unseenOutcome`: `done` for a message run, `woke` for schedule, watch and wake runs
+(never arrivals); a snooze whose time came also sets `woke`. `POST /seen` sets `seenAt` and
+clears `unseenOutcome`; sending a message does the same. `POST /mark-unread` clears `seenAt`
+and brings the outcome back (`done` when there was none). A row recedes when `unseenOutcome` is
+null and `needsUser` is null.
 
 Lifecycle:
 
@@ -180,8 +222,58 @@ Lifecycle:
 - **Pin** never changes status, so pinning during a run is kept as well.
 - **Auto-settle.** Tasks in `inbox` that are idle for 3 days, not pinned, and with no
   `needsUser` move to `settled`.
-- The 5-second undo after settle, snooze or archive is a UI concern: undo with the matching
-  opposite call.
+- **Undo and reopen.** Settle, snooze and archive answer with the task plus `previous`
+  (`status`, `snoozedUntil`, `settledAt` before the call). `/unsettle`, `/unsnooze` and
+  `/unarchive` bring a task in that state back to where it rests now (Working while a run is
+  active or it watches and nothing waits on the person, else the inbox) with a fresh
+  `returnedAt`; called on a task in another state they change nothing, so a repeated undo is
+  harmless. To restore a snooze that settle replaced, follow `/unsettle` with `/snooze` and
+  `previous.snoozedUntil`. Watches that settle or archive ended stay ended, and the queue they
+  held stays held until resumed.
+- Settle and archive also hold the follow-up queue first, so stopping the active run does not
+  start the next queued message on a task the person put away.
+
+## Follow-up queue
+
+A `queue` message waits in `Task.queue` when the task has an active message run, already has
+queued entries, has a held queue, or (after resuming it) was limited. Each entry has a TaskRun in
+status `queued` under its `runId` (its `trigger.itemId` is empty until it starts), so
+`POST /messages` still answers `202 { task, run }`. Queued messages are not on the timeline: the
+`user_message` item is appended when the entry starts. When a message run ends (completed,
+failed or cancelled other than by a steer), the oldest entry starts, unless the queue is held,
+the task is limited, settled or archived, or another message run is active. Starting removes
+the entry and runs it under its `runId`.
+
+- `PATCH …/queue/:runId` `{ text }` edits an entry; `POST …/queue/reorder` `{ runIds }` takes
+  the full new order (`409 QUEUE_CHANGED` if it does not list every entry exactly once);
+  `DELETE …/queue/:runId` removes one, its run ending `cancelled` with `QUEUE_REMOVED` and no
+  timeline notice; `POST …/queue/:runId/promote-to-steer` sends it now as a steer under the
+  same run id. An entry that already started answers `404 NOT_FOUND`.
+- **Held queue.** `/interrupt`, settle and archive set `queueHeld: true` when entries exist.
+  Nothing drains until `POST …/queue/resume` or the person's next message (which clears the hold,
+  joins the end of the queue, and the oldest entry starts).
+- At most 20 entries (`409 QUEUE_FULL`). The queue survives restarts.
+
+## Usage limits
+
+A run that ends because the host CLI's subscription limit or an API provider's limit was hit
+ends `failed` with `error: "USAGE_LIMITED"` (notice code `USAGE_LIMITED`) instead of a plain
+failure. Detection: `HOST_AGENT_RATE_LIMIT`, a host CLI failure whose text says so (Claude
+Code's `usage limit reached|<epoch>`, Codex's "hit your usage limit"), and `LLM_HTTP` with
+status 429 after the client's own retries. The task surfaces with `needsUser: "limited"` and
+`limited: { runId, resetAt, autoResume: false, source, at }`; `resetAt` is parsed from the error
+text (an epoch, an ISO time, or "try again in 2 hours 5 minutes") and is `null` when the CLI did
+not say. Recovery:
+
+- `POST /api/tasks/:id/resume` clears the limit and continues the stopped run now (the same
+  continuation as a restart: a message run continues on its `user_message` item; watch and wake
+  runs as a `wake` run with `reason: "limit_resumed"`), then the queue drains after it.
+- `POST /api/tasks/:id/resume-at-reset` sets `autoResume: true` and continues the run at
+  `resetAt` (an in-process timer, re-armed at startup, with `tasks.maintenance` as the durable
+  backstop). `409 RESET_UNKNOWN` when `resetAt` is null.
+- Snooze until the reset is the ordinary `/snooze` with `until: limited.resetAt`.
+- A new message counts as resume: the stopped run continues first, then the message.
+- The follow-up queue waits while the task is limited.
 
 ## Conversation watches
 
@@ -255,11 +347,22 @@ Every route requires the bearer token. Errors use the standard body
 | `GET /api/tasks/by-action/:actionId` | | `TaskByAction`: `{ taskId, runId }`; `404 NOT_FOUND` when no task run holds the action |
 | `GET /api/tasks/:id` | | `TaskDetail`: `{ task, runs }` (runs newest first, at most 50) |
 | `GET /api/tasks/:id/items` | `afterSeq` (default 0), `limit` (default 100) | `{ items, lastSeq }` (ascending `seq`) |
-| `POST /api/tasks/:id/messages` | `{ text, mode?: "queue" \| "steer" }` | `202 { task, run }` |
-| `POST /api/tasks/:id/interrupt` | | `Task` |
-| `POST /api/tasks/:id/snooze` | `{ until }` (future ISO time) | `Task` |
-| `POST /api/tasks/:id/settle` | | `Task` |
-| `POST /api/tasks/:id/archive` | | `Task` |
+| `POST /api/tasks/:id/messages` | `{ text, mode?: "queue" \| "steer" }` | `202 { task, run }`; a queued message's `run` is `queued` with an empty `trigger.itemId` |
+| `POST /api/tasks/:id/interrupt` | | `Task` (`queueHeld` when entries are waiting) |
+| `POST /api/tasks/:id/snooze` | `{ until }` (future ISO time) | `TaskWithPrevious`: the `Task` plus `previous` |
+| `POST /api/tasks/:id/settle` | | `TaskWithPrevious` |
+| `POST /api/tasks/:id/archive` | | `TaskWithPrevious` |
+| `POST /api/tasks/:id/unsettle` · `/unsnooze` · `/unarchive` | | `TaskWithPrevious`; unchanged when the task is not in that state |
+| `POST /api/tasks/:id/seen` | | `Task` (`seenAt` set, `unseenOutcome: null`) |
+| `POST /api/tasks/:id/mark-unread` | | `Task` (`seenAt: null`, `unseenOutcome` kept or `done`) |
+| `GET /api/tasks/:id/queue` | | `TaskQueue` |
+| `PATCH /api/tasks/:id/queue/:runId` | `{ text }` | `TaskQueue`; `404` when not queued |
+| `POST /api/tasks/:id/queue/reorder` | `{ runIds }` (every entry once) | `TaskQueue`; `409 QUEUE_CHANGED` |
+| `DELETE /api/tasks/:id/queue/:runId` | | `TaskQueue` |
+| `POST /api/tasks/:id/queue/:runId/promote-to-steer` | | `202 { task, run }` |
+| `POST /api/tasks/:id/queue/resume` | | `TaskQueue` (`held: false`; the next entry may have started) |
+| `POST /api/tasks/:id/resume` | | `202 { task, run }` (`run` is the continuation, `null` if the stopped run is gone); `409 NOT_LIMITED` |
+| `POST /api/tasks/:id/resume-at-reset` | | `Task` (`limited.autoResume: true`); `409 NOT_LIMITED`, `409 RESET_UNKNOWN` |
 | `POST /api/tasks/:id/pin` · `/unpin` | | `Task` |
 | `POST /api/tasks/:id/unwatch` | `{ threadHandle? }` (omit to stop every watch) | `Task` |
 | `PATCH /api/tasks/:id` | `{ title?, permissionMode?, interactionMode? }` | `Task` (mode clamped) |
@@ -361,7 +464,10 @@ The task gets an `APPROVAL_SCOPE` notice for `task` and for a pinned `always`.
 { type: "task.item.appended"; item: TaskItem }  // a new timeline item
 ```
 
-Clients can apply them directly. `task.revision` and `item.seq` are monotonic. After a
+Clients can apply them directly. `task.revision` and `item.seq` are monotonic. Every v0.4
+lifecycle change (seen, mark-unread, reopen, queue edits and holds, limits, generated titles,
+renames) is a `task.updated` frame, because the queue, the limit and the seen state ride on the
+task row; queued runs and their removal are `task.run.updated` frames. After a
 reconnect, refetch `GET /api/tasks/:id` and page items with `afterSeq=<last seen seq>`.
 `agent.run.*` and `action.*` events continue as before.
 
@@ -373,7 +479,8 @@ reconnect, refetch `GET /api/tasks/:id` and page items with `afterSeq=<last seen
 - User routines choose `runOn: "bound" | "fresh"`; fresh runs create a child task. Webhook
   deliveries use the same schedule-run seam with a framed `ctx.webhookPrompt`, and their
   durable queue owns payload recovery. See [scheduler](scheduler.md#webhook-routines).
-- `tasks.maintenance` (every 10 minutes) handles snooze wake-ups, auto-settle, watch expiry and
+- `tasks.maintenance` (every 10 minutes) handles snooze wake-ups, auto-settle, watch expiry,
+  due `resume-at-reset` continuations (the durable backstop for their timers) and
   the 24-hour `mail_export` sweep (`<dataDir>/scratch`, also swept at startup). See
   [scheduler](scheduler.md).
 
@@ -437,8 +544,9 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 - **R5-5:** finding the newest page costs about 2·log₂(items/100) one-item probes, because the
   task carries no last `seq` and the items route has no `beforeSeq`. Loaded items are not
   windowed; scrolling far back keeps every page in memory.
-- **R5-9:** settle, snooze and archive have no Undo (no reopen, unsnooze or unarchive route);
-  the toast says where the task went. Archiving a system task is not confirmed.
+- **R5-9:** the web UI does not offer Undo for settle, snooze and archive yet; the server routes
+  (`previous`, `/unsettle`, `/unsnooze`, `/unarchive`) exist since v0.4 and the wiring is W2B.
+  Archiving a system task is not confirmed.
 - **R5-15:** a decision card on Needs you and the same action in an open task share busy state
   only within one tab.
 - **R5-18:** the clamp notice always names the account ladder, even when a parent task caused
@@ -483,3 +591,21 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   Arrival dedupe prevents double triage; the cost is duplicate provider reads.
 - **R4-32:** explicit triage of an uncached handle caches the provider row without normalising
   it first (`personIds`, `category` and `matterId` fill in on the next read).
+
+## Known limitations (v0.4 lifecycle, server side)
+
+- The web UI does not use the new fields and routes yet (W2B): no queue strip, Limited actions,
+  Woke/Done badges, generated-title styling or `returnedAt` ordering. Until then a queued
+  message shows only as a queued run in task details, not on the timeline.
+- Limits are detected on task message, watch and wake runs. Routine (`schedule`) runs and
+  arrival triage report a limit as an ordinary failure (`JOB_FAILED`, or an arrival retry).
+  A limit message without a parsable reset time leaves `resetAt: null`, so only `/resume` and a
+  manual snooze are offered.
+- Continuations (restart and limit resume) build a fresh prompt from the request or the
+  notification that started the run; they do not replay the interrupted run's tool results.
+- Reopen does not restore watches that settle or archive ended, nor the snooze that settle
+  replaced (follow with `/snooze`). A held queue stays held after reopening.
+- A message that was leaving the queue at the exact moment of a crash (after it left
+  `Task.queue`, before its run started) is lost; its run ends `failed` (`SERVER_RESTARTED`).
+- Title generation runs outside the agent lane, so on a host CLI it can start a second CLI
+  process next to an active run.
