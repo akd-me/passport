@@ -156,10 +156,11 @@
 .limited-actions .error {
   flex-basis: 100%;
 }
+/* On Needs you the actions take a second line, under the title. */
 .limited-actions.compact {
-  flex: none;
-  margin-top: 0;
-  justify-content: flex-end;
+  flex-basis: 100%;
+  margin: 0 0 var(--s-2);
+  padding-left: calc(14px + var(--s-3));
 }
 .limited-actions.compact .limited-when {
   font-size: var(--t-xs);
@@ -168,11 +169,10 @@
 /* A Needs you row with controls beside its link. */
 .task-card-row {
   display: flex;
-  align-items: center;
-  gap: var(--s-3);
+  flex-wrap: wrap;
 }
 .task-card-row > .task-card {
-  flex: 1;
+  flex: 1 1 100%;
   min-width: 0;
 }
 

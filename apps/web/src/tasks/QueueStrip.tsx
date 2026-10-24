@@ -260,7 +260,7 @@ export function QueueStrip({ task, live }: { task: Task; live: boolean }) {
               <span className="queue-actions">
                 <button
                   type="button"
-                  className="btn btn-sm"
+                  className="btn btn-sm btn-ghost"
                   disabled={busy === entry.runId}
                   title={
                     live
