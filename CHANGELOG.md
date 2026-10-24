@@ -37,6 +37,9 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   characters (`titleGenerated: true` until you rename it).
 - `@passport/types` exports `isTaskWorking` and `taskBadge` (Approval, Input, Working, Waiting,
   Limited, Failed, Woke, Done); the server's status rules live in one `resolveTaskStatus`.
+- ⌘1–⌘9 open the first nine sidebar tasks, Escape closes the details panel, ⌘Enter sends with
+  the opposite of the default send mode, and ⌘Z undoes a pin or unpin while its five-second
+  toast shows.
 
 ### Changed
 
@@ -59,6 +62,18 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   come back, the budget and when to hand back.
 - `@passport/mcp` exports `ToolBeltListener` and `createToolBeltServer`; `createAgentRuntime`
   takes `toolBelt` and `budget`; `HostAgentLlmClient.session()` runs one resumable session.
+- The web UI is restyled to the v0.4 design brief ("classy, not showy") in both themes: warm-grey
+  surface steps instead of borders, one desaturated indigo accent for the primary action, focus
+  and the Needs you count, five type sizes, one control radius and one panel radius, and a single
+  elevation for popovers and dialogs. Timeline items no longer nest cards: your messages sit in a
+  tinted block, replies are plain prose, run headers are a hairline, and decisions hang from an
+  accent rule. The approval panel above the composer is a calm list. Sidebar rows are one 36 px
+  line with small-caps section headers.
+- One status mark set (Approval, Input, Waiting, Working, Limited, Failed, Woke, Done) is used by
+  the sidebar, the task header, Needs you and the task list.
+- `styles.css` and `styles-tasks.css` are now tokens plus layered component and screen sheets
+  under `apps/web/src/styles/`; dead rules are removed.
+
 
 ## [0.3.2] — 2026-10-24
 

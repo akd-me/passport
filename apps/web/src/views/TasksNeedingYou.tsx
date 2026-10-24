@@ -1,6 +1,6 @@
 import type { Task } from "@passport/types";
 import { Link } from "react-router";
-import { AccountDot, useAccountId } from "../accounts/AccountFilter";
+import { useAccountId } from "../accounts/AccountFilter";
 import { relativeTime } from "../components/ui";
 import { needsYou } from "../tasks/model";
 import { useTasks } from "../tasks/store";
@@ -16,7 +16,8 @@ export function needText(task: Task) {
     case "question":
       return "Has a question for you";
     default:
-      return "";
+      // Sent by servers with the usage-limit state (W1B); the type does not carry it yet.
+      return (task.needsUser as string | null) === "limited" ? "Paused at a usage limit" : "";
   }
 }
 
@@ -35,9 +36,6 @@ export function TaskCard({ task }: { task: Task }) {
           <strong>{task.title}</strong>
           {needText(task) && <span className={`need ${task.needsUser}`}>{needText(task)}</span>}
         </span>
-        {task.accountIds.slice(0, 3).map((id) => (
-          <AccountDot key={id} id={id} />
-        ))}
         <time dateTime={task.lastActivityAt}>{relativeTime(task.lastActivityAt)}</time>
       </Link>
     </li>

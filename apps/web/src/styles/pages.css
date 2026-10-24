@@ -1,0 +1,303 @@
+/*
+ * Context pages: matters, people, activity. Lists are rows separated by hairlines; a page title
+ * leads, then the summary, then history as a hanging-glyph timeline.
+ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin: var(--s-3) 0 var(--s-4);
+}
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.rows > li + li {
+  border-top: 1px solid var(--line);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 52px;
+  padding: var(--s-2) 0;
+  color: inherit;
+  line-height: var(--lh-row);
+}
+/* A row that opens something gets a hover step, set into the gutter. */
+a.row {
+  padding: var(--s-2) 10px;
+  margin: 0 -10px;
+  border-radius: var(--r-control);
+  transition: background-color var(--dur) var(--ease);
+}
+a.row:hover {
+  background: var(--sunken);
+  text-decoration: none;
+}
+.row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.row-main strong {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-m);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-main > span {
+  font-size: var(--t-s);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  font-size: var(--t-s);
+}
+.row-meta time {
+  min-width: 52px;
+  text-align: right;
+  font-size: var(--t-xs);
+}
+.row-meta .dots {
+  display: inline-flex;
+  gap: var(--s-1);
+}
+.status-text.waiting {
+  color: var(--amber);
+}
+.status-text.active {
+  color: var(--text-2);
+}
+.status-text.snoozed,
+.status-text.done {
+  color: var(--muted);
+}
+.log-row .row-meta .badge {
+  min-width: 64px;
+  justify-content: center;
+}
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+}
+
+/* ---------------------------------------------------------------- Matter and person */
+.matter-head {
+  margin-bottom: var(--s-2);
+}
+.matter-head h1,
+.person-head h1 {
+  font-size: var(--t-xl);
+  font-weight: var(--w-title);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.matter-summary {
+  margin-top: var(--s-2);
+  font-size: var(--t-m);
+  color: var(--text-2);
+  max-width: 68ch;
+}
+.next-step-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-control);
+  background: var(--sunken);
+  font-size: var(--t-s);
+}
+.next-step-line .icon {
+  color: var(--accent);
+  transform: translateY(2px);
+}
+.person-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+.person-head > div {
+  flex: 1;
+}
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.timeline > li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  position: relative;
+}
+.timeline > li::before {
+  content: "";
+  position: absolute;
+  left: 10.5px;
+  top: 30px;
+  bottom: -4px;
+  width: 1px;
+  background: var(--line);
+}
+.timeline > li:last-child::before {
+  display: none;
+}
+.timeline-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--muted);
+}
+.timeline details {
+  min-width: 0;
+}
+.timeline summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: var(--s-2);
+  border-radius: var(--r-control);
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--t-s);
+  line-height: var(--lh-row);
+  transition: background-color var(--dur) var(--ease);
+}
+.timeline summary::-webkit-details-marker {
+  display: none;
+}
+.timeline summary:hover {
+  background: var(--sunken);
+}
+.timeline-who {
+  font-weight: var(--w-medium);
+  flex: none;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline summary time {
+  font-size: var(--t-xs);
+  flex: none;
+}
+.timeline details[open] .timeline-title {
+  white-space: normal;
+  color: var(--text);
+}
+.timeline-body {
+  padding: var(--s-1) var(--s-2) var(--s-4);
+}
+.timeline-body > p:not(.mail-text) {
+  font-size: var(--t-s);
+  color: var(--muted);
+}
+.timeline-tags {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+}
+.timeline > li.deleted .timeline-title {
+  text-decoration: line-through;
+  text-decoration-color: var(--faint);
+}
+
+/* ---------------------------------------------------------------- Welcome and sign in */
+.welcome {
+  max-width: 560px;
+  margin: 8vh auto 0;
+}
+.welcome .brand-mark {
+  margin-bottom: var(--s-4);
+}
+.welcome h1 {
+  font-size: var(--t-xl);
+  font-weight: var(--w-title);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.welcome > p {
+  margin-top: var(--s-2);
+  font-size: var(--t-m);
+  max-width: 58ch;
+}
+.welcome-flow {
+  margin-top: var(--s-5);
+  padding: var(--s-4) var(--s-5) var(--s-5);
+  border-radius: var(--r-panel);
+  background: var(--sunken);
+}
+.login {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--s-4);
+  background: var(--sunken);
+}
+.login-card {
+  width: min(420px, 100%);
+  padding: var(--s-6) var(--s-6) var(--s-5);
+  border-radius: var(--r-panel);
+  background: var(--raised);
+  box-shadow: var(--elevation);
+}
+.login-card h1 {
+  font-size: var(--t-l);
+  font-weight: var(--w-title);
+}
+.login-hint {
+  margin: 6px 0 var(--s-4);
+  color: var(--muted);
+  font-size: var(--t-s);
+  overflow-wrap: anywhere;
+}
+.login-form {
+  display: grid;
+  gap: var(--s-2);
+}
+.login-form label {
+  font-size: var(--t-s);
+  font-weight: var(--w-medium);
+  color: var(--text-2);
+}
+.login-form .btn {
+  justify-self: start;
+  margin-top: var(--s-1);
+}
+
+@media (max-width: 860px) {
+  .row-meta time,
+  .row-meta .dots {
+    display: none;
+  }
+}

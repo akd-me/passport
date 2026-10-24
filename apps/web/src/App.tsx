@@ -2,14 +2,14 @@ import { useEffect } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useSearchParams } from "react-router";
 import { AccountScope, useAccounts } from "./accounts/AccountFilter";
 import { FIRST_RUN_CONNECTED } from "./accounts/api";
-import { Icon, Loading } from "./components/ui";
+import { Icon, Kbd, Loading, mod } from "./components/ui";
 import { ConnectDialog } from "./connect/ConnectDialog";
 import { SetupFlow } from "./connect/SetupFlow";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { CommandPalette } from "./shell/CommandPalette";
 import { BrandMark, Sidebar } from "./shell/Sidebar";
 import { Surface } from "./shell/Surface";
-import { useTaskListKeys } from "./shell/TaskList";
+import { useTaskJumpKeys, useTaskListKeys } from "./shell/TaskList";
 import { useWorkspace } from "./state";
 import { DecisionLink } from "./tasks/DecisionLink";
 import { TasksProvider } from "./tasks/store";
@@ -74,40 +74,74 @@ function Home() {
   return accounts.length ? <NewTask /> : <Welcome />;
 }
 
-function useGlobalShortcuts() {
+/** The overlay sidebar of narrow windows (the media query in styles/shell.css). */
+const overlaySidebar = () => window.matchMedia?.("(max-width: 860px)").matches ?? false;
+
+export function useGlobalShortcuts() {
   const ui = useUi(),
+    { noticeAction, notify } = useWorkspace(),
     navigate = useNavigate();
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const command = event.metaKey || event.ctrlKey;
-      if (command && event.key.toLowerCase() === "k") {
-        event.preventDefault();
+    /** ⌘-chords; true when handled. */
+    const chord = (event: KeyboardEvent, modal: boolean) => {
+      const key = event.key.toLowerCase();
+      if (key === "k") {
         ui.setPalette(!ui.palette);
-      } else if (command && event.key === ",") {
-        event.preventDefault();
+      } else if (key === ",") {
         ui.openSettings();
-      } else if (command && event.key.toLowerCase() === "b") {
-        event.preventDefault();
+      } else if (key === "b") {
         ui.toggleSidebar();
-      } else if (command && event.key === ".") {
-        event.preventDefault();
+      } else if (key === ".") {
         ui.toggleDetails();
       } else if (
-        event.key === "/" &&
-        !command &&
+        // ⌘Z undoes the last sidebar action while its toast offers Undo; text fields keep theirs.
+        key === "z" &&
+        !event.shiftKey &&
+        noticeAction?.undo &&
         !isTyping(event.target) &&
-        !document.querySelector('[aria-modal="true"]')
+        !modal
       ) {
-        event.preventDefault();
+        notify("");
+        noticeAction.run();
+      } else {
+        return false;
+      }
+      return true;
+    };
+    /** Plain keys outside text fields and dialogs; true when handled. */
+    const plain = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        // Dialogs and popovers close themselves; Escape then closes the open panel.
+        if (ui.details && document.querySelector(".details-panel")) {
+          ui.toggleDetails();
+        } else if (ui.sidebar && overlaySidebar()) {
+          ui.toggleSidebar();
+        } else {
+          return false;
+        }
+      } else if (event.key === "/") {
         if (!ui.composer.current) {
           navigate("/");
         }
         setTimeout(ui.focusComposer, 0);
+      } else {
+        return false;
+      }
+      return true;
+    };
+    const onKey = (event: KeyboardEvent) => {
+      const modal = !!document.querySelector('[aria-modal="true"]');
+      const handled =
+        event.metaKey || event.ctrlKey
+          ? chord(event, modal)
+          : !modal && !isTyping(event.target) && plain(event);
+      if (handled) {
+        event.preventDefault();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ui, navigate]);
+  }, [ui, navigate, noticeAction, notify]);
 }
 
 function Shell() {
@@ -115,6 +149,7 @@ function Shell() {
     ui = useUi();
   useGlobalShortcuts();
   useTaskListKeys();
+  useTaskJumpKeys();
   return (
     <div className={`app ${ui.sidebar ? "with-sidebar" : "sidebar-hidden"}`}>
       <a href="#main" className="skip-link">
@@ -183,6 +218,7 @@ function Shell() {
               {noticeAction.label}
             </button>
           )}
+          {noticeAction?.undo && <Kbd>{mod}Z</Kbd>}
         </div>
       )}
     </div>

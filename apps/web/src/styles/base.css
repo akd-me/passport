@@ -1,0 +1,196 @@
+/* Base: element defaults, form fields, utilities and motion. Low specificity throughout. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--t-m);
+  line-height: var(--lh-prose);
+  font-feature-settings: "ss01";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+  font-weight: var(--w-medium);
+}
+p {
+  font-weight: 400;
+}
+strong,
+b {
+  font-weight: var(--w-medium);
+}
+time,
+.num {
+  font-variant-numeric: tabular-nums;
+}
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+code {
+  font-family: var(--font-code);
+  font-size: 0.86em;
+  background: var(--sunken);
+  border-radius: 4px;
+  padding: 1px 4px;
+  overflow-wrap: anywhere;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+::selection {
+  background: var(--accent-soft);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* Form fields: low specificity so components can restyle them. */
+:where(input:not([type="checkbox"], [type="radio"]), select, textarea) {
+  font: inherit;
+  font-size: var(--t-m);
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-control);
+  min-height: var(--control-h);
+  padding: 0 10px;
+  width: 100%;
+}
+:where(textarea) {
+  padding: var(--s-2) 10px;
+  line-height: var(--lh-prose);
+  resize: vertical;
+}
+:where(input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent-fill);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+.select-sm {
+  width: auto;
+  min-height: var(--control-h-sm);
+  height: var(--control-h-sm);
+  font-size: var(--t-s);
+  padding: 0 var(--s-2);
+}
+
+/* Utilities */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.muted {
+  color: var(--muted);
+}
+.warn {
+  color: var(--amber);
+}
+.icon {
+  flex: none;
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+.skip-link {
+  position: absolute;
+  left: var(--s-3);
+  top: -60px;
+  z-index: 300;
+  background: var(--raised);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-control);
+  box-shadow: var(--elevation);
+}
+.skip-link:focus {
+  top: var(--s-3);
+}
+
+/* Motion: appearance and state changes only, 150–200 ms on the shared ease. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.99);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .spin {
+    animation: none;
+  }
+}
+@media (forced-colors: active) {
+  .ladder span.on,
+  .status-dot,
+  .account-dot,
+  .task-glyph svg {
+    forced-color-adjust: none;
+  }
+}

@@ -8,6 +8,22 @@ import { taskApi } from "./api";
 import { useTasks } from "./store";
 import { type Clamp, ClampNotice, PlanToggle, TaskModePicker } from "./TaskModes";
 
+/** The default send mode: a follow-up waits for the active run. */
+export const DEFAULT_SEND_MODE: TaskMessageMode = "queue";
+
+/**
+ * Enter sends in the default mode; ⌘Enter (Ctrl elsewhere) sends in the opposite one. Steering
+ * only means something while a run of a person's task is live, so without one both queue.
+ */
+export function sendModeFor(
+  event: { metaKey: boolean; ctrlKey: boolean },
+  live: boolean,
+): TaskMessageMode {
+  const opposite: TaskMessageMode = DEFAULT_SEND_MODE === "queue" ? "steer" : "queue";
+  const mode = event.metaKey || event.ctrlKey ? opposite : DEFAULT_SEND_MODE;
+  return live ? mode : "queue";
+}
+
 /**
  * Follow-ups for an open task. Enter queues after the active run; ⌘Enter steers (cancels the
  * active message run and restarts with both messages). Stop interrupts every cancellable run.
@@ -98,7 +114,7 @@ export function TaskComposer({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              void send(live && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
+              void send(sendModeFor(e, live));
             } else if (e.key === "Escape") {
               e.currentTarget.blur();
             }

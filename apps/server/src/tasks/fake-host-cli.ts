@@ -69,6 +69,15 @@ async function rpc(server, id, method, params) {
 }
 
 async function main() {
+  // A completion (no MCP attached: title generation, triage pipeline) answers a canned JSON
+  // object and is neither logged nor counted, so scripted session invocations stay in order.
+  const completion = kind === "claude-code" ? args.includes("--safe-mode") : !args.some((v) => v.startsWith("mcp_servers.passport.url="));
+  if (completion) {
+    const text = JSON.stringify({ title: "Generated title" });
+    if (kind === "claude-code") out({ type: "result", subtype: "success", is_error: false, result: text, session_id: "completion", usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } });
+    else { out({ type: "thread.started", thread_id: "completion" }); out({ type: "turn.started" }); out({ type: "item.completed", item: { id: "item_1", type: "agent_message", text } }); out({ type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } }); }
+    process.exit(0);
+  }
   const prior = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).length : 0;
   const entry = { args, stdin, pid: process.pid, results: [] };
   const invocation = plan.invocations[Math.min(prior, plan.invocations.length - 1)];

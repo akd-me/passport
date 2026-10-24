@@ -1,0 +1,384 @@
+/*
+ * Needs you: tasks waiting on the person, then open proposals. A proposal is one block on a
+ * sunken step; its draft hangs from a rule inside it. Selection is an accent rule, not a halo.
+ */
+.queue-head,
+.list-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-2);
+}
+.queue-head {
+  justify-content: space-between;
+  min-height: var(--control-h);
+}
+.queue-head h1,
+.list-head h1 {
+  font-size: var(--t-xl);
+  font-weight: var(--w-title);
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.group {
+  margin-top: var(--s-5);
+}
+.group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+}
+.group-head h2 {
+  font-size: var(--t-s);
+  font-weight: var(--w-medium);
+  color: var(--text-2);
+}
+.group-head h2 a {
+  color: inherit;
+}
+.group-head h2 a:hover {
+  color: var(--accent);
+}
+.group-head .count {
+  font-size: var(--t-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.group-head .muted {
+  font-size: var(--t-xs);
+}
+.group-head .quiet-link {
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------------- Proposal */
+.proposal {
+  position: relative;
+  padding: var(--s-3) var(--s-4) var(--s-3);
+  margin-bottom: var(--s-2);
+  border-radius: var(--r-panel);
+  background: var(--sunken);
+  outline: none;
+}
+.proposal::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--s-3);
+  bottom: var(--s-3);
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: transparent;
+  transition: background-color var(--dur) var(--ease);
+}
+.proposal.selected::before {
+  background: var(--accent);
+}
+.proposal.held::before {
+  background: var(--amber);
+}
+.proposal:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.proposal.fresh {
+  animation: rise-in var(--dur-slow) var(--ease);
+}
+.proposal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-s);
+  color: var(--muted);
+  min-width: 0;
+  line-height: var(--lh-row);
+}
+.proposal-kind {
+  font-weight: var(--w-medium);
+  color: var(--text-2);
+}
+.proposal-to {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proposal-head time {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--t-xs);
+}
+.proposal-reason {
+  font-size: var(--t-m);
+  font-weight: var(--w-medium);
+  line-height: var(--lh-prose);
+  margin: 6px 0 10px;
+}
+.proposal-detail {
+  font-size: var(--t-s);
+  color: var(--muted);
+}
+.draft {
+  border-left: 2px solid var(--line-strong);
+  padding: 2px 0 2px var(--s-3);
+}
+.draft-subject {
+  font-size: var(--t-s);
+  font-weight: var(--w-medium);
+  color: var(--muted);
+  margin-bottom: var(--s-1);
+}
+.draft-body {
+  font-family: var(--font-mail);
+  font-size: var(--t-l);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 68ch;
+}
+.proposal:not(.selected) .draft-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-2);
+}
+.draft-editor {
+  font-family: var(--font-mail);
+  font-size: var(--t-l);
+  line-height: 1.6;
+  margin-top: 2px;
+}
+.proposal-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--s-3);
+}
+.key-hints {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.hold-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-s);
+  color: var(--amber);
+  font-weight: var(--w-medium);
+  margin-right: auto;
+}
+
+/* ---------------------------------------------------------------- Outbox and handled */
+.outbox {
+  margin-top: var(--s-4);
+  padding: 10px var(--s-4);
+  border-radius: var(--r-panel);
+  background: var(--sunken);
+}
+.outbox h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-s);
+  font-weight: var(--w-medium);
+  color: var(--amber);
+}
+.outbox h2 .count {
+  font-variant-numeric: tabular-nums;
+}
+.outbox ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.outbox li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--s-1) 0;
+  font-size: var(--t-s);
+}
+.outbox-what {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: var(--s-2);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.outbox-what span {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.outbox-time {
+  color: var(--amber);
+  font-weight: var(--w-medium);
+  font-size: var(--t-s);
+}
+.handled {
+  margin-top: var(--s-6);
+}
+.handled ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.handled li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: var(--s-1) 0;
+  border-top: 1px solid var(--line);
+  font-size: var(--t-s);
+}
+.actor {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--muted);
+  flex: none;
+}
+.handled-what {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: var(--s-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.handled-what span {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.handled time {
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- Proposal context (details panel) */
+.risk.high {
+  color: var(--amber);
+  font-weight: var(--w-medium);
+}
+.risk.critical {
+  color: var(--red);
+  font-weight: var(--w-medium);
+}
+.trust-line {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.source-mail {
+  display: grid;
+  gap: 2px;
+}
+.source-from {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.source-subject {
+  font-weight: var(--w-medium);
+}
+.source-mail time {
+  font-size: var(--t-xs);
+}
+.source-body,
+.mail-text {
+  font-family: var(--font-mail);
+  font-size: var(--t-m);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.source-body {
+  margin-top: var(--s-2);
+  max-height: 340px;
+  overflow-y: auto;
+}
+.matter-ref {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  color: var(--text);
+  font-weight: var(--w-medium);
+  margin-bottom: var(--s-1);
+}
+.matter-ref:hover {
+  color: var(--accent);
+}
+.next-step {
+  margin-top: var(--s-2);
+}
+.people-mini,
+.events-mini,
+.link-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.people-mini li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.people-mini a,
+.link-list a {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  color: var(--text);
+}
+.people-mini a > span {
+  min-width: 0;
+}
+.people-mini small {
+  display: block;
+  font-size: var(--t-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.events-mini li {
+  display: flex;
+  gap: var(--s-2);
+  align-items: flex-start;
+}
+.events-mini .icon {
+  margin-top: 2px;
+  color: var(--muted);
+}
+.events-mini strong,
+.events-mini small {
+  display: block;
+}
+
+@media (max-width: 860px) {
+  .key-hints {
+    display: none;
+  }
+  .handled-what span {
+    display: none;
+  }
+}
