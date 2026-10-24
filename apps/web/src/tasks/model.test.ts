@@ -1,5 +1,16 @@
+import type { Task } from "@passport/types";
 import { describe, expect, it } from "vitest";
-import { glyphOf, groupTasks, needsYou, snoozePresets } from "./model";
+import {
+  groupTasks,
+  isFresh,
+  jumpOrder,
+  needsYou,
+  snoozePresets,
+  stateLabel,
+  stateText,
+  type TaskState,
+  taskState,
+} from "./model";
 import { minutesAgo, task } from "./test-fixtures";
 
 describe("sidebar grouping", () => {
@@ -49,17 +60,81 @@ describe("sidebar grouping", () => {
   });
 });
 
-describe("status glyph", () => {
+describe("task state", () => {
+  const watches = [
+    { threadHandle: "th", account: "acc-1", since: minutesAgo(5), consecutiveWakes: 0 },
+  ];
+  /** Fields the server adds later (W1B); the state reads them when present. */
+  const later = (fields: Record<string, unknown>) => fields as Partial<Task>;
+
   it("prefers what needs the person over activity", () => {
-    expect(glyphOf(task("a", { needsUser: "failure", status: "working" }), true)).toBe("failure");
-    expect(glyphOf(task("a", { needsUser: "approval" }), true)).toBe("approval");
-    expect(glyphOf(task("a", { status: "working" }))).toBe("running");
-    expect(glyphOf(task("a"), true)).toBe("running");
-    const watches = [
-      { threadHandle: "th", account: "acc-1", since: minutesAgo(5), consecutiveWakes: 0 },
+    expect(taskState(task("a", { needsUser: "failure", status: "working" }), true)).toBe("failed");
+    expect(taskState(task("a", { needsUser: "approval" }), true)).toBe("approval");
+    expect(taskState(task("a", { needsUser: "question" }), true)).toBe("input");
+    expect(taskState(task("a", later({ needsUser: "limited" })), true)).toBe("limited");
+    expect(taskState(task("a", { status: "working" }))).toBe("working");
+    expect(taskState(task("a"), true)).toBe("working");
+    expect(taskState(task("a", { status: "working", watches }))).toBe("waiting");
+    expect(taskState(task("a"))).toBe("idle");
+  });
+
+  it("shows Woke and Done only while the outcome is unseen", () => {
+    expect(taskState(task("a", later({ unseenOutcome: "woke" })))).toBe("woke");
+    expect(taskState(task("a", later({ unseenOutcome: "done" })))).toBe("done");
+    expect(taskState(task("a", later({ unseenOutcome: null })))).toBe("idle");
+    // Working outranks an unseen outcome.
+    expect(taskState(task("a", later({ unseenOutcome: "done" })), true)).toBe("working");
+  });
+
+  it("names every state in the shared vocabulary", () => {
+    const states: TaskState[] = [
+      "approval",
+      "input",
+      "waiting",
+      "working",
+      "limited",
+      "failed",
+      "woke",
+      "done",
     ];
-    expect(glyphOf(task("a", { status: "working", watches }))).toBe("watching");
-    expect(glyphOf(task("a"))).toBe("idle");
+    expect(states.map((s) => stateLabel[s])).toEqual([
+      "Approval",
+      "Input",
+      "Waiting",
+      "Working",
+      "Limited",
+      "Failed",
+      "Woke",
+      "Done",
+    ]);
+    expect(states.every((s) => stateText[s])).toBe(true);
+  });
+
+  it("brings a row forward only when something came back unseen", () => {
+    expect(isFresh(task("a"))).toBe(false);
+    expect(isFresh(task("a", { needsUser: "approval" }))).toBe(true);
+    expect(isFresh(task("a", later({ unseenOutcome: "done" })))).toBe(true);
+    expect(isFresh(task("a", later({ returnedAt: minutesAgo(2), seenAt: minutesAgo(5) })))).toBe(
+      true,
+    );
+    expect(isFresh(task("a", later({ returnedAt: minutesAgo(5), seenAt: minutesAgo(2) })))).toBe(
+      false,
+    );
+  });
+});
+
+describe("jump order", () => {
+  it("numbers the open sections in sidebar order and skips settled", () => {
+    const tasks = [
+      task("settled", { status: "settled", lastActivityAt: minutesAgo(0) }),
+      task("nap", { status: "snoozed", snoozedUntil: minutesAgo(-60) }),
+      task("run", { status: "working", lastActivityAt: minutesAgo(3) }),
+      task("in", { status: "inbox", lastActivityAt: minutesAgo(9) }),
+      task("pin", { status: "inbox", pinned: true, lastActivityAt: minutesAgo(60) }),
+    ];
+    expect(jumpOrder(tasks).map((t) => t.id)).toEqual(["pin", "in", "run", "nap"]);
+    const many = Array.from({ length: 12 }, (_, i) => task(`t${i}`));
+    expect(jumpOrder(many)).toHaveLength(9);
   });
 });
 

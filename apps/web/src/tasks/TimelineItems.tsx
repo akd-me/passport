@@ -46,7 +46,7 @@ export function TimelineItem({ item }: { item: TaskItem }) {
     case "user_message":
       return (
         <div className="tl-message from-user">
-          <span className="tl-author">You</span>
+          <span className="tl-author sr-only">You</span>
           <PlainText text={item.payload.text} />
         </div>
       );
@@ -54,10 +54,11 @@ export function TimelineItem({ item }: { item: TaskItem }) {
     case "question":
       return (
         <div className={`tl-message from-agent ${item.kind}`}>
-          <span className="tl-author">
-            <Icon name="sparkle" size={13} />
-            {item.kind === "question" ? "Passport asks" : "Passport"}
-          </span>
+          {item.kind === "question" ? (
+            <span className="tl-author">Passport asks</span>
+          ) : (
+            <span className="tl-author sr-only">Passport</span>
+          )}
           <Markdown text={item.payload.text} className="agent-text" />
         </div>
       );

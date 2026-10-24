@@ -5,10 +5,11 @@ import { AccountDot } from "../accounts/AccountFilter";
 import { Empty, Loading } from "../components/ui";
 import { Surface } from "../shell/Surface";
 import { useTaskActions, useTaskDetail, useTaskItems } from "../tasks/hooks";
-import { glyphOf, glyphText, isActiveRun, kindLabel } from "../tasks/model";
+import { isActiveRun, kindLabel, taskState } from "../tasks/model";
 import { useTasks } from "../tasks/store";
 import { TaskComposer } from "../tasks/TaskComposer";
 import { statusLabel, TaskDetails } from "../tasks/TaskDetails";
+import { StateWord } from "../tasks/TaskGlyph";
 import { TaskMenu } from "../tasks/TaskMenu";
 import type { Clamp } from "../tasks/TaskModes";
 import { Timeline } from "../tasks/Timeline";
@@ -23,18 +24,21 @@ export interface TaskLocationState {
 }
 
 function TaskHeader({ task, running }: { task: Task; running: boolean }) {
-  const glyph = glyphOf(task, running),
-    kind = kindLabel(task);
+  const kind = kindLabel(task);
   return (
     <header className="task-head">
       <h1>{task.title}</h1>
       <div className="task-meta">
+        <StateWord state={taskState(task, running)} />
         <span className={`task-status ${task.status}`}>{statusLabel(task)}</span>
         {kind && <span className={`kind-badge ${task.kind}`}>{kind}</span>}
-        {glyph !== "idle" && <span className={`task-state ${glyph}`}>{glyphText[glyph]}</span>}
-        {task.accountIds.map((id) => (
-          <AccountDot key={id} id={id} />
-        ))}
+        {task.accountIds.length > 0 && (
+          <span className="account-dots">
+            {task.accountIds.map((id) => (
+              <AccountDot key={id} id={id} />
+            ))}
+          </span>
+        )}
       </div>
     </header>
   );

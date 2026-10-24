@@ -1,11 +1,18 @@
 import type { Task } from "@passport/types";
 import { useEffect, useState } from "react";
-import { NavLink, useLocation } from "react-router";
-import { AccountDot } from "../accounts/AccountFilter";
-import { Icon, relativeTime } from "../components/ui";
-import { groupTasks, kindLabel, SECTIONS, type SectionId } from "../tasks/model";
+import { NavLink, useLocation, useNavigate } from "react-router";
+import { Icon, mod, relativeTime } from "../components/ui";
+import {
+  groupTasks,
+  isFresh,
+  jumpOrder,
+  kindLabel,
+  SECTIONS,
+  type SectionId,
+  taskState,
+} from "../tasks/model";
 import { useTasks } from "../tasks/store";
-import { TaskGlyph } from "../tasks/TaskGlyph";
+import { StateGlyph } from "../tasks/TaskGlyph";
 import { TaskMenu } from "../tasks/TaskMenu";
 import { isTyping } from "../ui-state";
 
@@ -60,39 +67,77 @@ export function wakeText(until: string, now = Date.now()) {
   return Date.parse(until) - now < 60_000 ? "Wakes soon" : `Wakes ${relativeTime(until)}`;
 }
 
-export function TaskRow({ task, running }: { task: Task; running: boolean }) {
+/** ⌘1–⌘9 (Ctrl elsewhere) open the first nine tasks in sidebar order, sidebar shown or not. */
+export function useTaskJumpKeys() {
+  const { tasks } = useTasks(),
+    navigate = useNavigate();
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const command = event.metaKey || event.ctrlKey;
+      if (
+        !command ||
+        event.altKey ||
+        event.shiftKey ||
+        !/^[1-9]$/.test(event.key) ||
+        document.querySelector('[aria-modal="true"]')
+      ) {
+        return;
+      }
+      const target = jumpOrder(tasks)[Number(event.key) - 1];
+      if (target) {
+        event.preventDefault();
+        navigate(`/tasks/${encodeURIComponent(target.id)}`);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tasks, navigate]);
+}
+
+export function TaskRow({
+  task,
+  running,
+  shortcut,
+}: {
+  task: Task;
+  running: boolean;
+  /** 1–9 when ⌘N opens this row. */
+  shortcut?: number;
+}) {
   const pending = task.pendingActionIds?.length ?? 0,
-    kind = kindLabel(task);
+    kind = kindLabel(task),
+    state = taskState(task, running);
+  const forward = isFresh(task) || state === "working";
   return (
     <li className="task-row">
       <NavLink
         to={`/tasks/${encodeURIComponent(task.id)}`}
         data-task-row={task.id}
+        aria-keyshortcuts={shortcut ? `Meta+${shortcut} Control+${shortcut}` : undefined}
+        title={shortcut ? `${task.title} (${mod}${shortcut})` : undefined}
         className={({ isActive }) =>
-          `side-row task-link ${isActive ? "active" : ""} ${task.needsUser ? "needs-you" : ""}`
+          `side-row task-link ${isActive ? "active" : ""} ${forward ? "fresh" : "recede"}`
         }
       >
-        <TaskGlyph task={task} running={running} />
+        <StateGlyph state={state} />
         <span className="side-label">
-          {task.title}
-          <small>
-            {kind && <span className={`kind-badge ${task.kind}`}>{kind}</span>}
-            {task.accountIds.slice(0, 3).map((id) => (
-              <AccountDot key={id} id={id} />
-            ))}
-            <span>
+          <span className="task-title">{task.title}</span>
+          {kind && <span className={`kind-badge ${task.kind}`}>{kind}</span>}
+        </span>
+        <span className="task-trail">
+          {pending > 0 ? (
+            <span className="side-count strong" title={`${pending} waiting for approval`}>
+              {pending}
+              <span className="sr-only"> waiting for approval</span>
+            </span>
+          ) : (
+            <time dateTime={task.snoozedUntil ?? task.lastActivityAt}>
               {task.status === "snoozed" && task.snoozedUntil
                 ? wakeText(task.snoozedUntil)
                 : relativeTime(task.lastActivityAt)}
-            </span>
-          </small>
+            </time>
+          )}
         </span>
-        {pending > 0 && (
-          <span className="side-count strong" title={`${pending} waiting for approval`}>
-            {pending}
-            <span className="sr-only"> waiting for approval</span>
-          </span>
-        )}
       </NavLink>
       <TaskMenu task={task} />
     </li>
@@ -104,11 +149,13 @@ function Section({
   label,
   tasks,
   running,
+  shortcuts,
 }: {
   id: SectionId;
   label: string;
   tasks: Task[];
   running: (id: string) => boolean;
+  shortcuts: Map<string, number>;
 }) {
   const [open, setOpen] = useState(id !== "settled"),
     { settled, loadSettled } = useTasks();
@@ -143,7 +190,12 @@ function Section({
       {open && (
         <ul>
           {tasks.map((task) => (
-            <TaskRow key={task.id} task={task} running={running(task.id)} />
+            <TaskRow
+              key={task.id}
+              task={task}
+              running={running(task.id)}
+              shortcut={shortcuts.get(task.id)}
+            />
           ))}
           {!tasks.length && !lazy && <li className="side-empty">Nothing has come back to you.</li>}
           {lazy && settled.loading && <li className="side-empty">Loading…</li>}
@@ -173,7 +225,8 @@ export function TaskList() {
   if (loaded && error && !tasks.length) {
     return <p className="side-empty side-note">Tasks could not load. {error}</p>;
   }
-  const groups = groupTasks(tasks);
+  const groups = groupTasks(tasks),
+    shortcuts = new Map(jumpOrder(tasks).map((task, i) => [task.id, i + 1]));
   return (
     <>
       {SECTIONS.map((section) => (
@@ -183,6 +236,7 @@ export function TaskList() {
           label={section.label}
           tasks={groups[section.id]}
           running={running}
+          shortcuts={shortcuts}
         />
       ))}
     </>
