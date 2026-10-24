@@ -325,12 +325,22 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 - **Sidebar.** Pinned, Inbox, Working, Snoozed and Settled (folded), each ordered by
   `lastActivityAt` (Snoozed by wake time). Inbox, then working and snoozed, then pinned settled
   tasks are fetched in full, following `nextCursor`; unpinned settled tasks page in 50 at a time
-  when the fold opens ("Show more"). A row shows the title, an Inbox or Routine badge, a status
-  mark (running, watching, needs approval, failed), the pending approval count and the account
-  dots. Its menu pins, snoozes until a preset or a chosen time, settles or archives. These
-  changes apply at once and roll back if the server refuses; frames arriving meanwhile keep the
-  guess on top. Pin and unpin toasts offer Undo. `j`/`k` move between rows (anywhere but the
-  Needs you queue, which keeps its own), Enter opens, and ⌘K finds tasks.
+  when the fold opens ("Show more"). A row is one 36 px line: the status mark, the title, an
+  Inbox or Routine word, and the pending approval count or the time. The title recedes (muted)
+  when nothing is new and comes forward when the task needs the person, finished or woke unseen,
+  or `returnedAt` is after `seenAt`. Its menu pins, snoozes until a preset or a chosen time,
+  settles or archives. These changes apply at once and roll back if the server refuses; frames
+  arriving meanwhile keep the guess on top. Pin and unpin toasts offer Undo for five seconds,
+  also on ⌘Z. `j`/`k` move between rows (anywhere but the Needs you queue, which keeps its own),
+  Enter opens, ⌘1–⌘9 open the first nine tasks of Pinned, Inbox, Working and Snoozed (Settled
+  never takes a number), and ⌘K finds tasks.
+- **Status marks.** One set (`tasks/TaskGlyph.tsx`, state from `taskState` in `tasks/model.ts`)
+  is used by the sidebar, the task header, Needs you and the task list, with the T3 badge words:
+  Approval (`needsUser: "approval"`), Input (`"question"`), Waiting (watching a conversation),
+  Working (a run is active, or `working` without watches), Limited, Failed (`"failure"`), Woke
+  and Done. Limited reads `needsUser: "limited"` or `limited`; Woke and Done read
+  `unseenOutcome`. Those fields arrive with the lifecycle work; until then the three marks never
+  show.
 - **Task view** (`/tasks/:id`). The timeline opens at its newest items: the first page answers
   short tasks; for longer ones the last `seq` is found with one-item `afterSeq` probes (doubling,
   then halving) and the last page is fetched. Older pages load when the top scrolls into view.
@@ -350,7 +360,8 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   draft recipients, and approves all the reversible ones in one click (`once`). A decision's
   busy state is shared by every control for that action; decided actions leave the panel at
   once.
-- **Composer.** Enter sends with `mode: "queue"` and ⌘Enter with `"steer"`. Stop calls
+- **Composer.** Enter sends in the default mode (`"queue"`) and ⌘Enter in the opposite one
+  (`"steer"`); without an active run both queue. Stop calls
   `/interrupt`. Stop and steer are only offered while a run is active on a `kind: "task"` task;
   messages to inbox and routine tasks queue. The permission picker and the Plan toggle `PATCH`
   the task, and the composer says when the server returned a lower mode than the one asked for.
@@ -366,6 +377,9 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 - **Refreshes.** The first `/ws` connect does not refetch; a reconnect refetches the open views
   and asks every working or seemingly running task for its runs again, so a run that ended
   offline stops showing as running. Window focus refetches only data older than 30 seconds.
+- **Keyboard.** Escape outside a text field or dialog closes the details panel (or the overlay
+  sidebar on a narrow window); dialogs and popovers close themselves first. ⌘. toggles the
+  details panel, ⌘B the sidebar, ⌘, settings, and `/` focuses the composer.
 - On the demo backend (`501 TASKS_UNAVAILABLE`) the sidebar and home say tasks need
   `passport serve`, and the composer runs the agent once (`POST /api/agent/run`) and shows the
   outcome inline.
@@ -379,7 +393,13 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   task carries no last `seq` and the items route has no `beforeSeq`. Loaded items are not
   windowed; scrolling far back keeps every page in memory.
 - **R5-9:** settle, snooze and archive have no Undo (no reopen, unsnooze or unarchive route);
-  the toast says where the task went. Archiving a system task is not confirmed.
+  the toast says where the task went, and ⌘Z only undoes pin and unpin. Archiving a system task
+  is not confirmed.
+- **⌘1–⌘9 in a browser tab:** Chrome and Safari keep ⌘1–⌘9 for switching tabs, so the
+  shortcut reaches Passport in the Mac app and with Ctrl on other systems, not in a Mac browser
+  tab.
+- **Command palette:** while searching, results are ranked across groups, so a group heading can
+  repeat (Tasks, Matters, Tasks).
 - **R5-15:** a decision card on Needs you and the same action in an open task share busy state
   only within one tab.
 - **R5-18:** the clamp notice always names the account ladder, even when a parent task caused
