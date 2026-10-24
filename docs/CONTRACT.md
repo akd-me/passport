@@ -150,3 +150,25 @@ Invariants (on-demand.md §5):
 - Provider-derived strings (subjects, snippets, names, label names, bodies, attachments) are untrusted and
   are wrapped as data in tool results and prompts.
 - A task's permission mode cannot exceed the account's trust ladder, and a child task cannot exceed its parent.
+
+
+## Additive contract: task sessions and orchestration (v0.4)
+
+- Task, run and item fields are additive; [tasks](tasks.md#model) records the complete lifecycle,
+  question/secret state, queue, Limited recovery, session IDs, requests and continuation ancestry.
+  `resolveTaskStatus` is the server transition function; `isTaskWorking` and `taskBadge` are
+  shared pure helpers. HTTP snapshots and raw WebSocket events are the client contract.
+- Host runs use Passport's per-run loopback tool belt and native session calls. Ordinary task
+  message/watch/wake sessions persist/resume; Inbox/routine work, scheduled fresh children and
+  voice learning stay ephemeral. Working files use private OS temp directories; CLI-owned
+  resumable transcripts can contain mail and remain outside Passport's cleanup.
+- Policy ceilings are checked live against the run's starting ceiling and current task/ancestor
+  modes. Account-scoped tools reject out-of-scope calls. Children inherit no approval grants;
+  no tool approves. Arrivals and scheduled work have explicit [tool allowlists](tools.md#arrival-and-routine-tool-scopes).
+- The 69-tool registry includes questions, delegation/status/cancel, organize, private secrets,
+  render and profile proposals. Local task/presentation changes do not require a domain action;
+  mail/calendar/profile changes still go through the executor. Learned profile changes always ask.
+- Private input values never reach the model/timeline; one-use encrypted refs have a one-hour
+  default TTL. Restricted render HTML stays inside an opaque script-free iframe. Webhook
+  capability intake uses bounded per-routine persistence, HMAC when configured, replay/coalesce
+  controls and redaction. See [scheduler](scheduler.md) and [security](security.md).

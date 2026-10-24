@@ -40,6 +40,11 @@ Webhook schedules validate through `validateSchedule` and have no recurring time
 The package exports pure request path/filter/template/key helpers and raw-body HMAC verification.
 The host supplies `frameUntrusted` to `renderWebhookTemplate` and owns intake/pending persistence.
 `runNow(id, { webhookPrompt })` forwards the rendered instruction through `JobContext`.
+The server stores intake separately per routine with a bounded queue (10 windows per routine,
+100 globally), accepted-window/update/rejection budgets and 2,048-character delivery previews.
+`runOn: "bound" | "fresh"` selects the routine task or a fresh child; scheduled work has an
+explicit restricted tool allowlist. Manual Run now has no webhook payload and leaves template
+placeholders literal. See [webhook routines](../../docs/scheduler.md#webhook-routines).
 
 Each started occurrence persists `activeRun: {runId,occurrenceAt,startedAt}` before invoking
 the handler. It clears only when the handler settles, including after a timeout. On restart,

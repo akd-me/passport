@@ -9,13 +9,15 @@ Passport is an open-source, local-first email harness. AI agents work on your ma
   <img alt="A Passport task: the task list in the sidebar, the timeline with collapsed tool calls, a per-run change summary, inline approvals, and the approval panel above the composer" src="docs/screenshots/task-light.png">
 </picture>
 
-More screens: [starting a task](docs/screenshots/new-task.png), [Needs you](docs/screenshots/queue-light.png), [queued follow-ups](docs/screenshots/queue-strip-light.png), [permission mode](docs/screenshots/permission-mode.png), [a matter](docs/screenshots/matter.png), [connecting an account](docs/screenshots/connect.png), [settings](docs/screenshots/settings.png) and the [command palette](docs/screenshots/command-palette.png).
+More screens: [starting a task](docs/screenshots/new-task.png), Needs you ([light](docs/screenshots/queue-light.png), [dark](docs/screenshots/queue-dark.png)), queued follow-ups ([light](docs/screenshots/queue-strip-light.png), [dark](docs/screenshots/queue-strip-dark.png)), [permission mode](docs/screenshots/permission-mode.png), [a matter](docs/screenshots/matter.png), [connecting an account](docs/screenshots/connect.png), [settings](docs/screenshots/settings.png) and the [command palette](docs/screenshots/command-palette.png).
 
 ## Why
 
-- **Tasks are the unit of work.** Ask in plain language and Passport opens a [task](docs/tasks.md), like a coding agent's thread: each step it takes, collapsed tool calls ("Searched twice, read 4 messages"), a per-run change summary with undo, and approvals at the composer. Follow-ups queue or steer the running task. Tasks that need you come back to the inbox; the rest work, snooze or settle. New mail wakes each account's Inbox task, routines run as scheduled tasks, and `watch_conversation` wakes a task when someone replies.
-- **A tool belt, not a mirror.** The [tools](docs/tools.md) map to coding primitives: `mail_labels` and `mail_list` (`ls`), `mail_search` (`grep`, Gmail `q`, Graph `$search`/`$filter`, IMAP and JMAP search), `mail_grep` (`grep -C`), `mail_read` and `mail_attachment_read` (`Read`), `mail_count` (`wc`), `mail_changes` (`git status`). Every result reports its quota cost; a per-account governor keeps interactive work ahead of background work.
-- **Notes for people and matters.** The agent keeps memory-file notes on people and matters (`notes_read`, `notes_search`, `notes_write`), next to a small structured table for what policy depends on: relationship and sender verification, which notes can never change.
+- **Sessions that carry work forward.** Ask in plain language to open a [task](docs/tasks.md). Codex and Claude Code call Passport's tools natively; ordinary task follow-ups resume their provider session. Tool calls, changes, approvals, questions and replies form a durable timeline. The agent can start subtasks and return their results to the parent.
+- **Work comes back when it needs you.** Follow-ups queue or steer; you can edit/reorder the queue, Stop holds it, and Resume releases it. Tasks track seen/unread outcomes, reopen after settle/archive, and expose Limited recovery now or at reset. Restarted work continues once with its whole request.
+- **Routines and readable results.** New mail runs on each account's Inbox task; routines run on schedules or signed webhooks, bound to a task or on a fresh child. The agent can publish restricted HTML with `render` and propose a draft for review. `passport task start/send --wait`, show, list, approve and reject let you work from the terminal.
+- **On-demand tools.** The [tools](docs/tools.md) map to coding primitives: `mail_labels` and `mail_list` (`ls`), `mail_search` (`grep`, Gmail `q`, Graph `$search`/`$filter`, IMAP and JMAP search), `mail_grep` (`grep -C`), `mail_read` and `mail_attachment_read` (`Read`), `mail_count` (`wc`), `mail_changes` (`git status`). Every result reports its quota cost; a per-account governor keeps interactive work ahead of background work.
+- **Notes for people and matters.** The agent keeps notes (`notes_read`, `notes_search`, `notes_write`) next to structured relationship and verification state that notes cannot change. First connect can sample at most 50 Sent messages and propose Voice, Signature and VIPs in USER.md for your approval.
 - **Earned trust.** Start supervised and grant autonomy per category as evidence accumulates. The ladder mirrors a coding agent's permission modes: `supervised`, `auto_accept_edits`, `auto`, `full_access`. A task's mode is capped by the ladder, and an external agent has a separate ceiling.
 - **A record of every change.** Agent and human changes pass through the policy executor and action log. Reversible actions carry undo; irreversible operations are identified explicitly. Sends wait in a delayed outbox where you can cancel them.
 - **Your providers, your subscription.** Connect Gmail, Outlook, IMAP or JMAP and calendar services. The agent runs on the Codex or Claude Code subscription already signed in on your computer; no API key needed. API providers and local Ollama models remain available.
@@ -23,7 +25,7 @@ More screens: [starting a task](docs/screenshots/new-task.png), [Needs you](docs
 
 ## Quickstart
 
-**Pre-release:** there is no published release of 0.3 yet. Build the Mac app or the server from source, or use a locally packed tarball; the npm and GHCR commands below need a published version. Provider/model integrations have offline tests; real Gmail and Outlook sign-in and reads have not been verified against the live APIs (see [Status](#status)).
+**Pre-release:** the v0.4 work is on `main`; the latest release heading and tag remain 0.3.2. Build the Mac app or the server from source, or use a locally packed tarball; the npm and GHCR commands below need a published version. Provider/model integrations have offline tests; real Gmail and Outlook sign-in and reads have not been verified against the live APIs (see [Status](#status)).
 
 ### Mac app (recommended on macOS)
 
@@ -115,7 +117,7 @@ The default is your **Claude Code or Codex subscription**: no API key. Passport 
 
 `passport init` shows what it found ("Codex (ChatGPT login) ✓, Claude Code ✓") and lets you pick; **Settings → Model** does the same in the browser, and `passport doctor` explains how to fix a missing or signed-out CLI. Choosing an agent pins it; "Choose automatically" returns to the order above. Pin from the environment with `PASSPORT_LLM_PROVIDER=codex` or `claude-code` and `PASSPORT_LLM_MODEL`.
 
-Each agent call is a fresh, non-persisted CLI run in a scratch directory under the data directory, with tools, shell and user plugins disabled; Passport executes every action itself, under policy. The CLIs receive a minimal environment (no `PASSPORT_*` secrets or provider API keys). Usage counts against your subscription's limits; there is no per-call cost. Defaults are `gpt-6.1-sol` / `gpt-5.6-luna` (Codex) and `claude-sonnet-5-5` / `claude-haiku-5-5` (Claude Code) for main and fast work. API keys are optional and only needed for the API providers under **advanced**; see [install](docs/install.md#models).
+Ordinary task message/watch/wake runs are resumable tool-belt sessions. Inbox/routine work, arrivals, scheduled fresh children and voice learning use ephemeral tool-belt sessions; one-shot structured completions keep tools off. Every host invocation uses a disposable private OS temp directory. Shell, file edits, web search and user plugins are disabled; Codex native code/image/sub-agent/clock tools are also disabled, with only inert MCP resource helpers remaining. Persistent CLI transcripts contain mail/tool results and are retained by the CLI, separately from Passport’s temporary files. Domain changes still go through policy with live task/parent ceilings and account checks. The CLIs receive a minimal environment (no `PASSPORT_*` secrets or provider API keys). Usage counts against your subscription's limits; there is no per-call cost. Defaults are `gpt-6.1-sol` / `gpt-5.6-luna` (Codex) and `claude-sonnet-5-5` / `claude-haiku-5-5` (Claude Code) for main and fast work. API keys are optional and only needed for the API providers under **advanced**; see [install](docs/install.md#models).
 
 ## Use it from Claude Code or Codex
 
@@ -193,7 +195,7 @@ flowchart TD
 | `@passport/web` | Tasks, Needs you, Matters, People, Trust and account UI |
 | `@passport/desktop` | macOS app: Electron shell that runs the server as a child, menu bar, notifications, Keychain key, deep links |
 
-The public **`@akd-me/passport`** artifact bundles the private workspace code and built web UI. The server workspace retains its development name. See the [engineering contract](docs/CONTRACT.md), the [v0.3 design](docs/design/on-demand.md) and the [server reference](apps/server/README.md).
+The public **`@akd-me/passport`** artifact bundles the private workspace code and built web UI. The server workspace retains its development name. See the [engineering contract](docs/CONTRACT.md), the [v0.4 plan and outcome](docs/design/v04-plan.md) and the [server reference](apps/server/README.md).
 
 ## Security model
 
@@ -207,18 +209,21 @@ Mail/calendar providers receive the reads and actions you authorize. Beyond thos
 
 ## Status
 
-**0.3.2 was tagged on 2026-10-24** (not yet published to npm or GHCR). What is verified, and how:
+**v0.4 is implemented on `main`, with the final web fix pass and release integration pending.**
+The latest release heading/tag is **0.3.2** (2026-10-24); this docs pass does not publish or tag.
+Verification remains bounded by the evidence below:
 
 | Area | State |
 | --- | --- |
-| On-demand reads, watcher, tasks, tools, policy, MCP | Offline tests against fixtures and fake provider endpoints |
+| On-demand reads, watcher, v0.4 sessions/lifecycle/questions/subtasks/queue/Limited, tools, policy, MCP | Offline fixtures, fake provider endpoints and host CLI stream replays; these do not verify live model judgments |
+| Webhooks, secrets, render, draft review and CLI run polling | Offline route/store/sanitiser tests, bounded queue/rate tests and durable run lookup coverage |
 | Real Gmail and Outlook OAuth sign-in, reads and the watcher | **Not verified** against the live APIs |
 | IMAP and JMAP against real servers | Not verified |
-| Mac app (unsigned, arm64) | Built and smoke-tested locally: the packaged server starts, signs in and stops on quit |
+| Mac app (unsigned, arm64) | Previously built and smoke-tested locally; packaging was not rerun by this docs pass |
 | Signing, notarization, auto-update | **Not done**; right-click → **Open** on first launch |
-| npm, GHCR and release workflow | Not yet live-published |
+| npm, GHCR and release workflow | Workflow exists; live publication was not checked in this pass |
 
-Deferred: Gmail Pub/Sub push and Graph subscriptions (the watcher polls), a deep local index, OCR for scanned attachments, staged task changes (approval is per action), and task-scoped "accept always". **Hosted identity and SMTP+ are parked.** See [CHANGELOG.md](CHANGELOG.md).
+Deferred: Gmail Pub/Sub push and Graph subscriptions (the watcher polls), a deep local index, OCR for scanned attachments, staged task changes (approval is per action), and private reference handoff in account/routine forms. Task approval scopes for later proposals are implemented; they do not approve proposals already pending. **Hosted identity and SMTP+ are parked.** See [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 

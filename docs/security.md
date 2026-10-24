@@ -18,7 +18,7 @@ This boundary covers the UI/API listener and its `/ws` upgrade. The separate MCP
 
 Only `serve`/`demo` owns background work for a data directory, using an atomic PID/start-time
 lock and a 10-second heartbeat (stale after 60 seconds, or when the PID exits). Stdio MCP is a
-client: it opens no listener, scheduler or arrival queue. CLI jobs/trust/decisions/sync/triage
+client: it opens no listener, scheduler or arrival queue. CLI task/jobs/trust/decisions/sync/triage
 use the running server's bearer-authenticated API; authentication failures never fall back
 to a separate local execution. MCP installer previews recursively redact values under
 authorization/token/secret/key/password keys, including existing unrelated client entries.
@@ -64,8 +64,17 @@ Passport treats them as data, never as instructions:
 - Sender verification comes from authentication headers and the provider's trusted boundary,
   computed once per envelope. Message content never grants verification, and `notes_write` cannot
   change a person's relationship or verification fields.
-- Each Codex or Claude Code call is a fresh run in `<data dir>/host-agent` with its own tools,
-  shell and plugins disabled and a minimal environment, so mail cannot drive local commands.
+- Host calls use private disposable directories under the OS temp root, outside the data
+  directory, removed after success, failure or cancellation. Shell, file edits, web search,
+  user config/plugins and Codex native code/image/sub-agent/clock tools are disabled. The task
+  session calls Passport’s MCP belt; Codex retains inert resource helpers only. Ordinary task
+  message/watch/wake sessions resume; Inbox/routine work, arrivals, scheduled fresh children,
+  voice learning and completions stay ephemeral. Persistent CLI transcripts contain prompts,
+  mail and tool results in the provider CLI’s profile; Passport does not delete them on settle
+  or archive. A force-killed process cannot run temporary cleanup.
+- Claude session system prompts (including USER.md) use a private file rather than argv.
+  Codex developer instructions and one-shot completion system prompts still travel in argv;
+  same-user process inspection is outside this boundary. See [Sessions](tasks.md#sessions).
 
 This framing reduces prompt injection; it does not make it impossible. The limits below are what
 holds when a model follows instructions it should not.
@@ -78,14 +87,18 @@ conversation for replies, and propose or perform changes through the action exec
 
 It **cannot**:
 
-- Write anything except through the executor, which applies the global trust mode, category trust,
+- Change mail/calendar/profile state except through the executor, which applies the global trust mode, category trust,
   always-ask rules, risk and reversibility checks, and the outbox hold for sends.
 - Exceed its ceiling. A task's permission mode is clamped to the trust dial and to its parent task,
-  and enforced on every action of its runs; plan mode records writes as proposals only. MCP clients
+  and checked live on every policy decision against the run’s starting ceiling. Lowering a
+  task or ancestor takes effect in a running session; authority cannot rise above its starting ceiling. A run
+  started in plan skips writes. Switching a default run to plan mid-run lowers its policy
+  ceiling to `supervised`, so writes ask rather than becoming planned calls. MCP clients
   are capped by `externalAgentCeiling`, and the HTTP MCP bearer token grants access, not trust.
 - Approve its own proposals, change trust, or claim another actor's undo. Approvals go through
   `/api/actions/:id/approve` (the UI or an API client holding the UI token); no tool approves,
-  rejects or edits trust settings, and tools accept no actor or category override.
+  rejects or edits trust settings. Actor identity is host-owned. Arrival-only category inputs
+  can classify only that arrival’s organizing call; other actions keep their inferred category.
 - Read credentials or provider settings, or make arbitrary provider requests: `provider_get` is a
   read-only allowlist.
 - Steer a reader with a forged page token. Graph and IMAP page tokens, which name provider links
@@ -93,9 +106,42 @@ It **cannot**:
   before anything in it is used. The sealing key is derived from the master key with HKDF, so
   tokens survive a restart without a second stored secret.
 
+Tasks may also change their own lifecycle through orchestration tools, questions, watches and
+presentation, without an ActionRecord for those local task changes. Subtasks cannot approve;
+accounts are enforced at tool calls (`ACCOUNT_FORBIDDEN`) and permission checks follow the
+parent chain. Routine tasks and fresh system-created routine children use all connected accounts.
+Arrivals have a strict tool allowlist (`INPUT_TRIAGE`); scheduled work has a separate routine
+allowlist excluding orchestration, secrets, sends and profile edits. See [tool scopes](tools.md#arrival-and-routine-tool-scopes).
+
 `mail_export` writes copies of mail to `<data dir>/scratch/<session>/` (0700) for MCP clients with a
 shell. Those copies are readable by your OS user and by whatever the client runs; see
 [installation](install.md#data-directory).
+
+## Private input and rich output
+
+`request_secret` opens task-scoped private input for 10–600 seconds; its MCP call timeout is
+660 seconds. Values are stored with AES-256-GCM and returned to the model only as one-use
+references, never plaintext. HTTP responses omit both value and reference; domain events may
+include a reference but never a value. Saved refs expire after one hour by default, retain
+that deadline through restart and are swept by store maintenance; old refs without expiry are
+revoked. Pending requests expire at their original `expiresAt`, when next read after restart.
+Account tests peek without consumption or voice learning; account/webhook installs consume only
+after persistence and roll back failures. The account wizard/setup agent lack reference handoff,
+and the routine form lacks a private reference picker: do not echo refs into chat/transcripts.
+
+The render parser allows only structural HTML, neutralises command sigils and converts links to
+visible text/URLs. It decodes numeric/common named entities and link URLs once, preserves stray
+`<` text and runs in linear time. Input/output are capped at 64 KiB, with ten render attempts
+including sanitiser failures per run; height is 80–1200 px. The empty iframe sandbox and its
+content policy disable scripts, same-origin access and external loads. Draft previews share it.
+Draft saves share the executor lock with approval; later approval records edited feedback
+against the preserved original rather than rewarding an unchanged approval.
+
+Public webhook capability URLs are the API-auth exception, still subject to Host/Origin checks,
+HMAC when configured, body/depth limits, rate budgets, replay keys and pending-window caps.
+Signing headers and credential-like header/query names are removed/redacted before templates
+reach the model; request bodies can still contain sensitive sender data. Full pending prompts
+and 2,048-character delivery previews are plaintext. See [scheduler](scheduler.md#webhook-routines).
 
 ## Keys
 

@@ -50,7 +50,10 @@ automatic triage stops after the fifth attempt. Without a configured model, entr
 without consuming attempts. A durable `arrival:pending` index provides discovery through `Store.kv`. SQLite transaction-backed
 compare-and-set claims protect against accidental double owners, with renewable 60-second leases.
 Arrivals carry `runId: arrival:<emailId>`; the server stamps runtime Actions and mirrors run checkpoints
-under that stable identity. A retry with logged Actions or a completed checkpoint is acknowledged.
+under that stable identity. Session retries skip inference after a completed run, or an arrival-session checkpoint with
+existing actions. People-resolution actions alone allow inference to repeat; uncheckpointed
+partial session actions fail with `TRIAGE_INTERRUPTED` until the queue surfaces review.
+The legacy pipeline retains its step-level recovery.
 Related calendars defer inference for up to one minute; timed-out proposals visibly state that
 availability is unverified. Conflicting held calendar proposals return to review at release. The server keeps temporary local
 adapters for SQLite KV transactions, calendar provider-ID lookup and recurrence expansion so this
@@ -67,6 +70,26 @@ The **policy seams** integration tests in `src/e2e.test.ts` cover complete-Perso
 newsletter/known-contact playbooks, and `emailPatch` metadata/undo. The server does not bypass
 these executor conventions. Real send approval/hold/release/cancel, archive undo, trust, digests,
 the watcher, calendar sync, tasks, OAuth callbacks, stdio and in-memory MCP are tested independently.
+
+## Task sessions and lifecycle (v0.4)
+
+The server owns native host-agent sessions, question/secret waiting state, subtasks, organize,
+seen/reopen lifecycle, the editable follow-up queue, Limited recovery and restart continuations.
+Run permissions are capped by both the starting ceiling and the current task/ancestor mode on
+each policy decision. Account-scoped tools enforce task accounts; routines/fresh routine
+children use all currently connected accounts. Scheduled work uses its restricted tool allowlist.
+
+Ordinary task message/watch/wake runs resume provider sessions; Inbox/routine work, arrivals,
+scheduled fresh children and voice learning remain ephemeral. Host invocations run in private
+OS temp directories and clean up; persistent transcripts remain in the provider CLI’s profile
+and contain mail/tool results. Only `HOST_AGENT_SESSION_MISSING` before activity triggers a
+fresh-session fallback. See [Sessions](../../docs/tasks.md#sessions) and [security](../../docs/security.md).
+
+`GET /api/tasks/:id/runs/:runId` provides a durable run for CLI polling outside the detail
+route’s latest-50 window. Draft saves share the executor lock and retain the original for
+edited-approval feedback. Render previews use the same 64 KiB restricted parser/sandbox as
+render timeline items. Secret routes return metadata only; saved refs are one-use with a
+one-hour default TTL. Account tests probe without consuming refs or scheduling voice learning.
 
 ## Configuration
 
@@ -88,7 +111,9 @@ Load `<PASSPORT_DATA_DIR>/passport.config.json` (default `~/.passport/passport.c
 }
 ```
 
-Environment overrides: `PASSPORT_DATA_DIR`, `PASSPORT_HOST`, `PASSPORT_PORT`, `PASSPORT_WATCH_INTERVAL_SECONDS` (new-mail watcher, 5–86400), `PASSPORT_SYNC_INTERVAL_SECONDS` (calendar sync and account discovery, 1–2147483), `PASSPORT_DIGEST_HOUR` (local wall-clock hour, 0–23), `PASSPORT_LLM_PROVIDER`, `PASSPORT_LLM_MODEL`, `PASSPORT_LLM_BASE_URL`, `PASSPORT_LLM_FAST_MODEL`, `PASSPORT_LLM_API_KEY`, `PASSPORT_CLAUDE_PATH`, `PASSPORT_CODEX_PATH` (host CLI binaries; win over the file's `hostAgents.claudePath`/`codexPath`), `PASSPORT_AGENT_MAX_TOOL_CALLS` and `PASSPORT_AGENT_MAX_RUN_MINUTES` (run budget, default 200 and 30; win over the file's `agentBudget`), `PASSPORT_SHELL_ENV_PREPARED` (a launcher already read PATH from the login shell; optional `PASSPORT_SHELL_ENV_SOURCE`). Without a terminal and that flag, `serve`/`demo` read PATH from the login shell before host-agent detection (`src/shell-env.ts`; see [install](../../docs/install.md#running-from-a-gui-or-launchd)). LLM providers: `anthropic`, `openai`, `openai-compatible`, `ollama`. Anthropic is the default. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` and `PASSPORT_LLM_API_KEY` override optional file `llm.apiKey`; environment keys are not copied to disk, and file-authored keys are preserved. Public responses omit keys. Without a cloud key the agent is disabled and Accounts shows “LLM not configured”; local Ollama/compatible models can run without a key. Account secrets are separated using descriptor `secret` flags and passed to `Store.accounts.setCredentials`, never account settings/config. The real Store must encrypt them; demo credentials are ephemeral.
+Environment overrides: `PASSPORT_DATA_DIR`, `PASSPORT_HOST`, `PASSPORT_PORT`, `PASSPORT_WATCH_INTERVAL_SECONDS` (new-mail watcher, 5–86400), `PASSPORT_SYNC_INTERVAL_SECONDS` (calendar sync and account discovery, 1–2147483), `PASSPORT_DIGEST_HOUR` (local wall-clock hour, 0–23), `PASSPORT_LLM_PROVIDER`, `PASSPORT_LLM_MODEL`, `PASSPORT_LLM_BASE_URL`, `PASSPORT_LLM_FAST_MODEL`, `PASSPORT_LLM_API_KEY`, `PASSPORT_CLAUDE_PATH`, `PASSPORT_CODEX_PATH` (host CLI binaries; win over the file's `hostAgents.claudePath`/`codexPath`), `PASSPORT_AGENT_MAX_TOOL_CALLS` and `PASSPORT_AGENT_MAX_RUN_MINUTES` (run budget, default 200 and 30; win over the file's `agentBudget`), `PASSPORT_SHELL_ENV_PREPARED` (a launcher already read PATH from the login shell; optional `PASSPORT_SHELL_ENV_SOURCE`). Without a terminal and that flag, `serve`/`demo` read PATH from the login shell before host-agent detection (`src/shell-env.ts`; see [install](../../docs/install.md#running-from-a-gui-or-launchd)). LLM providers: `codex`, `claude-code`, `anthropic`, `openai`, `openai-compatible`, `ollama`.
+Automatic selection prefers signed-in Codex, then Claude Code, then a configured API provider. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` and `PASSPORT_LLM_API_KEY` override optional file `llm.apiKey`; environment keys are not copied to disk, and file-authored keys are preserved. Public responses omit keys. Without a signed-in host agent or usable API configuration the built-in agent is disabled;
+local Ollama/compatible models can run without a key. Account secrets are separated using descriptor `secret` flags and passed to `Store.accounts.setCredentials`, never account settings/config. The real Store must encrypt them; demo credentials are ephemeral.
 
 ## Authentication and network access
 
@@ -146,7 +171,7 @@ All IDs in paths are URL-encoded. `Page<T>` is `{items, total?, nextCursor?}`. L
 | `PUT /api/settings/host-agents`     | Partial `{claudePath, codexPath}` (absolute or `~/`; `null`/`""` clears) → saved to config, re-detected, same shape as GET                                                                                                                  |
 | `POST /api/settings/host-agents/redetect` | Re-read PATH from the login shell, re-detect host agents → same shape as GET                                                                                                                                                            |
 | `POST /api/agent/run`               | Optional `{instruction, emailIds, matterId}` → `AgentRun` plus the `taskId` of the task created for it |
-| `/api/tasks/*`                      | Tasks, runs, items, messages, interrupt, snooze, settle, archive, pin, watches: see [docs/tasks.md](../../docs/tasks.md#http-api). `501 TASKS_UNAVAILABLE` on the demo backend |
+| `/api/tasks/*`                      | Tasks, durable run lookup, items, questions, lineage, seen/unread, queue, Limited resume, reopen, private secrets, and lifecycle: see [docs/tasks.md](../../docs/tasks.md#http-api). `501 TASKS_UNAVAILABLE` on the demo backend |
 | `GET /api/digest/:date`             | `YYYY-MM-DD` → `{date, markdown}`; Store KV key `digest:YYYY-MM-DD`; 404 if no digest                                                                                                                                                         |
 
 `ws://127.0.0.1:3000/ws` streams each raw `DomainEvent` as one JSON text frame. Reconnect clients should refetch current HTTP state; there is no replay protocol. Slow clients are disconnected. The upgrade requires a bearer header, session cookie, or `?token=<token>` for non-browser WS clients. Browser clients use the same-origin cookie automatically. Host and Origin are validated before upgrading.
@@ -170,7 +195,17 @@ passport accounts add mock --demo
 passport trust --demo
 passport decisions --demo
 passport triage <emailId>            # explicitly triage a stored email
+passport task start "Review my day" --wait
+passport task send <taskId> "Only the invoices" --steer --wait
+passport task show <taskId> --items 30
+passport task list --status inbox,working
+passport task approve <actionId>
+passport task reject <actionId>
 passport mcp                        # real MCP over stdio; diagnostics on stderr
 ```
+
+Task commands require the running real server with no direct-store fallback. `--wait` polls a
+durable run once per second, tolerating brief transient errors up to five consecutive failures;
+exit 2 means the task needs the person or the run failed/stopped. See [CLI](../../docs/install.md#cli).
 
 Account add prompts for descriptor fields, hiding secret entry. Secret fields can also use `PASSPORT_SETUP_<FIELD_ID_IN_UPPERCASE>` environment variables (punctuation becomes `_`), avoiding terminal echo. OAuth setup prints a consent URL and validates state/PKCE at `http://127.0.0.1:53682/oauth/callback` (override with `PASSPORT_OAUTH_REDIRECT_URI`), then stores tokens encrypted. Demo CLI mutations last only for that process. `SIGINT`/`SIGTERM` drain the server. Tests use no provider/LLM network; the WebSocket test uses an ephemeral loopback port.

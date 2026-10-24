@@ -35,9 +35,29 @@ public disclosure after a fix or an agreed disclosure date.
   the Mac app keeps it in the macOS Keychain and passes it to its server on an
   inherited pipe (fd 3), never in argv or the environment. Cached envelopes and
   bodies, tasks, notes, account metadata and action history are plaintext in SQLite.
-  `mail_export` copies under `scratch/` are plaintext files.
+  `mail_export` copies under `scratch/` are plaintext files. Resumable task transcripts
+  in the provider CLI’s own profile also contain mail/tool results; Passport does not delete
+  them on settle/archive. Inbox/routine work, arrivals, scheduled fresh children and voice
+  learning stay ephemeral. Host calls run in disposable private OS temp directories outside
+  the workspace, cleaned after completion/cancellation (hard process kills prevent cleanup).
   A model key explicitly placed in configuration remains in that file. Protect
   the whole directory, environment, swap and backups; use OS disk encryption.
+- Host task sessions expose Passport’s MCP tools with per-run loopback bearers. Native shell,
+  file edits, web search, plugins and Codex code/image/sub-agent/clock tools are disabled;
+  Codex retains inert MCP resource helpers. Permission reductions are read live on policy
+  decisions and account-scoped tools reject out-of-scope reads/writes (`ACCOUNT_FORBIDDEN`).
+  Claude session prompts use private files; Codex instructions and completion prompts still
+  use argv. Same-user process inspection remains within the trusted OS boundary.
+- Private secret input returns a reference to the model, never the value. AES-256-GCM saved
+  references are one-use and expire after one hour by default, even across restart. Pending
+  request deadlines are separate. Account tests peek without consumption/voice learning;
+  account and webhook installs consume only after persistence. Wizard/setup reference handoff
+  and a private routine reference picker are deferred; refs must not be echoed into chat.
+- Rich render items and draft previews are restricted HTML in an opaque, script-free iframe
+  with no external loads, capped at 64 KiB and ten render attempts per run. Arrival/routine
+  allowlists limit what untrusted scheduled/mail input can call. Webhook routes are capability
+  URLs exempt from API bearer auth, protected by optional HMAC and bounded intake/queues.
+  See [the detailed boundaries](docs/security.md#private-input-and-rich-output).
 - OAuth setup validates state and uses PKCE. Supply your own OAuth clients and
   review the requested scopes. Treat refresh tokens as mailbox access.
 - The HTTP API requires a bearer token (`api-token`) or a browser session, and

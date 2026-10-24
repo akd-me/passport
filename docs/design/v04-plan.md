@@ -5,6 +5,22 @@ is built from. Read it whole before starting any item below. Behaviour that alre
 documented in `docs/tasks.md`, `docs/tools.md`, `docs/scheduler.md`, `docs/desktop.md`; the
 rules that must stay true are in `docs/CONTRACT.md`.
 
+## Outcome (2026-10-24)
+
+At `main` `781a09b`, the runtime/server work shipped: native resumable task sessions, questions,
+subtasks and organise tools, seen/reopen lifecycle, editable queue, Limited recovery, restart
+continuations, webhook routines, private-input references, restricted renders, draft review,
+voice learning on connect and task CLI commands with durable run polling. The final web fix
+stream and release integration remain pending. The scoped tools, temporary host directories,
+transcript persistence and R1 corrections are described in the current reference docs.
+
+Deferred: staged task changes, fork/merge-back, private reference handoff in account setup and
+the routine form, plus the remaining limitations in [tasks](../tasks.md#known-limitations-2026-10-24)
+and [scheduler](../scheduler.md#known-limitations). Live OAuth/provider checks remain unverified.
+[R1 mismatch and fix-handoff dispositions](../v04-docs-pass.md) record the review inputs
+(`review-r1.md`, `review-r2.md`) and the UI work left to the web pass. The brief below records
+the original work breakdown; this Outcome and the reference docs describe the shipped result.
+
 ## 1. Why
 
 v0.3 adopted the T3 Code thread model well, but the agent underneath does not run like a coding
@@ -61,7 +77,7 @@ preview automation, Claude workflow projection, fork and merge-back (deferred).
    feature's folder. Do not reformat files you are not changing.
 4. **Append-only contracts.** `@passport/types` only grows. New `TaskItem` kinds, `DomainEvent`
    members, routes and tool names are additive. Existing routes keep their shapes.
-5. **Tool count.** Adding a registry tool bumps the `toHaveLength(61)` assertions in
+5. **Tool count.** Adding a registry tool bumps the current `toHaveLength(69)` assertions in
    `packages/tools/src/registry.test.ts` and `packages/mcp/src/transports.test.ts`.
 6. **Untrusted data.** Anything provider-derived stays wrapped and neutered exactly as
    `docs/tasks.md` describes. New prompt framing uses `frameUntrusted`. New UI renders agent and
@@ -137,7 +153,8 @@ window, `Esc` closes. Every control reachable; visible focus ring; AA contrast e
 - Follow-ups resume the provider session when one exists (`--resume <session_id>` for Claude,
   `thread_id` for Codex) and fall back to the current history prompt when it does not or when
   the provider changed. Record `providerSessionId` on the task (additive field).
-- Interrupt and steer cancel the session process at the next tool boundary, as today.
+- Interrupt and steer terminate the host session process group immediately; a successful result
+  already settling remains completed. API loops check cancellation at model/tool boundaries.
 - API-provider runs (Anthropic, OpenAI, Ollama) keep the native tool loop but lose the 12 cap
   in favour of the same budget.
 - Arrival triage and routines keep working unchanged in this item; W2C moves them.

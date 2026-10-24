@@ -161,7 +161,8 @@ timeline and pending approvals, and decide only that action (approval scope `onc
 approval can still return `held` while the outbox delay runs.
 
 Without `--wait`, start/send print the task and accepted run immediately. With it, they poll
-`GET /api/tasks/:id` once per second until that specific run ends, then print its summary, error
+`GET /api/tasks/:id/runs/:runId` once per second until that specific durable run ends, then
+fetch the current task for `needsUser` and print its summary, error
 code (if any), action ids and pending approvals. A task can remain `working` to watch mail after
 its run ends. An approval raised during a run does not end the wait early.
 
@@ -195,8 +196,10 @@ Action 01A…: executed
 
 **Known limitations:** task commands require a persistent server (`serve`), so `--demo` and
 offline task execution are unavailable. Waiting uses polling rather than streaming; output
-arrives when the run ends. The detail API retains only the latest 50 runs, so a wait errors if
-its run falls out of that window. Showing a long timeline walks its pages to retain the latest
+arrives when the run ends. The durable run endpoint works after a run leaves the detail API’s
+latest-50 window. Polling retries transient connection/server/rate-limit failures, with delays
+of 250 ms, 500 ms and up to 1 s, stopping at five consecutive failures. Authentication,
+missing-run and other permanent errors stop immediately. Showing a long timeline walks its pages to retain the latest
 N items. To use the CLI from another machine, run it over SSH on the server, or forward its
 loopback API port and supply that server's token; there is no separate CLI remote-URL option.
 The [remote access guide](deploy.md#remote-access) covers private browser access.
@@ -272,7 +275,7 @@ envelopes and bodies, tasks, notes and the rest of the database are not encrypte
 | `master.key` or `master.key.keychain` | Credential key, or the marker that the Mac app keeps it in the Keychain |
 | `owner.lock` | The live server's lease |
 | `scratch/` | `mail_export` output for MCP clients with a shell: one private (0700) directory per MCP server session |
-| `host-agent/` | Working directory for each Codex or Claude Code call |
+| `host-agent/` | Legacy host working directory; new calls use disposable OS temp directories |
 | `setup-browser-profile/`, `setup-agent/` | Agent-driven account setup; keep out of backups |
 
 The cache is bounded: bodies are evicted beyond 200 MB and envelopes beyond the 100,000 most
@@ -280,6 +283,15 @@ recently used. `mail_export` files are written for the client's own `rg` or scri
 to live 24 hours. The server sweeps `scratch/` at startup and from the `tasks.maintenance` job,
 removing session directories older than 24 hours. Keep `scratch/` out of
 backups.
+
+Host CLI invocations now use private `passport-host-run-*` directories under the OS temp root,
+removed on success, failure and cancellation, outside this data directory. Claude MCP and session
+system-prompt files and Codex catalogue/output files also use temporary private files. CLI-owned
+resumable transcripts are separate (typically `~/.claude/projects/…` or `~/.codex/sessions/…`);
+they contain mail/tool results, survive settling or archiving and are not deleted by Passport.
+Only ordinary task message/watch/wake runs persist them; Inbox/routine work, arrivals, scheduled
+fresh children, voice learning and one-shot completions stay ephemeral. A force-killed process
+cannot run its temporary-file cleanup. See [Sessions](tasks.md#sessions).
 
 ## Models
 
@@ -301,14 +313,21 @@ with the fix for each and sends a one-word test request through the selected one
 
 Model defaults are `gpt-6.1-sol` (main) and `gpt-5.6-luna` (fast) for Codex and
 `claude-sonnet-5-5` / `claude-haiku-5-5` for Claude Code; set `llm.model` and
-`llm.fastModel` to any model your plan offers. A task run is one CLI session in
-`<data-dir>/host-agent` whose only tools are Passport's own, served from the
-server over a per-run loopback MCP endpoint; shell, file edits, web search, user
-config and plugins stay disabled, so email content cannot drive local commands,
-and every write still goes through Passport's policy. The CLI keeps the session's
-transcript in its own data directory so follow-ups can resume it (see
-[tasks](tasks.md#sessions)). Other calls (triage steps, routines) are fresh,
-ephemeral, tool-less CLI runs. The CLI gets a minimal environment (home, path, locale, proxy and
+`llm.fastModel` to any model your plan offers. A task run is one agentic CLI session with
+Passport's tool belt served by the server over a per-run loopback MCP endpoint. Shell, file
+edits, web search, user config and plugins stay disabled. Codex's native code/image/sub-agent
+and clock tools are disabled through feature switches and a restricted model catalogue; inert
+MCP resource helpers remain. Calls run under the live task/parent permission ceiling and account
+scope, and domain writes pass through policy.
+
+Ordinary `kind: "task"` message/watch/wake runs keep a provider session and resume on follow-ups,
+including restart and limit recovery. Inbox/routine tasks stay ephemeral for all their runs;
+arrivals, scheduled built-ins/user routines (including fresh children) and voice learning use
+fresh tool-belt sessions without provider persistence. Structured completions (titles and the
+legacy triage pipeline) are ephemeral with tools off. Only a missing provider session
+(`HOST_AGENT_SESSION_MISSING`) before activity triggers a fresh-session fallback; other failures
+keep the old session ID. Every invocation uses a disposable OS temp working directory, while
+persistent transcripts remain in the CLI profile. See [Sessions](tasks.md#sessions). The CLI gets a minimal environment (home, path, locale, proxy and
 CLI config variables only). Usage counts against your plan's limits; Passport
 reports token usage without a cost. Docker images do not contain the CLIs; use an
 API provider there, or run Passport natively.

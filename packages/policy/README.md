@@ -74,6 +74,19 @@ Counterparty classification uses known person identities/relationships and trust
 fields; it never inspects message bodies or upgrades verification. The caller must supply
 authentic actor identity and counterparty classification rather than trusting client claims.
 
+The additive `profile_update` category always asks for approval, including at full access;
+legacy profile actions in `matters` remain readable. A learned whole-profile proposal keeps
+USER.md untouched until approval and captures the profile at execution for undo.
+
+`DraftEditingExecutor.editDraft(actionId, textBody)` saves only the pending draft text (clearing
+stale HTML) under the executor’s serial approval lock. If a decision already won it returns
+`ACTION_DECIDED`. It preserves the first agent draft across repeated saves/restarts; later
+approval computes edit distance against that original and records `approved_edited` feedback.
+
+The host can inject a per-request `ceiling`. Task runs use the minimum of their starting
+ceiling and the current task/ancestor mode, consulted on each policy decision; lowering reaches
+an active run; authority cannot rise above the starting ceiling until a new run.
+
 ## Trust and promotions
 
 New categories start at score 0.3. Unchanged approvals add 0.08; edited approvals subtract

@@ -55,8 +55,10 @@ produced something brings the task back to the inbox, and a failure surfaces it 
 `needsUser: "failure"`. In `@passport/scheduler` this is `JobDefinition.taskId` plus the
 `SchedulerOptions.runOnTask(taskId, ctx, run)` seam. The host records the run and passes
 `ctx.agentRunOptions`, which the job forwards to `AgentRuntime.run`. Deleting a routine keeps
-its task and timeline. The runtime's existing tools and policy engine
-control every action. Runs share the configurable 200-tool-call / 30-minute budget. Their outer
+its task and timeline. The runtime’s explicit [routine tool allowlist](tools.md#arrival-and-routine-tool-scopes)
+permits context reads, notes/matters, organizing mail, drafts and render. It omits delegation,
+questions, private secret requests, task organization, watches, sends, unsubscribe execution,
+calendar writes and profile edits. Every domain action still goes through policy. Runs share the configurable 200-tool-call / 30-minute budget. Their outer
 scheduler timeout is one minute longer, allowing a `BUDGET_EXHAUSTED` notice before cancellation.
 A routine cannot grant itself permissions or bypass the outbox.
 
@@ -81,15 +83,18 @@ configured host/port when available, so pause/resume immediately affect its time
 server offline, they operate on the local store without starting recurring timers; changes
 are loaded on the next server startup. The CLI authenticates with `PASSPORT_API_TOKEN` or `<data-dir>/api-token`; a 401 fails with instructions. Direct-store fallback is announced and requires both an unreachable server and an absent/stale owner lock. A live owner with an unreachable server is an error.
 
-`<data-dir>/owner.lock` records PID, start time and a 10-second heartbeat. A live lock prevents another `serve`/`demo`; it expires after 60 seconds without a heartbeat or when its PID exits. Shutdown removes only its own lock. Arrivals additionally use SQLite compare-and-set claims, renewed every 10 seconds, and stable `arrival:<emailId>` run IDs. Existing logged Actions or a completed run checkpoint acknowledge a retry without re-running inference.
+`<data-dir>/owner.lock` records PID, start time and a 10-second heartbeat. A live lock prevents another `serve`/`demo`; it expires after 60 seconds without a heartbeat or when its PID exits. Shutdown removes only its own lock. Arrivals additionally use SQLite compare-and-set claims, renewed every 10 seconds, and stable `arrival:<emailId>` run IDs. Session retries skip inference after a completed run, or an arrival-session checkpoint with
+existing actions. People-resolution actions alone allow inference to repeat; uncheckpointed
+partial session actions fail with `TRIAGE_INTERRUPTED` until the queue surfaces review.
+The legacy pipeline retains its step-level recovery.
 
 ## API
 
 | Method | Path                    | Input/result                                                                                          |
 | ------ | ----------------------- | ----------------------------------------------------------------------------------------------------- |
 | GET    | `/api/jobs`             | Array of states with definitions; routine instructions included for user jobs                         |
-| POST   | `/api/jobs`             | `{ name, schedule, routine: { instruction } }`; returns created job (201)                             |
-| PATCH  | `/api/jobs/:id`         | `{ schedule?, enabled?, name?, routine?: { instruction } }`; name/instruction edits only for routines |
+| POST   | `/api/jobs`             | `{ name, schedule, runOn?, routine: { instruction } }`; returns created job (201)                             |
+| PATCH  | `/api/jobs/:id`         | `{ schedule?, enabled?, name?, runOn?, routine?: { instruction } }`; name/instruction edits only for routines |
 | DELETE | `/api/jobs/:id`         | Remove a user routine; built-in deletion returns 409                                                  |
 | POST   | `/api/jobs/:id/run`     | Run once, return the run record (including an error or skipped result)                                |
 | POST   | `/api/jobs/:id/pause`   | Disable automatic runs                                                                                |
@@ -149,14 +154,27 @@ Creation/listing returns a relative `webhookUrl` with a random 256-bit token uni
 routine. Use the server's externally reachable HTTPS origin with that path. Rotation immediately
 revokes the old token; pause rejects incoming deliveries. Administration, delivery history and
 rotation require normal authentication. Hook POSTs retain Host and Origin checks and accept
-bodies up to 256 KiB. Per routine, at most 10 new dispatch windows and 60 coalesced updates
-are admitted per minute, with a separate 10-rejection limit and a 70-request ceiling.
-Limits survive restart; HTTP 429 includes `Retry-After: 60`.
+bodies up to 256 KiB. Per routine and minute, at most **10 accepted new windows** and **60 coalesced updates**
+are admitted. Filtered, duplicate, expired, disabled and rejected deliveries do not spend the
+new-window budget. Invalid signatures use a separate 10-rejection budget and cannot spend
+valid intake capacity. Disabled and expired requests also count toward that rejection state;
+valid signed requests skip the signature rejection gate. Valid-signature (or unsigned) intake
+has a separate **70-request ceiling**, including filtered/duplicate requests.
+
+Pending windows are capped at **10 per routine and 100 globally**, including work being
+dispatched. These caps and rate state survive restart; HTTP 429 includes `Retry-After: 60`.
+Unknown tokens are rejected before reading bodies and throttled by the socket peer address
+(60 misses/minute, bounded in-memory address buckets); forwarded headers do not set that identity.
+JSON with an object/array at depth 64 is rejected with HTTP 400 and a `rejected` delivery record.
 
 Signatures are HMAC-SHA256 over the **exact raw request bytes**. Encoding is `hex` or padded
 `base64`; `prefix` is optional (empty by default). Digest comparison is constant time.
 Enter the secret through [request_secret](tools.md#private-secrets-v04); its one-use reference
-is consumed when installed and the signer stays encrypted. PATCH may retain the same installed
+is peeked during validation and consumed only after the routine/schedule persist; failed
+installs roll back the signing key. The signer stays encrypted. Unused saved references expire
+after one hour by default, retain that deadline across restart and are swept by store
+maintenance; legacy refs without expiry are revoked. The installed signing key is independent
+of the consumed reference’s TTL. PATCH may retain the same installed
 reference; changing it requires a new reference. Schedules never accept a raw signing secret.
 
 Replay and coalesce keys are templates containing request placeholders, hashed per routine.
@@ -164,6 +182,9 @@ Replay keys live for seven days, independently of the bounded delivery log. Miss
 key values bypass that key. A coalesce key opens a fixed window of 10–3600 seconds (default 120)
 from the **first** delivery. Later deliveries replace the payload without extending the window.
 Replay keys, pending windows, rendered prompts, URL tokens, rate state and logs survive restart.
+State is stored per routine at `scheduler:webhooks:<id>` with a `scheduler:webhooks:index`;
+the former shared record is migrated once. Full prompts remain only in bounded pending
+windows, while delivery history retains at most 2,048 characters per prompt preview.
 An overdue window runs once with its latest payload; paused/deleted routines do not dispatch it.
 Webhook jobs have no recurring timer or automatic job retries.
 
@@ -184,16 +205,19 @@ Instructions substitute `{{body.x}}`, `{{headers.x}}`, `{{query.x}}`, `{{body}}`
 (the raw body) and `{{request}}` (the request with a redacted route). JSON and form bodies
 support paths; other bodies remain text. Every inserted value goes through `frameUntrusted`,
 including command neutralization and randomized tags. Authentication/signing headers and
-credential-like query parameters are removed or redacted before rendering. Each substitution
+credential-like header/query names are matched by substrings (including auth, cookie, pass,
+credential, key, token, secret, sig, code, session, hmac, jwt and assertion), then removed
+or redacted before rendering; the configured signature header is removed too. Each substitution
 is bounded to 64,000 characters, with a 262,144-character total payload-text budget.
 
 Deliveries retain `id, jobId, receivedAt, outcome, prompt?`. Outcomes:
-`accepted | dispatch_failed | duplicate | coalesced | rejected_signature | disabled | rate_limited | expired | filtered`.
+`accepted | dispatch_failed | duplicate | coalesced | rejected_signature | disabled | rate_limited | expired | filtered | rejected`.
 Accepted/coalesced return HTTP 202 after persistence, before execution.
-Duplicate/filtered/expired return 200, invalid signatures 401, disabled routines 410.
+Duplicate/filtered/expired return 200, invalid signatures 401, disabled routines 410, and
+excessively deep JSON returns 400 (`rejected`).
 The window's accepted entry (or its latest retained coalesced entry) changes to `dispatch_failed`
-if dispatch fails or overlaps an active job. Expanded rendered instructions are plain text.
-The latest 50 entries are retained.
+if dispatch fails or overlaps an active job. Expanded rendered instructions are plain text; history holds previews only.
+The latest 50 entries are retained, with at most one rate-limit log record per minute during a flood.
 
 ### Known limitations
 
@@ -201,6 +225,11 @@ The latest 50 entries are retained.
   and an allowed Host. There is no built-in relay or offline HTTP queue.
 - Dispatch is at least once across a crash between the run and its acknowledgement, as for
   existing jobs; executor/action semantics still govern effects.
+- Manual Run now has no webhook request; it runs the stored instruction with literal
+  `{{body.x}}` and other placeholders. Send a real hook POST to test templating.
+- The routine form has no private signing-reference picker; account setup’s `secretRef` path
+  is API-only. Connection tests peek without consumption or voice-learning side effects;
+  successful installs consume refs after persistence. See [secrets](tools.md#private-secrets-v04).
 - Relay timestamps are sender metadata, not freshness proofs. HMAC authenticates the body;
   use replay keys for signed senders that redeliver an event.
 

@@ -149,6 +149,11 @@ menu-bar counts or Dock badges on the viewing device. Those come from a running 
 attached to its local workspace; the Mac app has no remote-server setting. There is no browser
 push delivery while the page is closed. A headless server keeps working, but check **Needs you**
 in its browser UI or use `passport task … --wait` over SSH for the result of an individual run.
+Task CLI commands require the running server and never fall back to the store. `--wait` polls
+`GET /api/tasks/:id/runs/:runId`, so it continues after the run leaves the latest-50 detail window;
+brief transient failures are retried up to five consecutive failures. See [CLI](install.md#cli).
+Rich task output and draft previews use the same opaque, script-free iframe remotely as locally;
+no external render assets load. Do not expose the separate internal per-run tool-belt listener.
 
 **Validation and known limitations.** Offline tests in `apps/server/src/remote-access.test.ts`
 parse the documented loopback/port settings and allowed-host configuration, simulate forwarded
@@ -190,12 +195,21 @@ token from `PASSPORT_MCP_TOKEN` or `<data-dir>/mcp-token`. Do not expose that to
 Back up the data directory and the matching encryption secret, except
 `setup-browser-profile/` and `setup-agent/` (the agent-driven setup browser's live
 Google/Microsoft console sign-in and scratch files, recreated on demand, and never to be archived),
-`scratch/` (`mail_export` copies of mail for MCP clients) and `host-agent/` (per-call working
-directories). If
+`scratch/` (`mail_export` copies of mail for MCP clients) and `host-agent/` (legacy working
+files). Host calls now use private directories under the OS temp root, removed after the call,
+so they are outside workspace backups. Resumable CLI transcripts live in the CLI’s own profile
+(typically `~/.claude/projects/…` or `~/.codex/sessions/…`), contain mail/tool results, and are not
+deleted by Passport. Decide separately how to protect or retain those profiles. Inbox/routine
+work, scheduled fresh children, arrivals and voice learning are ephemeral; their Passport
+records still live in SQLite. If
 `PASSPORT_MASTER_KEY` is supplied externally, save it securely with the backup;
 otherwise include `master.key`. Losing the key makes saved provider credentials
 unreadable. The database contains plaintext cached mail, tasks and notes; encrypt backup storage.
 The mail itself stays at the provider, so a lost cache costs nothing but a re-read.
+Encrypted one-use secret references and installed webhook signing keys also need the same master
+key; saved references keep their original one-hour default expiry across restart/restore.
+Routine webhook queues persist per routine with 10 pending windows each and 100 globally;
+full pending prompts and delivery previews are plaintext workspace data. See [scheduler](scheduler.md#webhook-routines).
 
 Stop the service for a consistent SQLite snapshot, including any WAL files:
 
