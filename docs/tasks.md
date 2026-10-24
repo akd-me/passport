@@ -113,8 +113,8 @@ natively, streaming as it goes. There is no JSON tool protocol and no per-step C
   it ends.
 - **Budget.** Every manual or task run, on a host agent or an API provider, may make at most
   200 tool calls and run for at most 30 minutes (`agentBudget: { maxToolCalls, maxRunMinutes }`
-  in `passport.config.json`, or `PASSPORT_AGENT_MAX_TOOL_CALLS` and
-  `PASSPORT_AGENT_MAX_RUN_MINUTES`). A session's next tool call past the budget is refused and
+  in `passport.config.json`, 1–10,000 calls and 1–1,440 minutes, or
+  `PASSPORT_AGENT_MAX_TOOL_CALLS` and `PASSPORT_AGENT_MAX_RUN_MINUTES`). A session's next tool call past the budget is refused and
   the session stopped; a run that hits either limit completes with a `BUDGET_EXHAUSTED` notice,
   and the work done so far (including proposals) is kept. Arrival triage and the built-in
   digest and matter review keep their fixed pipelines.
