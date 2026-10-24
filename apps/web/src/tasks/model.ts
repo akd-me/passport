@@ -1,4 +1,5 @@
 import type { Task, TaskRun, TaskRunStatus, TaskRunTrigger } from "@passport/types";
+import { isHiddenSubtask } from "./lineage-model";
 
 export type SectionId = "pinned" | "inbox" | "working" | "snoozed" | "settled";
 export const SECTIONS: { id: SectionId; label: string }[] = [
@@ -31,7 +32,7 @@ export function groupTasks(tasks: Iterable<Task>): Record<SectionId, Task[]> {
     settled: [],
   };
   for (const task of tasks) {
-    const section = sectionOf(task);
+    const section = isHiddenSubtask(task) ? null : sectionOf(task);
     if (section) {
       groups[section].push(task);
     }

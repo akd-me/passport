@@ -1,10 +1,10 @@
 import {
   SUBTASK_LIMITS,
   TASK_ORGANIZE_ACTIONS,
-  TRUST_LEVELS,
   type TaskOrchestrator,
   type TaskSubtaskStatus,
   type TaskToolCaller,
+  TRUST_LEVELS,
 } from "@passport/types";
 import type { Context } from "./context.js";
 import { neutralize } from "./ondemand-support.js";

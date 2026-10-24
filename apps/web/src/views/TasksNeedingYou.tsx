@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { AccountDot, useAccountId } from "../accounts/AccountFilter";
 import { relativeTime } from "../components/ui";
 import { needsYou } from "../tasks/model";
+import { QuestionsNeedingYou } from "../tasks/QuestionsNeedingYou";
 import { useTasks } from "../tasks/store";
 import { TaskGlyph } from "../tasks/TaskGlyph";
 
@@ -49,21 +50,29 @@ export function TasksNeedingYou() {
   const { tasks, available } = useTasks(),
     accountId = useAccountId();
   // The page's account scope applies to tasks too (R5-16).
-  const list = needsYou(tasks).filter((t) => !accountId || t.accountIds.includes(accountId));
-  if (!available || !list.length) {
+  const all = needsYou(tasks).filter((t) => !accountId || t.accountIds.includes(accountId));
+  // Questions get their own group, with the question itself (W2A).
+  const questions = all.filter((t) => t.needsUser === "question");
+  const list = all.filter((t) => t.needsUser !== "question");
+  if (!available || !all.length) {
     return null;
   }
   return (
-    <section className="group" aria-labelledby="tasks-need-you">
-      <div className="group-head">
-        <h2 id="tasks-need-you">Tasks waiting on you</h2>
-        <span className="count">{list.length}</span>
-      </div>
-      <ul className="task-cards">
-        {list.map((task) => (
-          <TaskCard key={task.id} task={task} />
-        ))}
-      </ul>
-    </section>
+    <>
+      <QuestionsNeedingYou tasks={questions} />
+      {list.length > 0 && (
+        <section className="group" aria-labelledby="tasks-need-you">
+          <div className="group-head">
+            <h2 id="tasks-need-you">Tasks waiting on you</h2>
+            <span className="count">{list.length}</span>
+          </div>
+          <ul className="task-cards">
+            {list.map((task) => (
+              <TaskCard key={task.id} task={task} />
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
   );
 }

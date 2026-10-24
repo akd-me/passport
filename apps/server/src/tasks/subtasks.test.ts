@@ -206,7 +206,6 @@ describe("subtasks", () => {
   it("task_cancel stops a subtask without waking the parent", async () => {
     const env = await taskBackend(backends);
     const hold = gate();
-    let cancelled: TaskSubtaskStatus | undefined;
     env.llm.script.push(
       toolCall("task_delegate", { message: "Long job", title: "Long", mode: "wait" }),
       "Started.",
@@ -224,7 +223,7 @@ describe("subtasks", () => {
         : null;
     });
     const orchestrator = env.service.runner.orchestrator!;
-    cancelled = await orchestrator.cancel({ taskId: parent.id }, kid.id);
+    const cancelled: TaskSubtaskStatus = await orchestrator.cancel({ taskId: parent.id }, kid.id);
     hold.open();
     await quiet(env, parent.id, kid.id);
     expect(cancelled.taskId).toBe(kid.id);

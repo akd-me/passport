@@ -6,6 +6,7 @@ import { Empty, Loading } from "../components/ui";
 import { Surface } from "../shell/Surface";
 import { useTaskActions, useTaskDetail, useTaskItems } from "../tasks/hooks";
 import { glyphOf, glyphText, isActiveRun, kindLabel } from "../tasks/model";
+import { SubtasksLine } from "../tasks/SubtasksLine";
 import { useTasks } from "../tasks/store";
 import { TaskComposer } from "../tasks/TaskComposer";
 import { statusLabel, TaskDetails } from "../tasks/TaskDetails";
@@ -156,6 +157,7 @@ export function TaskPage() {
         selected={selected}
         onSelect={setSelected}
       />
+      <SubtasksLine task={task} />
     </Surface>
   );
 }

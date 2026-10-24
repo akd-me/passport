@@ -6,6 +6,7 @@ import { Automations } from "../scheduler/Automations";
 import { ProposalDetails } from "../views/ProposalDetails";
 import { modeLabel } from "../views/trust-modes";
 import { taskApi } from "./api";
+import { Lineage } from "./Lineage";
 import { duration, kindLabel, triggerText } from "./model";
 import { RunStatus } from "./RunHeader";
 import { useTasks } from "./store";
@@ -139,6 +140,7 @@ export function TaskDetails({
         </dl>
       </section>
       <Watches task={task} />
+      <Lineage task={task} />
       <Automations taskId={task.id} />
       <Runs runs={runs} />
     </div>
