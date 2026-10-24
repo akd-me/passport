@@ -329,7 +329,8 @@ tool), and surfaces the task with `needsUser: "question"`. The tool returns at o
   `QUESTION_DISMISSED` notice; no run starts. The agent sees the notice on its next turn.
 - Answering or dismissing a question that is no longer pending answers `409
   QUESTION_RESOLVED`; an unknown item `404 NOT_FOUND`.
-- `needsUser` stays `"question"` while any question or a `request_secret` request is open;
+- Outside forwarded subtask questions, `needsUser` stays `"question"` while any question or
+  `request_secret` request is open;
   approvals take priority, and deciding the last one hands over to the question.
 
 ## Subtasks
@@ -516,11 +517,13 @@ with `INPUT_TRIAGE`. Classification is scoped to this arrival's own matter creat
 operation; drafts and other mail operations keep their inferred policy categories. Human-review decisions
 are retained for sensitive/stranger/other mail and `alwaysAsk` categories.
 
-Session retries acknowledge an arrival only after its session organized it (a `matter_create`
-or `matter_attach` ActionRecord), the session checkpoint, or a completed run checkpoint.
-People-resolution actions alone do not count: inference repeats. A session ending after partial
-work without organizing the arrival fails with `TRIAGE_INCOMPLETE` unless it was read-only or
-budget-exhausted, so the arrival queue retries and can surface its final failure. The pipeline fallback keeps its
+A completed runtime checkpoint skips inference. A failed run with existing actions is
+acknowledged only when `arrival-session:<runId>` records that the session reached its
+checkpoint; people-resolution actions alone do not count and inference repeats. Other partial
+session actions without that checkpoint cause `TRIAGE_INTERRUPTED` on retry rather than
+replaying writes: the arrival queue eventually surfaces the failure for review. A session
+ending without organizing the arrival fails with `TRIAGE_INCOMPLETE` unless it was read-only
+or budget-exhausted. The pipeline fallback keeps its
 step-level recovery. Stable `arrival:<emailId>` IDs, queue claims, retry/backlog limits,
 `ARRIVALS_DROPPED` and the conversation-watch loop guard are unchanged.
 
@@ -886,6 +889,9 @@ limitations from R4, W1A, W2A, lifecycle and rich-output work are consolidated h
 - A direct message to a child cancelled by `task_cancel` does not clear
   `delegation.cancelledByParent`; its later completion still does not notify the parent.
   Use a parent `task_delegate` follow-up to clear that mark and its cancellation hold.
+- Resolved-question lookup searches the latest 500 question items; an older resolved ID can
+  answer 404 rather than 409. Answer prompts recover question text from the latest 50
+  question items; older open questions may continue with the answer text alone.
 - A settle request survives an active/queued run only until a new message run starts, which
   clears it. Reopen restores neither ended watches nor a replaced snooze automatically, and
   leaves a held queue held.

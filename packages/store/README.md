@@ -4,6 +4,12 @@
 including atomic `take`. `Store.secrets` issues one-use encrypted references and persists
 private request metadata with one timeline item per task/clientRequestId. Secret values never
 appear in metadata, items, or ordinary KV. Consumers, not models, call `secrets.take(ref)`.
+The repository additionally supports `peek`, atomic multi-reference `consume` and
+`sweepExpired`. Saved refs default to a one-hour TTL, stored inside the encrypted envelope;
+restart does not renew it. Expired refs and legacy refs without expiry are revoked on read,
+and maintenance sweeps them. Pending request deadlines (`expiresAt`) are independent; a
+restart alone does not time them out. Account probes peek; account/webhook installs consume
+only after persistence succeeds.
 
 Reference implementation of every `Store` repository from `@passport/types`, using
 Node's built-in `node:sqlite` (`DatabaseSync`, FTS5, JSON1). Also exports monotonic

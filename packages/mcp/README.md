@@ -46,7 +46,8 @@ Use the returned handle to shut down the entire HTTP host, including its session
 32-byte bearer on a loopback listener (stateless Streamable HTTP, POST only, no browser
 origins). Calls run the host's `call` in-process, so the agent runtime keeps its actor, task and
 policy ceiling; responses use the same byte budget as the mailbox server. The listener closes
-when the last binding is released. `createToolBeltServer(belt)` is the single-belt SDK server.
+when the last binding is released. Its default tool-call timeout is 660 seconds, exceeding
+the longest private secret wait (600 seconds). The belt exposes tools only, without resources. `createToolBeltServer(belt)` is the single-belt SDK server.
 
 The listener binds to `127.0.0.1` by default, validates Host/Origin, and requires
 `Authorization: Bearer <token>` on every request. An explicit `host` option overrides
@@ -124,7 +125,7 @@ the library itself does not load account configuration or credentials.
 
 ## Tools
 
-The registry exposes the shared tool catalogue (62 tools in v0.4, listed in
+The registry exposes the shared tool catalogue (69 tools in v0.4, listed in
 [docs/tools.md](../../docs/tools.md)). The original tools are described below; the full
 [shared catalogue](../../docs/tools.md) also covers summaries, free slots, person
 search, query batches, standing rules, daily logs, decision explanations and
@@ -258,6 +259,12 @@ for supported rules, exposed cancellation identities, and label creation/undo.
 - `triage_inbox` prompt: optional `accountId` and `mailboxId`.
 - `summarize_matter` prompt: required `matterId`.
 
+The catalogue includes `ask_user`, `task_delegate`, `task_status`, `task_cancel`,
+`task_organize`, `request_secret`, `render` and `profile_update`. Task-specific tools need
+trusted host context; external MCP clients cannot claim a task ID. Per-call account scope
+uses `ACCOUNT_FORBIDDEN`; domain changes still pass through policy. See the shared catalogue
+for exact arrival/routine allowlists, private references and render limits.
+
 ## Build, tests and limitations
 
 ```sh
@@ -274,13 +281,13 @@ search is intentionally simple; real FTS5 syntax is passed unchanged to `Store`.
 Fakes record policy outcomes and submissions, not provider effects, and are
 excluded from the production build.
 
-There are no production stubs. Availability is computed from synced local events,
-so sync freshness determines its accuracy. Meeting proposals carry caller-supplied
+Availability prefers the host’s injected provider resolver and falls back to synced local
+events when no connected provider is available; local sync freshness then determines accuracy. Meeting proposals carry caller-supplied
 slots and a draft through the executor; they do not reserve time independently.
 Provider execution, undo inverses, approval and outbox release remain the host's
 injected policy/executor responsibilities. The shared contract appends `profile_update` for reversible USER.md writes.
 
-Tools and resources have a total serialized UTF-8 cap of 512 KiB, configurable through
+Tools and resources default to a total serialized UTF-8 cap of 64 KiB, configurable through
 `createMailboxMcpServer({ ..., responseByteBudget })` (minimum 1024 bytes). Tool envelopes
 account for protocol JSON escaping. `full: true` respects this cap; truncated bodies include
 `truncated` and `continueFrom`. Use `get_email_body({emailId,offset,length})` for text/HTML

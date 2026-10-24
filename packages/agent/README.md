@@ -48,13 +48,15 @@ and [Anthropic tool calls](https://platform.claude.com/docs/en/agents-and-tools/
 ## Host agents (Claude Code and Codex)
 
 `provider: "codex"` and `provider: "claude-code"` run the host machine's logged-in CLI through its
-subscription; no API key. `HostAgentLlmClient` implements `LlmClient`: every call is a fresh,
+subscription; no API key. `HostAgentLlmClient` implements `LlmClient`: `complete()` is a fresh,
 non-persisted run (`claude -p --safe-mode --tools "" --system-prompt …` or `codex exec --json -s
-read-only --ignore-user-config` with the shell and other tools disabled) in a scratch `cwd`
-(`createLlmClient(config, { hostAgentCwd })`). JSON mode uses `--json-schema` / `--output-schema`
+read-only --ignore-user-config` with shell and other tools disabled). Every invocation uses
+a private `passport-host-run-*` directory under the OS temp root, removed after completion,
+failure or cancellation, outside the configured data directory. JSON mode uses `--json-schema` / `--output-schema`
 (Codex requires an object root with `additionalProperties: false` and every property required;
 other roots, including arrays, are described in the prompt) and is validated locally.
-Interactive tools are emulated as structured output, so Passport executes them under policy. `model:
+This completion path uses structured tool output when needed; task sessions instead call MCP
+tools natively and keep policy enforcement in the server. `model:
 "fast"` uses `fastModel`, defaulting to `claude-haiku-5-5` / `gpt-5.6-luna`. Usage maps to `LlmUsage`
 with `costUsd: null`.
 
@@ -83,7 +85,13 @@ exit hooks (such as SIGKILL) cannot run cleanup.
 
 `persistSession` keeps the session resumable (no `--no-session-persistence` / `--ephemeral`) and
 `resumeSessionId` continues one (`claude --resume <id>`, `codex exec resume <id>`); ids are
-validated before they reach argv.
+validated before they reach argv. The task runner persists ordinary task message/watch/wake
+runs, including continuations; Inbox/routine tasks and voice learning remain ephemeral even
+for follow-ups. Scheduled fresh children are ephemeral on their scheduled run. CLI-owned
+transcripts contain mail/tool results and are not deleted by Passport. Claude session system
+prompts use private files; Codex developer instructions and completion prompts still use argv.
+Codex native-tool feature switches plus `codexToolCatalog` remove code-mode exec, patch,
+sub-agent/image/clock tools; three MCP resource helpers remain. See [Sessions](../../docs/tasks.md#sessions).
 
 `maxTurns` is optional. Claude Code enforces it with `--max-turns`. Codex requires a positive safe
 integer and counts JSON-stream turn starts plus tool-call starts (MCP, shell and web search); the
@@ -98,6 +106,19 @@ redacted. Live tests in `src/host/host.live.test.ts` skip when a CLI is absent o
 `PASSPORT_SKIP_LIVE_HOST_AGENTS=1` to skip them anyway).
 
 ## How triage decides
+
+The default `triage.mode: "session"` resolves people and deterministic sensitive evidence,
+then screens newsletters, receipts and service notifications through model-free playbooks.
+Material arrivals use one tool-belt session with the explicit `ARRIVAL_TOOLS` allowlist;
+category choice applies only to organizing that arrival. No orchestration, secrets, render,
+sends or profile edits are allowed. A failed partial run is acknowledged only with a
+session checkpoint (and existing actions) or a completed run; people actions alone
+do not acknowledge it. Uncheckpointed session actions cause `TRIAGE_INTERRUPTED` on retry
+without replaying writes, until the arrival queue surfaces review. See [migration and parity](../../docs/tasks.md#arrival-triage-migration-v04).
+
+### Pipeline fallback
+
+`triage.mode: "pipeline"` retains the original structured pipeline for one release:
 
 1. Read the email through `store.emails.get(id, { includeBodies: true })`; an envelope without
    bodies gets one reader `body` call, or is triaged from its subject and preview. Resolve from/to/cc case-insensitively.
@@ -170,22 +191,29 @@ when enabled. This switch applies to triage, calendar response drafts, and manua
 
 ## Manual tools and schedules
 
-The manual loop offers all 44 tools from `@passport/tools`, using the same names,
+The full manual registry has 69 tools from `@passport/tools`, using the same names,
 JSON Schemas, account checks and handlers as MCP. Triage playbook writes and matter
-reviews invoke those handlers too. The system prompt lists registry tool names, so
+reviews invoke those handlers too. Arrival sessions enforce `ARRIVAL_TOOLS`; scheduled
+manual routines and digest/matter-review triggers expose only `ROUTINE_TOOLS` (read context,
+notes/matters, organize mail, drafts and render). Scheduled work omits orchestration, secrets,
+sends, calendar writes and profile edits. Voice learning has its own bounded sample guard.
+See the [exact scopes](../../docs/tools.md#arrival-and-routine-tool-scopes). The system prompt lists registry tool names, so
 new tools become available automatically. The full [catalogue](../../docs/tools.md)
 describes inputs, results and policy categories.
 
 Reads and writes both count toward the run budget (`budget`, default 200 tool calls and
 30 minutes), including batched calls; a run that reaches it ends with a `BUDGET_EXHAUSTED`
-notice through `observer.notice`.
+notice through `observer.notice`. In-flight tool calls get 10 seconds of grace after a spent
+time budget, then their tool abort signal fires. A late cancellation during successful result
+recording leaves the completed result intact.
 
 **Sessions (v0.4).** With a `toolBelt` (`ToolBeltHost`, e.g. `ToolBeltListener` from
 `@passport/mcp`), a host-agent LLM client and `run(manual, { session })`, the run is one native
 `HostAgentLlmClient.session()`: the CLI calls the run's registry tools over MCP, text streams to
 `observer.assistantMessage`, the provider session to `observer.providerSession`, and
 `session.resume` / `resolveResume` continue an earlier session (falling back to the full
-instruction when the agent kind differs or the resume fails before any activity). See
+instruction when the agent kind differs or the CLI returns `HOST_AGENT_SESSION_MISSING`
+before any activity; the fallback ID is recorded only on success). See
 `src/session-run.ts`. Recoverable input errors return to the model; dependency/LLM failures
 persist the failed run before throwing. `run()` returns an `AgentRunResult` with
 `toolBudget: {callsMade,llmCalls,inputTokens,outputTokens,totalTokens}`, also persisted

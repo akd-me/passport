@@ -1,6 +1,6 @@
 # @passport/tools
 
-The shared, local-first tool registry for Passport's built-in agent and MCP clients.
+The shared registry has **69 tools** for Passport’s built-in agent and MCP clients.
 Its only runtime dependency is `@passport/types`. Schemas use a small immutable JSON
 Schema builder with registry-side validation/defaults; no Zod or provider SDK is required.
 
@@ -39,8 +39,17 @@ read tools fall back to cached local data without readers. Bodies are capped at 
 `full: true`; HTML image beacons and remote image tags are removed in both views.
 Actions omit parameters, provider results and raw errors. Account credentials and
 settings are never read. Query writes cap at 200 matches and require one account.
-Standing-rule edits submit a reversible `profile_update` action in `matters`;
+Standing-rule edits and learned Voice/Signature/VIP proposals submit a reversible
+`profile_update` action in category `profile_update`, which always asks the person;
 USER.md lives at `store.kv["user_profile"]`, including its other sections.
+
+Task runs pass trusted `taskId`, `runId`, `accountIds` and an orchestrator. Account-scoped
+reads/writes reject other accounts with `ACCOUNT_FORBIDDEN`. The five orchestration tools
+(`ask_user`, `task_delegate`, `task_status`, `task_cancel`, `task_organize`) manage questions,
+subtasks and local lifecycle; external callers without task context get `TASK_REQUIRED`.
+`request_secret` returns a one-use reference only; `render` appends restricted HTML capped at
+64 KiB and ten attempts including sanitiser failures per run. Arrival and routine allowlists
+are enforced by the agent runtime. See [scopes and limits](../../docs/tools.md).
 
 All results have a serialized UTF-8 byte budget: 512 KiB by default for the built-in agent
 (the MCP server defaults to 64 KiB, see `DEFAULT_MCP_RESPONSE_BYTE_BUDGET`), configured with

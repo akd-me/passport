@@ -273,6 +273,38 @@ stdio entry point exists.
 Use the **All accounts** filter on Decisions, Matters and Activity. It uses `accountId` in the URL;
 account colour dots identify the source even in the combined view.
 
+## Voice learning on first connect
+
+A new real mail account creates a one-time **Learn how you write** task (`voice:<accountId>`).
+It makes one Sent search of at most 50 messages, reads only that sample with quotes collapsed,
+and proposes Voice, Signature and VIPs as one reversible `profile_update`. It always waits for
+your approval, even at full access; approving replaces USER.md and undo restores the profile
+captured immediately before execution. VIP suggestions do not change contact trust or verification.
+A pending profile proposal for the account blocks another learning run from sampling/proposing.
+
+Mock/demo accounts and existing accounts on upgrade are not sampled. Reconnect does not repeat
+the task; IMAP without an identified Sent folder skips it. CLI connects save a pending request
+for the next `serve` owner. Connection tests (`POST /api/accounts/test`) are probes: they never
+create voice-learning work or consume a private reference. Empty/failed learning can be revisited
+by messaging its task. The sampling bound resets per run before a proposal exists; review any
+pending whole-profile proposal against later human edits. See [tasks](tasks.md#learn-how-you-write-v04).
+
+## Private credential references
+
+Secret descriptor fields on the raw account/test API accept `{ secretRef: "secret:…" }` instead
+of plaintext, for example `fields.password` for IMAP. Obtain a reference with a task-bound
+[request_secret](tools.md#private-secrets-v04); the model receives only its reference, never
+the entered value. Tests peek without consumption. Account creation persists credentials and
+configuration before consuming references, rolling back failed installs. Saved refs expire after
+one hour by default, including across restart, and are one-use; installed credentials retain their
+normal lifetime. Legacy refs with no expiry are revoked.
+
+Known limitations: the manual wizard still has its own password field; agent-driven OAuth setup
+uses its separate setup tools and does not accept `secretRef`. Private reference handoff in those
+flows is deferred. Do not put passwords or references in task chat. Account-setup host sessions
+are ephemeral in disposable OS temp directories; the persistent setup browser profile and browser
+output use the separate data-directory paths described above.
+
 ## Adapter audit and live verification checklist
 
 Automated tests use hand-authored fixtures and fake endpoints. **No live Gmail, Graph or IMAP account

@@ -15,7 +15,15 @@ Thanks for helping build an agent-native email harness.
 - No native modules. Node 24 (persistent workspaces need ≥ 22.16 with SQLite FTS5), pnpm 10,
   TypeScript strict, vitest.
 - Tests run offline. Use the mock providers and in-memory stores; never hit a live API in tests.
-- Never log credentials or full message bodies.
+- Never log credentials or full message bodies. Private task input uses `request_secret`;
+  neither the value nor its reference belongs in chat. Persistent CLI transcripts can contain
+  mail/tool results; temporary host working directories are separate from data-directory scratch.
+- Follow [the v0.4 vocabulary](docs/design/v04-plan.md#5-vocabulary): task, run, item,
+  conversation, matter, routine, subtask, question, render. Update the reference docs and record
+  deferred behavior as a dated Known limitation.
+- Registry additions update the current 69-tool assertions in tools/MCP tests. Test route
+  requests through `apps/server/src/auth.test-client.ts`; production `createApp` requires auth.
+  Keep permission, account-scope and arrival/routine allowlist checks in the trusted host path.
 
 ## Workflow
 

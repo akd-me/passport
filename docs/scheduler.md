@@ -83,8 +83,9 @@ configured host/port when available, so pause/resume immediately affect its time
 server offline, they operate on the local store without starting recurring timers; changes
 are loaded on the next server startup. The CLI authenticates with `PASSPORT_API_TOKEN` or `<data-dir>/api-token`; a 401 fails with instructions. Direct-store fallback is announced and requires both an unreachable server and an absent/stale owner lock. A live owner with an unreachable server is an error.
 
-`<data-dir>/owner.lock` records PID, start time and a 10-second heartbeat. A live lock prevents another `serve`/`demo`; it expires after 60 seconds without a heartbeat or when its PID exits. Shutdown removes only its own lock. Arrivals additionally use SQLite compare-and-set claims, renewed every 10 seconds, and stable `arrival:<emailId>` run IDs. Arrival session retries require an organizing matter-create/attach action, an arrival-session
-checkpoint or a completed run checkpoint; people-resolution actions alone do not skip inference.
+`<data-dir>/owner.lock` records PID, start time and a 10-second heartbeat. A live lock prevents another `serve`/`demo`; it expires after 60 seconds without a heartbeat or when its PID exits. Shutdown removes only its own lock. Arrivals additionally use SQLite compare-and-set claims, renewed every 10 seconds, and stable `arrival:<emailId>` run IDs. Session retries skip inference after a completed run, or an arrival-session checkpoint with
+existing actions. People-resolution actions alone allow inference to repeat; uncheckpointed
+partial session actions fail with `TRIAGE_INTERRUPTED` until the queue surfaces review.
 The legacy pipeline retains its step-level recovery.
 
 ## API
