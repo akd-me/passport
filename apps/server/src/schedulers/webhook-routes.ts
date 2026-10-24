@@ -1,22 +1,40 @@
 import type { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Backend } from "../backend.js";
-import { ApiError, required } from "../errors.js";
+import { required } from "../errors.js";
 import { getSchedulerService } from "./service.js";
 
 /** Public capability URL; normal API auth still protects every administration route. */
 export function installWebhookRoutes(app: Hono, backend: Backend) {
   app.post(
     "/api/hooks/:token",
+    async (c, next) => {
+      const service = getSchedulerService(backend);
+      await service.ready;
+      const source = c.env?.incoming?.socket?.remoteAddress ?? "unknown";
+      const status = service.webhooks.authorize(c.req.param("token"), source);
+      if (status) {
+        if (status === 429) {
+          c.header("Retry-After", "60");
+        }
+        return c.json(
+          {
+            error: {
+              code: status === 429 ? "RATE_LIMITED" : "NOT_FOUND",
+              message: "Webhook unavailable",
+            },
+          },
+          status,
+        );
+      }
+      await next();
+    },
     bodyLimit({
       maxSize: 256 * 1024,
       onError: (c) =>
         c.json({ error: { code: "BODY_TOO_LARGE", message: "Webhook body exceeds 256 KiB" } }, 413),
     }),
     async (c) => {
-      if (!/^[a-f0-9]{64}$/.test(c.req.param("token"))) {
-        throw new ApiError("NOT_FOUND", "Webhook not found", 404);
-      }
       const raw = new Uint8Array(await c.req.arrayBuffer());
       const text = new TextDecoder().decode(raw);
       let body: unknown = text;

@@ -129,6 +129,9 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   deliveries leave room for eligible events.
 - Webhook queues are bounded per routine and globally, persist in separate routine records,
   and retain only prompt previews in delivery history.
+- Invalid webhook signatures have a separate rejection budget. Unknown URLs are throttled
+  before reading request bodies, deep JSON is rejected with a delivery record, and credential
+  substrings are redacted from request headers and query values.
 
 ## [0.3.2] — 2026-10-24
 

@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   type JobRun,
   matchesWebhookFilters,
@@ -17,6 +17,7 @@ import type {
 import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
 import { frameUntrusted } from "../tasks/untrusted.js";
+import { exceedsWebhookDepth, WEBHOOK_SECRET_KEY } from "./webhook-request.js";
 
 interface PendingWindow {
   receivedAt: number;
@@ -42,7 +43,7 @@ export interface HookRoutine {
 }
 export interface HookResult {
   outcome: WebhookDeliveryOutcome;
-  status: 202 | 200 | 401 | 410 | 429;
+  status: 202 | 200 | 400 | 401 | 410 | 429;
 }
 const KEY = "scheduler:webhooks";
 const INDEX_KEY = KEY + ":index";
@@ -50,6 +51,8 @@ const REPLAY_MS = 7 * 86400_000;
 export const MAX_PENDING_PER_ROUTINE = 10;
 export const MAX_PENDING_GLOBAL = 100;
 const PREVIEW_CHARS = 2048;
+// The shared outcome union is owned by the types stream; keep the wire addition local here.
+const REJECTED = "rejected" as WebhookDeliveryOutcome;
 
 /** Durable intake queue. Mutations serialize; dispatch never holds the intake lock. */
 export class RoutineWebhooks {
@@ -58,6 +61,8 @@ export class RoutineWebhooks {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private active = new Set<string>();
   private pendingCount = 0;
+  private tokens = new Map<string, { id: string; digest: Buffer }>();
+  private unknownSources = new Map<string, { minute: number; count: number }>();
   private stopped = false;
   constructor(
     private store: Store,
@@ -95,10 +100,17 @@ export class RoutineWebhooks {
       (total, state) => total + state.pending.length,
       0,
     );
+    for (const [id, state] of Object.entries(this.states)) {
+      this.indexToken(id, state.token);
+    }
   }
   private exclusive<T>(run: () => Promise<T>): Promise<T> {
     const result = this.queue.then(run);
-    this.queue = result.catch(() => logger.warn("Webhook state update failed"));
+    this.queue = result.catch((error) => {
+      if (!(error instanceof ApiError)) {
+        logger.warn("Webhook state update failed");
+      }
+    });
     return result;
   }
   private save(id: string) {
@@ -106,6 +118,40 @@ export class RoutineWebhooks {
   }
   private saveIndex() {
     return this.store.kv.set(INDEX_KEY, JSON.stringify(Object.keys(this.states)));
+  }
+  private indexToken(id: string, token: string) {
+    const digest = createHash("sha256").update(token).digest();
+    this.tokens.set(digest.toString("hex"), { id, digest });
+  }
+  private findToken(token: string) {
+    if (!/^[a-f0-9]{64}$/.test(token)) {
+      return undefined;
+    }
+    const digest = createHash("sha256").update(token).digest();
+    const entry = this.tokens.get(digest.toString("hex"));
+    // Compare fixed-size fingerprints without a token-dependent string comparison.
+    return timingSafeEqual(digest, entry?.digest ?? Buffer.alloc(32)) ? entry?.id : undefined;
+  }
+  /** Resolve capability URLs before reading a body; peer addresses never come from headers. */
+  authorize(token: string, source: string): 404 | 429 | undefined {
+    const id = this.findToken(token);
+    if (id && this.routine(id)) {
+      return undefined;
+    }
+    const minute = Math.floor(this.now() / 60000);
+    for (const [key, bucket] of this.unknownSources) {
+      if (bucket.minute !== minute) {
+        this.unknownSources.delete(key);
+      }
+    }
+    // Bound the address map too; excess sources share one overflow bucket.
+    const key =
+      this.unknownSources.has(source) || this.unknownSources.size < 1024 ? source : "overflow";
+    const bucket = this.unknownSources.get(key) ?? { minute, count: 0 };
+    bucket.count++;
+    this.unknownSources.set(key, bucket);
+    // Expected misses are silent, including during a flood.
+    return bucket.count > 60 ? 429 : 404;
   }
   async ensure(id: string) {
     return this.exclusive(async () => {
@@ -119,6 +165,7 @@ export class RoutineWebhooks {
         };
         await this.save(id);
         await this.saveIndex();
+        this.indexToken(id, this.states[id]!.token);
       }
       return this.path(id);
     });
@@ -133,8 +180,11 @@ export class RoutineWebhooks {
       if (!state || !this.routine(id)) {
         throw new ApiError("NOT_FOUND", "Webhook routine not found", 404);
       }
+      const old = state.token;
       state.token = randomBytes(32).toString("hex");
       await this.save(id);
+      this.tokens.delete(createHash("sha256").update(old).digest("hex"));
+      this.indexToken(id, state.token);
       return { webhookUrl: this.path(id)! };
     });
   }
@@ -146,6 +196,10 @@ export class RoutineWebhooks {
       clearTimeout(this.timers.get(id));
       this.timers.delete(id);
       this.pendingCount -= this.states[id]?.pending.length ?? 0;
+      const token = this.states[id]?.token;
+      if (token) {
+        this.tokens.delete(createHash("sha256").update(token).digest("hex"));
+      }
       delete this.states[id];
       await this.saveIndex();
       await this.store.kv.delete(KEY + ":" + id);
@@ -179,12 +233,15 @@ export class RoutineWebhooks {
     return delivery;
   }
   async receive(token: string, raw: Uint8Array, request: WebhookRequest): Promise<HookResult> {
+    const id = this.findToken(token);
+    if (!id) {
+      throw new ApiError("NOT_FOUND", "Webhook not found", 404);
+    }
     const result = await this.exclusive(async (): Promise<HookResult> => {
-      const entry = Object.entries(this.states).find(([, state]) => state.token === token);
-      if (!entry) {
+      const state = this.states[id];
+      if (!state || this.findToken(token) !== id) {
         throw new ApiError("NOT_FOUND", "Webhook not found", 404);
       }
-      const [id, state] = entry;
       const routine = this.routine(id);
       if (!routine) {
         throw new ApiError("NOT_FOUND", "Webhook not found", 404);
@@ -211,20 +268,29 @@ export class RoutineWebhooks {
       if (state.rate.minute !== minute) {
         state.rate = { minute, deliveries: 0, updates: 0, requests: 0, rejected: 0 };
       }
-      // Bound invalid/disabled requests too, before any HMAC work.
-      state.rate.requests = (state.rate.requests ?? 0) + 1;
-      if (state.rate.requests > 70 || state.rate.rejected >= 10) {
-        return reject("rate_limited", 429);
-      }
       if (!routine.enabled) {
+        if (state.rate.rejected >= 10) {
+          return reject("rate_limited", 429);
+        }
         return reject("disabled", 410);
       }
       const schedule = routine.schedule;
       if (schedule.signature) {
         const secret = await this.store.encryptedKv?.get("webhook-signature:" + id);
         if (!secret || !verifyWebhookSignature(raw, request.headers, schedule.signature, secret)) {
+          if (state.rate.rejected >= 10) {
+            return reject("rate_limited", 429);
+          }
           return reject("rejected_signature", 401);
         }
+      }
+      // Invalid signatures have a separate budget and cannot spend valid intake capacity.
+      state.rate.requests = (state.rate.requests ?? 0) + 1;
+      if (state.rate.requests > 70) {
+        return reject("rate_limited", 429);
+      }
+      if (exceedsWebhookDepth(request.body)) {
+        return reject(REJECTED, 400);
       }
       if (schedule.maxDeliveryAgeMinutes !== undefined) {
         // Direct requests arrive now; relay receive times can only make them older.
@@ -266,16 +332,14 @@ export class RoutineWebhooks {
       const safe = structuredClone(request);
       for (const header of Object.keys(safe.headers)) {
         if (
-          /auth|cookie|password|credential|key|token|secret|signature|hmac|jwt|assertion/i.test(
-            header,
-          ) ||
-          header === schedule.signature?.header
+          WEBHOOK_SECRET_KEY.test(header) ||
+          header.toLowerCase() === schedule.signature?.header.toLowerCase()
         ) {
           delete safe.headers[header];
         }
       }
       for (const key of Object.keys(safe.query)) {
-        if (/auth|password|credential|key|token|secret|signature/i.test(key)) {
+        if (WEBHOOK_SECRET_KEY.test(key)) {
           safe.query[key] = "[redacted]";
         }
       }

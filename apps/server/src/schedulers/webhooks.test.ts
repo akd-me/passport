@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { InMemoryEventBus, openStore } from "@passport/store";
 import type { Store } from "@passport/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -142,6 +143,32 @@ describe("durable webhook delivery windows", () => {
       expect((await send(token, "real-" + index, "opened", index + 1)).outcome).toBe("accepted");
     }
     expect((await send(token, "excess", "opened", 11)).status).toBe(429);
+  });
+  it("keeps correctly signed deliveries available after a flood of bad signatures", async () => {
+    routine.schedule = {
+      type: "webhook",
+      signature: { header: "x-sig", encoding: "hex", secretRef: "installed" },
+    };
+    await store.encryptedKv!.set("webhook-signature:" + routine.id, "signing-key");
+    const token = hooks.path(routine.id)!.split("/").at(-1)!;
+    const raw = Buffer.from("{}");
+    const sendSigned = (signature: string) =>
+      hooks.receive(token, raw, {
+        body: {},
+        headers: { "x-sig": signature },
+        query: {},
+      });
+    for (let index = 0; index < 100; index++) {
+      expect((await sendSigned("0".repeat(64))).status).toBe(index < 10 ? 401 : 429);
+    }
+    const signature = createHmac("sha256", "signing-key").update(raw).digest("hex");
+    for (let index = 0; index < 10; index++) {
+      expect((await sendSigned(signature)).outcome).toBe("accepted");
+    }
+    expect((await sendSigned(signature)).status).toBe(429);
+    expect(
+      hooks.deliveries(routine.id).filter((entry) => entry.outcome === "rejected_signature"),
+    ).toHaveLength(10);
   });
   it("caps queued work across minutes while dispatch is blocked and keeps full prompts out of history", async () => {
     // Adapted from the R1 pending-growth and 28 MB shared-blob reproductions.

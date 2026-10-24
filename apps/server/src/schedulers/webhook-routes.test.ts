@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { addAccount } from "../accounts.js";
 import { createApp } from "../auth.test-client.js";
 import type { RealBackend } from "../compose.js";
+import { logger } from "../logger.js";
 import { taskBackend, toolCall, waitFor } from "../tasks/test-support.js";
 import { getSchedulerService, type JobView } from "./service.js";
 
@@ -49,6 +50,85 @@ async function fixture() {
 }
 
 describe("webhook HTTP and task integration", () => {
+  it("throttles unknown URLs before reading oversized or nested bodies and keeps expected misses silent", async () => {
+    const env = await fixture();
+    const warn = vi.spyOn(logger, "warn");
+    const parse = vi.spyOn(JSON, "parse");
+    // Reuse the R1 unknown-token reproduction with assertions, including rotated token guesses.
+    const statuses: number[] = [];
+    for (let index = 0; index < 100; index++) {
+      statuses.push(
+        (
+          await env.app.request("/api/hooks/" + index.toString(16).padStart(64, "0"), {
+            method: "POST",
+            body: "[".repeat(100000) + "]".repeat(100000),
+            headers: { Authorization: "" },
+          })
+        ).status,
+      );
+    }
+    expect(statuses.slice(0, 60)).toEqual(Array(60).fill(404));
+    expect(statuses.slice(60)).toEqual(Array(40).fill(429));
+    expect(parse.mock.calls.some(([value]) => value.startsWith("[[[["))).toBe(false);
+    const blocked = await env.app.request("/api/hooks/" + "f".repeat(64), {
+      method: "POST",
+      body: "x".repeat(257 * 1024),
+      headers: { Authorization: "" },
+    });
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("Retry-After")).toBe("60");
+    expect(warn).not.toHaveBeenCalled();
+    const job = await env.create();
+    expect((await env.hook(job, "{}")).status).toBe(202);
+  });
+  it("returns 400 and logs rejected for deeply nested JSON without dispatching", async () => {
+    const env = await fixture();
+    const job = await env.create();
+    const run = vi.spyOn(env.backend.agent, "run");
+    for (const body of [
+      "[".repeat(100000) + "]".repeat(100000),
+      '{"a":' + "[".repeat(100000) + "]".repeat(100000) + "}",
+    ]) {
+      const response = await env.hook(job, body);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ outcome: "rejected" });
+    }
+    expect(
+      getSchedulerService(env.backend)
+        .webhooks.deliveries(job.id)
+        .map((entry) => entry.outcome),
+    ).toEqual(["rejected", "rejected"]);
+    expect(run).not.toHaveBeenCalled();
+    expect((await env.hook(job, '{"action":"opened"}')).status).toBe(202);
+  });
+  it("redacts credential substrings in headers and query keys without regard to case", async () => {
+    const env = await fixture();
+    const job = await env.create(
+      { type: "webhook" },
+      { routine: { instruction: "{{request}} {{query}} {{headers}}" } },
+    );
+    const values = ["sig", "code", "pass", "pwd", "session", "hmac", "jwt", "assertion"];
+    const headers: Record<string, string> = { Authorization: "" };
+    const query = new URLSearchParams();
+    for (const key of values) {
+      headers["x-MiXeD-" + key.toUpperCase() + "-value"] = "header-private-" + key;
+      query.set("MiXeD-" + key.toUpperCase() + "-value", "query-private-" + key);
+    }
+    expect(
+      (
+        await env.app.request(job.webhookUrl! + "?" + query, {
+          method: "POST",
+          body: "{}",
+          headers,
+        })
+      ).status,
+    ).toBe(202);
+    const prompt = getSchedulerService(env.backend).webhooks.deliveries(job.id).at(-1)!.prompt!;
+    for (const key of values) {
+      expect(prompt).not.toContain("header-private-" + key);
+      expect(prompt).not.toContain("query-private-" + key);
+    }
+  });
   it.each(["hex", "base64"] as const)(
     "consumes a secretRef, checks raw %s HMAC without a bearer, and frames every interpolation",
     async (encoding) => {
