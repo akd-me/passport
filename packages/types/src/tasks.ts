@@ -116,6 +116,9 @@ export interface Task {
   limited?: TaskLimited | null;
   /** v0.4: the title was proposed by the fast model; false once the person renames. */
   titleGenerated?: boolean;
+  // F2: merged with F1
+  /** v0.4 (R1-18): open `request_secret` requests; `needsUser` stays `question` while any is open. */
+  pendingSecretRequestIds?: Id[];
 }
 
 /** `done`: a run the person started finished. `woke`: the task woke itself and came back. */
@@ -199,6 +202,9 @@ export interface TaskRun {
   error?: string | null;
   /** v0.4: this run continues one a server restart interrupted (continued at most once). */
   restartOf?: Id | null;
+  // F2: merged with F1
+  /** v0.4 (R1-17): the request texts the run carried (a steer's include the cancelled message). */
+  request?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +414,9 @@ declare module "./agent-ondemand.js" {
     taskId?: string;
     /** Cooperative cancellation, checked before each model call and tool call. */
     signal?: AbortSignal;
+    // F2: merged with F1
+    /** v0.4 (R1-10): the task's accounts; tool calls outside them are refused. */
+    accountIds?: Id[];
   }
 }
 

@@ -39,6 +39,15 @@ export interface RunSpec {
   items?: RunItem[];
   /** Called once the TaskRun is persisted, before the agent is invoked. */
   onCreated?: (run: TaskRun) => void;
+  /** The request texts the run carries (`TaskRun.request`), for a later continuation (R1-17). */
+  request?: string[];
+  /** The run a restart interrupted and this one continues, written with the insert. */
+  restartOf?: string;
+  /**
+   * A restart continuation or limit resume: not the person's new message, so a snooze they chose
+   * stays (R1-16).
+   */
+  continuation?: boolean;
 }
 
 export interface RunDescription {
@@ -56,6 +65,8 @@ interface ActiveRun {
   produced: boolean;
   /** Cancelled by a steer: the replacement run owns the status. */
   steered: boolean;
+  /** A restart continuation or limit resume (`RunSpec.continuation`). */
+  continuation: boolean;
   writes: Promise<unknown>;
 }
 
@@ -171,6 +182,8 @@ export class TaskRunner {
       agentRunId: spec.agentRunId ?? id,
       createdAt: this.now(),
       actionIds: [],
+      ...(spec.request?.length ? { request: spec.request } : {}),
+      ...(spec.restartOf ? { restartOf: spec.restartOf } : {}),
     });
     this.bus.emit({ type: "task.run.updated", run });
     spec.onCreated?.(run);
@@ -181,6 +194,7 @@ export class TaskRunner {
       preStatus: task.status,
       produced: false,
       steered: false,
+      continuation: spec.continuation === true,
       writes: Promise.resolve(),
     };
     this.active.set(run.id, active);
@@ -197,7 +211,7 @@ export class TaskRunner {
         } as TaskItemInput);
       }
       const started = await this.updateTask(task.id, (current) =>
-        statusDuringRun(current, spec.trigger, this.now()),
+        statusDuringRun(current, spec.trigger, this.now(), spec.continuation),
       );
       active.startStatus = started.status;
       const options: AgentRunOptions = {
@@ -421,6 +435,8 @@ export class TaskRunner {
       preStatus: active.preStatus,
       ...(active.startStatus ? { startStatus: active.startStatus } : {}),
       failed: status === "failed",
+      cancelled: status === "cancelled",
+      ...(active.continuation ? { continuation: true } : {}),
       produced: active.produced || done.actionIds.length > 0,
       otherActiveRuns: this.activeRuns(run.taskId).length,
       now: this.now(),

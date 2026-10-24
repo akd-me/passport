@@ -34,13 +34,20 @@ export function idleStatus(task: Pick<Task, "watches" | "waitingOnTaskIds">): Ta
 
 /**
  * What the task waits on the person for, from its pending lists: approvals first, then
- * questions. A subtask's questions wait on its parent task, never on the person.
+ * questions and open `request_secret` requests. A subtask's questions wait on its parent task,
+ * never on the person; a secret request always waits on the person (R1-18).
  */
 export function waitingOn(
-  task: Pick<Task, "pendingActionIds" | "pendingQuestions" | "delegation">,
+  task: Pick<
+    Task,
+    "pendingActionIds" | "pendingQuestions" | "pendingSecretRequestIds" | "delegation"
+  >,
 ): TaskNeedsUser {
   if (task.pendingActionIds?.length) {
     return "approval";
+  }
+  if (task.pendingSecretRequestIds?.length) {
+    return "question";
   }
   if (task.pendingQuestions?.length && !task.delegation) {
     return "question";
@@ -67,11 +74,15 @@ export interface RunOutcome {
   now: string;
   /** The run's error code; a limit code surfaces `needsUser: "limited"` instead of a failure. */
   error?: string | null;
+  /** The run was cancelled (the person's Stop, settle or archive): no Done or Woke badge (R1-31). */
+  cancelled?: boolean;
+  /** A restart continuation or limit resume, not the person's new message (R1-16). */
+  continuation?: boolean;
 }
 
 /** What happened to the task; `resolveTaskStatus` answers with the patch to apply. */
 export type StatusEvent =
-  | { kind: "run_started"; trigger: TaskRunTrigger; now: string }
+  | { kind: "run_started"; trigger: TaskRunTrigger; now: string; continuation?: boolean }
   | { kind: "run_ended"; outcome: RunOutcome }
   /** Unsettle, unsnooze, unarchive and a snooze whose time came. */
   | { kind: "reopened"; activeRuns: number; now: string }
@@ -92,7 +103,7 @@ export type StatusEvent =
 export function resolveTaskStatus(task: Task, event: StatusEvent): Partial<Task> {
   switch (event.kind) {
     case "run_started":
-      return started(task, event.trigger, event.now);
+      return started(task, event.trigger, event.now, event.continuation);
     case "run_ended":
       return ended(task, event.outcome);
     case "reopened":
@@ -135,8 +146,13 @@ function resolved(task: Task): Partial<Task> {
 }
 
 /** Status while a run is queued or running. A user message also wakes a snoozed task. */
-export function statusDuringRun(task: Task, trigger: TaskRunTrigger, now: string): Partial<Task> {
-  return resolveTaskStatus(task, { kind: "run_started", trigger, now });
+export function statusDuringRun(
+  task: Task,
+  trigger: TaskRunTrigger,
+  now: string,
+  continuation = false,
+): Partial<Task> {
+  return resolveTaskStatus(task, { kind: "run_started", trigger, now, continuation });
 }
 
 /**
@@ -162,13 +178,23 @@ export function statusAfterRun(task: Task, outcome: RunOutcome): Partial<Task> {
   return resolveTaskStatus(task, { kind: "run_ended", outcome });
 }
 
-function started(task: Task, trigger: TaskRunTrigger, now: string): Partial<Task> {
+function started(
+  task: Task,
+  trigger: TaskRunTrigger,
+  now: string,
+  continuation = false,
+): Partial<Task> {
+  // A continuation repeats an earlier message; a snooze or archive the person chose stays.
+  if (trigger.kind === "message" && continuation && hidden(task.status)) {
+    return {};
+  }
   if (trigger.kind === "message") {
     return {
       status: "working",
       snoozedUntil: null,
       settledAt: null,
-      needsUser: task.needsUser === "failure" ? null : task.needsUser,
+      // A cleared failure hands over to what still waits on the person (R1-26).
+      needsUser: task.needsUser === "failure" ? waitingOn(task) : task.needsUser,
       lastActivityAt: now,
       // The person's message outranks the agent's earlier request to settle (task_organize).
       ...(task.settleRequested ? { settleRequested: false } : {}),
@@ -235,7 +261,7 @@ function settleAtRunEnd(task: Task, next: Partial<Task>, outcome: RunOutcome): P
 function unseenOutcome(task: Task, next: Partial<Task>, outcome: RunOutcome): TaskUnseenOutcome {
   const needsUser = "needsUser" in next ? next.needsUser : task.needsUser;
   const returned = next.status === "inbox" && next.lastActivityAt !== undefined && !needsUser;
-  if (!returned || outcome.failed) {
+  if (!returned || outcome.failed || outcome.cancelled) {
     return null;
   }
   switch (outcome.trigger.kind) {
@@ -264,7 +290,7 @@ function ruleStatus(task: Task, outcome: RunOutcome): Partial<Task> {
     return hidden(task.status) ? {} : { status: "working" };
   }
   const rest = outcome.preStatus === "working" ? idleStatus(task) : outcome.preStatus;
-  if (trigger.kind === "message") {
+  if (trigger.kind === "message" && !(outcome.continuation && hidden(task.status))) {
     return { status: idleStatus(task), lastActivityAt: now };
   }
   if (hidden(task.status)) {

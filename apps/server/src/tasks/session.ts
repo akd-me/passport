@@ -12,7 +12,7 @@ import type {
   TaskItemInput,
   TaskRun,
 } from "@passport/types";
-import { clip, frameUntrusted } from "./untrusted.js";
+import { clip, frameUntrusted, taskLabel } from "./untrusted.js";
 
 const SINCE_CHARS = 4000;
 const APPROVALS = 10;
@@ -92,7 +92,7 @@ async function resumeInstruction(
   // A subtask's messages come from its parent task's agent (v0.4).
   const from = task.delegation ? "The request from your parent task" : "The person's request";
   const parts = [
-    `Follow-up on the task "${task.title}" (task id ${task.id}). Your session holds the earlier turns.`,
+    `Follow-up on ${taskLabel(task)}. Your session holds the earlier turns.`,
     task.interactionMode === "plan"
       ? "Plan mode: investigate with read tools and answer with a concrete numbered proposal list. Write tools do not execute in this mode."
       : "Mode for this turn: default. Write tools run under policy.",

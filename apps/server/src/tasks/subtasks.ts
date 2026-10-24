@@ -14,7 +14,7 @@ import { ApiError } from "../errors.js";
 import type { TaskQuestions } from "./questions.js";
 import type { TaskQueueService } from "./queue.js";
 import { describeAgentRun, type TaskService } from "./service.js";
-import { clip, frameUntrusted, neutralize } from "./untrusted.js";
+import { clip, frameUntrusted, neutralize, taskLabel } from "./untrusted.js";
 
 /** The wake run reason for subtask completions; one active wake absorbs later ones. */
 export const SUBTASK_WAKE = "subtasks";
@@ -229,7 +229,7 @@ export class TaskSubtasks {
       return;
     }
     const instruction = [
-      `You are working on the task "${parent.title}" (task id ${parent.id}).`,
+      `You are working on ${taskLabel(parent)}.`,
       "Your subtasks reported back. Call task_status for every subtask's current result, answer any question with task_delegate and its taskId, then continue the request or hand back to the person.",
       summary ? frameUntrusted("subtask-report", summary) : "",
     ]

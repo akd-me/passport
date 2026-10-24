@@ -26,7 +26,7 @@ import { contextItems, taskByAction } from "./context.js";
 import { answeredRequest } from "./questions.js";
 import { type RunCeilings, type RunDescription, TaskRunner } from "./runner.js";
 import { taskSessionOptions } from "./session.js";
-import { frameUntrusted } from "./untrusted.js";
+import { frameUntrusted, taskLabel } from "./untrusted.js";
 
 export interface TaskServiceOptions {
   store: Store;
@@ -201,6 +201,7 @@ export class TaskService {
         runId,
         cancellable: true,
         onCreated: created,
+        request: texts,
         items: await contextItems(this.options.store, context),
       },
       (options) =>
@@ -244,6 +245,31 @@ export class TaskService {
   }
 
   private async instruction(task: Task, texts: string[], beforeSeq: number): Promise<string> {
+    const history = await this.history(task, beforeSeq);
+    const from = task.delegation
+      ? "The request from your parent task (another Passport agent working for the same person)"
+      : "The person's request";
+    const parts = [
+      `You are working on ${taskLabel(task)}.`,
+      task.delegation
+        ? "This task is a subtask: your parent task's agent delegated it and reads your final reply. Ask it, not the person, with ask_user."
+        : "",
+      task.interactionMode === "plan"
+        ? "Plan mode: investigate with read tools and answer with a concrete numbered proposal list. Write tools do not execute in this mode."
+        : "",
+      history,
+      texts.length > 1
+        ? `${from} (${task.delegation ? "added to" : "they added to it"} while you worked):\n${texts.join("\n\n")}`
+        : `${from}:\n${texts[0] ?? ""}`,
+    ];
+    return parts.filter(Boolean).join("\n\n");
+  }
+
+  /**
+   * Up to 16 recent user, assistant and notification items before `beforeSeq`, framed as
+   * untrusted data ("Earlier in this task"), or "" when there are none. Continuations reuse it.
+   */
+  async history(task: Task, beforeSeq: number): Promise<string> {
     const recent = (
       await this.tasks.items.recent(
         task.id,
@@ -265,23 +291,7 @@ export class TaskService {
               : "";
       history = `${history}${line}\n`.slice(-HISTORY_CHARS);
     }
-    const from = task.delegation
-      ? "The request from your parent task (another Passport agent working for the same person)"
-      : "The person's request";
-    const parts = [
-      `You are working on the task "${task.title}" (task id ${task.id}).`,
-      task.delegation
-        ? "This task is a subtask: your parent task's agent delegated it and reads your final reply. Ask it, not the person, with ask_user."
-        : "",
-      task.interactionMode === "plan"
-        ? "Plan mode: investigate with read tools and answer with a concrete numbered proposal list. Write tools do not execute in this mode."
-        : "",
-      history ? `Earlier in this task:\n${frameUntrusted("task-history", history)}` : "",
-      texts.length > 1
-        ? `${from} (${task.delegation ? "added to" : "they added to it"} while you worked):\n${texts.join("\n\n")}`
-        : `${from}:\n${texts[0] ?? ""}`,
-    ];
-    return parts.filter(Boolean).join("\n\n");
+    return history ? `Earlier in this task:\n${frameUntrusted("task-history", history)}` : "";
   }
 
   /** Stops every cancellable run of the task. */
