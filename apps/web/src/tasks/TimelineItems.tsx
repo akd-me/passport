@@ -53,8 +53,9 @@ const noticeTone = (code?: string) =>
       ? "limited"
       : "warn";
 const noticeIcon = (code?: string) =>
+  // A stopped run reads as a stop sign, not the composer's square Stop (an empty checkbox here).
   code === "RUN_CANCELLED"
-    ? "stop"
+    ? "stopped"
     : code === "RESTARTED"
       ? "restart"
       : code === "USAGE_LIMITED"

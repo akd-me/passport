@@ -1,7 +1,7 @@
 import type { SecretRequest, TaskItem } from "@passport/types";
 import { useState } from "react";
 import { request } from "../api";
-import { Feedback } from "../components/ui";
+import { Feedback, Icon } from "../components/ui";
 import { useResource, useTask } from "../state";
 
 export function SecretRequestItem({
@@ -27,7 +27,14 @@ export function SecretRequestItem({
       setValue("");
     }, "Private request updated.");
   return (
-    <section className="scheduler-secret-request" aria-label="Private secret request">
+    <section
+      className="scheduler-secret-request"
+      aria-labelledby={`secret-${item.payload.requestId}`}
+    >
+      <p className="scheduler-secret-label" id={`secret-${item.payload.requestId}`}>
+        <Icon name="lock" size={13} />
+        Private input
+      </p>
       <p>{item.payload.text}</p>
       {!current ? (
         <p className="muted">Loading private request…</p>
@@ -60,7 +67,7 @@ export function SecretRequestItem({
             conversation.
           </p>
           <div className="row-actions">
-            <button className="btn btn-sm" disabled={action.busy || !value}>
+            <button className="btn btn-sm btn-primary" disabled={action.busy || !value}>
               Save privately
             </button>
             <button

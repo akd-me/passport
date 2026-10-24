@@ -11,10 +11,38 @@
   padding: 0;
   font-variant-numeric: tabular-nums;
 }
-.scheduler-delivery-list li,
-.scheduler-secret-request {
-  padding-block: 16px;
+.scheduler-delivery-list li {
+  padding-block: var(--s-2);
   border-bottom: 1px solid var(--line);
+}
+.scheduler-delivery-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-s);
+}
+.scheduler-delivery-head time {
+  color: var(--muted);
+}
+.scheduler-delivery-list details {
+  margin-top: var(--s-1);
+  font-size: var(--t-s);
+  color: var(--text-2);
+}
+/* A private request waits on the person: it hangs from the same accent rule as decisions. */
+.scheduler-secret-request {
+  margin: var(--s-2) 0;
+  padding: 2px 0 2px var(--s-4);
+  border-left: 2px solid var(--accent);
+}
+.scheduler-secret-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0 0 var(--s-1);
+  font-size: var(--t-s);
+  font-weight: var(--w-medium);
+  color: var(--text-2);
 }
 .scheduler-delivery-list pre {
   white-space: pre-wrap;

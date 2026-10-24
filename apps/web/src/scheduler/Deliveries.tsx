@@ -1,8 +1,21 @@
-import type { WebhookDelivery } from "@passport/types";
+import type { WebhookDelivery, WebhookDeliveryOutcome } from "@passport/types";
 import { useState } from "react";
-import { Feedback, Loading } from "../components/ui";
+import { Badge, Feedback, Loading, relativeTime } from "../components/ui";
 import { type Job, jobsApi } from "../scheduler-api";
 import { useResource, useTask } from "../state";
+
+/** Each outcome as a badge, toned like the run history below it. */
+const outcomeTone: Record<WebhookDeliveryOutcome, string> = {
+  accepted: "good",
+  dispatch_failed: "danger",
+  rejected_signature: "danger",
+  expired: "danger",
+  rate_limited: "warn",
+  disabled: "warn",
+  duplicate: "",
+  coalesced: "",
+  filtered: "",
+};
 
 /** Payloads are plain text, including expanded prompts. No remote content is loaded. */
 export function Deliveries({ job }: { job: Job }) {
@@ -52,11 +65,17 @@ export function Deliveries({ job }: { job: Job }) {
         <ol className="scheduler-delivery-list">
           {[...deliveries.data].reverse().map((delivery) => (
             <li key={delivery.id}>
-              <time dateTime={delivery.receivedAt}>
-                {new Date(delivery.receivedAt).toLocaleString()}
-              </time>
-              {" · "}
-              <span>{delivery.outcome.replaceAll("_", " ")}</span>
+              <div className="scheduler-delivery-head">
+                <Badge tone={outcomeTone[delivery.outcome] ?? ""}>
+                  {delivery.outcome.replaceAll("_", " ")}
+                </Badge>
+                <time
+                  dateTime={delivery.receivedAt}
+                  title={new Date(delivery.receivedAt).toLocaleString()}
+                >
+                  {relativeTime(delivery.receivedAt)}
+                </time>
+              </div>
               {delivery.prompt && (
                 <details>
                   <summary>Rendered instruction</summary>

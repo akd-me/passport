@@ -33,12 +33,15 @@ export function QuickDecision({
   record,
   load,
   onRetry,
+  primary = true,
 }: {
   actionId: string;
   label: string;
   record?: ActionRecord;
   load: LoadState | "idle";
   onRetry: () => void;
+  /** False in the composer's panel, whose "Approve all" is the one primary action. */
+  primary?: boolean;
 }) {
   const decision = useDecision(actionId);
   if (!record && load === "failed") {
@@ -58,7 +61,7 @@ export function QuickDecision({
         {!record && <span className="muted loading-note">Loading…</span>}
         <button
           type="button"
-          className="btn btn-sm btn-primary"
+          className={`btn btn-sm ${primary ? "btn-primary" : ""}`}
           disabled={!record || decision.busy}
           aria-label={`Approve: ${label}`}
           onClick={() => void decision.decide({ kind: "approve" }, "Approved.")}

@@ -107,9 +107,10 @@ describe("work queue", () => {
         <WorkQueue />
       </Harness>,
     );
-    expect(
-      await screen.findByRole("heading", { name: "4 proposals need you" }),
-    ).toBeInTheDocument();
+    // R2-28: the page names itself; each group carries its own count.
+    expect(await screen.findByRole("heading", { level: 1, name: "Needs you" })).toBeInTheDocument();
+    const northstar = await screen.findByRole("region", { name: "Northstar launch" });
+    expect(within(northstar).getByText("2")).toHaveClass("count");
     expect(await screen.findByRole("link", { name: "Northstar launch" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Not in a matter" })).toBeInTheDocument();
     const outbox = screen.getByRole("region", { name: /Leaving soon/ });
@@ -143,6 +144,29 @@ describe("work queue", () => {
     await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
     expect(approve).toHaveBeenCalledWith("p3", undefined, "once");
     expect(card).toHaveAttribute("aria-current", "true");
+  });
+
+  it("R2-25: an empty queue is one sentence and one action", async () => {
+    stubApi({
+      "/decisions": { items: [] },
+      "/matters": [],
+      "/actions": { items: [] },
+      "/trust": {
+        config: { globalMode: "supervised", alwaysAsk: [] },
+        categories: [],
+        promotionOffers: [],
+      },
+      "/accounts": { accounts: [], mode: "real" },
+    });
+    render(
+      <Harness>
+        <WorkQueue />
+      </Harness>,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Nothing needs you right now." }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ask Passport something/ })).toBeInTheDocument();
   });
 
   it("moves with j/k and approves the selected proposal with a", async () => {

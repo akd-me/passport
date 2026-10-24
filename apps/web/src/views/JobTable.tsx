@@ -215,7 +215,9 @@ export function JobHistory({ job, onClose }: { job: Job; onClose(): void }) {
                 <Badge tone={run.status === "error" ? "danger" : run.status === "ok" ? "good" : ""}>
                   {run.status}
                 </Badge>
-                <time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString()}</time>
+                <time dateTime={run.startedAt} title={new Date(run.startedAt).toLocaleString()}>
+                  {relativeTime(run.startedAt)}
+                </time>
                 <span>{duration(run.durationMs)}</span>
               </div>
               {run.summary && <p>{run.summary}</p>}

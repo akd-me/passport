@@ -146,6 +146,7 @@ describe("one accent (brief §3)", () => {
         ".question-panel",
         ".setup-prompt",
         ".setup-prompt > .icon",
+        ".scheduler-secret-request",
         ".side-row.setup-waiting .icon",
         // The person's own messages (the brief's tinted block) and the brand mark.
         ".tl-message.from-user",

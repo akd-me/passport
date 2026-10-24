@@ -53,13 +53,18 @@ export function TaskCard({ task, actions }: { task: Task; actions?: ReactNode })
  * on (`needs-you-groups.ts`): approvals, then usage limits with their recovery actions, then
  * failures.
  */
-export function TasksNeedingYou() {
+/** Tasks waiting on the person, in the page's account scope (R5-16). */
+export function useTasksNeedingYou() {
   const { tasks, available } = useTasks(),
     accountId = useAccountId();
-  // The page's account scope applies to tasks too (R5-16).
-  const all = needsYou(tasks).filter((t) => !accountId || t.accountIds.includes(accountId));
-  const list = all;
-  if (!available || !all.length) {
+  return available
+    ? needsYou(tasks).filter((t) => !accountId || t.accountIds.includes(accountId))
+    : [];
+}
+
+export function TasksNeedingYou() {
+  const list = useTasksNeedingYou();
+  if (!list.length) {
     return null;
   }
   return (

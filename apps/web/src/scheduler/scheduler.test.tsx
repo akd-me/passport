@@ -74,7 +74,9 @@ describe("scheduler task panels", () => {
     resource(deliveries);
     vi.spyOn(jobsApi, "rotateToken").mockResolvedValue({ webhookUrl: "/api/hooks/new-token" });
     const { container } = render(<Deliveries job={job} />);
-    expect(screen.getByText("rejected signature")).toBeInTheDocument();
+    // R2-19: outcomes are toned badges, like the run history.
+    expect(screen.getByText("rejected signature")).toHaveClass("badge", "danger");
+    expect(screen.getByText("accepted")).toHaveClass("badge", "good");
     expect(screen.getByText("<img src='https://remote.example/beacon'>")).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Rotate webhook URL" }));
@@ -106,6 +108,9 @@ describe("scheduler task panels", () => {
     resource(state);
     const post = vi.spyOn(api, "request").mockResolvedValue({ ...state, status: "saved" });
     const { container } = render(<SecretRequestItem item={item} />);
+    // R2-12: a visible "Private input" heading names the region; Save is the primary action.
+    expect(screen.getByRole("region", { name: "Private input" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save privately" })).toHaveClass("btn-primary");
     const input = screen.getByLabelText("Secret");
     expect(input).toHaveAttribute("type", "password");
     fireEvent.change(input, { target: { value: "private-password" } });
