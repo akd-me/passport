@@ -58,14 +58,22 @@ export function validateAgentBudget(config: unknown): void {
   const { maxToolCalls, maxRunMinutes } = config as Record<string, unknown>;
   if (
     maxToolCalls !== undefined &&
-    !(Number.isInteger(maxToolCalls) && (maxToolCalls as number) >= 1)
+    !(
+      Number.isInteger(maxToolCalls) &&
+      (maxToolCalls as number) >= 1 &&
+      (maxToolCalls as number) <= 10_000
+    )
   ) {
-    throw new ApiError("INVALID_CONFIG", "agentBudget.maxToolCalls must be a positive integer");
+    throw new ApiError("INVALID_CONFIG", "agentBudget.maxToolCalls must be an integer 1–10000");
   }
   if (
     maxRunMinutes !== undefined &&
-    !(Number.isInteger(maxRunMinutes) && (maxRunMinutes as number) >= 1)
+    !(
+      Number.isInteger(maxRunMinutes) &&
+      (maxRunMinutes as number) >= 1 &&
+      (maxRunMinutes as number) <= 1440
+    )
   ) {
-    throw new ApiError("INVALID_CONFIG", "agentBudget.maxRunMinutes must be a positive integer");
+    throw new ApiError("INVALID_CONFIG", "agentBudget.maxRunMinutes must be an integer 1–1440");
   }
 }

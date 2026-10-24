@@ -9,8 +9,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectHostAgents, HostAgentLlmClient } from "@passport/agent";
-import { ToolBeltListener } from "@passport/mcp";
-import type { Tool } from "@passport/tools";
+import { type ToolBelt, ToolBeltListener } from "@passport/mcp";
 import type { HostAgentKind } from "@passport/types";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -22,7 +21,7 @@ const FAST: Record<HostAgentKind, string> = {
   codex: "gpt-5.6-luna",
 };
 
-const codeWord: Tool = {
+const codeWord: ToolBelt["tools"][number] = {
   name: "get_code_word",
   description: "Returns today's secret code word",
   inputSchema: { type: "object", properties: {} },

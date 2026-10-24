@@ -15,6 +15,9 @@ import { manualPrompt, systemPrompt } from "./prompts/index.js";
 import { orchestrationPrompt } from "./prompts/orchestration.js";
 import { prepareToolInput } from "./tool-input.js";
 
+/** `setTimeout` holds at most a signed 32-bit delay. */
+const MAX_TIMER_MS = 2_147_483_647 - 60_000;
+
 /** MCP server name of the tool belt; the CLI sees its tools as `mcp__passport__<tool>`. */
 export const TOOL_BELT_SERVER = "passport";
 
@@ -99,16 +102,6 @@ export async function agenticSession(
       return stopped("The run failed. Stop now.", "RUN_FAILED");
     }
   };
-  const binding = await host.bind({
-    tools: ctx.tools,
-    call: (name, input) => {
-      const pending = call(name, input);
-      inflight.add(pending);
-      void pending.finally(() => inflight.delete(pending));
-      return pending;
-    },
-  });
-
   const system = [
     systemPrompt(
       ctx.profile,
@@ -127,11 +120,22 @@ export async function agenticSession(
       ? manualPrompt(resume.instruction, context)
       : resume?.instruction;
 
+  const binding = await host.bind({
+    tools: ctx.tools,
+    call: (name, input) => {
+      const pending = call(name, input);
+      inflight.add(pending);
+      void pending.finally(() => inflight.delete(pending));
+      return pending;
+    },
+  });
+
   const attempt = (prompt: string, resumeSessionId?: string): Promise<HostAgentSessionResult> => {
+    const remaining = Math.min(budget.remainingMs(), MAX_TIMER_MS);
     const timer = setTimeout(() => {
       budget.expire();
       controller.abort();
-    }, budget.remainingMs());
+    }, remaining);
     const onEvent = (event: HostAgentEvent) => {
       if (event.type === "started" && event.sessionId) {
         observer?.providerSession?.({ kind: llm.hostKind, id: event.sessionId });
@@ -150,25 +154,32 @@ export async function agenticSession(
         allowedTools: [`mcp__${TOOL_BELT_SERVER}`],
         ...(resumeSessionId ? { resumeSessionId } : {}),
         // The budget timer stops the session first; this only bounds a CLI that ignores it.
-        timeoutMs: budget.remainingMs() + 60_000,
+        timeoutMs: remaining + 60_000,
         signal: sessionSignal,
       },
       onEvent,
     );
-    return session.done.finally(() => clearTimeout(timer));
+    return session.done
+      .then((result) => {
+        if (result.usage) {
+          ctx.usages.push({ ...result.usage });
+        }
+        return result;
+      })
+      .finally(() => clearTimeout(timer));
   };
 
   try {
     let result = await attempt(resumed ?? fresh, resume?.id);
-    if (resume && !result.ok && !activity && !sessionSignal.aborted) {
+    // Both CLIs report a missing session as a plain failure before any event; auth, limits and
+    // timeouts would fail again, so they are not retried.
+    const lost = !result.ok && result.error?.code === "HOST_AGENT_FAILED";
+    if (resume && lost && !activity && !sessionSignal.aborted) {
       // The provider no longer has the session (expired, other machine): start over.
       ctx.notes.push("Provider session could not be resumed; started a fresh one.");
       result = await attempt(fresh);
     }
     await Promise.allSettled([...inflight]);
-    if (result.usage) {
-      ctx.usages.push({ ...result.usage });
-    }
     if (signal?.aborted) {
       throw new AgentError("Run cancelled", "RUN_CANCELLED");
     }
