@@ -1,5 +1,5 @@
 import type { ActionRecord, Task, TaskRun } from "@passport/types";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import { taskApi } from "../tasks/api";
@@ -117,6 +117,32 @@ describe("work queue", () => {
     expect(
       within(outbox).getByRole("button", { name: "Cancel send: Reason h1" }),
     ).toBeInTheDocument();
+  });
+
+  it("approves an unselected draft card on the first real click", async () => {
+    stubQueue();
+    const approve = vi.spyOn(api, "approve").mockResolvedValue(items[2]!);
+    render(
+      <Harness>
+        <WorkQueue />
+      </Harness>,
+    );
+    const first = await screen.findByRole("article", { name: "Reason p1" });
+    await waitFor(() => expect(first).toHaveAttribute("aria-current", "true"));
+    const card = screen.getByRole("article", { name: "Reason p3" });
+    const button = within(card).getByRole("button", { name: "Approve" });
+    // pointerdown, then focus (on the button in Chromium, on the card in WebKit), then click.
+    fireEvent.pointerDown(button);
+    act(() => button.focus());
+    fireEvent.pointerDown(button);
+    act(() => card.focus());
+    // Nothing reflowed under the pointer: the selection (and so the draft clamp) is unchanged.
+    expect(card).not.toHaveAttribute("aria-current");
+    expect(first).toHaveAttribute("aria-current", "true");
+    fireEvent.click(button);
+    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+    expect(approve).toHaveBeenCalledWith("p3", undefined, "once");
+    expect(card).toHaveAttribute("aria-current", "true");
   });
 
   it("moves with j/k and approves the selected proposal with a", async () => {
