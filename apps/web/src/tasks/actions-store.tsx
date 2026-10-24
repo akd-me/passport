@@ -12,6 +12,7 @@ import {
 import { type ApproveScope, api } from "../api";
 import { logger } from "../logger";
 import { useWorkspace, useWorkspaceEvents } from "../state";
+import { renderApi } from "./render-api";
 
 export type LoadState = "loading" | "loaded" | "failed";
 export type Decision =
@@ -34,6 +35,7 @@ export interface ActionsState {
   /** Decided here; hidden until the task frame drops them from `pendingActionIds`. */
   decided: Set<string>;
   decide: (id: string, decision: Decision) => Promise<ActionRecord>;
+  saveDraft: (id: string, body: string) => Promise<ActionRecord>;
 }
 
 const call = (id: string, decision: Decision) =>
@@ -50,6 +52,7 @@ const Actions = createContext<ActionsState>({
   busy: none,
   decided: none,
   decide: call,
+  saveDraft: (id, body) => renderApi.saveDraft(id, body),
 });
 
 const without = (set: Set<string>, id: string) => {
@@ -178,6 +181,20 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
     [put],
   );
 
+  const saveDraft = useCallback(
+    async (id: string, body: string) => {
+      setBusy((current) => new Set(current).add(id));
+      try {
+        const record = await renderApi.saveDraft(id, body);
+        put([record]);
+        return record;
+      } finally {
+        setBusy((current) => without(current, id));
+      }
+    },
+    [put],
+  );
+
   const value = useMemo<ActionsState>(
     () => ({
       records,
@@ -192,8 +209,20 @@ export function ActionsProvider({ children }: { children: ReactNode }) {
       busy,
       decided,
       decide,
+      saveDraft,
     }),
-    [records, pending, runs, ensurePending, fetchPending, loadRun, busy, decided, decide],
+    [
+      records,
+      pending,
+      runs,
+      ensurePending,
+      fetchPending,
+      loadRun,
+      busy,
+      decided,
+      decide,
+      saveDraft,
+    ],
   );
   return <Actions.Provider value={value}>{children}</Actions.Provider>;
 }

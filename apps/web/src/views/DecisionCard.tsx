@@ -7,6 +7,7 @@ import { Feedback, Icon, Kbd, relativeTime } from "../components/ui";
 import { actionLabel } from "../labels";
 import { useResource, useTask } from "../state";
 import { useDecision } from "../tasks/actions-store";
+import { DraftReview } from "./DraftReview";
 import { draftOf, recipients } from "./decision-model";
 
 function Countdown({ until }: { until: string }) {
@@ -48,8 +49,10 @@ export function DecisionCard({
   useEffect(() => {
     if (editing) {
       textarea.current?.focus();
+    } else {
+      setBody(draft?.textBody ?? "");
     }
-  }, [editing]);
+  }, [editing, draft?.textBody]);
   const approve = (scope: ApproveScope = "once") =>
     decision.decide(
       {
@@ -173,6 +176,7 @@ export function DecisionCard({
             >
               Always
             </button>
+            <DraftReview action={action} />
             {draft && (
               <button
                 className="btn btn-sm"
