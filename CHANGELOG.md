@@ -124,6 +124,8 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 
 ### Fixed
 
+- Server lifecycle and tool writes share the types package's waiting-state and task-stamping
+  rules, including pending secret requests (R1-18, R1-19 integration).
 - Inbox and routine message, watch and wake runs stay ephemeral, including continuations;
   only user tasks keep resumable CLI transcripts (R1-5 integration).
 - Restart continuations and limit resumes run as host-agent sessions with the tool belt and

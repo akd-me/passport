@@ -10,6 +10,7 @@ import {
   type TaskRunTrigger,
   type TaskStatus,
   type TaskUnseenOutcome,
+  taskWaitingOn,
 } from "@passport/types";
 
 /** Run error codes that mean a usage limit, not a failure (`needsUser: "limited"`). */
@@ -30,29 +31,6 @@ export function hidden(status: TaskStatus): boolean {
  */
 export function idleStatus(task: Pick<Task, "watches" | "waitingOnTaskIds">): TaskStatus {
   return task.watches.length || task.waitingOnTaskIds?.length ? "working" : "inbox";
-}
-
-/**
- * What the task waits on the person for, from its pending lists: approvals first, then
- * questions and open `request_secret` requests. A subtask's questions wait on its parent task,
- * never on the person; a secret request always waits on the person (R1-18).
- */
-export function waitingOn(
-  task: Pick<
-    Task,
-    "pendingActionIds" | "pendingQuestions" | "pendingSecretRequestIds" | "delegation"
-  >,
-): TaskNeedsUser {
-  if (task.pendingActionIds?.length) {
-    return "approval";
-  }
-  if (task.pendingSecretRequestIds?.length) {
-    return "question";
-  }
-  if (task.pendingQuestions?.length && !task.delegation) {
-    return "question";
-  }
-  return null;
 }
 
 /** Brings a task back to the person: approval, question, failure, limit or their own message. */
@@ -126,7 +104,7 @@ export function resolveTaskStatus(task: Task, event: StatusEvent): Partial<Task>
  * task records it without moving (R4-9). A subtask's question goes to its parent instead.
  */
 function asked(task: Task, now: string): Partial<Task> {
-  const needsUser = waitingOn(task);
+  const needsUser = taskWaitingOn(task);
   if (!needsUser) {
     return {};
   }
@@ -138,7 +116,7 @@ function asked(task: Task, now: string): Partial<Task> {
 
 /** An answered or dismissed question: the next thing waiting on the person, if any. */
 function resolved(task: Task): Partial<Task> {
-  const next = waitingOn(task);
+  const next = taskWaitingOn(task);
   if (next) {
     return task.needsUser === next ? {} : { needsUser: next };
   }
@@ -194,7 +172,7 @@ function started(
       snoozedUntil: null,
       settledAt: null,
       // A cleared failure hands over to what still waits on the person (R1-26).
-      needsUser: task.needsUser === "failure" ? waitingOn(task) : task.needsUser,
+      needsUser: task.needsUser === "failure" ? taskWaitingOn(task) : task.needsUser,
       lastActivityAt: now,
       // The person's message outranks the agent's earlier request to settle (task_organize).
       ...(task.settleRequested ? { settleRequested: false } : {}),
@@ -283,7 +261,7 @@ function ruleStatus(task: Task, outcome: RunOutcome): Partial<Task> {
     return task.status === "inbox" && task.needsUser === "approval" ? {} : surface("approval", now);
   }
   // v0.4: an unanswered question (ask_user) waits on the person like an approval.
-  if (waitingOn(task) === "question") {
+  if (taskWaitingOn(task) === "question") {
     return task.status === "inbox" && task.needsUser === "question" ? {} : surface("question", now);
   }
   if (outcome.otherActiveRuns > 0) {

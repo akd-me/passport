@@ -1,17 +1,18 @@
-import type {
-  AgentRun,
-  AgentRunOptions,
-  AgentRuntime,
-  Task,
-  TaskLimitSource,
-  TaskRun,
+import {
+  type AgentRun,
+  type AgentRunOptions,
+  type AgentRuntime,
+  type Task,
+  type TaskLimitSource,
+  type TaskRun,
+  taskWaitingOn,
 } from "@passport/types";
 import { ApiError } from "../errors.js";
 import { logger } from "../logger.js";
 import { continueRun } from "./continuation.js";
 import type { TaskQueueService } from "./queue.js";
 import type { TaskService } from "./service.js";
-import { isLimitCode, waitingOn } from "./status.js";
+import { isLimitCode } from "./status.js";
 
 export interface DetectedLimit {
   resetAt: string | null;
@@ -173,7 +174,7 @@ export class TaskLimits {
     await this.service.runner.updateTask(task.id, (current) => ({
       limited: null,
       // Pending approvals or questions keep the task waiting on the person (R1-26).
-      ...(current.needsUser === "limited" ? { needsUser: waitingOn(current) } : {}),
+      ...(current.needsUser === "limited" ? { needsUser: taskWaitingOn(current) } : {}),
     }));
     const previous = await this.service.tasks.runs.get(limited.runId);
     if (!previous) {

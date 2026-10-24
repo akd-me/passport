@@ -6,9 +6,10 @@ import {
   type TaskPendingQuestion,
   type TaskRunTrigger,
   taskBadge,
+  taskWaitingOn,
 } from "@passport/types";
 import { describe, expect, it } from "vitest";
-import { type RunOutcome, resolveTaskStatus, type StatusEvent, waitingOn } from "./status.js";
+import { type RunOutcome, resolveTaskStatus, type StatusEvent } from "./status.js";
 
 const NOW = "2026-10-24T12:00:00.000Z";
 const BEFORE = "2026-10-20T12:00:00.000Z";
@@ -221,13 +222,15 @@ describe("resolveTaskStatus (W2A)", () => {
     expect(resolveTaskStatus(before, event)).toEqual(expected);
   });
 
-  it("waitingOn orders approvals before questions and ignores a subtask's questions", () => {
-    expect(waitingOn(task({ pendingActionIds: ["a"], pendingQuestions: [QUESTION] }))).toBe(
+  it("taskWaitingOn orders approvals before questions and ignores a subtask's questions", () => {
+    expect(taskWaitingOn(task({ pendingActionIds: ["a"], pendingQuestions: [QUESTION] }))).toBe(
       "approval",
     );
-    expect(waitingOn(task({ pendingQuestions: [QUESTION] }))).toBe("question");
-    expect(waitingOn(task({ pendingQuestions: [QUESTION], delegation: DELEGATION }))).toBeNull();
-    expect(waitingOn(task())).toBeNull();
+    expect(taskWaitingOn(task({ pendingQuestions: [QUESTION] }))).toBe("question");
+    expect(
+      taskWaitingOn(task({ pendingQuestions: [QUESTION], delegation: DELEGATION })),
+    ).toBeNull();
+    expect(taskWaitingOn(task())).toBeNull();
   });
 });
 

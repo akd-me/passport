@@ -7,6 +7,7 @@ import {
   minTrust,
   type Store,
   type StoreTasks,
+  stampTask,
   type Task,
   type TaskItemInput,
   type TaskOrchestrator,
@@ -16,11 +17,11 @@ import {
   type TaskStatus,
   type ToolCallEvent,
   type TrustLevel,
+  taskWaitingOn,
 } from "@passport/types";
 import { logger } from "../logger.js";
 import { sessionObserver } from "./session.js";
-import { stampTask } from "./stamps.js";
-import { type RunOutcome, statusAfterRun, statusDuringRun, surface, waitingOn } from "./status.js";
+import { type RunOutcome, statusAfterRun, statusDuringRun, surface } from "./status.js";
 import { clip, costOf, neutralize, summarizeInput, summarizeResult } from "./untrusted.js";
 
 /** Item without its run (the runner fills `runId`). */
@@ -426,7 +427,7 @@ export class TaskRunner {
       await this.updateTask(task.id, (current) => {
         const pending = (current.pendingActionIds ?? []).filter((id) => id !== action.id);
         // The last decided approval hands over to a pending question, if any (v0.4).
-        const next = waitingOn({ ...current, pendingActionIds: pending });
+        const next = taskWaitingOn({ ...current, pendingActionIds: pending });
         return {
           pendingActionIds: pending,
           ...(pending.length || current.needsUser !== "approval" ? {} : { needsUser: next }),
