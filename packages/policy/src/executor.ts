@@ -1,6 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
 import {
-  type ActionExecutor,
   type ActionRecord,
   type ActionRequest,
   BASE_REVERSIBILITY,
@@ -11,6 +10,7 @@ import { PolicyError } from "./errors.js";
 import { createExecutorCommands } from "./executor-commands.js";
 import { createExecutorContext } from "./executor-context.js";
 import { createDispatch } from "./executor-dispatch.js";
+import { createDraftEditor, type DraftEditingExecutor } from "./executor-drafts.js";
 import { createMailActions } from "./executor-mail.js";
 import { knowledgeInverseOf } from "./executor-notes.js";
 import { createRestoration } from "./executor-restoration.js";
@@ -20,7 +20,7 @@ import { newId } from "./id.js";
 export type { ActionExecutorOptions } from "./executor-shared.js";
 
 /** Persist, authorize, execute, hold, and undo all mutations through one serialized gate. */
-export function createActionExecutor(options: ActionExecutorOptions): ActionExecutor {
+export function createActionExecutor(options: ActionExecutorOptions): DraftEditingExecutor {
   const {
     store,
     bus,
@@ -53,6 +53,7 @@ export function createActionExecutor(options: ActionExecutorOptions): ActionExec
     return result;
   };
   const context = createExecutorContext(dependencies);
+  const editDraft = createDraftEditor(dependencies, context);
   const { requireAction, claim, requireClaim, resolvedDraft, assertPublic, capture } = context;
 
   const mail = createMailActions(dependencies);
@@ -310,6 +311,7 @@ export function createActionExecutor(options: ActionExecutorOptions): ActionExec
   };
   return {
     submit: (request) => serial(() => submitAction(request)),
+    editDraft: (actionId, textBody) => serial(() => editDraft(actionId, textBody)),
     ...createExecutorCommands(dependencies, context, {
       serial,
       holdOrExecute,

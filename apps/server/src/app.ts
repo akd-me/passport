@@ -21,6 +21,7 @@ import { installSettingsRoutes } from "./settings-routes.js";
 import { registerSetup } from "./setup/routes.js";
 import { installRenderRoutes } from "./tasks/render-routes.js";
 import { installTaskRoutes } from "./tasks/routes.js";
+import { installTaskRunRoutes } from "./tasks/run-routes.js";
 
 export function createApp(
   backend: Backend,
@@ -70,6 +71,7 @@ export function createApp(
   installAgentRoutes(app, backend);
 
   installTaskRoutes(app, backend);
+  installTaskRunRoutes(app, backend);
   installRenderRoutes(app, backend);
 
   app.all("/api/*", (c) =>

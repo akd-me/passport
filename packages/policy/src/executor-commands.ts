@@ -8,6 +8,7 @@ import type {
 } from "@passport/types";
 import { PolicyError } from "./errors.js";
 import type { ExecutorContext } from "./executor-context.js";
+import { draftOriginalKey } from "./executor-drafts.js";
 import { type ActionExecutorOptions, snapshotOf } from "./executor-shared.js";
 import { editDistanceRatio } from "./helpers.js";
 import { newId } from "./id.js";
@@ -33,6 +34,9 @@ export function createExecutorCommands(
     approve: (actionId, edited) =>
       serial(async () => {
         const original = await requireAction(actionId, ["proposed"]);
+        const savedOriginal = await store.kv.get(draftOriginalKey(actionId));
+        const wasEdited = edited !== undefined || savedOriginal !== null;
+        const approvedRequest = edited ?? original.request;
         let distance = 0;
         if (edited) {
           await assertPublic(edited);
@@ -51,18 +55,23 @@ export function createExecutorCommands(
               "Approval edits must preserve action type, account, actor, and category",
             );
           }
+        }
+        if (wasEdited) {
+          const baseline = savedOriginal
+            ? (JSON.parse(savedOriginal) as ActionRequest)
+            : original.request;
           const text = (request: ActionRequest): string | null => {
             const draft = (request.params as { draft?: DraftInput }).draft;
             return draft ? `${draft.subject}\n${draft.textBody}` : null;
           };
-          const left = text(original.request),
-            right = text(edited);
+          const left = text(baseline),
+            right = text(approvedRequest);
           distance =
             left !== null && right !== null
               ? editDistanceRatio(left, right)
-              : editDistanceRatio(original.request.params, edited.params);
+              : editDistanceRatio(baseline.params, approvedRequest.params);
         }
-        const decision = await policy.evaluate(edited ?? original.request);
+        const decision = await policy.evaluate(approvedRequest);
         if (decision.outcome === "deny") {
           throw new PolicyError("ACTION_DENIED", decision.reason);
         }
@@ -71,15 +80,15 @@ export function createExecutorCommands(
         if (!(await store.kv.get(`policy:feedback:${actionId}`))) {
           await policy.recordOutcome(
             actionId,
-            edited ? "approved_edited" : "approved_unchanged",
+            wasEdited ? "approved_edited" : "approved_unchanged",
             distance,
           );
         }
         const approved = await store.actions.update(actionId, {
           decision,
           decidedAt: now(),
-          request: structuredClone(edited ?? original.request),
-          editDistance: edited ? distance : null,
+          request: structuredClone(approvedRequest),
+          editDistance: wasEdited ? distance : null,
         });
         bus.emit({ type: "action.decided", action: approved });
         return holdOrExecute(approved);

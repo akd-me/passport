@@ -1,6 +1,7 @@
 export { NotImplementedError, PolicyError } from "./errors.js";
 export type { ActionExecutorOptions } from "./executor.js";
 export { createActionExecutor } from "./executor.js";
+export type { DraftEditingExecutor } from "./executor-drafts.js";
 export { classifyCounterparty, describeDecision, editDistanceRatio } from "./helpers.js";
 export type { PolicyEngineOptions } from "./policy.js";
 export { createPolicyEngine } from "./policy.js";
