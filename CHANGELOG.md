@@ -124,6 +124,8 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 
 ### Fixed
 
+- Secret responses and expiry clear pending request IDs even after the requesting run ended;
+  regression coverage includes saved, declined, cancelled and timed-out requests (R1-18).
 - Server lifecycle and tool writes share the types package's waiting-state and task-stamping
   rules, including pending secret requests (R1-18, R1-19 integration).
 - Inbox and routine message, watch and wake runs stay ephemeral, including continuations;

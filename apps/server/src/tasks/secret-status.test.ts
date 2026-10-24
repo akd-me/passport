@@ -13,7 +13,7 @@ const post = (body: unknown) => ({
   body: JSON.stringify(body),
 });
 
-async function setup() {
+async function setup(expired = false) {
   const env = await taskBackend(backends);
   env.llm.script.push(toolCall("ask_user", { text: "Which account?" }), "Asked.");
   const { task, done } = await env.service.create({ message: "Connect my bank" });
@@ -25,7 +25,7 @@ async function setup() {
     clientRequestId: "bank",
     text: "Bank password",
     createdAt: now,
-    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    expiresAt: new Date(Date.now() + (expired ? -1000 : 60_000)).toISOString(),
   });
   await env.service.runner.updateTask(task.id, (current) => ({
     pendingSecretRequestIds: [...(current.pendingSecretRequestIds ?? []), request.id],
@@ -35,6 +35,29 @@ async function setup() {
 }
 
 describe("secret requests and questions", () => {
+  it.each(["saved", "declined", "cancelled", "timed_out"] as const)(
+    "removes a %s secret request after its run has ended",
+    async (status) => {
+      const { env, task, request, question } = await setup(status === "timed_out");
+      await env.app.request(`/api/tasks/${task.id}/questions/${question.itemId}/dismiss`, post({}));
+      expect(env.service.runner.activeRuns(task.id)).toEqual([]);
+      expect((await env.service.task(task.id)).needsUser).toBe("question");
+      const res = await env.app.request(
+        `/api/tasks/${task.id}/secrets/${request.id}`,
+        status === "timed_out"
+          ? undefined
+          : post(status === "saved" ? { value: "private-value" } : { status }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ status });
+      expect(await env.service.task(task.id)).toMatchObject({
+        needsUser: null,
+        pendingSecretRequestIds: [],
+        pendingQuestions: [],
+      });
+    },
+  );
+
   it("resolving a secret keeps Input while a question is open", async () => {
     const { env, task, request } = await setup();
     const res = await env.app.request(
