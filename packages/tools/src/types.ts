@@ -32,6 +32,8 @@ export interface ToolContext {
   readers?: MailReaderResolver;
   /** Task the call belongs to (`watch_conversation`). Set by the host, never by the model. */
   taskId?: string;
+  /** v0.4: the task host behind ask_user, task_delegate, task_status, task_cancel, task_organize. */
+  orchestrator?: import("@passport/types").TaskOrchestrator;
 }
 /** MCP tool hints that differ from the defaults derived from `risk`. */
 export interface ToolAnnotations {

@@ -228,17 +228,25 @@ export interface TaskToolCallPayload {
 
 export interface TaskItemPayloads {
   secret_request: { requestId: string; text: string; expiresAt: Timestamp };
-  user_message: { text: string };
+  /** `answers` (v0.4): ids of the `question` items this message answered. */
+  user_message: { text: string; answers?: Id[] };
   assistant_message: { text: string };
   tool_call: TaskToolCallPayload;
   approval_request: { actionId: Id; summary: string };
-  question: { text: string };
+  /**
+   * `ask_user` (v0.4): `options` are suggested answers; `blocking` means the run ended to wait
+   * for the answer. Pending questions are listed in `Task.pendingQuestions`.
+   */
+  question: { text: string; options?: string[]; blocking?: boolean };
   system_notice: { text: string; code?: string };
   /** Monitor or trigger context, e.g. a new arrival with its `MailRow`. */
   notification: {
-    source: "arrival" | "watch" | "schedule" | "system";
+    /** `subtask` (v0.4): a child task finished, stopped or asked something. */
+    source: "arrival" | "watch" | "schedule" | "system" | "subtask";
     summary: string;
     row?: MailRow;
+    /** `subtask` notifications: the child task. */
+    subtaskId?: Id;
   };
 }
 
@@ -506,13 +514,17 @@ export interface TaskActivity {
  * failure, limit); otherwise working while a run is active or a conversation is watched.
  */
 export function isTaskWorking(
-  task: Pick<Task, "needsUser" | "watches">,
+  task: Pick<Task, "needsUser" | "watches"> &
+    Partial<Pick<Task, "waitingOnTaskIds" | "pendingQuestions">>,
   activity: TaskActivity,
 ): boolean {
-  if (task.needsUser) {
+  // A subtask's blocking question waits on its parent task (v0.4).
+  if (task.needsUser || task.pendingQuestions?.some((question) => question.blocking)) {
     return false;
   }
-  return activity.activeRuns > 0 || task.watches.length > 0;
+  // v0.4: a task waiting on subtasks it delegated with `mode: "wait"` rests in Working too.
+  const waiting = task.watches.length > 0 || (task.waitingOnTaskIds?.length ?? 0) > 0;
+  return activity.activeRuns > 0 || waiting;
 }
 
 /**
@@ -520,13 +532,15 @@ export function isTaskWorking(
  * (a run is active), waiting (watching), limited, failed, woke, done; null when nothing is new.
  */
 export function taskBadge(
-  task: Pick<Task, "needsUser" | "watches" | "unseenOutcome">,
+  task: Pick<Task, "needsUser" | "watches" | "unseenOutcome"> &
+    Partial<Pick<Task, "waitingOnTaskIds" | "pendingQuestions">>,
   activity: TaskActivity,
 ): TaskBadge | null {
   if (task.needsUser === "approval") {
     return "approval";
   }
-  if (task.needsUser === "question") {
+  // A subtask's question waits on its parent, not the person, but the child still shows Input.
+  if (task.needsUser === "question" || (task.pendingQuestions?.length ?? 0) > 0) {
     return "input";
   }
   if (isTaskWorking(task, activity)) {

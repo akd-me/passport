@@ -284,6 +284,10 @@ describe("orchestration prompt", () => {
       expect(Buffer.byteLength(text)).toBeLessThan(4096);
       expect(text).toContain("at most 200 tool calls and 30 minutes");
       expect(text).toContain('"proposed"');
+      // W2A: questions, subtasks and organising.
+      for (const tool of ["ask_user", "task_delegate", "task_status", "task_organize"]) {
+        expect(text).toContain(tool);
+      }
     }
   });
 });

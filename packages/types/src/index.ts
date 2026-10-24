@@ -1275,6 +1275,7 @@ export * from "./ondemand.js";
 export * from "./scheduler-v2.js";
 export * from "./secrets.js";
 export * from "./store-ondemand.js";
+export * from "./task-orchestration.js";
 export * from "./tasks.js";
 export * from "./tools-ondemand.js";
 export * from "./watch.js";

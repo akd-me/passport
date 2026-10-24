@@ -9,6 +9,7 @@ import { registerOnDemandExtra } from "./reads-ondemand-extra.js";
 import { registerMailRead } from "./reads-ondemand-read.js";
 import { responseByteBudget } from "./response-budget.js";
 import { registerSecrets } from "./secrets.js";
+import { registerTaskOrchestration } from "./tasks-orchestration.js";
 import { registerTaskWatches } from "./tasks-watch.js";
 import type { Tool, ToolRegistryOptions } from "./types.js";
 import { registerWrites } from "./writes.js";
@@ -28,6 +29,7 @@ export function createToolRegistry(options: ToolRegistryOptions): Tool[] {
   registerNotes(ctx);
   registerTaskWatches(ctx);
   registerSecrets(ctx);
+  registerTaskOrchestration(ctx);
   return ctx.tools;
 }
 

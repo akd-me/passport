@@ -158,6 +158,7 @@ class PersonalAgentRuntime implements AgentRuntime {
           ...context,
           runId: run.id,
           ...(options.taskId ? { taskId: options.taskId } : {}),
+          ...(options.orchestrator ? { orchestrator: options.orchestrator } : {}),
         });
         const data = result;
         if (data.error === "DEPENDENCY_ERROR" || data.status === "failed") {
