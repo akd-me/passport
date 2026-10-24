@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type {
   HostAgentEvent,
   HostAgentKind,
@@ -48,7 +47,7 @@ export interface HostAgentLlmClientOptions {
   fastModel?: string;
   /** Reasoning effort per tier. Codex defaults to medium/low; Claude Code uses its own default. */
   reasoning?: { main?: HostAgentReasoning; fast?: HostAgentReasoning };
-  /** Scratch working directory, created on demand. Defaults to a directory under the OS temp dir. */
+  /** Legacy directory hint; the CLI always runs in a private per-run OS temp directory. */
   cwd?: string;
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
@@ -188,7 +187,7 @@ export class HostAgentLlmClient implements SessionLlmClient {
         ...(reasoning ? { reasoning } : {}),
         prompt: input.prompt,
         systemPrompt: input.systemPrompt,
-        cwd: this.options.cwd ?? join(tmpdir(), "passport-host-agent"),
+        cwd: this.options.cwd ?? tmpdir(),
         mcpServers: input.mcpServers,
         ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
         ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
@@ -235,7 +234,7 @@ export class HostAgentLlmClient implements SessionLlmClient {
         ...(reasoning ? { reasoning } : {}),
         prompt: transcript(opts.messages),
         systemPrompt: system,
-        cwd: this.options.cwd ?? join(tmpdir(), "passport-host-agent"),
+        cwd: this.options.cwd ?? tmpdir(),
         ...(schema ? { jsonSchema: schema } : {}),
         completion: true,
       },

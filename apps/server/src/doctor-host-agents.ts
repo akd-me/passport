@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { HostAgentLlmClient } from "@passport/agent";
 import type { HostAgentStatus } from "@passport/types";
 import { isHostAgentProvider, llmConfigured, type PassportConfig } from "./config.js";
@@ -86,7 +85,6 @@ export async function pingHostAgent(
         kind: llm.provider,
         model: llm.model,
         ...(llm.fastModel ? { fastModel: llm.fastModel } : {}),
-        cwd: join(config.dataDir, "host-agent"),
         timeoutMs: 90_000,
       }).complete({
         system: "Reply with the single word OK.",

@@ -1,6 +1,6 @@
-import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import type { HostAgentStatus } from "@passport/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./auth.test-client.js";
@@ -292,7 +292,7 @@ describe("host agent routes", () => {
 });
 
 describe("host agent composition", () => {
-  it("runs the agent through the configured host CLI in a scratch directory under the data dir", async () => {
+  it("runs the configured host CLI in a temporary directory outside the data dir", async () => {
     const dir = await dataDir();
     const fake = join(dir, "codex"),
       log = join(dir, "codex.log");
@@ -327,7 +327,9 @@ process.stdin.on("end", () => {
         .split("\n")
         .map((line) => JSON.parse(line))
         .filter((entry) => entry.args[0] !== "debug");
-      expect(call.cwd).toBe(await realpath(join(dir, "host-agent")));
+      expect(dirname(call.cwd)).toBe(await realpath(tmpdir()));
+      expect(call.cwd.startsWith(`${await realpath(dir)}${sep}`)).toBe(false);
+      await expect(stat(call.cwd)).rejects.toMatchObject({ code: "ENOENT" });
       expect(call.args).toEqual(expect.arrayContaining(["exec", "--json", "-m", "gpt-6-sol"]));
       expect(call.input).toContain("Tidy my inbox");
       expect(call.keys.some((key: string) => key.startsWith("PASSPORT_"))).toBe(false);

@@ -2,9 +2,11 @@
  * W1A: task runs on a host agent are one native session with Passport's tool belt. The fake
  * CLIs replay Claude Code and Codex stream-json while making real MCP calls to the belt.
  */
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, sep } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { HostAgentLlmClient } from "@passport/agent";
 import {
   createProviderRegistry,
@@ -77,6 +79,40 @@ const resumeArgs = (kind: HostAgentKind, id: string) =>
 const kinds_of = (items: TaskItem[]) => items.map((item) => item.kind);
 
 describe.each(kinds)("%s task sessions", (kind) => {
+  it("removes host working files while MCP mail exports remain in the data directory scratch root", async () => {
+    const env = await sessionBackend(kind, [{ steps: [{ text: "Reviewed." }] }]);
+    const { done } = await env.service.create({ message: "Review my mail" });
+    await done;
+    const [call] = await env.cli.calls();
+    expect(call).toBeDefined();
+    const cwd = call!.cwd;
+    const dataDir = await realpath(dirname(env.cli.path));
+    expect(dirname(cwd)).toBe(await realpath(tmpdir()));
+    expect(cwd.startsWith(`${dataDir}${sep}`)).toBe(false);
+    await expect(stat(cwd)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const client = new Client({ name: "export-path-test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await env.backend.mcp.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      const result = await client.callTool({
+        name: "mail_export",
+        arguments: { query: "from:alice@example.com", account: env.account.id },
+      });
+      expect(result.isError).not.toBe(true);
+      const data = JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as {
+        dir: string;
+        files: Array<{ path: string }>;
+      };
+      expect(await realpath(dirname(data.dir))).toBe(join(dataDir, "scratch"));
+      expect(data.files).toHaveLength(1);
+      expect(await readFile(data.files[0]!.path, "utf8")).toContain("Invoice due Friday");
+    } finally {
+      await client.close();
+    }
+  });
+
   it("keeps a provider-completed run successful when a steer abort arrives while it settles", async () => {
     const env = await sessionBackend(kind, [{ steps: [{ text: "Finished the request." }] }]);
     const controller = new AbortController();

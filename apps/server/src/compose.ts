@@ -207,7 +207,6 @@ export async function createRealBackend(
         (enabled
           ? createLlmClient(config.llm, {
               log: logger.warn,
-              hostAgentCwd: join(config.dataDir, "host-agent"),
             })
           : undefined);
       runtime = createAgentRuntime({

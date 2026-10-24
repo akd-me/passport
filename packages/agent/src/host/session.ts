@@ -1,4 +1,6 @@
-import { mkdir } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   HostAgentEvent,
   HostAgentSessionRequest,
@@ -130,6 +132,7 @@ export function runHostAgent(
       /* a listener failure must not break the run */
     }
   };
+  let workDir: string | undefined;
   const done = (async (): Promise<HostRunResult> => {
     const source = runtime.env ?? process.env;
     const binary = runtime.binaryPath ?? resolveHostAgentBinary(spec.kind, source, runtime.log);
@@ -152,7 +155,10 @@ export function runHostAgent(
         error: { code: "HOST_AGENT_CANCELLED", message: `${NAMES[spec.kind]} run was cancelled` },
       };
     }
-    await mkdir(spec.cwd, { recursive: true, mode: 0o700 });
+    // Never make Passport's database or credentials part of the CLI's working tree. Each
+    // invocation (sessions, completions and catalog probes) uses a private OS temp directory.
+    workDir = await mkdtemp(join(tmpdir(), "passport-host-run-"));
+    spec = { ...spec, cwd: workDir };
     const modelCatalog =
       spec.kind === "codex" && runtime.restrictCodexTools && !spec.modelCatalog
         ? await restrictedCodexCatalog(binary, hostAgentEnv(source, binary), spec.cwd, runtime.log)
@@ -220,28 +226,36 @@ export function runHostAgent(
         return undefined;
       });
     }
-  })().catch((error: unknown): HostRunResult => {
-    // Host-agent preparation failed; returning the bounded error.
-    runtime.log?.("Host-agent preparation failed; returning the bounded error");
+  })()
+    .catch((error: unknown): HostRunResult => {
+      // Host-agent preparation failed; returning the bounded error.
+      runtime.log?.("Host-agent preparation failed; returning the bounded error");
 
-    const code =
-      typeof (error as { code?: unknown })?.code === "string" &&
-      String((error as { code: string }).code).startsWith("HOST_AGENT")
-        ? (error as { code: string }).code
-        : "HOST_AGENT_FAILED";
-    return {
-      text: "",
-      finished: false,
-      schemaEnforced: false,
-      error: {
-        code,
-        message:
-          code === "HOST_AGENT_CONFIG"
-            ? (error as Error).message
-            : `${NAMES[spec.kind]} run could not be prepared`,
-      },
-    };
-  });
+      const code =
+        typeof (error as { code?: unknown })?.code === "string" &&
+        String((error as { code: string }).code).startsWith("HOST_AGENT")
+          ? (error as { code: string }).code
+          : "HOST_AGENT_FAILED";
+      return {
+        text: "",
+        finished: false,
+        schemaEnforced: false,
+        error: {
+          code,
+          message:
+            code === "HOST_AGENT_CONFIG"
+              ? (error as Error).message
+              : `${NAMES[spec.kind]} run could not be prepared`,
+        },
+      };
+    })
+    .finally(async () => {
+      if (workDir) {
+        await rm(workDir, { recursive: true, force: true }).catch(() => {
+          runtime.log?.("Host-agent working directory cleanup failed");
+        });
+      }
+    });
   return { done, cancel: () => controller.abort() };
 }
 

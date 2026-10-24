@@ -92,6 +92,6 @@ export interface LlmClientOptions {
   maxTokens?: number;
   /** Exact model IDs mapped to operator-supplied rates; no stale hard-coded pricing. */
   pricing?: Record<string, ModelPricing>;
-  /** Host-agent providers (`claude-code`, `codex`): scratch working directory for CLI runs. */
+  /** Legacy hint; host-agent providers always use a private per-run OS temp directory. */
   hostAgentCwd?: string;
 }

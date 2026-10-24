@@ -24,6 +24,7 @@ export interface FakeCall {
   args: string[];
   stdin: string;
   pid: number;
+  cwd: string;
   /** Tool results the fake received, in order. */
   results?: string[];
   /** Tools advertised by this run's MCP server. */
@@ -88,7 +89,7 @@ function titleReply() {
 async function main() {
   if ((args.join(" ") + stdin).includes("You name tasks")) return titleReply();
   const prior = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).length : 0;
-  const entry = { args, stdin, pid: process.pid, results: [] };
+  const entry = { args, stdin, pid: process.pid, cwd: process.cwd(), results: [] };
   const invocation = plan.invocations[Math.min(prior, plan.invocations.length - 1)];
   const resume = kind === "claude-code" ? after("--resume") : args[1] === "resume" ? args[2] : undefined;
   const log = () => fs.writeFileSync(logPath, (fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).slice(0, prior).join("\n") + (prior ? "\n" : "") : "") + JSON.stringify(entry) + "\n");

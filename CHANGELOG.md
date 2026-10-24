@@ -124,6 +124,9 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 
 ### Fixed
 
+- Host CLI sessions and completions run in private per-run directories under the OS temp root,
+  removed after success, failure or cancellation, outside Passport's data directory; MCP
+  `mail_export` files keep their documented data-directory scratch location (R1-7).
 - Daily digest, matter review and user routine sessions expose an explicit allowlist of read,
   notes, matter, mail-organizing, draft and render tools; scheduled input cannot delegate,
   ask questions, request secrets or organize its task (R1-1 routines).
