@@ -216,6 +216,9 @@
 
 /* ---------------------------------------------------------------- Notices */
 .tl-notice.limited {
+  color: var(--text);
+}
+.tl-notice.limited .icon {
   color: var(--amber);
 }
 .tl-notice.restarted {

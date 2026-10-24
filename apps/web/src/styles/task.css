@@ -124,7 +124,11 @@
   margin-top: 3px;
   flex: none;
 }
+/* Status colour marks the icon only; the sentence stays readable text. */
 .tl-notice.warn {
+  color: var(--text);
+}
+.tl-notice.warn .icon {
   color: var(--red);
 }
 
@@ -568,7 +572,7 @@ button.composer-chip:hover {
   place-items: center;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: var(--r-control);
   color: var(--muted);
   flex: none;
 }
@@ -783,6 +787,20 @@ button.composer-chip:hover {
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--s-2);
+}
+/* The trigger and time keep at least half the row; a long failure wraps in its own column. */
+.run-list-what {
+  flex: 1 0 50%;
+  min-width: 0;
+}
+.run-list .run-chip {
+  min-width: 0;
+  white-space: normal;
+  align-items: baseline;
+}
+.run-list .run-chip::before {
+  flex: none;
+  transform: translateY(-1px);
 }
 .account-line {
   display: flex;

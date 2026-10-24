@@ -273,7 +273,6 @@ a.row:hover {
   padding: var(--s-6) var(--s-6) var(--s-5);
   border-radius: var(--r-panel);
   background: var(--raised);
-  box-shadow: var(--elevation);
 }
 .login-card h1 {
   font-size: var(--t-l);

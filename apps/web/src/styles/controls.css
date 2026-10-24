@@ -120,11 +120,10 @@
   min-width: 18px;
   height: 18px;
   padding: 0 4px;
-  border-radius: 4px;
-  background: var(--sunken);
-  box-shadow: 0 0 0 1px var(--line-strong);
+  border-radius: var(--r-control);
+  background: var(--selected);
   color: var(--muted);
-  font: var(--w-medium) 10.5px / 1 var(--font-ui);
+  font: var(--w-medium) var(--t-xs) / 1 var(--font-ui);
 }
 
 /* ---------------------------------------------------------------- Badges and dots */
@@ -198,7 +197,7 @@
 .avatar.small {
   width: 24px;
   height: 24px;
-  font-size: 10px;
+  font-size: var(--t-xs);
 }
 .verification {
   display: inline-flex;
@@ -332,7 +331,7 @@
   gap: 6px;
   height: var(--control-h-sm);
   padding: 0 10px;
-  border-radius: 4px;
+  border-radius: var(--r-control);
   color: var(--muted);
   font-size: var(--t-s);
   transition:
@@ -350,7 +349,6 @@
   background: var(--raised);
   color: var(--text);
   font-weight: var(--w-medium);
-  box-shadow: 0 0 0 1px var(--line);
 }
 .search-field {
   display: flex;
@@ -740,10 +738,6 @@ details[open] > summary::before {
 .mode-option.active {
   background: var(--selected);
 }
-.mode-picker:not(.compact) .mode-option.active {
-  background: var(--raised);
-  box-shadow: 0 0 0 1px var(--line);
-}
 .mode-option:disabled {
   opacity: 0.6;
 }
@@ -854,9 +848,8 @@ details[open] > summary::before {
   text-underline-offset: 2px;
 }
 .toast .kbd {
-  background: transparent;
+  background: color-mix(in srgb, var(--canvas) 18%, transparent);
   color: inherit;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--canvas) 40%, transparent);
 }
 @keyframes toast-in {
   from {
@@ -900,7 +893,7 @@ details[open] > summary::before {
 }
 .md pre {
   font-family: var(--font-code);
-  font-size: 0.84em;
+  font-size: var(--t-xs);
   line-height: var(--lh-prose);
   background: var(--sunken);
   border-radius: var(--r-control);
@@ -944,6 +937,6 @@ details[open] > summary::before {
 .md-link-url {
   color: var(--muted);
   font-family: var(--font-code);
-  font-size: 0.86em;
+  font-size: var(--t-xs);
   overflow-wrap: anywhere;
 }

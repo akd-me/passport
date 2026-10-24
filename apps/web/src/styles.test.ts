@@ -184,11 +184,34 @@ describe("design tokens", () => {
     }
   });
 
+  it("R2-15: has no raw radius but 0, 50%, and 1–2 px on glyphs and bars", () => {
+    const raw = sheets.flatMap(([file, text]) =>
+      [...text.matchAll(/border-radius: ([^;]+);/g)]
+        .filter((m) =>
+          (m[1] ?? "")
+            .split(/\s+/)
+            .some((part) => !/^(0|50%|1px|2px|var\(--r-(control|panel)\))$/.test(part)),
+        )
+        .map((m) => `${file}: ${m[1]}`),
+    );
+    expect(raw).toEqual([]);
+  });
+
   it("uses one radius for controls and one for panels", () => {
     const radii = new Set(
       [...css.matchAll(/border-radius: var\(--(r-[a-z]+)\)/g)].map((m) => m[1]),
     );
     expect([...radii].sort()).toEqual(["r-control", "r-panel"]);
+  });
+
+  it("R2-14: sets no font size off the scale", () => {
+    const raw = sheets.flatMap(([file, text]) =>
+      [...text.matchAll(/font(?:-size)?: ([^;]+);/g)]
+        .map((m) => m[1] ?? "")
+        .filter((value) => /\d(px|em|rem)\b/.test(value.replace(/var\([^)]*\)/g, "")))
+        .map((value) => `${file}: ${value}`),
+    );
+    expect(raw).toEqual([]);
   });
 
   it("keeps to five type sizes", () => {

@@ -6,6 +6,9 @@
   background: var(--sunken);
   border-radius: 0 var(--r-panel) var(--r-panel) 0;
   padding: var(--s-2) var(--s-3);
+  /* Long questions scroll inside the dock, so a short window keeps the timeline readable. */
+  max-height: 40dvh;
+  overflow-y: auto;
 }
 .question-panel ul {
   list-style: none;
