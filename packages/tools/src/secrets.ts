@@ -1,9 +1,12 @@
-import type { SecretRequest } from "@passport/types";
+import { type SecretRequest, stampTask, type Task, taskWaitingOn } from "@passport/types";
 import type { Context } from "./context.js";
 import { neutralize } from "./ondemand-support.js";
 import { json, ToolError } from "./presentation.js";
 import { register } from "./register.js";
 import { schema as z } from "./schema.js";
+
+/** Longest `request_secret` wait. Host tool-call timeouts must exceed it (`ToolBeltListener`). */
+export const MAX_SECRET_TIMEOUT_SECONDS = 600;
 
 /** Await private input, returning only its one-use reference to the agent. */
 export function registerSecrets(ctx: Context) {
@@ -14,7 +17,7 @@ export function registerSecrets(ctx: Context) {
     {
       text: z.string().trim().min(1).max(1000),
       clientRequestId: z.string().trim().min(1).max(200),
-      timeoutSeconds: z.number().int().min(10).max(600).default(300),
+      timeoutSeconds: z.number().int().min(10).max(MAX_SECRET_TIMEOUT_SECONDS).default(300),
     },
     true,
     async (args, call) => {
@@ -41,11 +44,9 @@ export function registerSecrets(ctx: Context) {
       if (request.status !== "pending") {
         return json(requestResult(request));
       }
-      const task = await tasks.update(taskId, (current) => ({
-        needsUser: current.pendingActionIds?.length ? "approval" : "question",
-        status: "inbox",
-        lastActivityAt: createdAt,
-      }));
+      const task = await tasks.update(taskId, (current) =>
+        stampTask(current, secretAsked(current, request.id, createdAt)),
+      );
       call.deps.bus.emit({ type: "task.updated", task });
       const result = await new Promise<SecretRequest>((resolve, reject) => {
         let timer: ReturnType<typeof setTimeout>;
@@ -103,26 +104,57 @@ export function registerSecrets(ctx: Context) {
           },
         );
       });
-      const recent = await tasks.items.recent(taskId, ["secret_request"], 200);
-      const pending = await Promise.all(
-        recent.map((item) =>
-          item.kind === "secret_request"
-            ? secrets.requests.get(item.payload.requestId, taskId, call.now())
-            : null,
-        ),
+      const updated = await tasks.update(taskId, (current) =>
+        stampTask(current, secretResolved(current, request.id)),
       );
-      // Questions from ask_user keep the task waiting on the person (v0.4).
-      const updated = await tasks.update(taskId, (current) => ({
-        ...(current.needsUser === "question" &&
-        !current.pendingQuestions?.length &&
-        !pending.some((item) => item?.status === "pending")
-          ? { needsUser: null }
-          : {}),
-      }));
       call.deps.bus.emit({ type: "task.updated", task: updated });
       return json(requestResult(result));
     },
   );
+}
+
+/**
+ * A new secret request waits on the person like a question (docs/tasks.md "Status rules",
+ * `question_asked`): approvals keep priority, a settled or archived task only records
+ * `needsUser`, otherwise the task surfaces in the inbox.
+ */
+export function secretAsked(task: Task, requestId: string, now: string): Partial<Task> {
+  const pendingSecretRequestIds = [
+    ...(task.pendingSecretRequestIds ?? []).filter((id) => id !== requestId),
+    requestId,
+  ];
+  const needsUser = taskWaitingOn({ ...task, pendingSecretRequestIds });
+  if (task.status === "settled" || task.status === "archived") {
+    return { pendingSecretRequestIds, needsUser };
+  }
+  if (task.status === "inbox" && task.needsUser === needsUser) {
+    return { pendingSecretRequestIds };
+  }
+  return {
+    pendingSecretRequestIds,
+    status: "inbox",
+    needsUser,
+    snoozedUntil: null,
+    lastActivityAt: now,
+  };
+}
+
+/**
+ * A secret request that ended (saved, timed out, cancelled): `needsUser` passes to the next thing
+ * waiting on the person (`question_resolved`); a failure or limit stays.
+ */
+export function secretResolved(task: Task, requestId: string): Partial<Task> {
+  const pendingSecretRequestIds = (task.pendingSecretRequestIds ?? []).filter(
+    (id) => id !== requestId,
+  );
+  const next = taskWaitingOn({ ...task, pendingSecretRequestIds });
+  if (next) {
+    return { pendingSecretRequestIds, ...(task.needsUser === next ? {} : { needsUser: next }) };
+  }
+  return {
+    pendingSecretRequestIds,
+    ...(task.needsUser === "question" ? { needsUser: null } : {}),
+  };
 }
 
 function requestResult(request: SecretRequest) {

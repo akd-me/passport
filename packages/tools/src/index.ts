@@ -83,6 +83,7 @@ export {
   responseByteBudget,
 } from "./response-budget.js";
 export type { JsonSchema } from "./schema.js";
+export { MAX_SECRET_TIMEOUT_SECONDS, secretAsked, secretResolved } from "./secrets.js";
 export type {
   Tool,
   ToolAnnotations,
