@@ -188,6 +188,25 @@ credentials and starts watching for new mail. OAuth-only IMAP services need thei
 above where possible. Microsoft deployments that disable password authentication cannot be connected
 by entering an app password here.
 
+## Learn how you write
+
+On first connect of a real mail account, Passport creates a one-time **Learn how you write**
+task. It runs in the interactive lane, with permissions capped at `auto_accept_edits` (or your
+lower global mode). It makes one Sent search of at most 50 messages, reads only sampled bodies
+through `mail_read` with quoted replies collapsed, and proposes Voice, Signature and VIP entries
+for USER.md together. Frequent recipients are suggestions, not newly trusted identities.
+
+Review the proposed USER.md in the task’s approval panel or Decisions, then approve or reject
+the single `profile_update` action. Passport never applies this learning without your approval,
+even at full access. Approval is logged and Undo restores the prior profile. Other USER.md
+sections are preserved when the proposal is prepared; review any edits you made while it waited.
+
+Reauthorization reuses the task and does not sample again. One-shot CLI connections defer it to
+the next `passport serve`. IMAP without an advertised or configured Sent folder skips it. Accounts
+already connected before this feature, mock/demo accounts, and calendar-only connections are not
+sampled. Empty or unusable Sent samples produce no profile proposal. If a run fails, open its task
+to retry; profile learning is limited to one bounded sample per run.
+
 ## Watching for new mail, account controls and diagnostics
 
 Passport keeps no copy of your mailbox. Connecting an account takes a change cursor at "now" and
