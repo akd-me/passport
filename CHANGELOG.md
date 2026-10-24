@@ -134,6 +134,8 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   substrings are redacted from request headers and query values.
 - Account connection tests peek at private references and never queue voice learning. Account
   and webhook setup consume references only after persistence succeeds, cleaning up failed installs.
+- Saved private references expire after one hour by default, retain their deadline across restart,
+  and are swept by store maintenance. References from older builds without an expiry are revoked.
 
 ## [0.3.2] — 2026-10-24
 

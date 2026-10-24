@@ -3,6 +3,7 @@ import { ApiError } from "../errors.js";
 
 /** Store extension local to this stream until the shared contract adds these methods. */
 export interface SecretReferenceStore extends StoreSecrets {
+  put(value: string, options?: { ttlMs?: number }): Promise<string>;
   peek(ref: string): Promise<string | null>;
   consume(refs: string[]): Promise<boolean>;
   sweepExpired?(): Promise<number>;

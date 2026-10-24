@@ -3,6 +3,7 @@ import type { Store } from "@passport/types";
 import { agentJobTimeout } from "../agent-session.js";
 import type { Backend } from "../backend.js";
 import { registerTaskJobs, routineBinding } from "../tasks/jobs.js";
+import type { SecretReferenceStore } from "./secret-references.js";
 export async function registerSystemJobs(
   backend: Backend,
   register: (def: JobDefinition) => Promise<void>,
@@ -93,6 +94,7 @@ export async function registerSystemJobs(
       // The envelope/body cache is bounded: TTL+LRU bodies, then LRU envelopes; vacuum after.
       const bodies = await store.emails.evictBodies?.();
       const envelopes = await store.emails.evictEnvelopes?.();
+      const secrets = await (store.secrets as SecretReferenceStore | undefined)?.sweepExpired?.();
       const evicted =
         bodies || envelopes
           ? `; evicted ${bodies?.evicted ?? 0} bodies and ${envelopes?.evicted ?? 0} envelopes`
@@ -102,13 +104,15 @@ export async function registerSystemJobs(
       } else if (store.vacuum || store.optimizeFts) {
         await store.vacuum?.();
         await store.optimizeFts?.();
-      } else if (!evicted) {
+      } else if (!evicted && secrets === undefined) {
         return {
           status: "skipped",
           summary: "This store does not expose maintenance operations",
         };
       }
-      return { summary: `Store maintenance complete${evicted}` };
+      return {
+        summary: `Store maintenance complete${evicted}; expired ${secrets ?? 0} secret references`,
+      };
     },
   );
   // Reconcile non-HTTP account changes too, without another ad-hoc timer loop.

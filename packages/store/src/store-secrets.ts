@@ -33,9 +33,11 @@ export function createEncryptedKv(db: StoreDatabase): EncryptedKv {
 }
 
 export interface SecretReferenceStore extends StoreSecrets {
+  put(value: string, options?: { ttlMs?: number }): Promise<string>;
   peek(ref: string): Promise<string | null>;
   /** Atomically consume a set after every consumer write has succeeded. */
   consume(refs: string[]): Promise<boolean>;
+  sweepExpired(): Promise<number>;
 }
 
 export function createSecretsRepository(db: StoreDatabase): SecretReferenceStore {
@@ -50,29 +52,53 @@ export function createSecretsRepository(db: StoreDatabase): SecretReferenceStore
     ]);
   };
   // Synchronous internal write so saving a value and resolving its request share a transaction.
-  const put = (value: string) => {
+  const put = (value: string, ttlMs = 3600_000) => {
+    if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) {
+      throw new StoreError("INVALID_TTL", "Secret reference TTL must be a positive integer");
+    }
     const ref = "secret:" + randomBytes(32).toString("hex");
     const key = "encrypted:" + ref;
-    const blob = encryptCredentials(db.key, key, { value }).toString("base64");
+    const blob = encryptCredentials(db.key, key, {
+      value,
+      expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+    }).toString("base64");
     db.run("INSERT INTO kv(key, value) VALUES (?, ?)", [key, blob]);
     return ref;
   };
-  const encrypted = createEncryptedKv(db);
+  const peek = (ref: string): string | null => {
+    if (!/^secret:[a-f0-9]{64}$/.test(ref)) {
+      return null;
+    }
+    const key = "encrypted:" + ref;
+    const row = db.one("SELECT value FROM kv WHERE key = ?", [key]);
+    if (!row) {
+      return null;
+    }
+    const saved = decryptCredentials(db.key, key, Buffer.from(row.value as string, "base64"));
+    // Legacy references have no trustworthy expiry; invalidate them rather than renew forever.
+    const expiresAt = Date.parse(saved.expiresAt ?? "");
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      db.run("DELETE FROM kv WHERE key = ?", [key]);
+      return null;
+    }
+    return saved.value as string;
+  };
   return {
-    put: async (value) => put(value),
-    peek: (ref) => (/^secret:[a-f0-9]{64}$/.test(ref) ? encrypted.get(ref) : Promise.resolve(null)),
-    take: (ref) =>
-      /^secret:[a-f0-9]{64}$/.test(ref) ? encrypted.take(ref) : Promise.resolve(null),
-    consume: async (refs) => {
-      const values = await Promise.all(refs.map((ref) => encrypted.get(ref)));
-      return db.transaction(() => {
-        // Re-read under the write lock: concurrent consumers can install a ref only once.
-        for (const [index, ref] of refs.entries()) {
-          if (!/^secret:[a-f0-9]{64}$/.test(ref) || values[index] === null) {
-            return false;
-          }
-          const row = db.one("SELECT value FROM kv WHERE key = ?", ["encrypted:" + ref]);
-          if (!row) {
+    put: async (value, options) => put(value, options?.ttlMs),
+    peek: async (ref) => db.transaction(() => peek(ref)),
+    take: async (ref) =>
+      db.transaction(() => {
+        const value = peek(ref);
+        if (value !== null) {
+          db.run("DELETE FROM kv WHERE key = ?", ["encrypted:" + ref]);
+        }
+        return value;
+      }),
+    consume: async (refs) =>
+      db.transaction(() => {
+        // Validate every ref under the write lock, including its TTL, before consuming any.
+        for (const ref of refs) {
+          if (peek(ref) === null) {
             return false;
           }
         }
@@ -80,8 +106,18 @@ export function createSecretsRepository(db: StoreDatabase): SecretReferenceStore
           db.run("DELETE FROM kv WHERE key = ?", ["encrypted:" + ref]);
         }
         return true;
-      });
-    },
+      }),
+    sweepExpired: async () =>
+      db.transaction(() => {
+        let removed = 0;
+        for (const row of db.all("SELECT key FROM kv WHERE key GLOB 'encrypted:secret:*'")) {
+          const ref = (row.key as string).slice("encrypted:".length);
+          if (peek(ref) === null) {
+            removed++;
+          }
+        }
+        return removed;
+      }),
     requests: {
       create: async (input) =>
         db.transaction(() => {
