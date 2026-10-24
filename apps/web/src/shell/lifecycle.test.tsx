@@ -153,11 +153,15 @@ describe("undo settle, snooze and archive", () => {
   });
 
   it("offers no Undo when the server sends no previous state", async () => {
-    const backend = lifecycleBackend([task("a", { title: "Old server" })]);
+    lifecycleBackend([task("a", { title: "Old server" })]);
     renderSidebar();
     await screen.findByText("Old server");
     // A v0.3 server: settle answers with the bare task.
-    const settled = { ...task("a", { title: "Old server" }), status: "settled" as const, revision: 500 };
+    const settled = {
+      ...task("a", { title: "Old server" }),
+      status: "settled" as const,
+      revision: 500,
+    };
     const original = globalThis.fetch;
     globalThis.fetch = async (input, init) =>
       String(input).endsWith("/settle") ? Response.json(settled) : original(input, init);
