@@ -3,6 +3,17 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
+## [Unreleased]
+
+### Added
+
+- Webhook routines with HMAC signatures, seven-day replay protection, durable coalescing,
+  filters, token rotation and the latest 50 deliveries. Routines can run on their bound task
+  or create a fresh child task for each run.
+- `request_secret` and private task input with encrypted one-use references for webhook
+  signing keys and IMAP credentials. Task details now include Automations; routine details
+  include Deliveries.
+
 ## [0.3.2] — 2026-10-24
 
 ### Fixed

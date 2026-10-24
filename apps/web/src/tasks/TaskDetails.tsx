@@ -2,6 +2,7 @@ import type { ActionRecord, Task, TaskRun } from "@passport/types";
 import { useState } from "react";
 import { AccountDot, useAccounts } from "../accounts/AccountFilter";
 import { Feedback, relativeTime } from "../components/ui";
+import { Automations } from "../scheduler/Automations";
 import { ProposalDetails } from "../views/ProposalDetails";
 import { modeLabel } from "../views/trust-modes";
 import { taskApi } from "./api";
@@ -138,6 +139,7 @@ export function TaskDetails({
         </dl>
       </section>
       <Watches task={task} />
+      <Automations taskId={task.id} />
       <Runs runs={runs} />
     </div>
   );

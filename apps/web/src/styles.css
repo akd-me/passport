@@ -3098,3 +3098,33 @@ fieldset.field legend {
 .host-agent-program .field {
   margin-top: 6px;
 }
+/* W1C scheduler additions: semantic rows, shared theme tokens, no nested surfaces. */
+.scheduler-automations li {
+  align-items: start;
+  padding-block: 8px;
+}
+.scheduler-automations p {
+  margin: 4px 0;
+}
+.scheduler-delivery-list {
+  list-style: none;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+}
+.scheduler-delivery-list li,
+.scheduler-secret-request {
+  padding-block: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.scheduler-delivery-list pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.scheduler-webhook-fields,
+.scheduler-filter {
+  border: 0;
+  padding: 8px 0;
+  margin: 0;
+  min-width: 0;
+}
+/* End W1C scheduler additions. */
