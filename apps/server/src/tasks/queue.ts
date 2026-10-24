@@ -49,7 +49,16 @@ export class TaskQueueService {
       let answers: string[] = [];
       let task = await this.update(taskId, (current) => {
         const pending = current.pendingQuestions ?? [];
-        answers = options.answers ?? pending.map((question) => question.itemId);
+        const open = pending.map((question) => question.itemId);
+        // Only questions still open: a dismiss may have won the race with an answer.
+        answers = (options.answers ?? open).filter((itemId) => open.includes(itemId));
+        if (options.answers && !answers.length) {
+          throw new ApiError(
+            "QUESTION_RESOLVED",
+            "This question was already answered or dismissed",
+            409,
+          );
+        }
         const left = pending.filter((question) => !answers.includes(question.itemId));
         return {
           seenAt: this.service.now(),

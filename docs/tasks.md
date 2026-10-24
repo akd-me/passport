@@ -671,6 +671,8 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   secret card still works, but the task no longer shows Input for it.
 - Coalescing relies on the single agent lane; a future parallel lane would need an explicit
   wake generation.
+- Settling, archiving or stopping a parent does not stop its subtasks; they finish and leave a
+  notification without waking it. Use `task_cancel` (the agent) or open the subtask.
 
 ## Known limitations (W1A sessions)
 
