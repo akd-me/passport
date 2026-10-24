@@ -65,6 +65,7 @@ describe.each(["claude-code", "codex"] as const)("live %s session", (kind) => {
             systemPrompt: "You are a terse test assistant. Use the passport tools when asked.",
             mcpServers: { passport: binding.server },
             allowedTools: ["mcp__passport"],
+            persist: true,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             timeoutMs: 180_000,
           },

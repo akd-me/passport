@@ -53,6 +53,12 @@ export interface HostAgentLlmClientOptions {
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   binaryPath?: string;
+  /**
+   * Codex: rewrite the CLI's model catalog so sessions and completions get no code-mode `exec`,
+   * `apply_patch`, sub-agents or clock tools (one `codex debug models` per binary).
+   * `createLlmClient` turns it on; off by default so scripted test CLIs see only real runs.
+   */
+  restrictCodexTools?: boolean;
 }
 
 /** One agentic session turn on the client's CLI, model and scratch directory. */
@@ -61,8 +67,13 @@ export interface HostAgentSessionInput {
   systemPrompt: string;
   mcpServers: Record<string, HostAgentMcpServer>;
   allowedTools?: string[];
-  /** Resume this provider session; the session is always kept resumable. */
+  /** Resume this provider session; a resumed session keeps its transcript. */
   resumeSessionId?: string;
+  /**
+   * Keep the CLI transcript so a later run can resume the session. Default false: the run uses
+   * `--no-session-persistence` (Claude Code) or `--ephemeral` (Codex) and leaves no transcript.
+   */
+  persist?: boolean;
   timeoutMs: number;
   signal?: AbortSignal;
 }
@@ -161,7 +172,7 @@ export class HostAgentLlmClient implements SessionLlmClient {
 
   /**
    * A task run as one native session: the CLI calls the supplied MCP tools itself and streams
-   * events. Uses the main model and reasoning, and keeps the session resumable.
+   * events. Uses the main model and reasoning; the session is resumable only with `persist`.
    */
   session(
     input: HostAgentSessionInput,
@@ -181,12 +192,17 @@ export class HostAgentLlmClient implements SessionLlmClient {
         mcpServers: input.mcpServers,
         ...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
         ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
-        persistSession: true,
+        ...(input.persist || input.resumeSessionId ? { persistSession: true } : {}),
         timeoutMs: input.timeoutMs,
         ...(input.signal ? { signal: input.signal } : {}),
       },
       onEvent,
-      { log: this.options.log, env: this.options.env, binaryPath: this.options.binaryPath },
+      {
+        log: this.options.log,
+        env: this.options.env,
+        binaryPath: this.options.binaryPath,
+        ...(this.options.restrictCodexTools ? { restrictCodexTools: true } : {}),
+      },
     );
   }
 
@@ -228,6 +244,7 @@ export class HostAgentLlmClient implements SessionLlmClient {
         env: this.options.env,
         binaryPath: this.options.binaryPath,
         timeoutMs: this.options.timeoutMs ?? 180_000,
+        ...(this.options.restrictCodexTools ? { restrictCodexTools: true } : {}),
       },
     );
     const outcome = await run.done;

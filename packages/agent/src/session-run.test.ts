@@ -119,7 +119,11 @@ describe("agentic session runs", () => {
         };
       },
     ]);
-    const run = await env.runtime.run(instruction, env.options());
+    // A run that can be resumed later (message, watch, wake) keeps its transcript.
+    const run = await env.runtime.run(
+      instruction,
+      env.options({ session: { resolveResume: async () => undefined } }),
+    );
     expect(JSON.stringify(reply)).toContain("Invoice due Friday");
     expect(JSON.stringify(reply)).not.toContain("ON_DEMAND_UNSUPPORTED");
     expect(env.mock.reader().costLog.map((entry) => entry.method)).toContain("search");
@@ -132,6 +136,7 @@ describe("agentic session runs", () => {
     // Native tools: the session sees the belt, not a JSON protocol, plus the orchestration notes.
     const input = env.llm.inputs[0]!;
     expect(input.allowedTools).toEqual(["mcp__passport"]);
+    expect(input.persist).toBe(true);
     expect(Object.keys(input.mcpServers)).toEqual(["passport"]);
     expect(input.systemPrompt).toContain("## How Passport runs you");
     expect(input.systemPrompt).not.toContain("argumentsJson");
@@ -174,7 +179,10 @@ describe("agentic session runs", () => {
 
   it("falls back to a fresh session when the resume fails before doing anything", async () => {
     const env = await setup([
-      async () => ({ ok: false, error: { code: "HOST_AGENT_FAILED", message: "No session" } }),
+      async () => ({
+        ok: false,
+        error: { code: "HOST_AGENT_SESSION_MISSING", message: "No session" },
+      }),
       async (_belt, emit) => {
         emit({ type: "started", sessionId: "s-2" });
         return {};
@@ -190,6 +198,77 @@ describe("agentic session runs", () => {
     expect(env.llm.inputs[1]?.prompt).toContain("Anything due this week?");
     expect(env.events.sessions).toEqual([{ kind: "claude-code", id: "s-2" }]);
     expect(run.summary).toContain("could not be resumed");
+  });
+
+  it("keeps the task's session when a resume fails for any other reason (R1-6)", async () => {
+    const env = await setup([
+      async (_belt, emit) => {
+        emit({ type: "started", sessionId: "orig" });
+        return { ok: false, error: { code: "HOST_AGENT_FAILED", message: "Overloaded (529)" } };
+      },
+    ]);
+    await expect(
+      env.runtime.run(
+        instruction,
+        env.options({
+          session: { resume: { kind: "claude-code", id: "orig", instruction: "Turn" } },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "HOST_AGENT_FAILED" });
+    expect(env.llm.inputs).toHaveLength(1);
+    expect(env.events.sessions).toEqual([{ kind: "claude-code", id: "orig" }]);
+  });
+
+  it("records a fallback session only once the fresh attempt succeeds (R1-6)", async () => {
+    const env = await setup([
+      async () => ({
+        ok: false,
+        error: { code: "HOST_AGENT_SESSION_MISSING", message: "No session" },
+      }),
+      async (_belt, emit) => {
+        emit({ type: "started", sessionId: "fresh" });
+        return { ok: false, error: { code: "HOST_AGENT_RATE_LIMIT", message: "Limited" } };
+      },
+    ]);
+    await expect(
+      env.runtime.run(
+        instruction,
+        env.options({
+          session: { resume: { kind: "claude-code", id: "gone", instruction: "Turn" } },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "HOST_AGENT_RATE_LIMIT" });
+    expect(env.llm.inputs).toHaveLength(2);
+    expect(env.events.sessions).toEqual([]);
+  });
+
+  it("runs one-off sessions without a transcript and records no provider session (R1-5)", async () => {
+    const env = await setup([
+      async (_belt, emit) => {
+        emit({ type: "started", sessionId: "ephemeral" });
+        return {};
+      },
+      async (_belt, emit) => {
+        emit({ type: "started", sessionId: "voice" });
+        return {};
+      },
+    ]);
+    // Arrivals and routines pass `session: {}`; voice learning never persists either.
+    await env.runtime.run(instruction, env.options());
+    await env.runtime.run(
+      instruction,
+      env.options({
+        session: {
+          resolveResume: async () => ({ kind: "claude-code", id: "x", instruction: "T" }),
+        },
+        voiceLearning: { accountId: "account-1", sentContainer: "Sent" },
+      }),
+    );
+    expect(env.llm.inputs.map((input) => [input.persist, input.resumeSessionId])).toEqual([
+      [false, undefined],
+      [false, undefined],
+    ]);
+    expect(env.events.sessions).toEqual([]);
   });
 
   it("does not retry a resumed session that already did work", async () => {

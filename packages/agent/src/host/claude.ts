@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { HostAgentEvent, HostAgentMcpServer } from "@passport/types";
 import { LlmError } from "../errors.js";
 import { redact } from "./env.js";
+import { LIMIT_TEXT, SESSION_MISSING_TEXT } from "./session-text.js";
 import {
   count,
   emptyUsage,
@@ -46,13 +47,14 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
   if (spec.reasoning) {
     args.push("--effort", spec.reasoning);
   }
-  if (spec.systemPrompt !== undefined) {
-    args.push("--system-prompt", spec.systemPrompt);
-  }
   if (spec.jsonSchema) {
     args.push("--json-schema", JSON.stringify(spec.jsonSchema));
   }
   let dir: string | undefined;
+  const privateDir = async () => {
+    dir ??= await mkdtemp(join(tmpdir(), "passport-claude-"));
+    return dir;
+  };
   const env: Record<string, string> = {};
   if (spec.completion) {
     args.push("--safe-mode", "--tools", "", "--max-turns", "1");
@@ -98,8 +100,7 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
     }
     if (Object.keys(mcpServers).length) {
       // A private file keeps MCP env and headers out of the process list.
-      dir = await mkdtemp(join(tmpdir(), "passport-claude-"));
-      const path = join(dir, "mcp.json");
+      const path = join(await privateDir(), "mcp.json");
       await writeFile(path, JSON.stringify({ mcpServers }), { mode: 0o600 });
       args.push("--mcp-config", path);
     }
@@ -112,6 +113,13 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
     if (spec.maxTurns !== undefined) {
       args.push("--max-turns", String(spec.maxTurns));
     }
+  }
+  // Last, after the checks that can throw, so a failed build leaves no private directory.
+  if (spec.systemPrompt !== undefined) {
+    // The system prompt holds USER.md: a private file keeps it out of the process list (R1-39).
+    const path = join(await privateDir(), "system-prompt.md");
+    await writeFile(path, spec.systemPrompt, { mode: 0o600 });
+    args.push("--system-prompt-file", path);
   }
   return {
     args,
@@ -142,10 +150,13 @@ function text(content: unknown): string {
     .join("\n");
 }
 
-function errorCode(result: Record<string, unknown>): string {
+function errorCode(result: Record<string, unknown>, detail: string): string {
   const status = count(result.api_error_status);
   if (result.subtype === "error_max_turns") {
     return "HOST_AGENT_MAX_TURNS";
+  }
+  if (SESSION_MISSING_TEXT.test(detail)) {
+    return "HOST_AGENT_SESSION_MISSING";
   }
   if (status === 401 || status === 403) {
     return "HOST_AGENT_AUTH";
@@ -153,7 +164,8 @@ function errorCode(result: Record<string, unknown>): string {
   if (status === 404) {
     return "HOST_AGENT_MODEL";
   }
-  if (status === 429) {
+  // Claude Code reports a plan limit as result text ("usage limit reached|<epoch>").
+  if (status === 429 || LIMIT_TEXT.test(detail)) {
     return "HOST_AGENT_RATE_LIMIT";
   }
   return "HOST_AGENT_FAILED";
@@ -258,13 +270,12 @@ export function createClaudeParser(): HostStreamParser {
           message.is_error === true ||
           (typeof message.subtype === "string" && message.subtype !== "success")
         ) {
-          const detail =
-            result ||
-            (Array.isArray(message.errors)
-              ? message.errors.filter((e) => typeof e === "string").join("; ")
-              : "");
+          const errors = Array.isArray(message.errors)
+            ? message.errors.filter((e) => typeof e === "string").join("; ")
+            : "";
+          const detail = result || errors;
           state.error = {
-            code: errorCode(message),
+            code: errorCode(message, `${result}\n${errors}`),
             message: `Claude Code run failed${detail ? `: ${redact(detail)}` : ""}`,
           };
         } else {

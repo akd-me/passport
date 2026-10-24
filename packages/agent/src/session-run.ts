@@ -18,6 +18,9 @@ import { prepareToolInput } from "./tool-input.js";
 /** `setTimeout` holds at most a signed 32-bit delay. */
 const MAX_TIMER_MS = 2_147_483_647 - 60_000;
 
+/** How long in-flight tool calls may finish after the time budget runs out before they are aborted. */
+export const TOOL_GRACE_MS = 10_000;
+
 /** MCP server name of the tool belt; the CLI sees its tools as `mcp__passport__<tool>`. */
 export const TOOL_BELT_SERVER = "passport";
 
@@ -112,7 +115,14 @@ export async function agenticSession(
   ].join("\n\n");
   const context = await manualContext(ctx, trigger);
   const fresh = manualPrompt(trigger.instruction, context);
-  const requested = options.session?.resume ?? (await options.session?.resolveResume?.());
+  // Only runs a later run can resume keep a CLI transcript (R1-5): message, watch and wake runs.
+  // Arrivals, routines and voice learning run without one and never record a provider session.
+  const persist =
+    options.session?.persist ??
+    (!options.voiceLearning && !!(options.session?.resume || options.session?.resolveResume));
+  const requested = persist
+    ? (options.session?.resume ?? (await options.session?.resolveResume?.()))
+    : undefined;
   const resume = requested?.kind === llm.hostKind ? requested : undefined;
   // A resumed turn is the follow-up alone, plus any composer context this run was given.
   const resumed =
@@ -130,7 +140,12 @@ export async function agenticSession(
     },
   });
 
-  const attempt = (prompt: string, resumeSessionId?: string): Promise<HostAgentSessionResult> => {
+  let pendingSession: string | undefined;
+  const attempt = (
+    prompt: string,
+    resumeSessionId?: string,
+    deferSession = false,
+  ): Promise<HostAgentSessionResult> => {
     const remaining = Math.min(budget.remainingMs(), MAX_TIMER_MS);
     const timer = setTimeout(() => {
       budget.expire();
@@ -138,7 +153,12 @@ export async function agenticSession(
     }, remaining);
     const onEvent = (event: HostAgentEvent) => {
       if (event.type === "started" && event.sessionId) {
-        observer?.providerSession?.({ kind: llm.hostKind, id: event.sessionId });
+        // An ephemeral session cannot be resumed; the task keeps the session it had.
+        if (persist && deferSession) {
+          pendingSession = event.sessionId;
+        } else if (persist) {
+          observer?.providerSession?.({ kind: llm.hostKind, id: event.sessionId });
+        }
       } else if (event.type === "text" && event.text.trim() && !sessionSignal.aborted) {
         activity = true;
         observer?.assistantMessage?.(event.text);
@@ -153,6 +173,7 @@ export async function agenticSession(
         mcpServers: { [TOOL_BELT_SERVER]: binding.server },
         allowedTools: [`mcp__${TOOL_BELT_SERVER}`],
         ...(resumeSessionId ? { resumeSessionId } : {}),
+        persist,
         // The budget timer stops the session first; this only bounds a CLI that ignores it.
         timeoutMs: remaining + 60_000,
         signal: sessionSignal,
@@ -171,13 +192,30 @@ export async function agenticSession(
 
   try {
     let result = await attempt(resumed ?? fresh, resume?.id);
-    // Both CLIs report a missing session as a plain failure before any event; auth, limits and
-    // timeouts would fail again, so they are not retried.
-    const lost = !result.ok && result.error?.code === "HOST_AGENT_FAILED";
+    // Only a positive "no such session" from the CLI means the provider lost it (R1-6). Overload,
+    // network, limit, auth and timeout failures would fail again, and a fresh session would
+    // replace the task's real one.
+    const lost = !result.ok && result.error?.code === "HOST_AGENT_SESSION_MISSING";
     if (resume && lost && !activity && !sessionSignal.aborted) {
-      // The provider no longer has the session (expired, other machine): start over.
+      // The provider no longer has the session (expired, other machine): start over. The fresh
+      // session replaces the recorded one only once it succeeds.
       ctx.notes.push("Provider session could not be resumed; started a fresh one.");
-      result = await attempt(fresh);
+      result = await attempt(fresh, undefined, true);
+      if (result.ok && pendingSession) {
+        observer?.providerSession?.({ kind: llm.hostKind, id: pendingSession });
+      }
+    }
+    if (budget.exhausted && inflight.size) {
+      // Give calls already running a short grace, then abort them so a slow read cannot hold
+      // the agent lane past the budget (R1-37). Their late results are recorded as before.
+      const settled = Promise.allSettled([...inflight]).then(() => true);
+      const grace = new Promise<false>((resolve) => {
+        const timer = setTimeout(() => resolve(false), TOOL_GRACE_MS);
+        void settled.then(() => clearTimeout(timer));
+      });
+      if (!(await Promise.race([settled, grace]))) {
+        ctx.stopTools?.();
+      }
     }
     await Promise.allSettled([...inflight]);
     if (signal?.aborted) {

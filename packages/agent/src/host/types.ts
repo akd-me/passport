@@ -23,6 +23,11 @@ export interface HostRunSpec {
   resumeSessionId?: string;
   /** Keep the session resumable on disk (sessions only). */
   persistSession?: boolean;
+  /**
+   * Codex only: a model catalog (JSON text, `codex debug models` shape) to load instead of the
+   * CLI's own, written to a private file (`model_catalog_json`). See `codexToolCatalog`.
+   */
+  modelCatalog?: string;
   /** Structured final output. */
   jsonSchema?: JsonSchema;
   /** A single completion: no tools, no MCP, no user customizations. */

@@ -278,13 +278,20 @@ describe("host CLI invocations", () => {
       ]),
     );
     expect(args[args.indexOf("--tools") + 1]).toBe("");
-    expect(args[args.indexOf("--system-prompt") + 1]).toBe("SYS");
+    // The system prompt (USER.md) travels in a private file, never in argv (R1-39).
+    const promptFile = args[args.indexOf("--system-prompt-file") + 1]!;
+    expect(await readFile(promptFile, "utf8")).toBe("SYS");
+    expect((await stat(promptFile)).mode & 0o777).toBe(0o600);
+    expect(args).not.toContain("SYS");
+    expect(args).not.toContain("--system-prompt");
     expect(args).not.toContain("--append-system-prompt");
     expect(args[args.indexOf("--max-turns") + 1]).toBe("1");
     expect(args[args.indexOf("--model") + 1]).toBe("claude-haiku-5-5");
     expect(JSON.parse(args[args.indexOf("--json-schema") + 1]!)).toEqual({ type: "object" });
     expect(args).not.toContain("--mcp-config");
     expect(invocation.input).toBe("hi");
+    await invocation.cleanup();
+    await expect(stat(promptFile)).rejects.toThrow();
   });
   it("writes Claude MCP config to a private file and removes it on cleanup", async () => {
     const invocation = await claudeInvocation(
