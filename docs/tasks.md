@@ -327,6 +327,9 @@ reconnect, refetch `GET /api/tasks/:id` and page items with `afterSeq=<last seen
 - `JobDefinition.taskId` / `JobState.taskId` bind a job to its routine task, and
   `SchedulerOptions.runOnTask` wraps those runs.
 - Job functions pass `ctx.agentRunOptions` to `AgentRuntime.run`.
+- User routines choose `runOn: "bound" | "fresh"`; fresh runs create a child task. Webhook
+  deliveries use the same schedule-run seam with a framed `ctx.webhookPrompt`, and their
+  durable queue owns payload recovery. See [scheduler](scheduler.md#webhook-routines).
 - `tasks.maintenance` (every 10 minutes) handles snooze wake-ups, auto-settle, watch expiry and
   the 24-hour `mail_export` sweep (`<dataDir>/scratch`, also swept at startup). See
   [scheduler](scheduler.md).
@@ -402,7 +405,8 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 
 ## Not yet
 
-- `question` items and `needsUser: "question"` are reserved. No tool asks the person yet.
+- General `question` items remain reserved. `request_secret` uses `secret_request` items
+  and `needsUser: "question"` for private input; there is no general question tool yet.
 - Staged changes, the worktree analogue, are not implemented. Approval stays per action.
 - Approval scopes apply to later proposals only: approving with `task` does not approve the
   task's other proposals that are already pending. The proposing tool call returns `proposed`

@@ -238,6 +238,9 @@ closing persistence.
 The shared DomainEvent union has three appended members: `job.started` (jobId/runId),
 `job.finished` (jobId/runId/status/durationMs/optional summary), and `job.updated` (jobId).
 Existing event members retain their names and shapes.
+Webhook deliveries additionally emit `job.delivery` with the latest delivery record.
+Private input emits `secret.request.updated` with request metadata and an optional reference,
+never a secret value.
 
 `@passport/scheduler` depends only on `@passport/types` and receives `store`, `bus`, optional
 `now` and `logger`. It exports `createScheduler`, schedule validation/calculation helpers,
