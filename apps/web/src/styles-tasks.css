@@ -290,6 +290,93 @@
   display: grid;
   gap: 3px;
 }
+/* Markdown from Passport's own messages: compact, no anchors, URLs shown as muted text. */
+.md {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.md > *,
+.md li > * {
+  margin: 0;
+}
+.md > * + *,
+.md li > * + * {
+  margin-top: 0.55em;
+}
+.md ul,
+.md ol {
+  padding-left: 1.35em;
+}
+.md li + li,
+.md li > ul,
+.md li > ol {
+  margin-top: 0.2em;
+}
+.md li > p {
+  display: inline;
+}
+.md-heading {
+  font-weight: 640;
+  letter-spacing: -0.005em;
+}
+.md-h1 {
+  font-size: 1.08em;
+}
+.md-h2 {
+  font-size: 1.04em;
+}
+.md pre {
+  font-family: var(--font-code);
+  font-size: 0.84em;
+  line-height: 1.5;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-s);
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre;
+}
+.md pre code {
+  font-size: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.md blockquote {
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+}
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.md table {
+  border-collapse: collapse;
+  font-size: 0.94em;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.md th,
+.md td {
+  text-align: left;
+  vertical-align: top;
+  padding: 3px 10px 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+.md th {
+  font-weight: 620;
+  color: var(--muted);
+  font-size: var(--t-xs);
+}
+.md-link-url {
+  color: var(--muted);
+  font-family: var(--font-code);
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
+}
 .tl-author {
   display: inline-flex;
   align-items: center;

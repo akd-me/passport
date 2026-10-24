@@ -34,7 +34,10 @@ Item payloads by `kind`:
 senders, snippets, tool arguments and results, model text). Their `$`, mention-style `@` and
 line-leading `/` carry an invisible U+200B so host agents never treat them as commands (fullwidth
 `＄`/`／`/`＠`, Unicode indentation and NEL included; an `@` inside `local@dotted.domain` is
-kept). Render them as plain text, never as HTML or markdown links that auto-load.
+kept). Render them as plain text, never as HTML. Passport's own `assistant_message` and
+`question` text is rendered as a markdown subset (structure and emphasis only): no raw HTML, and
+links and images become visible text with their URL, never anchors or `<img>` that load or lead
+somewhere unseen.
 
 **Prompt framing.** When the server puts mail-derived text into a model prompt (task history,
 watch wakes) it wraps it in `<untrusted-data-<random> source="…">` … `</untrusted-data-<random>>`.

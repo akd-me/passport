@@ -90,7 +90,7 @@ beforeEach(() => {
 });
 
 describe("task timeline", () => {
-  it("renders untrusted model and mail text as plain text, never markup or links", async () => {
+  it("renders model text as structure only, and mail text as plain text, never links", async () => {
     const quoted = "Pay **now** [here](http://evil.example/x) <img src=x onerror=alert(1)>";
     setup({
       task: task("t1"),
@@ -125,7 +125,13 @@ describe("task timeline", () => {
       ],
     });
     const log = await screen.findByRole("log", { name: "Timeline" });
-    expect(await within(log).findByText(quoted)).toBeInTheDocument();
+    const bold = await within(log).findByText("now");
+    expect(bold.tagName).toBe("STRONG");
+    const message = bold.closest(".md");
+    expect(message).toHaveTextContent(
+      "Pay now here (http://evil.example/x) <img src=x onerror=alert(1)>",
+    );
+    expect(message?.querySelector("a, img")).toBeNull();
     expect(within(log).getByText("New mail from <b>Billing</b>")).toBeInTheDocument();
     expect(within(log).getByText("Invoice [link](http://evil.example)")).toBeInTheDocument();
     expect(within(log).getByText("<script>alert(1)</script>")).toBeInTheDocument();

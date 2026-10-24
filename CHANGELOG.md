@@ -3,6 +3,17 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
+## [0.3.2] — 2026-10-24
+
+### Fixed
+
+- Passport's replies in a task timeline showed raw markdown (`**bold**`, `- ` bullets). They are
+  now rendered as a markdown subset (paragraphs, headings, nested lists, tables, quotes, inline
+  and fenced code, emphasis) through a small React renderer that builds elements rather than
+  HTML. Raw HTML stays text; links and images are shown as text with their URL, never as anchors
+  or images, so quoted mail cannot smuggle a destination into a reply. Your own messages, mail
+  snippets and notices remain plain text.
+
 ## [0.3.1] — 2026-10-23
 
 ### Fixed

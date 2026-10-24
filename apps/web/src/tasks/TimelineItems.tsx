@@ -1,10 +1,12 @@
 import type { MailRow, TaskItem } from "@passport/types";
 import { AccountDot } from "../accounts/AccountFilter";
+import { Markdown } from "../components/Markdown";
 import { Icon, relativeTime } from "../components/ui";
 
 /**
  * Item text, always as a text node: never markdown, never HTML, never a link. Untrusted items
- * may quote mail, and their sigils are already neutralized by the server.
+ * may quote mail, and their sigils are already neutralized by the server. Passport's own
+ * messages use `Markdown` instead, which renders structure but still no anchors or images.
  */
 export function PlainText({ text, className = "" }: { text: string; className?: string }) {
   return <p className={`plain-text ${className}`}>{text}</p>;
@@ -56,7 +58,7 @@ export function TimelineItem({ item }: { item: TaskItem }) {
             <Icon name="sparkle" size={13} />
             {item.kind === "question" ? "Passport asks" : "Passport"}
           </span>
-          <PlainText text={item.payload.text} />
+          <Markdown text={item.payload.text} className="agent-text" />
         </div>
       );
     case "notification":
