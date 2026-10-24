@@ -489,24 +489,29 @@ reconnect, refetch `GET /api/tasks/:id` and page items with `afterSeq=<last seen
 The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 
 - **Sidebar.** Pinned, Inbox, Working, Snoozed and Settled (folded), each ordered by
-  `lastActivityAt` (Snoozed by wake time). Inbox, then working and snoozed, then pinned settled
+  `returnedAt` (`lastActivityAt` on rows written before v0.4; Snoozed by wake time). Inbox, then working and snoozed, then pinned settled
   tasks are fetched in full, following `nextCursor`; unpinned settled tasks page in 50 at a time
   when the fold opens ("Show more"). A row is one 36 px line: the status mark, the title, an
-  Inbox or Routine word, and the pending approval count or the time. The title recedes (muted)
-  when nothing is new and comes forward when the task needs the person, finished or woke unseen,
-  or `returnedAt` is after `seenAt`. Its menu pins, snoozes until a preset or a chosen time,
+  Inbox or Routine word, and the pending approval count or the time it came back. The title
+  recedes (muted) unless the task needs the person (`needsUser`) or has an unseen outcome
+  (`unseenOutcome`, the Done and Woke marks), the server's rule. Its menu pins, marks unread
+  (offered when nothing is unseen; `/mark-unread`), snoozes until a preset or a chosen time,
   settles or archives. These changes apply at once and roll back if the server refuses; frames
-  arriving meanwhile keep the guess on top. Pin and unpin toasts offer Undo for five seconds,
-  also on ⌘Z. `j`/`k` move between rows (anywhere but the Needs you queue, which keeps its own),
+  arriving meanwhile keep the guess on top. Every one of them toasts with Undo for five seconds,
+  also on ⌘Z: pin and unpin reverse each other, mark unread reverses through `/seen`, and settle,
+  snooze and archive through `/unsettle`, `/unsnooze` and `/unarchive`, after which the
+  `previous` state they answered with is put back (a snooze they replaced is snoozed again while
+  its time is ahead, a settle that archive replaced is settled again). A server that answers
+  without `previous` gets no Undo. `j`/`k` move between rows (anywhere but the Needs you queue, which keeps its own),
   Enter opens, ⌘1–⌘9 open the first nine tasks of Pinned, Inbox, Working and Snoozed (Settled
   never takes a number), and ⌘K finds tasks.
 - **Status marks.** One set (`tasks/TaskGlyph.tsx`, state from `taskState` in `tasks/model.ts`)
   is used by the sidebar, the task header, Needs you and the task list, with the T3 badge words:
   Approval (`needsUser: "approval"`), Input (`"question"`), Waiting (watching a conversation),
   Working (a run is active, or `working` without watches), Limited, Failed (`"failure"`), Woke
-  and Done. Limited reads `needsUser: "limited"` or `limited`; Woke and Done read
-  `unseenOutcome`. Those fields arrive with the lifecycle work; until then the three marks never
-  show.
+  and Done. The state is `taskBadge` from `@passport/types` (so its priority order), with a
+  `working` task without watches counted as running and `limited` without `needsUser` read as
+  Limited. Woke and Done read `unseenOutcome`.
 - **Task view** (`/tasks/:id`). The timeline opens at its newest items: the first page answers
   short tasks; for longer ones the last `seq` is found with one-item `afterSeq` probes (doubling,
   then halving) and the last page is fetched. Older pages load when the top scrolls into view.
@@ -516,7 +521,18 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   frames patch records in place. Consecutive `tool_call` items of a run collapse into one line
   that names at most two categories, writes first ("Archived 40, read 4 messages and 1 other
   step"). Proposals read "asked to", plan mode "planned to", and failed calls are counted apart.
-  Every item is rendered as plain text, whether or not it is `untrusted`.
+  Every item is rendered as plain text, whether or not it is `untrusted`. A `RESTARTED` notice
+  is a calm block, "Picked up after a restart", with the server's text (what was interrupted,
+  what it still watches) beneath; `USAGE_LIMITED` notices read amber, other error codes red.
+- **Header.** The title renames in place: click it, Enter saves (`PATCH { title }`), Escape
+  keeps it. A title the fast model proposed (`titleGenerated`) reads muted until renamed;
+  saving it unchanged accepts it. Opening the page marks the task seen (`POST /seen`) when it
+  has an unseen outcome or came back after the last look, and again when it comes back while the
+  page is visible; Mark unread while the page is open holds until it closes. A Limited task
+  shows the reset time ("Resets today at 3:40 PM", or that it is unknown) and Resume (`/resume`),
+  Resume at reset (`/resume-at-reset`, offered while the reset is ahead; afterwards "Resumes on
+  its own …") and Snooze until reset (the ordinary snooze, with its Undo). Without a reset time
+  only Resume is offered.
 - **Approvals.** A pending `approval_request` (in `pendingActionIds`, or with a `proposed`
   record) is the queue's decision card: Approve, Approve for this task, Always (`scope` `once`,
   `task`, `always` on `/approve`), edit a draft, reject. Approve is never offered before the
@@ -528,7 +544,13 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   once.
 - **Composer.** Enter sends in the default mode (`"queue"`) and ⌘Enter in the opposite one
   (`"steer"`); without an active run both queue. Stop calls
-  `/interrupt`. Stop and steer are only offered while a run is active on a `kind: "task"` task;
+  `/interrupt`. Above it, the **queue strip** lists `task.queue` as rows in run order: click a
+  row's text to edit it in place (Enter saves through `PATCH …/queue/:runId`, Escape keeps it),
+  drag a row or press Alt+↑/↓ on it to reorder (`POST …/queue/reorder` with the full order,
+  shown at once), "Steer now" (or "Send now" without a live run) promotes it
+  (`…/promote-to-steer`), and × removes it. A refused change (`404`, `409 QUEUE_CHANGED`)
+  reloads the queue and says so. After Stop the strip reads "Queue held · Resume"
+  (`POST …/queue/resume`). Stop and steer are only offered while a run is active on a `kind: "task"` task;
   messages to inbox and routine tasks queue. The permission picker and the Plan toggle `PATCH`
   the task, and the composer says when the server returned a lower mode than the one asked for.
 - **New task** (`/`). The home composer calls `POST /api/tasks` and opens the task. The opened
@@ -536,7 +558,12 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   `matterId`; their subjects and titles never enter the person's message. A server that rejects
   those fields (400) gets the plain ids appended to the message instead. Suggestion chips fill
   the composer; Enter starts the task. The v0.2 queue lives on as **Needs you** (`/needs-you`),
-  under the tasks waiting on the person; its badge counts tasks in the account scope.
+  under the tasks waiting on the person; its badge counts tasks in the account scope. Those
+  tasks are grouped by what they wait on, in the order of `views/needs-you-groups.ts`:
+  Approvals, Paused at a usage limit (with the reset time and the three recovery actions under
+  each row), Failed. A task no group claims (today a private-input `question`) shows under
+  "Waiting on you". A new group is one entry in that list (or `registerNeedsYouGroup(group,
+  before)`); nothing else changes.
 - **Deep links.** `?decision=<actionId>` asks `GET /api/tasks/by-action/:id` and opens
   `/tasks/:id?approval=<actionId>`. When that fails (unknown action, older server) it searches the
   loaded tasks' `pendingActionIds`, then falls back to `/needs-you?decision=<actionId>`.
@@ -558,9 +585,19 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 - **R5-5:** finding the newest page costs about 2·log₂(items/100) one-item probes, because the
   task carries no last `seq` and the items route has no `beforeSeq`. Loaded items are not
   windowed; scrolling far back keeps every page in memory.
-- **R5-9:** the web UI does not offer Undo for settle, snooze and archive yet; the server routes
-  (`previous`, `/unsettle`, `/unsnooze`, `/unarchive`) exist since v0.4 and the wiring is W2B.
-  Archiving a system task is not confirmed.
+- Archiving a system task is not confirmed. (R5-9, Undo for settle, snooze and archive, is
+  resolved: see Sidebar above.)
+- **Undo** covers the latest sidebar action only, while its toast shows. Reopening does not bring
+  back the watches settle or archive ended, nor release a queue they held (the strip offers
+  Resume).
+- **Queue strip:** reordering by drag uses HTML5 drag and drop, which touch screens do not
+  fire; Alt+↑/↓ on a focused row is the keyboard path. A reorder racing a starting entry answers
+  `409` and the strip reloads.
+- **Seen:** the page marks a task seen when it opens or the window becomes visible, not when the
+  person scrolls to the news; another open tab does not learn about a Mark unread made here
+  until the frame arrives.
+- **Generated titles** are muted in the task header only; sidebar rows and the palette show them
+  like any title.
 - **⌘1–⌘9 in a browser tab:** Chrome and Safari keep ⌘1–⌘9 for switching tabs, so the
   shortcut reaches Passport in the Mac app and with Ctrl on other systems, not in a Mac browser
   tab.
@@ -613,9 +650,8 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 
 ## Known limitations (v0.4 lifecycle, server side)
 
-- The web UI does not use the new fields and routes yet (W2B): no queue strip, Limited actions,
-  Woke/Done badges, generated-title styling or `returnedAt` ordering. Until then a queued
-  message shows only as a queued run in task details, not on the timeline.
+- Queued messages are not on the timeline until they start; the web UI shows them in the queue
+  strip above the composer (and as queued runs in task details).
 - Limits are detected on task message, watch and wake runs. Routine (`schedule`) runs and
   arrival triage report a limit as an ordinary failure (`JOB_FAILED`, or an arrival retry).
   A limit message without a parsable reset time leaves `resetAt: null`, so only `/resume` and a
