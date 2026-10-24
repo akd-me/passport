@@ -54,7 +54,11 @@ Passport treats them as data, never as instructions:
 - Task prompts wrap provider-derived text in an `<untrusted-data source="…">` block that says the
   text is data, and neutralise the sigils host agents treat as commands: `$`, mention-style `@` and
   a line-leading `/` get an invisible joiner. Tool results do the same, and timeline items that may
-  quote mail are flagged `untrusted` and rendered as plain text.
+  quote mail are flagged `untrusted` and rendered as plain text or the safe Markdown subset.
+  Rich `render` items are an explicit exception: a server allowlist parser reconstructs
+  restricted HTML, links become text with visible URLs, and the UI uses an opaque iframe
+  (`sandbox=""`, no scripts or same-origin access) with a deny-by-default content policy.
+  Draft recipient previews use the same parser and sandbox; no remote assets load.
 - Tool-call summaries in a task's timeline are redacted (bodies, secret-named fields and
   token-shaped strings) and at most 200 characters.
 - Sender verification comes from authentication headers and the provider's trusted boundary,
