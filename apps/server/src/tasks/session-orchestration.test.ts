@@ -82,7 +82,7 @@ describe.each(["claude-code", "codex"] as const)(
         const [found] = (await env.service.tasks.list({ parentTaskId: task.id })).items;
         return found;
       });
-      await waitFor(async () => (await env.cli.calls()).length >= 3, 10_000);
+      // Read the fake's log only once its runs ended: it rewrites the file while it works.
       await waitFor(async () => {
         const runs = [
           ...(await env.service.get(task.id)).runs,
@@ -115,8 +115,10 @@ describe.each(["claude-code", "codex"] as const)(
         },
       );
       expect(answered.status).toBe(202);
-      await waitFor(async () => (await env.cli.calls()).length === 4, 10_000);
-      await waitFor(async () => (await env.service.get(task.id)).runs.every((run) => run.endedAt));
+      await waitFor(async () => {
+        const runs = (await env.service.get(task.id)).runs;
+        return runs.length === 3 && runs.every((run) => run.endedAt);
+      }, 10_000);
       const last = (await env.cli.calls())[3]!;
       expect(last.args.join(" ")).toContain("parent");
       expect(last.stdin).toContain('You asked:\n- "Pay it today?"');
