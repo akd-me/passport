@@ -10,7 +10,14 @@ import { draftOf, recipients } from "./decision-model";
 import { draftPreview, useDraftThread } from "./draft-review-model";
 
 /** Shared entry from a timeline approval, Needs you, and its details panel. */
-export function DraftReview({ action }: { action: ActionRecord }) {
+export function DraftReview({
+  action,
+  section = false,
+}: {
+  action: ActionRecord;
+  /** Wrap the button in a details-panel `<section>`, so it gets the panel's padding. */
+  section?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const actions = useActions();
   const current = actions.records.get(action.id) ?? action;
@@ -18,7 +25,7 @@ export function DraftReview({ action }: { action: ActionRecord }) {
   if (!draft || current.status !== "proposed" || actions.decided.has(action.id)) {
     return null;
   }
-  return (
+  const body = (
     <>
       <button
         type="button"
@@ -31,6 +38,7 @@ export function DraftReview({ action }: { action: ActionRecord }) {
       {open && <DraftReviewDialog action={current} draft={draft} onClose={() => setOpen(false)} />}
     </>
   );
+  return section ? <section>{body}</section> : body;
 }
 
 function DraftReviewDialog({

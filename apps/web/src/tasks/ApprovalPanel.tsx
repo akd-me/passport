@@ -69,7 +69,7 @@ export function ApprovalPanel({
         {reversible.length > 0 && (
           <button
             type="button"
-            className="btn btn-sm"
+            className="btn btn-sm btn-primary"
             disabled={all.busy}
             onClick={() =>
               all.run(
@@ -108,6 +108,7 @@ export function ApprovalPanel({
                 record={record}
                 load={actions.pending}
                 onRetry={actions.retryPending}
+                primary={false}
               />
             </li>
           );

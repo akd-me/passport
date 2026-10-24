@@ -16,6 +16,7 @@ import { useTasks } from "../tasks/store";
 import { StateGlyph } from "../tasks/TaskGlyph";
 import { TaskMenu } from "../tasks/TaskMenu";
 import { isTyping } from "../ui-state";
+import { useWindowKeydown } from "../use-window-keydown";
 
 /**
  * j/k move between task rows, Enter opens the focused one. The list in the main column wins over
@@ -25,42 +26,38 @@ import { isTyping } from "../ui-state";
 export function useTaskListKeys() {
   const { pathname } = useLocation();
   const queue = pathname === "/needs-you";
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (
-        (event.key !== "j" && event.key !== "k") ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        isTyping(event.target) ||
-        document.querySelector('[aria-modal="true"]') ||
-        // Only the queue moves between decision cards; a card in a task timeline does not.
-        (queue && document.querySelector("main [data-decision]"))
-      ) {
-        return;
-      }
-      const inMain = [...document.querySelectorAll<HTMLElement>("main [data-task-row]")];
-      const rows = inMain.length
-        ? inMain
-        : [...document.querySelectorAll<HTMLElement>("[data-task-row]")];
-      if (!rows.length) {
-        return;
-      }
-      event.preventDefault();
-      const focused = rows.indexOf(document.activeElement as HTMLElement);
-      const at = focused >= 0 ? focused : rows.findIndex((r) => r.getAttribute("aria-current"));
-      const next =
-        at < 0
-          ? event.key === "j"
-            ? 0
-            : rows.length - 1
-          : Math.max(0, Math.min(rows.length - 1, at + (event.key === "j" ? 1 : -1)));
-      rows[next]?.focus();
-      rows[next]?.scrollIntoView?.({ block: "nearest" });
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [queue]);
+  useWindowKeydown((event) => {
+    if (
+      (event.key !== "j" && event.key !== "k") ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.altKey ||
+      isTyping(event.target) ||
+      document.querySelector('[aria-modal="true"]') ||
+      // Only the queue moves between decision cards; a card in a task timeline does not.
+      (queue && document.querySelector("main [data-decision]"))
+    ) {
+      return;
+    }
+    const inMain = [...document.querySelectorAll<HTMLElement>("main [data-task-row]")];
+    const rows = inMain.length
+      ? inMain
+      : [...document.querySelectorAll<HTMLElement>("[data-task-row]")];
+    if (!rows.length) {
+      return;
+    }
+    event.preventDefault();
+    const focused = rows.indexOf(document.activeElement as HTMLElement);
+    const at = focused >= 0 ? focused : rows.findIndex((r) => r.getAttribute("aria-current"));
+    const next =
+      at < 0
+        ? event.key === "j"
+          ? 0
+          : rows.length - 1
+        : Math.max(0, Math.min(rows.length - 1, at + (event.key === "j" ? 1 : -1)));
+    rows[next]?.focus();
+    rows[next]?.scrollIntoView?.({ block: "nearest" });
+  });
 }
 
 /** "Wakes in 20h", or "Wakes soon" once the time has passed and the server has not caught up. */
@@ -72,27 +69,23 @@ export function wakeText(until: string, now = Date.now()) {
 export function useTaskJumpKeys() {
   const { tasks } = useTasks(),
     navigate = useNavigate();
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const command = event.metaKey || event.ctrlKey;
-      if (
-        !command ||
-        event.altKey ||
-        event.shiftKey ||
-        !/^[1-9]$/.test(event.key) ||
-        document.querySelector('[aria-modal="true"]')
-      ) {
-        return;
-      }
-      const target = jumpOrder(tasks)[Number(event.key) - 1];
-      if (target) {
-        event.preventDefault();
-        navigate(`/tasks/${encodeURIComponent(target.id)}`);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [tasks, navigate]);
+  useWindowKeydown((event) => {
+    const command = event.metaKey || event.ctrlKey;
+    if (
+      !command ||
+      event.altKey ||
+      event.shiftKey ||
+      !/^[1-9]$/.test(event.key) ||
+      document.querySelector('[aria-modal="true"]')
+    ) {
+      return;
+    }
+    const target = jumpOrder(tasks)[Number(event.key) - 1];
+    if (target) {
+      event.preventDefault();
+      navigate(`/tasks/${encodeURIComponent(target.id)}`);
+    }
+  });
 }
 
 export function TaskRow({

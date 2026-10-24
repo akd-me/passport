@@ -2,14 +2,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-/** The entry plus every layer it imports, as one sheet. */
-const dir = new URL("./styles/", import.meta.url);
-const css = [
-  readFileSync(new URL("./styles.css", import.meta.url), "utf8"),
-  ...readdirSync(dir)
-    .filter((file) => file.endsWith(".css"))
-    .map((file) => readFileSync(new URL(file, dir), "utf8")),
-].join("\n");
+/** Every stylesheet under src (the entry, its layers, and feature sheets), as one sheet. */
+const src = new URL("./", import.meta.url);
+const files = readdirSync(src, { recursive: true, encoding: "utf8" })
+  .filter((file) => file.endsWith(".css"))
+  .sort();
+const sheets = files.map((file) => [file, readFileSync(new URL(file, src), "utf8")] as const);
+const css = sheets.map(([, text]) => text).join("\n");
 
 /** `[light, dark]` for a `--name: light-dark(#light, #dark)` token. */
 function token(name: string) {
@@ -74,12 +73,86 @@ describe("instructional text contrast", () => {
     expect(users.sort()).toEqual([
       ".crumb-sep",
       ".empty .icon",
-      ".queue-grip",
       ".section-toggle .icon",
       ".send-btn:disabled",
-      ".task-glyph.idle",
       ".tool-group-head .icon",
     ]);
+  });
+});
+
+describe("stylesheets", () => {
+  it("reads every sheet, including feature sheets outside styles/", () => {
+    expect(files).toEqual(expect.arrayContaining(["styles.css", "tasks/orchestration.css"]));
+  });
+
+  it("uses no custom property that no sheet declares", () => {
+    const declared = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+    const unknown = sheets.flatMap(([file, text]) =>
+      [...text.matchAll(/var\((--[a-z0-9-]+)/g)]
+        .filter((m) => !declared.has(m[1]))
+        .map((m) => `${file}: ${m[1]}`),
+    );
+    expect(unknown).toEqual([]);
+  });
+});
+
+describe("one accent (brief §3)", () => {
+  it("R2-10: is used only for the primary action, focus and what returns to the person", () => {
+    const users = new Set(
+      sheets
+        .filter(([file]) => file !== "styles/tokens.css")
+        .flatMap(([, text]) =>
+          [...`\n${text}`.matchAll(/\n([^\n{}]+(?:,\n[^\n{}]+)*) \{([^}]*)\}/g)]
+            .filter((m) => m[2]?.includes("var(--accent"))
+            .flatMap((m) => (m[1] ?? "").split(",\n").map((selector) => selector.trim())),
+        ),
+    );
+    expect([...users].sort()).toEqual(
+      [
+        // The primary action.
+        ".btn-primary",
+        ".btn-primary:hover:not(:disabled)",
+        ".send-btn",
+        ".send-btn:hover:not(:disabled)",
+        // Focus, the selected decision, text being edited, and a drop target while dragging.
+        ":focus-visible",
+        ":where(input, select, textarea):focus-visible",
+        "::selection",
+        ".chip-toggle:has(:focus-visible)",
+        ".composer:focus-within",
+        ".input-unit:focus-within",
+        ".search-field:focus-within",
+        ".proposal:focus-visible",
+        ".proposal.selected::before",
+        ".queue-edit",
+        ".task-title-edit input",
+        ".queue-row.drop-after::after",
+        ".queue-row.drop-before::before",
+        // What needs the person: the count, Approval, Input, Woke, questions and setup prompts.
+        ".side-count.strong",
+        ".task-card-what .need",
+        ".task-glyph.approval",
+        ".task-glyph.input",
+        ".task-glyph.woke",
+        ".state-word.approval",
+        ".state-word.input",
+        ".state-word.woke",
+        ".approval-panel-head h2 .icon",
+        ".change-status.proposed",
+        ".tl-approval .proposal",
+        ".tl-approval.pending",
+        ".tl-approval.pending .tl-line > .icon",
+        ".tl-message.question",
+        ".question-panel",
+        ".setup-prompt",
+        ".setup-prompt > .icon",
+        ".scheduler-secret-request",
+        ".side-row.setup-waiting .icon",
+        // The person's own messages (the brief's tinted block) and the brand mark.
+        ".tl-message.from-user",
+        ".brand-mark",
+      ].sort(),
+    );
   });
 });
 
@@ -112,11 +185,34 @@ describe("design tokens", () => {
     }
   });
 
+  it("R2-15: has no raw radius but 0, 50%, and 1–2 px on glyphs and bars", () => {
+    const raw = sheets.flatMap(([file, text]) =>
+      [...text.matchAll(/border-radius: ([^;]+);/g)]
+        .filter((m) =>
+          (m[1] ?? "")
+            .split(/\s+/)
+            .some((part) => !/^(0|50%|1px|2px|var\(--r-(control|panel)\))$/.test(part)),
+        )
+        .map((m) => `${file}: ${m[1]}`),
+    );
+    expect(raw).toEqual([]);
+  });
+
   it("uses one radius for controls and one for panels", () => {
     const radii = new Set(
       [...css.matchAll(/border-radius: var\(--(r-[a-z]+)\)/g)].map((m) => m[1]),
     );
     expect([...radii].sort()).toEqual(["r-control", "r-panel"]);
+  });
+
+  it("R2-14: sets no font size off the scale", () => {
+    const raw = sheets.flatMap(([file, text]) =>
+      [...text.matchAll(/font(?:-size)?: ([^;]+);/g)]
+        .map((m) => m[1] ?? "")
+        .filter((value) => /\d(px|em|rem)\b/.test(value.replace(/var\([^)]*\)/g, "")))
+        .map((value) => `${file}: ${value}`),
+    );
+    expect(raw).toEqual([]);
   });
 
   it("keeps to five type sizes", () => {

@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Markdown } from "./Markdown";
+import { Markdown, markdownToText } from "./Markdown";
 
 const html = (text: string) => render(<Markdown text={text} />).container.firstElementChild;
 
@@ -107,5 +107,20 @@ describe("Markdown", () => {
     const zwsp = "​";
     const root = html(`Costs $${zwsp}5 for @${zwsp}alice and /${zwsp}usr`);
     expect(root).toHaveTextContent(`Costs $${zwsp}5 for @${zwsp}alice and /${zwsp}usr`);
+  });
+});
+
+describe("markdownToText", () => {
+  it("drops the markers, keeps link URLs visible and makes one line", () => {
+    expect(markdownToText("Priya offers **9–11** or __16–18__ *June*, ~~not~~ `July`?")).toBe(
+      "Priya offers 9–11 or 16–18 June, not July?",
+    );
+    expect(markdownToText("# Dates\n\n- [Calendar](https://cal.example/x)\n- ![map](m.png)")).toBe(
+      "Dates Calendar (https://cal.example/x) map (m.png)",
+    );
+    expect(markdownToText("> quoted\nline two\n\n| a | b |\n|---|---|\n| 1 | 2 |")).toBe(
+      "quoted line two a b 1 2",
+    );
+    expect(markdownToText("snake_case and 2 * 3")).toBe("snake_case and 2 * 3");
   });
 });

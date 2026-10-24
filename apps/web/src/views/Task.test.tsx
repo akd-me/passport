@@ -224,6 +224,79 @@ describe("approvals", () => {
   });
 });
 
+describe("task header", () => {
+  it("R2-5: says Working once, and the status only when it adds something", async () => {
+    setup({
+      task: task("t1", { status: "working" }),
+      runs: [run("r1", "t1", { status: "running", endedAt: null })],
+      records: [],
+      items: [item("user_message", { text: "Start" }, { seq: 1 })],
+    });
+    const head = (await screen.findByRole("heading", { level: 1 })).closest("header")!;
+    await waitFor(() => expect(within(head).getAllByText("Working")).toHaveLength(1));
+    expect(head.querySelector(".task-status")).toBeNull();
+  });
+});
+
+describe("approval cards under a real pointer", () => {
+  it("acts on the first click on an unselected draft card: pressing does not select and reflow it", async () => {
+    const draft = (id: string) =>
+      action(id, "delayed", {
+        request: {
+          ...action(id, "delayed").request,
+          params: {
+            draft: {
+              accountId: "acc-1",
+              to: [{ email: "billing@example.com" }],
+              subject: `Re: ${id}`,
+              textBody: "One\nTwo\nThree\nFour\nFive",
+            },
+          },
+        },
+      });
+    const { requests } = setup({
+      task: task("t1", { needsUser: "approval", pendingActionIds: ["a1", "a2"] }),
+      runs: [run("r1", "t1", { actionIds: ["a1", "a2"] })],
+      records: [draft("a1"), draft("a2")],
+      items: [
+        item("approval_request", { actionId: "a1", summary: "Reply 1" }, { seq: 1 }),
+        item("approval_request", { actionId: "a2", summary: "Reply 2" }, { seq: 2 }),
+      ],
+    });
+    const card = await screen.findByRole("article", { name: "Reason a2" });
+    expect(card).not.toHaveAttribute("aria-current");
+    const approve = within(card).getByRole("button", { name: "Approve" });
+    // A mouse press: pointerdown, then focus lands on the button (Chromium) or the card (WebKit).
+    fireEvent.pointerDown(approve);
+    act(() => approve.focus());
+    expect(card).not.toHaveAttribute("aria-current");
+    expect(card).not.toHaveClass("selected");
+    fireEvent.pointerDown(approve);
+    act(() => card.focus());
+    expect(card).not.toHaveClass("selected");
+    fireEvent.click(approve);
+    await waitFor(() =>
+      expect(requests().filter((r) => r.path === "/api/actions/a2/approve")).toHaveLength(1),
+    );
+    expect(card).toHaveAttribute("aria-current", "true");
+  });
+
+  it("still selects a card that takes keyboard focus", async () => {
+    setup({
+      task: task("t1", { needsUser: "approval", pendingActionIds: ["a1", "a2"] }),
+      runs: [run("r1", "t1", { actionIds: ["a1", "a2"] })],
+      records: [action("a1", "delayed"), action("a2", "delayed")],
+      items: [
+        item("approval_request", { actionId: "a1", summary: "Reply 1" }, { seq: 1 }),
+        item("approval_request", { actionId: "a2", summary: "Reply 2" }, { seq: 2 }),
+      ],
+    });
+    const card = await screen.findByRole("article", { name: "Reason a2" });
+    act(() => card.focus());
+    expect(card).toHaveAttribute("aria-current", "true");
+  });
+});
+
 describe("task composer", () => {
   it("queues with Enter, steers with ⌘Enter, stops a running task and toggles plan", async () => {
     const { requests } = setup({

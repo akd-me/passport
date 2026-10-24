@@ -32,13 +32,17 @@ export function QueueStrip({ task, live }: { task: Task; live: boolean }) {
     [over, setOver] = useState<number | null>(null),
     [error, setError] = useState("");
   const rows = useRef(new Map<string, HTMLLIElement>());
+  /** The row to focus after the next render, and whether its text button had focus. */
   const focusAfter = useRef<string | null>(null),
+    focusText = useRef(false),
     /** The row being edited; cleared first, so the blur after Enter or Escape does not save. */
     edited = useRef<string | null>(null);
   useEffect(() => {
     if (focusAfter.current) {
-      rows.current.get(focusAfter.current)?.focus();
+      const row = rows.current.get(focusAfter.current);
+      ((focusText.current && row?.querySelector<HTMLElement>(".queue-text")) || row)?.focus();
       focusAfter.current = null;
+      focusText.current = false;
     }
   });
   if (!entries.length) {
@@ -124,7 +128,9 @@ export function QueueStrip({ task, live }: { task: Task; live: boolean }) {
 
   const ids = shown.map((e) => e.runId);
   const onRowKey = (event: KeyboardEvent<HTMLLIElement>, index: number) => {
-    if (event.target !== event.currentTarget || !event.altKey) {
+    // Alt+↑/↓ anywhere in the row (its text button is where Tab lands), except while editing.
+    const target = event.target as HTMLElement;
+    if (!event.altKey || target.closest("textarea, input")) {
       return;
     }
     const step = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
@@ -134,6 +140,7 @@ export function QueueStrip({ task, live }: { task: Task; live: boolean }) {
     }
     event.preventDefault();
     focusAfter.current = ids[index] ?? null;
+    focusText.current = target.classList.contains("queue-text");
     reorder(moveEntry(ids, index, to));
   };
   const onDragOver = (event: DragEvent<HTMLLIElement>, index: number) => {
@@ -252,6 +259,7 @@ export function QueueStrip({ task, live }: { task: Task; live: boolean }) {
                   className="queue-text"
                   title="Edit"
                   aria-label={`Edit queued message: ${entry.text}`}
+                  aria-description={movable ? "Alt+Up or Alt+Down moves it" : undefined}
                   onClick={() => edit(entry)}
                 >
                   {entry.text}

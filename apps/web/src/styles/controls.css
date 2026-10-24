@@ -78,7 +78,7 @@
   color: var(--red);
 }
 .link-btn {
-  color: var(--accent);
+  color: var(--text-2);
   font-size: var(--t-s);
   font-weight: var(--w-medium);
 }
@@ -120,11 +120,10 @@
   min-width: 18px;
   height: 18px;
   padding: 0 4px;
-  border-radius: 4px;
-  background: var(--sunken);
-  box-shadow: 0 0 0 1px var(--line-strong);
+  border-radius: var(--r-control);
+  background: var(--selected);
   color: var(--muted);
-  font: var(--w-medium) 10.5px / 1 var(--font-ui);
+  font: var(--w-medium) var(--t-xs) / 1 var(--font-ui);
 }
 
 /* ---------------------------------------------------------------- Badges and dots */
@@ -143,8 +142,8 @@
   white-space: nowrap;
 }
 .badge.ink {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--selected);
+  color: var(--text-2);
 }
 .badge.good {
   background: var(--green-soft);
@@ -198,7 +197,7 @@
 .avatar.small {
   width: 24px;
   height: 24px;
-  font-size: 10px;
+  font-size: var(--t-xs);
 }
 .verification {
   display: inline-flex;
@@ -332,7 +331,7 @@
   gap: 6px;
   height: var(--control-h-sm);
   padding: 0 10px;
-  border-radius: 4px;
+  border-radius: var(--r-control);
   color: var(--muted);
   font-size: var(--t-s);
   transition:
@@ -350,7 +349,6 @@
   background: var(--raised);
   color: var(--text);
   font-weight: var(--w-medium);
-  box-shadow: 0 0 0 1px var(--line);
 }
 .search-field {
   display: flex;
@@ -463,7 +461,7 @@ fieldset.field legend {
   cursor: pointer;
 }
 .chip-toggle:has(:checked) {
-  background: var(--accent-soft);
+  background: var(--selected);
   color: var(--text);
 }
 .chip-toggle:has(:focus-visible) {
@@ -539,7 +537,33 @@ fieldset.field legend {
 .meter span {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: var(--text-2);
+}
+
+/* ---------------------------------------------------------------- Disclosures */
+/* One disclosure mark everywhere: a small chevron that turns when open, never the UA triangle. */
+summary {
+  list-style: none;
+  cursor: pointer;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+summary::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 var(--s-2) 2px 2px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--dur) var(--ease);
+  vertical-align: middle;
+  opacity: 0.8;
+}
+details[open] > summary::before {
+  transform: rotate(45deg);
 }
 
 /* ---------------------------------------------------------------- Popovers and menus */
@@ -653,7 +677,7 @@ fieldset.field legend {
   height: 14px;
 }
 .ladder span.on {
-  background: var(--accent);
+  background: var(--text-2);
 }
 .ladder-full_access span.on {
   background: var(--amber);
@@ -712,17 +736,13 @@ fieldset.field legend {
   background: var(--hover);
 }
 .mode-option.active {
-  background: var(--accent-soft);
-}
-.mode-picker:not(.compact) .mode-option.active {
-  background: var(--raised);
-  box-shadow: 0 0 0 1px var(--line);
+  background: var(--selected);
 }
 .mode-option:disabled {
   opacity: 0.6;
 }
 .mode-option .icon {
-  color: var(--accent);
+  color: var(--text-2);
 }
 .mode-text strong {
   display: block;
@@ -828,9 +848,8 @@ fieldset.field legend {
   text-underline-offset: 2px;
 }
 .toast .kbd {
-  background: transparent;
+  background: color-mix(in srgb, var(--canvas) 18%, transparent);
   color: inherit;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--canvas) 40%, transparent);
 }
 @keyframes toast-in {
   from {
@@ -874,7 +893,7 @@ fieldset.field legend {
 }
 .md pre {
   font-family: var(--font-code);
-  font-size: 0.84em;
+  font-size: var(--t-xs);
   line-height: var(--lh-prose);
   background: var(--sunken);
   border-radius: var(--r-control);
@@ -918,6 +937,6 @@ fieldset.field legend {
 .md-link-url {
   color: var(--muted);
   font-family: var(--font-code);
-  font-size: 0.86em;
+  font-size: var(--t-xs);
   overflow-wrap: anywhere;
 }

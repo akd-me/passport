@@ -67,7 +67,7 @@ export function ProposalDetails({ action }: { action?: ActionRecord }) {
           Adjust trust for this category
         </button>
       </section>
-      <DraftReview action={action} />
+      <DraftReview action={action} section />
       {source.data && (
         <section>
           <h3>In reply to</h3>

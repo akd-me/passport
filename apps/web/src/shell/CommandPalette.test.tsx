@@ -11,10 +11,19 @@ function OpenPalette() {
   useEffect(() => ui.setPalette(true), []); // eslint-disable-line react-hooks/exhaustive-deps
   return <output aria-label="settings section">{ui.settings ?? "closed"}</output>;
 }
-function renderPalette() {
+const baseTask = {
+  status: "inbox",
+  kind: "task",
+  pinned: false,
+  watches: [],
+  accountIds: [],
+  lastActivityAt: "2026-10-22T10:00:00Z",
+};
+function renderPalette(extra: { tasks?: object[]; matters?: object[] } = {}) {
   stubApi({
     "/tasks": {
       items: [
+        ...(extra.tasks ?? []),
         {
           id: "t1",
           title: "Hetzner invoices",
@@ -31,6 +40,7 @@ function renderPalette() {
     },
     "/matters": [
       { id: "m1", title: "Northstar launch", status: "active", nextStep: "Confirm Thursday" },
+      ...(extra.matters ?? []),
     ],
     "/people": [
       {
@@ -108,5 +118,34 @@ describe("command palette", () => {
     fireEvent.change(input, { target: { value: "hetzner" } });
     const option = await screen.findByRole("option", { name: /Hetzner invoices/ });
     expect(option).toHaveTextContent("1 change to approve");
+  });
+
+  it("R2-6: shows each group once while searching, ordered by its best match", async () => {
+    renderPalette({
+      tasks: [
+        { ...baseTask, id: "t2", title: "Lisbon trip" },
+        {
+          ...baseTask,
+          id: "t3",
+          title: "Dates for the offsite",
+          needsUser: "question",
+          pendingQuestions: [{ id: "q1", text: "Priya offers **9–11** or *16–18* `Lisbon` June" }],
+        },
+      ],
+      matters: [{ id: "m2", title: "Lisbon offsite", status: "active" }],
+    });
+    const input = await screen.findByRole("combobox");
+    fireEvent.change(input, { target: { value: "lisbon" } });
+    await screen.findByRole("option", { name: /Lisbon offsite/ });
+    const list = screen.getByRole("listbox");
+    const headings = [...list.querySelectorAll(".palette-group")].map((h) => h.textContent);
+    expect(headings).toEqual(["Tasks", "Matters"]);
+    expect(
+      screen.getAllByRole("option").map((o) => o.querySelector(".palette-label")?.textContent),
+    ).toEqual(["Lisbon trip", "Dates for the offsite", "Lisbon offsite"]);
+    // R2-4: the question is markdown; the one-line hint shows it as plain text.
+    expect(screen.getByRole("option", { name: /Dates for the offsite/ })).toHaveTextContent(
+      "Priya offers 9–11 or 16–18 Lisbon June",
+    );
   });
 });

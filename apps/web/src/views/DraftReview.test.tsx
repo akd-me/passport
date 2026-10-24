@@ -144,6 +144,17 @@ describe("side-by-side draft review", () => {
     const frame = await within(dialog).findByTitle("Draft as received");
     expect(preview.mock.calls[0]?.[0]).toContain('<div class="mail"><p>Friday</p></div>');
     expect(preview.mock.calls[0]?.[0]).toContain("&lt;script&gt;bad&lt;/script&gt;");
+    // R2-9: the quoted history reads a date the way a mail client writes it, not ISO.
+    const quotedOn = new Date(source.receivedAt).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    expect(preview.mock.calls[0]?.[0]).toContain(`On ${quotedOn},`);
+    expect(preview.mock.calls[0]?.[0]).not.toContain(source.receivedAt);
+    expect(within(dialog).getByRole("button", { name: "As they will see it" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(frame).toHaveAttribute("sandbox", "");
     expect(frame.getAttribute("srcdoc")).toContain("<blockquote>Could we meet?</blockquote>");
     fireEvent.click(within(dialog).getByRole("button", { name: "As they will see it" }));

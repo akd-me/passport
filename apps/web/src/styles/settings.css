@@ -79,15 +79,21 @@
 .settings-block > .hint:last-child {
   margin-bottom: 0;
 }
+/* A sub-block inside the settings dialog hangs from a rule; no card inside the dialog's card. */
 .settings-block.inset {
   border-top: 0;
-  background: var(--sunken);
-  border-radius: var(--r-panel);
-  padding: var(--s-4);
+  border-left: 2px solid var(--line);
+  padding: var(--s-1) 0 var(--s-1) var(--s-4);
   margin: var(--s-3) 0;
 }
 .settings-content > .offers {
   margin: var(--s-3) 0 0;
+}
+.settings-content .offer {
+  padding-left: 0;
+  border-radius: 0;
+  background: none;
+  border-top: 1px solid var(--line);
 }
 .block-heading {
   display: flex;
@@ -123,7 +129,7 @@
   background: var(--raised);
 }
 .current-model .icon {
-  color: var(--accent);
+  color: var(--text-2);
 }
 .agent-choice {
   display: grid;
@@ -136,7 +142,7 @@
   display: flex;
   gap: var(--s-1);
   padding: var(--s-3) var(--s-4);
-  border-radius: var(--r-panel);
+  border-radius: var(--r-control);
   background: var(--sunken);
   text-align: left;
   min-width: 0;
@@ -157,8 +163,7 @@
 }
 .agent-option.active,
 .provider-option.active {
-  background: var(--raised);
-  box-shadow: 0 0 0 2px var(--accent);
+  background: var(--selected);
 }
 .agent-option:disabled {
   opacity: 0.6;
@@ -324,9 +329,6 @@
   gap: 6px;
   margin: calc(-1 * var(--s-1)) 0 var(--s-3);
 }
-.settings-block.inset .chip-toggle {
-  background: var(--hover);
-}
 
 /* ---------------------------------------------------------------- Connect: agent-driven setup */
 .provider-choice {
@@ -339,8 +341,16 @@
   align-items: center;
   gap: var(--s-3);
 }
+/* On the sunken welcome panel the options are tone steps, not raised cards: the chosen one is
+   filled, the others are quiet until hovered. */
 .welcome-flow .provider-option {
-  background: var(--raised);
+  background: transparent;
+}
+.welcome-flow .provider-option:hover {
+  background: var(--hover);
+}
+.welcome-flow .provider-option.active {
+  background: var(--selected);
 }
 .provider-option strong {
   display: block;
@@ -422,8 +432,8 @@
   color: var(--green);
 }
 .step-icon.running {
-  box-shadow: 0 0 0 1.5px var(--accent);
-  color: var(--accent);
+  box-shadow: 0 0 0 1.5px var(--text-2);
+  color: var(--text-2);
 }
 .step-icon.failed {
   box-shadow: none;

@@ -121,7 +121,8 @@ describe("questions", () => {
     const approving = task("t2", { needsUser: "approval", pendingActionIds: ["a1"] });
     setup(asking, noLineage, [asking, approving]);
     const group = await screen.findByRole("region", { name: "Questions for you" });
-    expect(within(group).getByText("Which **year**?")).toBeInTheDocument();
+    // R2-4: the one-line row shows the markdown question as plain text.
+    expect(within(group).getByText("Which year?")).toBeInTheDocument();
     const rest = screen.getByRole("region", { name: "Approvals" });
     expect(within(rest).getByText("Task t2")).toBeInTheDocument();
     expect(within(rest).queryByText("Task t1")).toBeNull();

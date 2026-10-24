@@ -85,7 +85,7 @@
   width: 18px;
   height: 24px;
   flex: none;
-  color: var(--faint);
+  color: var(--muted);
 }
 .queue-row[draggable="true"] {
   cursor: grab;
@@ -216,6 +216,9 @@
 
 /* ---------------------------------------------------------------- Notices */
 .tl-notice.limited {
+  color: var(--text);
+}
+.tl-notice.limited .icon {
   color: var(--amber);
 }
 .tl-notice.restarted {

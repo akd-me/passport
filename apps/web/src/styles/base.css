@@ -37,12 +37,20 @@ time,
 .num {
   font-variant-numeric: tabular-nums;
 }
+/* Links are neutral: the accent is for the primary action, focus and what needs you. A link
+   inside a sentence keeps a quiet underline so it still reads as one. */
 a {
-  color: var(--accent);
+  color: var(--text);
   text-decoration: none;
+}
+:where(p, dd) a:not([class]) {
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
 }
 a:hover {
   text-decoration: underline;
+  text-decoration-color: currentColor;
   text-underline-offset: 2px;
 }
 button {
@@ -56,11 +64,15 @@ button {
 button:disabled {
   cursor: not-allowed;
 }
+/* Small print, keys and code stay on the five-size scale. */
+small {
+  font-size: var(--t-xs);
+}
 code {
   font-family: var(--font-code);
-  font-size: 0.86em;
+  font-size: var(--t-xs);
   background: var(--sunken);
-  border-radius: 4px;
+  border-radius: var(--r-control);
   padding: 1px 4px;
   overflow-wrap: anywhere;
 }
@@ -100,7 +112,7 @@ code {
 }
 input[type="checkbox"],
 input[type="radio"] {
-  accent-color: var(--accent-fill);
+  accent-color: var(--text);
   width: 15px;
   height: 15px;
   margin: 0;

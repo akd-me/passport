@@ -41,6 +41,24 @@ describe("rich render sandbox", () => {
     expect(doc.querySelectorAll("script,link,img,form,a")).toHaveLength(0);
   });
 
+  it("R2-23: embeds the app's faces as data URLs, the serif only for mail", () => {
+    const style = (html: string) =>
+      new DOMParser()
+        .parseFromString(renderDocument(html, "light"), "text/html")
+        .querySelector("style")?.textContent ?? "";
+    const doc = renderDocument("<p>Day</p>", "light");
+    expect(doc).toContain("font-src data:;");
+    expect(doc).toContain("default-src 'none'");
+    const plain = style("<p>Day</p>");
+    expect(plain).toMatch(
+      /@font-face \{ font-family: "Public Sans Variable";[^}]*url\(data:font\/woff2/,
+    );
+    expect(plain).not.toContain('Source Serif 4 Variable"; font-display');
+    expect(style('<div class="mail"><p>Hi</p></div>')).toContain(
+      '@font-face { font-family: "Source Serif 4 Variable"',
+    );
+  });
+
   it("keeps nested escaped quotes inside srcdoc without creating parent DOM attributes", () => {
     render(
       <RenderFrame

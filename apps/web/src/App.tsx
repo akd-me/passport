@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { type CSSProperties, useEffect, useLayoutEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useSearchParams } from "react-router";
 import { AccountScope, useAccounts } from "./accounts/AccountFilter";
 import { FIRST_RUN_CONNECTED } from "./accounts/api";
@@ -14,6 +14,7 @@ import { useWorkspace } from "./state";
 import { DecisionLink } from "./tasks/DecisionLink";
 import { TasksProvider } from "./tasks/store";
 import { isTyping, type SettingsSection, useUi } from "./ui-state";
+import { useWindowKeydown } from "./use-window-keydown";
 import { Activity } from "./views/Activity";
 import { WorkQueue } from "./views/Decisions";
 import { MatterPage, Matters } from "./views/Matters";
@@ -81,7 +82,7 @@ export function useGlobalShortcuts() {
   const ui = useUi(),
     { noticeAction, notify } = useWorkspace(),
     navigate = useNavigate();
-  useEffect(() => {
+  useWindowKeydown((event) => {
     /** ⌘-chords; true when handled. */
     const chord = (event: KeyboardEvent, modal: boolean) => {
       const key = event.key.toLowerCase();
@@ -129,24 +130,35 @@ export function useGlobalShortcuts() {
       }
       return true;
     };
-    const onKey = (event: KeyboardEvent) => {
-      const modal = !!document.querySelector('[aria-modal="true"]');
-      const handled =
-        event.metaKey || event.ctrlKey
-          ? chord(event, modal)
-          : !modal && !isTyping(event.target) && plain(event);
-      if (handled) {
-        event.preventDefault();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [ui, navigate, noticeAction, notify]);
+    const modal = !!document.querySelector('[aria-modal="true"]');
+    const handled =
+      event.metaKey || event.ctrlKey
+        ? chord(event, modal)
+        : !modal && !isTyping(event.target) && plain(event);
+    if (handled) {
+      event.preventDefault();
+    }
+  });
+}
+
+/**
+ * Where the toast sits: above the composer dock when one is on screen, so it never covers the
+ * mode chips or Send (R2-20); otherwise at the bottom edge.
+ */
+function useToastLift(notice: string): CSSProperties | undefined {
+  const [bottom, setBottom] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const dock = notice ? document.querySelector(".dock") : null;
+    const top = dock?.getBoundingClientRect().top;
+    setBottom(top ? Math.max(0, window.innerHeight - top) : null);
+  }, [notice]);
+  return bottom ? { bottom: `calc(${bottom}px + var(--s-3))` } : undefined;
 }
 
 function Shell() {
   const { notice, noticeAction, notify } = useWorkspace(),
-    ui = useUi();
+    ui = useUi(),
+    toastLift = useToastLift(notice);
   useGlobalShortcuts();
   useTaskListKeys();
   useTaskJumpKeys();
@@ -203,7 +215,7 @@ function Shell() {
       <SettingsDialog />
       <ConnectDialog />
       {notice && (
-        <div className="toast" role="status">
+        <div className="toast" role="status" style={toastLift}>
           <Icon name="check" size={15} />
           {notice}
           {noticeAction && (

@@ -9,6 +9,11 @@
   justify-content: space-between;
   gap: var(--s-4);
 }
+/* "As they will see it" is a toggle: its pressed state reads at a glance. */
+.draft-review-heading [aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--text);
+}
 .render-heading h3,
 .draft-review-heading h3,
 .draft-review-thread h3 {

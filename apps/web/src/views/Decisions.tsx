@@ -7,10 +7,11 @@ import { Empty, Feedback, Kbd, Loading } from "../components/ui";
 import { Composer } from "../shell/Composer";
 import { Surface } from "../shell/Surface";
 import { useResource } from "../state";
+import { useUi } from "../ui-state";
 import { DecisionCard, HandledToday, OutboxStrip } from "./DecisionCard";
 import { draftOf, type Grouping, groupProposals, useQueueKeys } from "./decision-model";
 import { ProposalDetails } from "./ProposalDetails";
-import { TasksNeedingYou } from "./TasksNeedingYou";
+import { TasksNeedingYou, useTasksNeedingYou } from "./TasksNeedingYou";
 import { PromotionPrompts } from "./Trust";
 
 export { DecisionCard, UndoButton } from "./DecisionCard";
@@ -27,6 +28,8 @@ export function WorkQueue() {
     matters = useResource<Matter[]>(`/matters${queryString({ accountId })}`);
   const [params] = useSearchParams(),
     deepLink = params.get("decision") ?? undefined;
+  const ui = useUi(),
+    waiting = useTasksNeedingYou();
   const [selected, setSelected] = useState<string | undefined>(deepLink),
     [grouping, setGrouping] = useState<Grouping>("matter");
   const items = decisions.data?.items ?? [],
@@ -80,13 +83,8 @@ export function WorkQueue() {
       }
     >
       <div className="queue-head">
-        <h1>
-          {decisions.data
-            ? proposed.length
-              ? `${proposed.length} ${proposed.length === 1 ? "proposal needs" : "proposals need"} you`
-              : "Nothing needs you"
-            : "Needs you"}
-        </h1>
+        {/* The page names itself; each group below carries its own count (R2-28). */}
+        <h1>Needs you</h1>
         {proposed.length > 1 && (
           <div className="segmented small" role="radiogroup" aria-label="Group proposals">
             {(["matter", "newest"] as Grouping[]).map((g) => (
@@ -110,10 +108,11 @@ export function WorkQueue() {
       ) : (
         <>
           {held.length > 0 && <OutboxStrip held={held} />}
-          {!proposed.length && (
-            <Empty title="You’re clear for now.">
-              New proposals land here as mail arrives. Ask Passport for something below, or press{" "}
-              <Kbd>/</Kbd> to start typing.
+          {!proposed.length && !waiting.length && (
+            <Empty title="Nothing needs you right now.">
+              <button type="button" className="btn btn-sm" onClick={ui.focusComposer}>
+                Ask Passport something <Kbd>/</Kbd>
+              </button>
             </Empty>
           )}
           {groups.map(([id, actions]) => (
@@ -128,18 +127,18 @@ export function WorkQueue() {
                     : matterTitle(id)
               }
             >
-              {id !== "newest" && (
-                <div className="group-head">
-                  <h2>
-                    {id === "unassigned" ? (
-                      "Not in a matter"
-                    ) : (
-                      <Link to={scope(`/matters/${id}`)}>{matterTitle(id)}</Link>
-                    )}
-                  </h2>
-                  <span className="count">{actions.length}</span>
-                </div>
-              )}
+              <div className="group-head">
+                <h2>
+                  {id === "newest" ? (
+                    "Proposals"
+                  ) : id === "unassigned" ? (
+                    "Not in a matter"
+                  ) : (
+                    <Link to={scope(`/matters/${id}`)}>{matterTitle(id)}</Link>
+                  )}
+                </h2>
+                <span className="count">{actions.length}</span>
+              </div>
               {actions.map((action) => (
                 <DecisionCard
                   key={action.id}

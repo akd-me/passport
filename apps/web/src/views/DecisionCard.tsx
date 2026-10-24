@@ -42,7 +42,11 @@ export function DecisionCard({
   const draft = draftOf(action);
   const [editing, setEditing] = useState(false),
     [body, setBody] = useState(draft?.textBody ?? ""),
-    textarea = useRef<HTMLTextAreaElement>(null);
+    textarea = useRef<HTMLTextAreaElement>(null),
+    // Selecting expands a clamped draft, which moves the actions row. A press on a control must
+    // not select on focus, or the button slides out from under the pointer and the click is lost;
+    // the click that bubbles up selects the card once the action has run.
+    pressOnControl = useRef(false);
   const task = useTask(),
     decision = useDecision(action.id),
     busy = task.busy || decision.busy,
@@ -80,8 +84,20 @@ export function DecisionCard({
       className={`proposal ${selected ? "selected" : ""} ${held ? "held" : ""} ${fresh ? "fresh" : ""}`}
       data-decision={action.id}
       tabIndex={0}
-      onFocus={onSelect}
-      onClick={onSelect}
+      onPointerDownCapture={(e) => {
+        pressOnControl.current = !!(e.target as Element).closest("button, a, textarea, input");
+      }}
+      onFocus={() => {
+        const skip = pressOnControl.current;
+        pressOnControl.current = false;
+        if (!skip) {
+          onSelect?.();
+        }
+      }}
+      onClick={() => {
+        pressOnControl.current = false;
+        onSelect?.();
+      }}
       aria-label={action.request.reason}
       aria-current={selected || undefined}
     >

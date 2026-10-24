@@ -1,5 +1,6 @@
 import type { Page, Task } from "@passport/types";
 import { useState } from "react";
+import { Link } from "react-router";
 import { Empty, Feedback, Loading } from "../components/ui";
 import { Surface } from "../shell/Surface";
 import { useResource } from "../state";
@@ -36,7 +37,9 @@ export function Tasks() {
           <Feedback error={error} />
           {!tasks.length && (
             <Empty title="No tasks yet." icon="sparkle">
-              Start one from New task, or wait for mail to arrive.
+              <Link className="btn btn-sm" to="/">
+                New task
+              </Link>
             </Empty>
           )}
           {SECTIONS.map(({ id, label }) =>

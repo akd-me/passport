@@ -217,7 +217,28 @@ version; release tags must match it. Move Unreleased to a date before tagging.
 - The tool belt's MCP tool timeout exceeds the longest `request_secret` wait (R1-46).
 - A pending profile proposal ends voice-learning sampling for the account, so a restarted run
   cannot propose a second profile (R1-49).
-
+- Web: the first click on Approve, Edit, Reject or Review draft of an unselected draft card now
+  acts; selecting the card no longer moves the button out from under the pointer.
+- Web: the question panel, subtasks line, Deliveries and secret request use the current design
+  tokens again, Lineage rows stay inside the details panel, and a stylesheet test fails on any
+  undeclared `var(--…)`, raw radius or raw font size.
+- Web: ⌘Z, ⌘K, ⌘1–⌘9 and j/k never miss a key pressed right after a render (a toast's Undo
+  could be ignored).
+- Web: the task header shows one status word (no more "Working Working"); a held queue with no
+  active run no longer reads as Working.
+- Web: the command palette shows each group once while searching; question text in Needs you,
+  Home and the palette is plain text instead of raw markdown.
+- Web: Alt+↑/↓ reorders the queue from the row's text button, where Tab lands.
+- Web: the toast sits above the composer; narrow windows keep sidebar counts and times; routine
+  countdowns never read "60m"; webhook routines say "On webhook delivery".
+- Web: rendered blocks and the draft preview use Public Sans and Source Serif 4 instead of system
+  fonts; the "As they will see it" toggle shows its state and quoted dates read like a mail client.
+- Web: the accent is kept to the primary action, focus and what needs you; Working, Running,
+  badges, links, meters and selected options are neutral, and sidebar rows no longer spin.
+- Web: five type sizes and two radii throughout, no ring borders or cards inside cards, failure
+  notices colour only their icon, and empty states are one sentence and one action.
+- Web: Needs you is titled "Needs you" with a count per group; a private secret request reads as
+  something waiting on you; Deliveries use toned badges and relative times.
 
 ## [0.3.2] — 2026-10-24
 

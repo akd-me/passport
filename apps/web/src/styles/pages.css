@@ -124,7 +124,7 @@ a.row:hover {
   font-size: var(--t-s);
 }
 .next-step-line .icon {
-  color: var(--accent);
+  color: var(--text-2);
   transform: translateY(2px);
 }
 .person-head {
@@ -186,6 +186,10 @@ a.row:hover {
 }
 .timeline summary::-webkit-details-marker {
   display: none;
+}
+/* History rows hang from their own glyph; no disclosure chevron. */
+.timeline summary::before {
+  content: none;
 }
 .timeline summary:hover {
   background: var(--sunken);
@@ -269,7 +273,6 @@ a.row:hover {
   padding: var(--s-6) var(--s-6) var(--s-5);
   border-radius: var(--r-panel);
   background: var(--raised);
-  box-shadow: var(--elevation);
 }
 .login-card h1 {
   font-size: var(--t-l);

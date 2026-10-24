@@ -2,6 +2,7 @@ import type { Task } from "@passport/types";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { useAccountId } from "../accounts/AccountFilter";
+import { markdownToText } from "../components/Markdown";
 import { relativeTime } from "../components/ui";
 import { needsYou, returnedOf } from "../tasks/model";
 import { useTasks } from "../tasks/store";
@@ -16,7 +17,8 @@ export function needText(task: Task) {
     case "failure":
       return "Stopped with an error";
     case "question":
-      return task.pendingQuestions?.[0]?.text ?? "Has a question for you";
+      // The question is markdown; a one-line row shows it as plain text.
+      return markdownToText(task.pendingQuestions?.[0]?.text ?? "") || "Has a question for you";
     case "limited":
       return "Paused at a usage limit";
     default:
@@ -51,13 +53,18 @@ export function TaskCard({ task, actions }: { task: Task; actions?: ReactNode })
  * on (`needs-you-groups.ts`): approvals, then usage limits with their recovery actions, then
  * failures.
  */
-export function TasksNeedingYou() {
+/** Tasks waiting on the person, in the page's account scope (R5-16). */
+export function useTasksNeedingYou() {
   const { tasks, available } = useTasks(),
     accountId = useAccountId();
-  // The page's account scope applies to tasks too (R5-16).
-  const all = needsYou(tasks).filter((t) => !accountId || t.accountIds.includes(accountId));
-  const list = all;
-  if (!available || !all.length) {
+  return available
+    ? needsYou(tasks).filter((t) => !accountId || t.accountIds.includes(accountId))
+    : [];
+}
+
+export function TasksNeedingYou() {
+  const list = useTasksNeedingYou();
+  if (!list.length) {
     return null;
   }
   return (
