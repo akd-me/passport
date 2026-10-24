@@ -287,6 +287,22 @@ describe("agentic session runs", () => {
     expect(env.llm.inputs).toHaveLength(1);
   });
 
+  it("limits the session's tools to the run's accounts (R1-10)", async () => {
+    let reply: unknown;
+    const env = await setup([
+      async (belt) => {
+        reply = await belt.call("mail_search", { query: "from:alice@example.com", limit: 5 });
+        return {};
+      },
+    ]);
+    await env.runtime.run(instruction, env.options({ accountIds: ["account-2"] }));
+    expect(reply).toMatchObject({
+      isError: true,
+      reason: expect.stringContaining("only its own accounts"),
+    });
+    expect(env.readers).not.toHaveBeenCalled();
+  });
+
   it("returns schema and unknown-tool errors to the session and keeps going", async () => {
     const replies: unknown[] = [];
     const env = await setup([
