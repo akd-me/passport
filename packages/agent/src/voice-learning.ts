@@ -22,7 +22,13 @@ export class VoiceLearningGuard {
       category: "profile_update",
       limit: 50,
     });
-    if (pending.items.some((action) => action.request.accountId === this.limits.accountId)) {
+    if (
+      pending.items.some(
+        (action) =>
+          action.request.type === "profile_update" &&
+          action.request.accountId === this.limits.accountId,
+      )
+    ) {
       this.searched = true;
       this.proposed = true;
     }

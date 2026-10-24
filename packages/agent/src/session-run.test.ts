@@ -303,6 +303,34 @@ describe("agentic session runs", () => {
     expect(env.readers).not.toHaveBeenCalled();
   });
 
+  it("ends voice sampling while a profile proposal for the account is pending (R1-49)", async () => {
+    let reply: unknown;
+    const env = await setup([
+      async (belt) => {
+        reply = await belt.call("mail_search", { query: "in:sent", limit: 50 });
+        return {};
+      },
+    ]);
+    await env.store.actions.insert({
+      id: "profile-1",
+      status: "proposed",
+      createdAt: TEST_NOW,
+      request: {
+        type: "profile_update",
+        accountId: "account-1",
+        params: {},
+        reason: "Learned voice",
+        actor: { kind: "agent", id: "earlier-run" },
+        category: "profile_update",
+      },
+    } as never);
+    await env.runtime.run(
+      instruction,
+      env.options({ voiceLearning: { accountId: "account-1", sentContainer: "Sent" } }),
+    );
+    expect(reply).toMatchObject({ isError: true, error: "INPUT_VOICE_LIMIT" });
+  });
+
   it("returns schema and unknown-tool errors to the session and keeps going", async () => {
     const replies: unknown[] = [];
     const env = await setup([

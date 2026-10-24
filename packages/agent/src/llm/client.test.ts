@@ -171,6 +171,25 @@ describe("OpenAI-compatible adapter", () => {
     expect(sleep.mock.calls.map((call) => call[0])).toEqual([1000, 200]);
   });
 
+  it("carries a final 429's Retry-After as the reset time (R1-33)", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => response({}, 429, { "retry-after": "3600" }));
+    const client = createLlmClient(
+      { provider: "ollama", model: "local" },
+      { fetch: fetcher, sleep: async () => {}, maxRetries: 1 },
+    );
+    const before = Date.now();
+    const error = await client.complete(opts).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: "LLM_HTTP", status: 429 });
+    const { retryAfter, message } = error as { retryAfter: string; message: string };
+    const reset = Date.parse(retryAfter);
+    expect(reset - before).toBeGreaterThanOrEqual(3_599_000);
+    expect(reset - before).toBeLessThan(3_700_000);
+    // The task limit parser reads the ISO time from the message.
+    expect(message).toBe(`LLM request failed (HTTP 429); retry after ${retryAfter}`);
+  });
+
   it("stops after the configured retry budget and never includes API secrets in errors", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
