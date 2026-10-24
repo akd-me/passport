@@ -119,8 +119,8 @@ export async function agenticSession(
   ].join("\n\n");
   const context = await manualContext(ctx, trigger);
   const fresh = manualPrompt(trigger.instruction, context);
-  const resume =
-    options.session?.resume?.kind === llm.hostKind ? options.session.resume : undefined;
+  const requested = options.session?.resume ?? (await options.session?.resolveResume?.());
+  const resume = requested?.kind === llm.hostKind ? requested : undefined;
   // A resumed turn is the follow-up alone, plus any composer context this run was given.
   const resumed =
     resume && (context.emails.length || context.matter)

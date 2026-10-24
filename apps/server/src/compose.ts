@@ -19,6 +19,7 @@ import type {
   Email,
   ProviderRegistry,
 } from "@passport/types";
+import { agentSessionOptions } from "./agent-session.js";
 import { type Arrival, ArrivalQueue, type ArrivalTrigger } from "./arrivals.js";
 import type { Backend, PassportAgent } from "./backend.js";
 import { calendarSafeStore } from "./calendar-safety.js";
@@ -220,6 +221,7 @@ export async function createRealBackend(
         selfAddresses: config.accounts.map((account) => account.emailAddress),
         freeBusy,
         readers,
+        ...agentSessionOptions(config.agentBudget),
         runId: () => currentTrigger?.runId,
         triageStep: async <T>(step: string, task: () => Promise<T>): Promise<T> => {
           if (currentTrigger?.kind !== "email.received" || !currentTrigger.runId) {

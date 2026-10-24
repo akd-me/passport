@@ -33,6 +33,11 @@ export interface AgentSessionRunOptions {
    * resume fails before the session did anything.
    */
   resume?: ProviderSessionRef & { instruction: string };
+  /**
+   * Resolves `resume` when the run starts rather than when it was queued, so a follow-up queued
+   * behind the task's first run resumes the session that run opened. Used when `resume` is absent.
+   */
+  resolveResume?: () => Promise<(ProviderSessionRef & { instruction: string }) | undefined>;
 }
 
 /** A run notice for the timeline (`system_notice`), e.g. `BUDGET_EXHAUSTED`. */

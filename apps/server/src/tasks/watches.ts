@@ -362,15 +362,17 @@ export class TaskWatchMonitor {
           },
         ],
       },
-      async (options) =>
-        this.agent.run(
+      async (options) => {
+        const instruction = `You are working on the task "${task.title}" (task id ${task.id}).\n\n${input.instruction}`;
+        return this.agent.run(
+          { kind: "manual", instruction, ...(input.emailIds ? { emailIds: input.emailIds } : {}) },
           {
-            kind: "manual",
-            instruction: `You are working on the task "${task.title}" (task id ${task.id}).\n\n${input.instruction}`,
-            ...(input.emailIds ? { emailIds: input.emailIds } : {}),
+            ...options,
+            priority: "background",
+            session: this.service.sessionOptions(task.id, { instruction }),
           },
-          { ...options, priority: "background" },
-        ),
+        );
+      },
       describeAgentRun,
     );
   }
