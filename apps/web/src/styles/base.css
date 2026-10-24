@@ -37,12 +37,20 @@ time,
 .num {
   font-variant-numeric: tabular-nums;
 }
+/* Links are neutral: the accent is for the primary action, focus and what needs you. A link
+   inside a sentence keeps a quiet underline so it still reads as one. */
 a {
-  color: var(--accent);
+  color: var(--text);
   text-decoration: none;
+}
+:where(p, dd) a:not([class]) {
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
 }
 a:hover {
   text-decoration: underline;
+  text-decoration-color: currentColor;
   text-underline-offset: 2px;
 }
 button {
@@ -100,7 +108,7 @@ code {
 }
 input[type="checkbox"],
 input[type="radio"] {
-  accent-color: var(--accent-fill);
+  accent-color: var(--text);
   width: 15px;
   height: 15px;
   margin: 0;

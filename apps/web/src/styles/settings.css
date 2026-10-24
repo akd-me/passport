@@ -123,7 +123,7 @@
   background: var(--raised);
 }
 .current-model .icon {
-  color: var(--accent);
+  color: var(--text-2);
 }
 .agent-choice {
   display: grid;
@@ -157,8 +157,7 @@
 }
 .agent-option.active,
 .provider-option.active {
-  background: var(--raised);
-  box-shadow: 0 0 0 2px var(--accent);
+  background: var(--selected);
 }
 .agent-option:disabled {
   opacity: 0.6;
@@ -422,8 +421,8 @@
   color: var(--green);
 }
 .step-icon.running {
-  box-shadow: 0 0 0 1.5px var(--accent);
-  color: var(--accent);
+  box-shadow: 0 0 0 1.5px var(--text-2);
+  color: var(--text-2);
 }
 .step-icon.failed {
   box-shadow: none;

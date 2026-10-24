@@ -84,7 +84,7 @@
   border-left: 2px solid var(--accent);
 }
 .tl-message.question .tl-author {
-  color: var(--accent);
+  color: var(--text-2);
   font-weight: var(--w-medium);
 }
 .tl-line {
@@ -232,12 +232,12 @@
 .run-chip.running,
 .run-chip.queued,
 .run-chip.waiting {
-  color: var(--accent);
+  color: var(--text-2);
 }
 .run-chip.running::before,
 .run-chip.queued::before,
 .run-chip.waiting::before {
-  background: var(--accent);
+  background: var(--text-2);
 }
 .run-chip.completed::before {
   background: var(--green);
@@ -578,10 +578,10 @@ button.composer-chip:hover {
 }
 .plan-toggle.on,
 .plan-toggle.on .icon {
-  color: var(--accent);
+  color: var(--text);
 }
 .plan-toggle.on {
-  background: var(--accent-soft);
+  background: var(--selected);
 }
 .composer-hint {
   margin-left: auto;
@@ -628,7 +628,7 @@ button.composer-chip:hover {
   font-size: var(--t-s);
 }
 .run-status.running .icon {
-  color: var(--accent);
+  color: var(--text-2);
 }
 .run-status.done > .icon {
   color: var(--green);

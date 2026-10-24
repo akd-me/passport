@@ -73,10 +73,8 @@ describe("instructional text contrast", () => {
     expect(users.sort()).toEqual([
       ".crumb-sep",
       ".empty .icon",
-      ".queue-grip",
       ".section-toggle .icon",
       ".send-btn:disabled",
-      ".task-glyph.idle",
       ".tool-group-head .icon",
     ]);
   });
@@ -95,6 +93,65 @@ describe("stylesheets", () => {
         .map((m) => `${file}: ${m[1]}`),
     );
     expect(unknown).toEqual([]);
+  });
+});
+
+describe("one accent (brief §3)", () => {
+  it("R2-10: is used only for the primary action, focus and what returns to the person", () => {
+    const users = new Set(
+      sheets
+        .filter(([file]) => file !== "styles/tokens.css")
+        .flatMap(([, text]) =>
+          [...`\n${text}`.matchAll(/\n([^\n{}]+(?:,\n[^\n{}]+)*) \{([^}]*)\}/g)]
+            .filter((m) => m[2]?.includes("var(--accent"))
+            .flatMap((m) => (m[1] ?? "").split(",\n").map((selector) => selector.trim())),
+        ),
+    );
+    expect([...users].sort()).toEqual(
+      [
+        // The primary action.
+        ".btn-primary",
+        ".btn-primary:hover:not(:disabled)",
+        ".send-btn",
+        ".send-btn:hover:not(:disabled)",
+        // Focus, the selected decision, text being edited, and a drop target while dragging.
+        ":focus-visible",
+        ":where(input, select, textarea):focus-visible",
+        "::selection",
+        ".chip-toggle:has(:focus-visible)",
+        ".composer:focus-within",
+        ".input-unit:focus-within",
+        ".search-field:focus-within",
+        ".proposal:focus-visible",
+        ".proposal.selected::before",
+        ".queue-edit",
+        ".task-title-edit input",
+        ".queue-row.drop-after::after",
+        ".queue-row.drop-before::before",
+        // What needs the person: the count, Approval, Input, Woke, questions and setup prompts.
+        ".side-count.strong",
+        ".task-card-what .need",
+        ".task-glyph.approval",
+        ".task-glyph.input",
+        ".task-glyph.woke",
+        ".state-word.approval",
+        ".state-word.input",
+        ".state-word.woke",
+        ".approval-panel-head h2 .icon",
+        ".change-status.proposed",
+        ".tl-approval .proposal",
+        ".tl-approval.pending",
+        ".tl-approval.pending .tl-line > .icon",
+        ".tl-message.question",
+        ".question-panel",
+        ".setup-prompt",
+        ".setup-prompt > .icon",
+        ".side-row.setup-waiting .icon",
+        // The person's own messages (the brief's tinted block) and the brand mark.
+        ".tl-message.from-user",
+        ".brand-mark",
+      ].sort(),
+    );
   });
 });
 

@@ -85,7 +85,7 @@
   width: 18px;
   height: 24px;
   flex: none;
-  color: var(--faint);
+  color: var(--muted);
 }
 .queue-row[draggable="true"] {
   cursor: grab;

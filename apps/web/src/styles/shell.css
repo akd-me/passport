@@ -349,7 +349,7 @@
   height: 8px;
   border-radius: 2px;
   flex: none;
-  background: var(--accent);
+  background: var(--text-2);
 }
 .matter-glyph.waiting {
   background: transparent;
@@ -375,11 +375,14 @@
 .task-glyph svg {
   display: block;
 }
+/* Accent only for what returns to the person; Working is not waiting on them. */
 .task-glyph.approval,
 .task-glyph.input,
-.task-glyph.working,
 .task-glyph.woke {
   color: var(--accent);
+}
+.task-glyph.working {
+  color: var(--text-2);
 }
 .task-glyph.limited {
   color: var(--amber);
@@ -391,10 +394,11 @@
   color: var(--green);
 }
 .task-glyph.idle {
-  color: var(--faint);
+  color: var(--muted);
 }
+/* Rows show the arc still; only the open task's header spins, so a list of working tasks is calm. */
 .task-glyph.working svg {
-  animation: spin 1.2s linear infinite;
+  animation: none;
 }
 /* The state word that travels with a glyph: in the task header and Needs you. */
 .state-word {
@@ -423,7 +427,7 @@
   flex: none;
 }
 .state-word.working {
-  color: var(--accent);
+  color: var(--text-2);
 }
 .state-word.working .state-mark {
   animation: spin 1.2s linear infinite;

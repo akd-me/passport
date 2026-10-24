@@ -124,7 +124,7 @@ a.row:hover {
   font-size: var(--t-s);
 }
 .next-step-line .icon {
-  color: var(--accent);
+  color: var(--text-2);
   transform: translateY(2px);
 }
 .person-head {

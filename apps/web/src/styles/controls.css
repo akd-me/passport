@@ -78,7 +78,7 @@
   color: var(--red);
 }
 .link-btn {
-  color: var(--accent);
+  color: var(--text-2);
   font-size: var(--t-s);
   font-weight: var(--w-medium);
 }
@@ -143,8 +143,8 @@
   white-space: nowrap;
 }
 .badge.ink {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--selected);
+  color: var(--text-2);
 }
 .badge.good {
   background: var(--green-soft);
@@ -463,7 +463,7 @@ fieldset.field legend {
   cursor: pointer;
 }
 .chip-toggle:has(:checked) {
-  background: var(--accent-soft);
+  background: var(--selected);
   color: var(--text);
 }
 .chip-toggle:has(:focus-visible) {
@@ -539,7 +539,7 @@ fieldset.field legend {
 .meter span {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: var(--text-2);
 }
 
 /* ---------------------------------------------------------------- Disclosures */
@@ -679,7 +679,7 @@ details[open] > summary::before {
   height: 14px;
 }
 .ladder span.on {
-  background: var(--accent);
+  background: var(--text-2);
 }
 .ladder-full_access span.on {
   background: var(--amber);
@@ -738,7 +738,7 @@ details[open] > summary::before {
   background: var(--hover);
 }
 .mode-option.active {
-  background: var(--accent-soft);
+  background: var(--selected);
 }
 .mode-picker:not(.compact) .mode-option.active {
   background: var(--raised);
@@ -748,7 +748,7 @@ details[open] > summary::before {
   opacity: 0.6;
 }
 .mode-option .icon {
-  color: var(--accent);
+  color: var(--text-2);
 }
 .mode-text strong {
   display: block;

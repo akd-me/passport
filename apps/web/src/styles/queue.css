@@ -38,7 +38,8 @@
   color: inherit;
 }
 .group-head h2 a:hover {
-  color: var(--accent);
+  color: var(--text);
+  text-decoration: underline;
 }
 .group-head .count {
   font-size: var(--t-xs);
@@ -322,7 +323,7 @@
   margin-bottom: var(--s-1);
 }
 .matter-ref:hover {
-  color: var(--accent);
+  color: var(--text);
 }
 .next-step {
   margin-top: var(--s-2);
