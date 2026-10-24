@@ -42,8 +42,11 @@ export type TaskKind = "task" | "inbox" | "routine";
 export type TaskCreatedBy = "user" | "agent" | "system";
 /** `plan` = investigate read-only and return a proposal list; write tools never execute. */
 export type TaskInteractionMode = "default" | "plan";
-/** Why the task is in the person's inbox. Null = nothing pending. `question` is reserved. */
-export type TaskNeedsUser = null | "approval" | "question" | "failure";
+/**
+ * Why the task is in the person's inbox. Null = nothing pending. `question` is reserved.
+ * `limited` (v0.4): a run stopped at a subscription or provider usage limit (`Task.limited`).
+ */
+export type TaskNeedsUser = null | "approval" | "question" | "failure" | "limited";
 
 /** `watch_conversation`: wake the task when someone else replies on this conversation. */
 export interface ConversationWatch {
@@ -93,7 +96,67 @@ export interface Task {
    * the grant recorded. Append-only.
    */
   approvalGrants?: TaskApprovalGrant[];
+  /**
+   * v0.4: when the task last came back to the person (T3's inbox order): created, reopened, a run
+   * requested by the person, or a run that handed it back. Moves with `lastActivityAt`; absent
+   * on rows written before v0.4 (fall back to `lastActivityAt`).
+   */
+  returnedAt?: Timestamp | null;
+  /** v0.4: when the person last marked the task seen (`POST /api/tasks/:id/seen`). */
+  seenAt?: Timestamp | null;
+  /** v0.4: an outcome the person has not seen yet: `done` (their run finished) or `woke`. */
+  unseenOutcome?: TaskUnseenOutcome;
+  /** v0.4: follow-ups waiting behind the active run, in run order (`/api/tasks/:id/queue`). */
+  queue?: TaskQueueEntry[];
+  /** v0.4: the queue stopped after `/interrupt` (or settle, archive) until resumed. */
+  queueHeld?: boolean;
+  /** v0.4: the last run hit a usage limit; set with `needsUser: "limited"`. */
+  limited?: TaskLimited | null;
+  /** v0.4: the title was proposed by the fast model; false once the person renames. */
+  titleGenerated?: boolean;
 }
+
+/** `done`: a run the person started finished. `woke`: the task woke itself and came back. */
+export type TaskUnseenOutcome = "done" | "woke" | null;
+
+/** A queued follow-up. `runId` is the TaskRun (status `queued`) it becomes when it starts. */
+export interface TaskQueueEntry {
+  runId: Id;
+  text: string;
+  createdAt: Timestamp;
+}
+
+/** `GET /api/tasks/:id/queue` and every queue mutation. */
+export interface TaskQueue {
+  taskId: Id;
+  held: boolean;
+  entries: TaskQueueEntry[];
+}
+
+/** Where a usage limit came from: the host CLI's subscription, or an API provider's 429. */
+export type TaskLimitSource = "host_agent" | "provider";
+
+/** `Task.limited`: the run that hit the limit and how it recovers. */
+export interface TaskLimited {
+  /** The TaskRun that stopped; `/resume` continues it. */
+  runId: Id;
+  /** When the limit resets, if the CLI or provider said so. */
+  resetAt: Timestamp | null;
+  /** `/resume-at-reset` was requested: the server continues the run at `resetAt`. */
+  autoResume: boolean;
+  source: TaskLimitSource;
+  at: Timestamp;
+}
+
+/** The fields settle, snooze and archive replace, as they were before (for undo). */
+export interface TaskRestoreState {
+  status: TaskStatus;
+  snoozedUntil: Timestamp | null;
+  settledAt: Timestamp | null;
+}
+
+/** Response of settle, snooze, archive and the reopen routes: the task plus what it was. */
+export type TaskWithPrevious = Task & { previous: TaskRestoreState };
 
 // ---------------------------------------------------------------------------
 // Runs
@@ -132,6 +195,8 @@ export interface TaskRun {
   actionIds: Id[];
   usage?: TaskRunUsage | null;
   error?: string | null;
+  /** v0.4: this run continues one a server restart interrupted (continued at most once). */
+  restartOf?: Id | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +420,8 @@ export const TASK_LIMITS = {
   watchCoalesceMs: 120_000,
   titleMax: 60,
   summaryMax: 200,
+  /** v0.4: queued follow-ups per task. */
+  queueMax: 20,
 } as const;
 
 /** Title from the first message: whitespace collapsed, at most 60 characters. */
@@ -410,4 +477,64 @@ export interface ApprovalScopeResult {
 export interface TaskByAction {
   taskId: Id;
   runId: Id;
+}
+
+// ---------------------------------------------------------------------------
+// v0.4 lifecycle: the Working predicate and the badge vocabulary
+// ---------------------------------------------------------------------------
+
+/** One status vocabulary for the sidebar, the task header, Needs you and the menu bar. */
+export type TaskBadge =
+  | "approval"
+  | "input"
+  | "working"
+  | "waiting"
+  | "limited"
+  | "failed"
+  | "woke"
+  | "done";
+
+/** What the task row alone does not say: how many of its runs are queued or running. */
+export interface TaskActivity {
+  activeRuns: number;
+}
+
+/**
+ * T3's `isThreadWorking` over a task: not while it waits on the person (approval, question,
+ * failure, limit); otherwise working while a run is active or a conversation is watched.
+ */
+export function isTaskWorking(
+  task: Pick<Task, "needsUser" | "watches">,
+  activity: TaskActivity,
+): boolean {
+  if (task.needsUser) {
+    return false;
+  }
+  return activity.activeRuns > 0 || task.watches.length > 0;
+}
+
+/**
+ * The single badge for a task, highest priority first: approval, input (question), working
+ * (a run is active), waiting (watching), limited, failed, woke, done; null when nothing is new.
+ */
+export function taskBadge(
+  task: Pick<Task, "needsUser" | "watches" | "unseenOutcome">,
+  activity: TaskActivity,
+): TaskBadge | null {
+  if (task.needsUser === "approval") {
+    return "approval";
+  }
+  if (task.needsUser === "question") {
+    return "input";
+  }
+  if (isTaskWorking(task, activity)) {
+    return activity.activeRuns > 0 ? "working" : "waiting";
+  }
+  if (task.needsUser === "limited") {
+    return "limited";
+  }
+  if (task.needsUser === "failure") {
+    return "failed";
+  }
+  return task.unseenOutcome ?? null;
 }

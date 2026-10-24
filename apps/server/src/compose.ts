@@ -155,6 +155,7 @@ export async function createRealBackend(
     let closing: Promise<void> | undefined;
     let stopped = false;
     let runtime: AgentRuntime;
+    let llm: LlmClient | undefined;
     const lanes = new LaneQueue();
     let enabled = false;
     let currentTrigger: ArrivalTrigger | undefined;
@@ -199,24 +200,25 @@ export async function createRealBackend(
     };
     const configureAgent = () => {
       enabled = !!options.llm || llmConfigured(config.llm);
+      llm =
+        options.llm ??
+        (enabled
+          ? createLlmClient(config.llm, {
+              log: logger.warn,
+              hostAgentCwd: join(config.dataDir, "host-agent"),
+            })
+          : undefined);
       runtime = createAgentRuntime({
         log: logger.warn,
         store,
         executor: agentExecutor,
         policy,
         bus,
-        llm:
-          options.llm ??
-          (enabled
-            ? createLlmClient(config.llm, {
-                log: logger.warn,
-                hostAgentCwd: join(config.dataDir, "host-agent"),
-              })
-            : {
-                complete: async () => {
-                  throw new ApiError("LLM_NOT_CONFIGURED", "LLM not configured");
-                },
-              }),
+        llm: llm ?? {
+          complete: async () => {
+            throw new ApiError("LLM_NOT_CONFIGURED", "LLM not configured");
+          },
+        },
         selfAddresses: config.accounts.map((account) => account.emailAddress),
         freeBusy,
         readers,
@@ -319,7 +321,21 @@ export async function createRealBackend(
     };
     const tasks = options.clientMode
       ? undefined
-      : createTaskSystem({ store, bus, policy, agent, ceilings, executor, watcher });
+      : createTaskSystem({
+          store,
+          bus,
+          policy,
+          agent,
+          ceilings,
+          executor,
+          watcher,
+          titleModel: async (request) => {
+            if (!llm || stopped) {
+              throw new ApiError("LLM_NOT_CONFIGURED", "LLM not configured");
+            }
+            return llm.complete(request);
+          },
+        });
     const arrivals = options.clientMode
       ? undefined
       : new ArrivalQueue(

@@ -12,20 +12,21 @@ import { ApiError } from "../errors.js";
 import { readEmail } from "../ondemand-wiring.js";
 import { csv, jsonBody, limit } from "../route-input.js";
 import { integer, member, string } from "../validation.js";
+import { installTaskLifecycleRoutes } from "./routes-lifecycle.js";
 import type { TaskSystem } from "./wiring.js";
 
 const MESSAGE_MAX = 20_000;
 const KINDS: TaskKind[] = ["task", "inbox", "routine"];
 const INTERACTION: TaskInteractionMode[] = ["default", "plan"];
 
-function system(backend: Backend): TaskSystem {
+export function system(backend: Backend): TaskSystem {
   if (!backend.tasks) {
     throw new ApiError("TASKS_UNAVAILABLE", "Tasks need the real backend (passport serve)", 501);
   }
   return backend.tasks;
 }
 
-function text(value: unknown, name: string, max = MESSAGE_MAX): string {
+export function text(value: unknown, name: string, max = MESSAGE_MAX): string {
   const result = string(value, name).trim();
   if (!result || result.length > max) {
     throw new ApiError("INVALID_FIELD", `${name} must contain 1–${max} characters`);
@@ -33,7 +34,7 @@ function text(value: unknown, name: string, max = MESSAGE_MAX): string {
   return result;
 }
 
-function only(body: Record<string, unknown>, allowed: string[]) {
+export function only(body: Record<string, unknown>, allowed: string[]) {
   const unknown = Object.keys(body).find((key) => !allowed.includes(key));
   if (unknown) {
     throw new ApiError("INVALID_FIELD", `Unknown field ${unknown}`);
@@ -158,7 +159,7 @@ export function installTaskRoutes(app: Hono, backend: Backend): void {
         ? "queue"
         : (member(string(body.mode, "mode"), ["queue", "steer"], "mode") as TaskMessageMode);
     return c.json(
-      await system(backend).service.sendMessage(c.req.param("id"), {
+      await system(backend).queue.send(c.req.param("id"), {
         text: text(body.text, "text"),
         mode: messageMode,
       }),
@@ -166,20 +167,20 @@ export function installTaskRoutes(app: Hono, backend: Backend): void {
     );
   });
   app.post("/api/tasks/:id/interrupt", async (c) =>
-    c.json(await system(backend).service.interrupt(c.req.param("id"))),
+    c.json(await system(backend).queue.interrupt(c.req.param("id"))),
   );
   app.post("/api/tasks/:id/snooze", async (c) => {
     const body = await jsonBody(c.req.raw);
     only(body, ["until"]);
     return c.json(
-      await system(backend).service.snooze(c.req.param("id"), string(body.until, "until")),
+      await system(backend).lifecycle.snooze(c.req.param("id"), string(body.until, "until")),
     );
   });
   app.post("/api/tasks/:id/settle", async (c) =>
-    c.json(await system(backend).service.settle(c.req.param("id"))),
+    c.json(await system(backend).lifecycle.settle(c.req.param("id"))),
   );
   app.post("/api/tasks/:id/archive", async (c) =>
-    c.json(await system(backend).service.archive(c.req.param("id"))),
+    c.json(await system(backend).lifecycle.archive(c.req.param("id"))),
   );
   app.post("/api/tasks/:id/pin", async (c) =>
     c.json(await system(backend).service.pin(c.req.param("id"), true)),
@@ -208,4 +209,5 @@ export function installTaskRoutes(app: Hono, backend: Backend): void {
       }),
     );
   });
+  installTaskLifecycleRoutes(app, backend);
 }
