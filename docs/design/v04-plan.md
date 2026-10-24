@@ -17,7 +17,7 @@ transcript persistence and R1 corrections are described in the current reference
 Deferred: staged task changes, fork/merge-back, private reference handoff in account setup and
 the routine form, plus the remaining limitations in [tasks](../tasks.md#known-limitations-2026-10-24)
 and [scheduler](../scheduler.md#known-limitations). Live OAuth/provider checks remain unverified.
-[R1 mismatch and fix-handoff dispositions](../v04-docs-pass.md) record the review inputs
+[R1 mismatch and fix-handoff dispositions](v04-docs-audit.md) record the review inputs
 (`review-r1.md`, `review-r2.md`) and the UI work left to the web pass. The brief below records
 the original work breakdown; this Outcome and the reference docs describe the shipped result.
 

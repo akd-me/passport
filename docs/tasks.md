@@ -758,10 +758,11 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 - **Status marks.** One set (`tasks/TaskGlyph.tsx`, state from `taskState` in `tasks/model.ts`)
   is used by the sidebar, the task header, Needs you and the task list, with the T3 badge words:
   Approval (`needsUser: "approval"`), Input (`"question"`), Waiting (watching a conversation),
-  Working (a run is active, or `working` without watches), Limited, Failed (`"failure"`), Woke
-  and Done. The state is `taskBadge` from `@passport/types` (so its priority order), with a
-  `working` task without watches counted as running and `limited` without `needsUser` read as
-  Limited. Woke and Done read `unseenOutcome`.
+  Working (a run is active, or `working` without watches; not while the queue is held with no
+  active run), Limited, Failed (`"failure"`), Woke and Done. The state is `taskBadge` from
+  `@passport/types` (so its priority order), with a `working` task without watches counted as
+  running and `limited` without `needsUser` read as Limited. Woke and Done read
+  `unseenOutcome`. Only the task header's mark animates; sidebar rows stay still.
 - **Task view** (`/tasks/:id`). The timeline opens at its newest items: the first page answers
   short tasks; for longer ones the last `seq` is found with one-item `afterSeq` probes (doubling,
   then halving) and the last page is fetched. Older pages load when the top scrolls into view.
@@ -772,13 +773,15 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   that names at most two categories, writes first ("Archived 40, read 4 messages and 1 other
   step"). Proposals read "asked to", plan mode "planned to", and failed calls are counted apart.
   Messages use the safe Markdown subset or text. A `render` item displays server-sanitised
-  HTML in an opaque `<iframe sandbox="">`, with theme variables, fluid width, a bounded
+  HTML in an opaque `<iframe sandbox="">`, with theme variables, the app's fonts embedded as
+  `data:` URLs (so a frame never falls back to the system font), fluid width, a bounded
   content-derived height and Open full size. Rich output is a document block without a card.
-  A `RESTARTED` notice
-  is a calm block, "Picked up after a restart", with the server's text (what was interrupted,
-  what it still watches) beneath; `USAGE_LIMITED` notices read amber, other error codes red.
-- **Header.** The title renames in place: click it, Enter saves (`PATCH { title }`), Escape
-  keeps it. A title the fast model proposed (`titleGenerated`) reads muted until renamed;
+  A `RESTARTED` notice is a calm block, "Picked up after a restart", with the server's text
+  (what was interrupted, what it still watches) beneath. Failure and usage-limit notices colour
+  only their icon: amber for `USAGE_LIMITED`, red for other error codes.
+- **Header.** The status mark sits beside the title, with a status word only for Snoozed,
+  Settled and Archived. The title renames in place: click it, Enter saves (`PATCH { title }`),
+  Escape keeps it. A title the fast model proposed (`titleGenerated`) reads muted until renamed;
   saving it unchanged accepts it. Opening the page marks the task seen (`POST /seen`) when it
   has an unseen outcome or came back after the last look, and again when it comes back while the
   page is visible; Mark unread while the page is open holds until it closes. A Limited task
@@ -798,13 +801,15 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   timeline approval and Needs you (also its context panel). Save uses the existing approval
   edit validator through the pending-draft route and leaves approval pending; Approve keeps
   the executor path. The **As they will see it** toggle previews the draft and quoted history
-  through the shared server sanitiser and sandbox.
+  (with mail-style dates) through the shared server sanitiser and sandbox. A press that starts
+  on one of the card's buttons acts on the first click; selecting the card never moves the
+  button away under the pointer.
 - **Composer.** Enter sends in the default mode (`"queue"`) and ⌘Enter in the opposite one
   (`"steer"`); without an active run both queue. Stop calls
   `/interrupt`. Above it, the **queue strip** lists `task.queue` as rows in run order: click a
   row's text to edit it in place (Enter saves through `PATCH …/queue/:runId`, Escape keeps it),
-  drag a row or press Alt+↑/↓ on it to reorder (`POST …/queue/reorder` with the full order,
-  shown at once), "Steer now" (or "Send now" without a live run) promotes it
+  drag a row or press Alt+↑/↓ anywhere in it, its text button included, to reorder
+  (`POST …/queue/reorder` with the full order, shown at once; focus stays on the moved row), "Steer now" (or "Send now" without a live run) promotes it
   (`…/promote-to-steer`), and × removes it. A refused change (`404`, `409 QUEUE_CHANGED`)
   reloads the queue and says so. After Stop the strip reads "Queue held · Resume"
   (`POST …/queue/resume`). Stop and steer are only offered while a run is active on a `kind: "task"` task;
@@ -815,12 +820,14 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   `matterId`; their subjects and titles never enter the person's message. A server that rejects
   those fields (400) gets the plain ids appended to the message instead. Suggestion chips fill
   the composer; Enter starts the task. The v0.2 queue lives on as **Needs you** (`/needs-you`),
-  under the tasks waiting on the person; its badge counts tasks in the account scope. Those
-  tasks are grouped by what they wait on, in the order of `views/needs-you-groups.ts`:
-  Approvals, Paused at a usage limit (with the reset time and the three recovery actions under
-  each row), Failed. A task no group claims (today a private-input `question`) shows under
-  "Waiting on you". A new group is one entry in that list (or `registerNeedsYouGroup(group,
-  before)`); nothing else changes.
+  titled "Needs you" with a count per group (Newest included), under the tasks waiting on the
+  person; its badge counts tasks in the account scope. Those tasks are grouped by what they
+  wait on, in the order of `views/needs-you-groups.ts`: Approvals, Questions for you (the
+  question as one line of plain text), Paused at a usage limit (with the reset time and the
+  three recovery actions under each row), Failed. A task of a kind no group claims shows under
+  "Waiting on you", so nothing is hidden. A new group is one entry in that list (or
+  `registerNeedsYouGroup(group, before)`); nothing else changes. Its empty state is one
+  sentence and "Ask Passport something".
 - **Deep links.** `?decision=<actionId>` asks `GET /api/tasks/by-action/:id` and opens
   `/tasks/:id?approval=<actionId>`. When that fails (unknown action, older server) it searches the
   loaded tasks' `pendingActionIds`, then falls back to `/needs-you?decision=<actionId>`.
@@ -835,8 +842,11 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   composer answers them all. Task details show a **Lineage** panel (the parent, or the
   children with their status). The timeline ends with one collapsed line, "Started 3
   subtasks, 2 working", that opens to the list. Subtasks stay out of the sidebar until they
-  need the person (`needsUser` set). Needs you shows questions in their own group, "Questions
-  for you", with the question text.
+  need the person (`needsUser` set). Needs you, Home and the palette show the question as
+  plain text (one-line rows); only the composer's question card renders it as markdown.
+- **Toasts and narrow windows.** Undo toasts sit above the composer, never over its controls.
+  Below 860 px the sidebar keeps its approval counts; on touch screens the row menu shows beside
+  the row instead of on hover.
 - On the demo backend (`501 TASKS_UNAVAILABLE`) the sidebar and home say tasks need
   `passport serve`, and the composer runs the agent once (`POST /api/agent/run`) and shows the
   outcome inline.
@@ -855,8 +865,8 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
   back the watches settle or archive ended, nor release a queue they held (the strip offers
   Resume).
 - **Queue strip:** reordering by drag uses HTML5 drag and drop, which touch screens do not
-  fire; Alt+↑/↓ on a focused row is the keyboard path. A reorder racing a starting entry answers
-  `409` and the strip reloads.
+  fire; Alt+↑/↓ from anywhere in the row is the keyboard path. A reorder racing a starting entry
+  answers `409` and the strip reloads.
 - **Seen:** the page marks a task seen when it opens or the window becomes visible, not when the
   person scrolls to the news; another open tab does not learn about a Mark unread made here
   until the frame arrives.
@@ -865,8 +875,6 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 - **⌘1–⌘9 in a browser tab:** Chrome and Safari keep ⌘1–⌘9 for switching tabs, so the
   shortcut reaches Passport in the Mac app and with Ctrl on other systems, not in a Mac browser
   tab.
-- **Command palette:** while searching, results are ranked across groups, so a group heading can
-  repeat (Tasks, Matters, Tasks).
 - **R5-15:** a decision card on Needs you and the same action in an open task share busy state
   only within one tab.
 - **R5-18:** the clamp notice always names the account ladder, even when a parent task caused

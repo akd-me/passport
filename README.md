@@ -25,7 +25,7 @@ More screens: [starting a task](docs/screenshots/new-task.png), Needs you ([ligh
 
 ## Quickstart
 
-**Pre-release:** the v0.4 work is on `main`; the latest release heading and tag remain 0.3.2. Build the Mac app or the server from source, or use a locally packed tarball; the npm and GHCR commands below need a published version. Provider/model integrations have offline tests; real Gmail and Outlook sign-in and reads have not been verified against the live APIs (see [Status](#status)).
+**Pre-release:** 0.4.0 is tagged but not yet published to npm or GHCR. Build the Mac app or the server from source, or use a locally packed tarball; the npm and GHCR commands below need a published version. Provider/model integrations have offline tests; real Gmail and Outlook sign-in and reads have not been verified against the live APIs (see [Status](#status)).
 
 ### Mac app (recommended on macOS)
 
@@ -209,9 +209,7 @@ Mail/calendar providers receive the reads and actions you authorize. Beyond thos
 
 ## Status
 
-**v0.4 is implemented on `main`, with the final web fix pass and release integration pending.**
-The latest release heading/tag is **0.3.2** (2026-10-24); this docs pass does not publish or tag.
-Verification remains bounded by the evidence below:
+**0.4.0 was tagged on 2026-10-24** (not yet published to npm or GHCR). Verification is bounded by the evidence below:
 
 | Area | State |
 | --- | --- |

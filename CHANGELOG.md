@@ -3,7 +3,7 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
-## [Unreleased]
+## [0.4.0] — 2026-10-24
 
 ### Added
 
@@ -165,10 +165,6 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   snooze, settle or title; prompts quote task titles as labels and frame a subtask's request in
   the title prompt; the resumed turn lists the last 10 proposals however busy the task is
   (R1-30, R1-34 to R1-36, R1-40).
-
-
-### Fixed
-
 - Webhook new-window budgets count accepted windows only; filtered, duplicate and rejected
   deliveries leave room for eligible events.
 - Webhook queues are bounded per routine and globally, persist in separate routine records,
