@@ -27,6 +27,7 @@ Item payloads by `kind`:
 | `tool_call` | `{ name, inputSummary, resultSummary, cost?, durationMs, isError, planned? }`; summaries are redacted (bodies, secrets, token-shaped strings) and at most 200 characters |
 | `approval_request` | `{ actionId, summary }`; approve or reject with `/api/actions/:id/{approve,reject}` |
 | `question` | `{ text }` (reserved: nothing emits it yet) |
+| `secret_request` | `{ requestId, text, expiresAt }`; private password field, never the value; see [request_secret](tools.md#private-secrets-v04) |
 | `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`) |
 | `notification` | `{ source: "arrival" \| "watch" \| "schedule" \| "system", summary, row? }`; `row` is a `MailRow`. A task created with `matterId` or `emailIds` gets a `system` one on its first run ("With matter “…” and 2 messages “…”, “…”"; `row` when there is exactly one message) |
 
@@ -58,6 +59,11 @@ loses its `<` (becomes `‹`), so mail can neither close the frame nor open a de
 - **`routine`**: one per model-backed scheduler job (`agent.daily_digest`,
   `agent.matter_review`, every user routine). The job's `taskId` points at it, and each job run
   is a `schedule` run on it.
+
+User routines may set `runOn: "fresh"`: each scheduled/webhook run creates a new `kind: "task"`
+child with the routine task as `parentTaskId`, instead of appending a run to the bound task.
+It inherits the accounts and interaction mode and is clamped to the parent's permissions.
+Task details show an **Automations** panel for jobs bound to that task.
 
 System tasks (`inbox`, `routine`) follow the global trust dial: before each run their
 `permissionMode` is refreshed to the dial, unless the person set one with `PATCH`
@@ -188,6 +194,13 @@ queued for automatic triage.
 
 ## HTTP API
 
+Private secret input adds `GET/POST /api/tasks/:taskId/secrets/:id`. POST accepts `{ value }`
+or `{ status: "declined" | "cancelled" }`; only request metadata is returned. While
+`request_secret` waits, the task surfaces with `needsUser: "question"` (existing approvals
+keep priority). Saving, declining, timeout or run cancellation resolves the request; no
+entered value is appended to the timeline. `secret.request.updated` events carry metadata
+and an optional one-use reference, never the secret. See [tools](tools.md#private-secrets-v04).
+
 Every route requires the bearer token. Errors use the standard body
 `{ "error": { "code", "message" } }`. On the demo backend every task route answers
 `501 TASKS_UNAVAILABLE`.
@@ -314,6 +327,9 @@ reconnect, refetch `GET /api/tasks/:id` and page items with `afterSeq=<last seen
 - `JobDefinition.taskId` / `JobState.taskId` bind a job to its routine task, and
   `SchedulerOptions.runOnTask` wraps those runs.
 - Job functions pass `ctx.agentRunOptions` to `AgentRuntime.run`.
+- User routines choose `runOn: "bound" | "fresh"`; fresh runs create a child task. Webhook
+  deliveries use the same schedule-run seam with a framed `ctx.webhookPrompt`, and their
+  durable queue owns payload recovery. See [scheduler](scheduler.md#webhook-routines).
 - `tasks.maintenance` (every 10 minutes) handles snooze wake-ups, auto-settle, watch expiry and
   the 24-hour `mail_export` sweep (`<dataDir>/scratch`, also swept at startup). See
   [scheduler](scheduler.md).
@@ -389,7 +405,8 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 
 ## Not yet
 
-- `question` items and `needsUser: "question"` are reserved. No tool asks the person yet.
+- General `question` items remain reserved. `request_secret` uses `secret_request` items
+  and `needsUser: "question"` for private input; there is no general question tool yet.
 - Staged changes, the worktree analogue, are not implemented. Approval stays per action.
 - Approval scopes apply to later proposals only: approving with `task` does not approve the
   task's other proposals that are already pending. The proposing tool call returns `proposed`

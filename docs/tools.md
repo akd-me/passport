@@ -185,6 +185,41 @@ Write tools accept mail handles (`acc:email:…`) as well as local ids.
 | `add_standing_rule` | RW | Append an exact one-line rule; preserve other USER.md sections | matters / profile_update |
 | `remove_standing_rule` | RW | Remove an exact bullet rule; preserve other sections | matters / profile_update |
 
+## Private secrets (v0.4)
+
+`request_secret({ text, clientRequestId, timeoutSeconds?=300 })` asks for a secret through a
+private password field in the calling task. It needs the trusted `ToolContext.taskId`;
+without it the result is `TASK_REQUIRED`. It is a write tool, so plan mode returns
+`{ status: "planned" }` without opening a request. Timeouts range from 10 to 600 seconds.
+The call awaits input and returns `{ requestId, status, secretRef? }`, with status
+`saved | declined | timed_out | cancelled`. Interrupting the run cancels a pending request.
+
+The model **never** receives the entered value. A `secret_request` timeline item contains
+only `{ requestId, text, expiresAt }`; a retry with the same task and `clientRequestId`
+reuses that request and card, including after restart. A saved value lives in AES-256-GCM
+encrypted storage under a random one-use `secretRef`. Atomic consumption works across
+processes. There is no tool or HTTP route for reading a stored value.
+
+The person responds through authenticated `POST /api/tasks/:taskId/secrets/:id` with
+`{ value }` or `{ status: "declined" | "cancelled" }`. The authenticated GET at the same
+path returns request metadata, excluding the value and reference. Responses never become
+task messages, logs, tool arguments or domain-event values.
+
+Consumers accept the reference directly:
+
+- Webhook routines: `schedule.signature.secretRef` on `POST/PATCH /api/jobs`. Installing it
+  consumes the reference and stores a private encrypted signing key for future deliveries.
+- IMAP account setup: a secret descriptor field such as
+  `fields.password: { secretRef: "secret:…" }` on the account/test API, instead of plaintext.
+  It is consumed into the encrypted account credentials, never account settings.
+
+Do not ask the person to paste a secret into chat. Request-ID retries return the same reference;
+once consumed, that reference cannot install another consumer.
+
+Known limitations: private requests require a task-capable store and a task-bound caller.
+An external MCP session without trusted task context cannot open one. Pending requests expire
+when next read after restart; they do not replay the interrupted model call.
+
 ## On-demand results
 
 Every on-demand result carries `source` (`provider`, `cache` or `mixed`) and `cost`

@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { Badge, Empty, Feedback, Loading, relativeTime } from "../components/ui";
+import { Deliveries } from "../scheduler/Deliveries";
 import { type Job, type JobRun, type JobSchedule, jobsApi } from "../scheduler-api";
 import { useResource, useTask } from "../state";
 
 export const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export function describeSchedule(schedule: JobSchedule) {
+  if (schedule.type === "webhook") {
+    return "Webhook";
+  }
   if (schedule.type === "manual") {
     return "On demand";
   }
@@ -194,6 +198,7 @@ export function JobHistory({ job, onClose }: { job: Job; onClose(): void }) {
         </div>
       )}
       <Feedback error={history.error ?? task.error} />
+      <Deliveries job={job} />
       {!history.data ? (
         !history.error && <Loading />
       ) : !history.data.length ? (

@@ -2,6 +2,7 @@ import type { MailRow, TaskItem } from "@passport/types";
 import { AccountDot } from "../accounts/AccountFilter";
 import { Markdown } from "../components/Markdown";
 import { Icon, relativeTime } from "../components/ui";
+import { SecretRequestItem } from "../scheduler/SecretRequest";
 
 /**
  * Item text, always as a text node: never markdown, never HTML, never a link. Untrusted items
@@ -43,6 +44,8 @@ const noticeTone = (code?: string) =>
 /** Every item kind except tool calls (grouped) and approvals (actionable). */
 export function TimelineItem({ item }: { item: TaskItem }) {
   switch (item.kind) {
+    case "secret_request":
+      return <SecretRequestItem item={item} />;
     case "user_message":
       return (
         <div className="tl-message from-user">

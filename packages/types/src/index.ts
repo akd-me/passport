@@ -876,6 +876,8 @@ export interface ProviderSetupDescriptor {
 // ---------------------------------------------------------------------------
 
 export type DomainEvent =
+  | { type: "secret.request.updated"; request: import("./secrets.js").SecretRequest }
+  | { type: "job.delivery"; delivery: import("./scheduler-v2.js").WebhookDelivery }
   | { type: "account.changed"; accountId: Id }
   | { type: "account.sync.started"; accountId: Id }
   | { type: "account.sync.retry"; accountId: Id; attempt: number; delayMs: number }
@@ -1269,6 +1271,8 @@ export * from "./attachments-ondemand.js";
 export * from "./mail-row.js";
 export * from "./notes.js";
 export * from "./ondemand.js";
+export * from "./scheduler-v2.js";
+export * from "./secrets.js";
 export * from "./store-ondemand.js";
 export * from "./tasks.js";
 export * from "./tools-ondemand.js";

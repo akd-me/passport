@@ -9,6 +9,7 @@ import {
 } from "@passport/types";
 import { type DroppedCounts, droppedNotice } from "../arrival-backlog.js";
 import type { ArrivalTrigger } from "../arrivals.js";
+import { freshRoutineTask } from "./jobs.js";
 import { describeAgentRun, type TaskService } from "./service.js";
 import { clip, neutralize, safeRow } from "./untrusted.js";
 
@@ -120,15 +121,19 @@ export class TaskTriggers {
     taskId: string,
     ctx: JobContext,
     run: (ctx: JobContext) => Promise<JobResult>,
+    runOn: "bound" | "fresh" = "bound",
   ): Promise<JobResult> {
     const found = await this.service.tasks.get(taskId);
     if (!found) {
       return run(ctx);
     }
-    const task = await this.followDial(found);
+    let task = await this.followDial(found);
+    if (runOn === "fresh") {
+      task = await freshRoutineTask(this.service, task);
+    }
     return this.service.runner.execute(
       {
-        taskId,
+        taskId: task.id,
         trigger: { kind: "schedule", jobId: ctx.jobId, name: task.title },
         priority: "background",
         cancellable: false,

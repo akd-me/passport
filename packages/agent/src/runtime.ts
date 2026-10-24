@@ -147,6 +147,7 @@ class PersonalAgentRuntime implements AgentRuntime {
         cancelled(options.signal);
         ctx.toolCalls++;
         const result = await tool.handler(input, {
+          ...(options.signal ? { signal: options.signal } : {}),
           ...context,
           runId: run.id,
           ...(options.taskId ? { taskId: options.taskId } : {}),

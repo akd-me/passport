@@ -36,6 +36,11 @@ This is a single-process scheduler, not a distributed lock or exactly-once actio
 See [scheduler guide](../../docs/scheduler.md) for retries, DST, persistence, routines and APIs.
 Nothing is stubbed. Run `pnpm --filter @passport/scheduler build`, `typecheck`, and `test`.
 
+Webhook schedules validate through `validateSchedule` and have no recurring timer or retries.
+The package exports pure request path/filter/template/key helpers and raw-body HMAC verification.
+The host supplies `frameUntrusted` to `renderWebhookTemplate` and owns intake/pending persistence.
+`runNow(id, { webhookPrompt })` forwards the rendered instruction through `JobContext`.
+
 Each started occurrence persists `activeRun: {runId,occurrenceAt,startedAt}` before invoking
 the handler. It clears only when the handler settles, including after a timeout. On restart,
 an interrupted occurrence runs once immediately after its timeout expires (immediately for

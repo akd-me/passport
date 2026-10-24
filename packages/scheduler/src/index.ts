@@ -22,6 +22,7 @@ export type {
   JobStatus,
   Scheduler,
 } from "./scheduler-state.js";
+export * from "./webhook.js";
 
 /** Persistent, process-local scheduler. Await registrations before starting. */
 export function createScheduler(options: SchedulerOptions): Scheduler {
@@ -59,7 +60,11 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       return;
     }
     const interrupted =
-      e.recoverInterrupted && e.state.activeRun && !e.active && !e.work
+      e.state.schedule.type !== "webhook" &&
+      e.recoverInterrupted &&
+      e.state.activeRun &&
+      !e.active &&
+      !e.work
         ? e.state.activeRun
         : undefined;
     if (!interrupted && !e.state.nextRunAt) {
@@ -279,13 +284,13 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     },
     list: () => [...entries.values()].map((e) => clone(e.state)),
     get: (id) => (entries.has(id) ? clone(find(id).state) : undefined),
-    async runNow(id) {
+    async runNow(id, input) {
       const e = find(id);
       await e.ready;
       if (stopping) {
         throw new SchedulerError("SCHEDULER_STOPPING", "Scheduler is stopping");
       }
-      return execute(e);
+      return execute(e, undefined, false, input);
     },
     pause: (id) => scheduler.update(id, { enabled: false }),
     resume: (id) => scheduler.update(id, { enabled: true }),

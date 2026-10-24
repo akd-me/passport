@@ -7,6 +7,7 @@ import type {
 } from "@passport/types";
 import type { Backend } from "./backend.js";
 import { ApiError } from "./errors.js";
+import { isSecretReference, resolveAccountSecrets } from "./schedulers/account-secrets.js";
 import { member, object, string } from "./validation.js";
 
 /** Descriptor fields marked secret are sent exclusively to the credential store. */
@@ -28,10 +29,17 @@ export async function addAccount(
   }
   for (const field of descriptor.fields) {
     const value = fields[field.id];
-    if (field.required && (typeof value !== "string" || !value.trim())) {
+    if (
+      field.required &&
+      !(field.secret && isSecretReference(value)) &&
+      (typeof value !== "string" || !value.trim())
+    ) {
       throw new ApiError("MISSING_FIELD", `${field.label} is required`);
     }
     if (value === undefined || value === "") {
+      continue;
+    }
+    if (field.secret && isSecretReference(value)) {
       continue;
     }
     const text = string(value, field.label);
@@ -90,6 +98,12 @@ export async function addAccount(
     createdAt: at,
     updatedAt: at,
   };
+  const resolvedFields = await resolveAccountSecrets(backend.store, descriptor, fields);
+  for (const field of descriptor.fields) {
+    if (field.secret && isSecretReference(fields[field.id])) {
+      credentials[field.id] = resolvedFields[field.id] as string;
+    }
+  }
   await backend.store.accounts.upsert(account);
   try {
     delete credentials.codeVerifier;

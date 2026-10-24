@@ -15,6 +15,8 @@ import { installMailRoutes } from "./mail-routes.js";
 import { installMattersRoutes } from "./matters-routes.js";
 import { registerOnboarding } from "./onboarding/routes.js";
 import { installJobRoutes } from "./schedulers/routes.js";
+import { installSecretRoutes } from "./schedulers/secret-routes.js";
+import { installWebhookRoutes } from "./schedulers/webhook-routes.js";
 import { installSettingsRoutes } from "./settings-routes.js";
 import { registerSetup } from "./setup/routes.js";
 import { installTaskRoutes } from "./tasks/routes.js";
@@ -49,6 +51,8 @@ export function createApp(
   });
   installAuth(app, options.auth ?? getAuth(backend));
   installJobRoutes(app, backend);
+  installSecretRoutes(app, backend);
+  installWebhookRoutes(app, backend);
   registerOnboarding(app, backend);
   registerSetup(app, backend);
   installLlmRoutes(app, backend);

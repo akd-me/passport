@@ -55,7 +55,7 @@ produced something brings the task back to the inbox, and a failure surfaces it 
 its task and timeline. The runtime's existing tools and policy engine
 control every action. A routine cannot grant itself permissions or bypass the outbox.
 
-The form supports interval, daily and weekly schedules, a named time zone, and three example
+The form supports interval, daily, weekly and webhook schedules, a named time zone, and three example
 instructions. Weekly `days` use Sunday = 0 through Saturday = 6. The API also supports manual
 schedules. Missing time zones resolve to the host's local zone. Invalid times, zones, weekdays,
 intervals and unknown fields are rejected. Pause stops automatic scheduling; Run now also
@@ -90,6 +90,9 @@ are loaded on the next server startup. The CLI authenticates with `PASSPORT_API_
 | POST   | `/api/jobs/:id/pause`   | Disable automatic runs                                                                                |
 | POST   | `/api/jobs/:id/resume`  | Enable and compute the next future occurrence                                                         |
 | GET    | `/api/jobs/:id/history` | Last 20 runs, oldest first                                                                            |
+| GET    | `/api/jobs/:id/deliveries` | Last 50 webhook deliveries, oldest first |
+| POST   | `/api/jobs/:id/rotate-token` | Rotate the capability URL; returns `{ webhookUrl }` |
+| POST   | `/api/hooks/:token` | Public webhook intake; no bearer required |
 
 Example schedules:
 
@@ -99,6 +102,102 @@ Example schedules:
 { "type": "weekly", "days": [1, 2, 3, 4, 5], "at": "07:30", "timeZone": "America/New_York" }
 { "type": "manual" }
 ```
+
+User routines accept an optional top-level `runOn: "bound" | "fresh"` on creation and
+PATCH (default `"bound"`). Bound runs append a `schedule` run to the routine's task.
+Fresh runs create a new `kind: "task"` task whose `parentTaskId` is the routine task,
+with the parent's accounts and interaction mode and permissions clamped to the parent and
+global dial. Approval grants, watches and provider sessions are not copied. The task details
+**Automations** panel shows last run, status, next run, Run now and Pause/Resume.
+The routine's history view includes its **Deliveries** list.
+
+## Webhook routines
+
+```json
+{
+  "name": "Review incoming issues",
+  "runOn": "fresh",
+  "schedule": {
+    "type": "webhook",
+    "signature": {
+      "header": "x-hub-signature-256",
+      "encoding": "hex",
+      "prefix": "sha256=",
+      "secretRef": "secret:<one-use reference from request_secret>"
+    },
+    "maxDeliveryAgeMinutes": 60,
+    "dedupe": {
+      "replayKey": "{{headers.x-github-delivery}}",
+      "coalesceKey": "{{body.issue.number}}",
+      "coalesceWindowSeconds": 120
+    },
+    "filters": [
+      { "path": "headers.x-github-event", "op": "equals", "value": "issues" },
+      { "path": "body.issue.labels[].name", "op": "in", "value": ["urgent", "bug"] }
+    ]
+  },
+  "routine": { "instruction": "Review this issue for me: {{body.issue}}" }
+}
+```
+
+Creation/listing returns a relative `webhookUrl` with a random 256-bit token unique to the
+routine. Use the server's externally reachable HTTPS origin with that path. Rotation immediately
+revokes the old token; pause rejects incoming deliveries. Administration, delivery history and
+rotation require normal authentication. Hook POSTs retain Host and Origin checks and accept
+bodies up to 256 KiB. Per routine, at most 10 new dispatch windows and 60 coalesced updates
+are admitted per minute, with a separate 10-rejection limit and a 70-request ceiling.
+Limits survive restart; HTTP 429 includes `Retry-After: 60`.
+
+Signatures are HMAC-SHA256 over the **exact raw request bytes**. Encoding is `hex` or padded
+`base64`; `prefix` is optional (empty by default). Digest comparison is constant time.
+Enter the secret through [request_secret](tools.md#private-secrets-v04); its one-use reference
+is consumed when installed and the signer stays encrypted. PATCH may retain the same installed
+reference; changing it requires a new reference. Schedules never accept a raw signing secret.
+
+Replay and coalesce keys are templates containing request placeholders, hashed per routine.
+Replay keys live for seven days, independently of the bounded delivery log. Missing/null
+key values bypass that key. A coalesce key opens a fixed window of 10–3600 seconds (default 120)
+from the **first** delivery. Later deliveries replace the payload without extending the window.
+Replay keys, pending windows, rendered prompts, URL tokens, rate state and logs survive restart.
+An overdue window runs once with its latest payload; paused/deleted routines do not dispatch it.
+Webhook jobs have no recurring timer or automatic job retries.
+
+`maxDeliveryAgeMinutes` is an integer from 1 to 1440. Direct delivery is received now.
+Relays may supply `x-t3-relay-received-at` (or `x-webhook-timestamp`) as ISO-8601,
+Unix seconds or milliseconds; future timestamps are clamped to now and invalid timestamps
+fall back to now. Older deliveries are logged as expired. Pending windows also check their
+server receipt time before dispatch after downtime.
+
+Up to 16 filters must all match. Paths begin with `body.`, `headers.` or `query.`;
+headers are case insensitive. `[]` fans out over arrays, including nested arrays.
+Scalars compare as strings: `equals`, `startsWith` and `in` match any resolved value;
+`notEquals` requires none to match; `exists` requires a non-null resolved value.
+Missing ordinary paths fail comparisons. `in` accepts 1–100 scalars.
+Prototype properties cannot be addressed.
+
+Instructions substitute `{{body.x}}`, `{{headers.x}}`, `{{query.x}}`, `{{body}}`
+(the raw body) and `{{request}}` (the request with a redacted route). JSON and form bodies
+support paths; other bodies remain text. Every inserted value goes through `frameUntrusted`,
+including command neutralization and randomized tags. Authentication/signing headers and
+credential-like query parameters are removed or redacted before rendering. Each substitution
+is bounded to 64,000 characters, with a 262,144-character total payload-text budget.
+
+Deliveries retain `id, jobId, receivedAt, outcome, prompt?`. Outcomes:
+`accepted | dispatch_failed | duplicate | coalesced | rejected_signature | disabled | rate_limited | expired | filtered`.
+Accepted/coalesced return HTTP 202 after persistence, before execution.
+Duplicate/filtered/expired return 200, invalid signatures 401, disabled routines 410.
+The window's accepted entry (or its latest retained coalesced entry) changes to `dispatch_failed`
+if dispatch fails or overlaps an active job. Expanded rendered instructions are plain text.
+The latest 50 entries are retained.
+
+### Known limitations
+
+- Passport provides the local route; remote delivery needs your own HTTPS tunnel/reverse proxy
+  and an allowed Host. There is no built-in relay or offline HTTP queue.
+- Dispatch is at least once across a crash between the run and its acknowledgement, as for
+  existing jobs; executor/action semantics still govern effects.
+- Relay timestamps are sender metadata, not freshness proofs. HMAC authenticates the body;
+  use replay keys for signed senders that redeliver an event.
 
 ## Execution, retries and downtime
 
@@ -140,6 +239,9 @@ closing persistence.
 The shared DomainEvent union has three appended members: `job.started` (jobId/runId),
 `job.finished` (jobId/runId/status/durationMs/optional summary), and `job.updated` (jobId).
 Existing event members retain their names and shapes.
+Webhook deliveries additionally emit `job.delivery` with the latest delivery record.
+Private input emits `secret.request.updated` with request metadata and an optional reference,
+never a secret value.
 
 `@passport/scheduler` depends only on `@passport/types` and receives `store`, `bus`, optional
 `now` and `logger`. It exports `createScheduler`, schedule validation/calculation helpers,

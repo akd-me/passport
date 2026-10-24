@@ -1,5 +1,7 @@
+import type { RoutineRunOn, WebhookSchedule } from "@passport/types";
 import { useState } from "react";
 import { Feedback } from "../components/ui";
+import { RunOnField, WebhookFields } from "../scheduler/RoutineOptions";
 import { type JobSchedule, jobsApi } from "../scheduler-api";
 import { useTask } from "../state";
 import { weekdays } from "./JobTable";
@@ -18,7 +20,9 @@ const examples = [
 
 export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
   const [name, setName] = useState(""),
-    [type, setType] = useState<"interval" | "daily" | "weekly">("daily"),
+    [type, setType] = useState<"interval" | "daily" | "weekly" | "webhook">("daily"),
+    [runOn, setRunOn] = useState<RoutineRunOn>("bound"),
+    [webhook, setWebhook] = useState<WebhookSchedule>({ type: "webhook" }),
     [at, setAt] = useState("07:30"),
     [minutes, setMinutes] = useState(120),
     [days, setDays] = useState([1, 2, 3, 4, 5]),
@@ -31,14 +35,22 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
       onSubmit={async (e) => {
         e.preventDefault();
         const schedule: JobSchedule =
-          type === "interval"
-            ? { type, everyMs: minutes * 60000 }
-            : type === "weekly"
-              ? { type, days, at, timeZone }
-              : { type, at, timeZone };
+          type === "webhook"
+            ? webhook
+            : type === "interval"
+              ? { type, everyMs: minutes * 60000 }
+              : type === "weekly"
+                ? { type, days, at, timeZone }
+                : { type, at, timeZone };
         if (
           await task.run(
-            () => jobsApi.add({ name, schedule, routine: { instruction } }),
+            () =>
+              jobsApi.add({
+                name,
+                schedule,
+                routine: { instruction },
+                ...(runOn === "fresh" ? { runOn } : {}),
+              }),
             "Routine created.",
           )
         ) {
@@ -63,6 +75,7 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
           <option value="interval">Interval</option>
           <option value="daily">Daily</option>
           <option value="weekly">Weekly</option>
+          <option value="webhook">Webhook</option>
         </select>
       </label>
       {type === "interval" ? (
@@ -77,7 +90,7 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
             onChange={(e) => setMinutes(Number(e.target.value))}
           />
         </label>
-      ) : (
+      ) : type !== "webhook" ? (
         <>
           <label className="field">
             Time
@@ -93,7 +106,10 @@ export function NewRoutineForm({ onCreated }: { onCreated(): void }) {
             />
           </label>
         </>
+      ) : (
+        <WebhookFields value={webhook} onChange={setWebhook} />
       )}
+      <RunOnField value={runOn} onChange={setRunOn} />
       {type === "weekly" && (
         <fieldset className="field">
           <legend>Days</legend>

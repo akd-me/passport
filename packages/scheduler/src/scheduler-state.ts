@@ -8,6 +8,8 @@ export interface JobResult {
   nextRunInMs?: number;
 }
 export interface JobContext {
+  /** Rendered and framed webhook instruction, supplied only for this delivery. */
+  webhookPrompt?: string;
   jobId: string;
   runId: string;
   signal: AbortSignal;
@@ -62,7 +64,7 @@ export interface Scheduler {
   stop(): Promise<void>;
   list(): JobState[];
   get(id: string): JobState | undefined;
-  runNow(id: string): Promise<JobRun>;
+  runNow(id: string, input?: { webhookPrompt?: string }): Promise<JobRun>;
   pause(id: string): Promise<JobState>;
   resume(id: string): Promise<JobState>;
   update(

@@ -1,7 +1,10 @@
 import type { JobDefinition } from "@passport/scheduler";
+import { newId } from "@passport/store";
+import type { Task } from "@passport/types";
 import type { Backend } from "../backend.js";
 import { logger } from "../logger.js";
 import { sweepExports } from "../ondemand-wiring.js";
+import type { TaskService } from "./service.js";
 
 /** `{ taskId }` binding a model-backed job to its routine task, or `{}` without tasks. */
 export async function routineBinding(
@@ -11,6 +14,30 @@ export async function routineBinding(
 ): Promise<Pick<JobDefinition, "taskId">> {
   const task = await backend.tasks?.triggers.ensureRoutine(jobId, name);
   return task ? { taskId: task.id } : {};
+}
+
+/** Each fresh run starts with no approvals, watches, history, or provider session of its parent. */
+export async function freshRoutineTask(service: TaskService, parent: Task): Promise<Task> {
+  const now = service.now();
+  const task = await service.tasks.insert({
+    id: newId(),
+    title: parent.title,
+    accountIds: [...parent.accountIds],
+    kind: "task",
+    parentTaskId: parent.id,
+    permissionMode: await service.clampMode(parent.permissionMode, parent.id),
+    interactionMode: parent.interactionMode,
+    status: "inbox",
+    pinned: false,
+    createdBy: "system",
+    needsUser: null,
+    watches: [],
+    pendingActionIds: [],
+    createdAt: now,
+    lastActivityAt: now,
+  });
+  service.options.bus.emit({ type: "task.updated", task });
+  return task;
 }
 
 /** Exported-mail sweep; a failure never fails the maintenance job. */
