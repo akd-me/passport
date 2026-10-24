@@ -6,6 +6,7 @@ import type {
   AgentTrigger,
   QuotaLane,
 } from "@passport/types";
+import { RunBudget, resolveBudget } from "./budget.js";
 import type {
   AgentRunResult,
   AgentRuntimeOptions,
@@ -14,6 +15,7 @@ import type {
 } from "./context.js";
 import { normalizeAddress } from "./data.js";
 import { AgentError } from "./errors.js";
+import { isSessionLlmClient } from "./host/client.js";
 import { newAgentId } from "./id.js";
 import type { AgentFinishedEvent } from "./integration.js";
 import { createLlmClient } from "./llm/client.js";
@@ -25,6 +27,7 @@ import { systemPrompt } from "./prompts/index.js";
 import { RunQueue } from "./queue.js";
 import { createRunReads } from "./reads.js";
 import { dailyDigest, getJournal, type Journal, reviewMatters } from "./schedules.js";
+import { agenticSession } from "./session-run.js";
 import { triage } from "./triage.js";
 
 class PersonalAgentRuntime implements AgentRuntime {
@@ -43,6 +46,8 @@ class PersonalAgentRuntime implements AgentRuntime {
       "complete" in options.llm ? options.llm : createLlmClient(options.llm, { log: options.log });
     this.now = options.now ?? (() => new Date().toISOString());
     this.queue = new RunQueue(options.log);
+    // Validate the configured ceiling once, at construction.
+    resolveBudget(options.budget);
   }
 
   getUserProfile(): Promise<string> {
@@ -96,6 +101,8 @@ class PersonalAgentRuntime implements AgentRuntime {
       drafts: this.options.drafts ?? {},
       tools: [],
       toolCalls: 0,
+      budget: new RunBudget(resolveBudget(this.options.budget), () => Date.parse(this.now())),
+      ...(options.observer ? { observer: options.observer } : {}),
       actions: [],
       decisions: [],
       downgrades: [],
@@ -213,7 +220,11 @@ class PersonalAgentRuntime implements AgentRuntime {
           await triage(ctx, trigger.emailId, bus);
           break;
         case "manual":
-          await manual(ctx, trigger);
+          if (options.session && this.options.toolBelt && isSessionLlmClient(this.llm)) {
+            await agenticSession(ctx, trigger, this.llm, this.options.toolBelt, options);
+          } else {
+            await manual(ctx, trigger, { orchestration: !!options.session });
+          }
           break;
         case "schedule":
           switch (trigger.name) {

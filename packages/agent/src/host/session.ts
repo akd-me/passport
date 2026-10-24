@@ -220,6 +220,8 @@ export function runHostAgentSession(
       mcpServers: request.mcpServers,
       allowedTools: request.allowedTools,
       maxTurns: request.maxTurns,
+      ...(request.resumeSessionId ? { resumeSessionId: request.resumeSessionId } : {}),
+      ...(request.persistSession ? { persistSession: true } : {}),
       completion: false,
     },
     { ...options, timeoutMs: request.timeoutMs ?? 15 * 60_000, signal: request.signal },

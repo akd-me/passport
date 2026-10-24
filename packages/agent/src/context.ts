@@ -3,6 +3,8 @@ import type {
   ActionExecutor,
   ActionRecord,
   AgentRun,
+  AgentRunBudget,
+  AgentRunObserver,
   AgentRunOptions,
   EventBus,
   LlmConfig,
@@ -11,6 +13,7 @@ import type {
   QuotaLane,
   Store,
 } from "@passport/types";
+import type { RunBudget } from "./budget.js";
 import type { AgentDecision, DailyDigest } from "./integration.js";
 import type {
   CompleteOptions,
@@ -45,6 +48,14 @@ export interface AgentRuntimeOptions {
    * candidates and reply threads come from the provider instead of local mirror scans.
    */
   readers?: MailReaderResolver;
+  /**
+   * Exposes a run's tools to host-agent sessions over MCP (v0.4). With it, task runs on Codex or
+   * Claude Code are one native session (`AgentRunOptions.session`); without it they use the
+   * completion loop.
+   */
+  toolBelt?: import("./session-run.js").ToolBeltHost;
+  /** Per-run ceiling for task and manual runs; default 200 tool calls and 30 minutes. */
+  budget?: Partial<AgentRunBudget>;
 }
 
 export interface RunContext {
@@ -75,6 +86,10 @@ export interface RunContext {
   ) => Promise<Record<string, unknown>>;
   tools: Tool[];
   toolCalls: number;
+  /** Tool-call and time ceiling of manual and task runs. */
+  budget: RunBudget;
+  /** The task runner's timeline hooks, when the run belongs to a task. */
+  observer?: AgentRunObserver;
   callTool: (name: string, input: unknown, context?: ToolContext) => Promise<ToolResult>;
 }
 
