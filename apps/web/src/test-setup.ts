@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
 // Node 25 ships a global `localStorage` that shadows jsdom's and lacks methods without
@@ -18,6 +18,10 @@ if (typeof globalThis.localStorage?.clear !== "function") {
   } satisfies Storage;
   Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
 }
+// findBy* and waitFor wait up to 4 s, not 1 s: under a loaded machine (pnpm -r test runs every
+// package at once) a render plus two round trips can take longer than a second.
+configure({ asyncUtilTimeout: 4000 });
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

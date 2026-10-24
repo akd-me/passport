@@ -14,6 +14,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test-setup.ts"],
+    // Paging tests render a few hundred rows in jsdom; give them room on a loaded machine.
+    testTimeout: 15_000,
     css: { include: [/tokens\.css/] },
   },
 });
