@@ -74,6 +74,7 @@ const toolNames = [
   "watch_conversation",
   "unwatch_conversation",
   "request_secret",
+  "render",
 ];
 
 describe("mailbox MCP over SDK InMemoryTransport", () => {
