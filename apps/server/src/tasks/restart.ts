@@ -22,19 +22,38 @@ const plural = (count: number, one: string, many = `${one}s`) =>
  * runs, fail as before (`SERVER_RESTARTED`; a message run surfaces `needsUser: "failure"`).
  * Queued follow-ups are not runs yet: they stay in `Task.queue` and drain afterwards.
  */
-export async function recoverRuns(service: TaskService, queue: TaskQueueService): Promise<void> {
+export interface RecoveryHooks {
+  /** A run recovery ended without continuing it: `TaskSubtasks.afterRunEnded` (R1-11). */
+  afterRunEnded?: (run: TaskRun) => Promise<void>;
+}
+
+export async function recoverRuns(
+  service: TaskService,
+  queue: TaskQueueService,
+  hooks: RecoveryHooks = {},
+): Promise<void> {
   const byTask = new Map<string, TaskRun[]>();
   for (const run of await service.tasks.runs.unfinished()) {
     byTask.set(run.taskId, [...(byTask.get(run.taskId) ?? []), run]);
   }
   const wakes = await new PendingWakes(service.options.store.kv).all();
+  const ended: TaskRun[] = [];
   for (const [taskId, runs] of byTask) {
     try {
-      await recoverTask(service, taskId, runs, wakes);
+      const last = await recoverTask(service, taskId, runs, wakes);
+      if (last) {
+        ended.push(last);
+      }
     } catch {
       // One task's recovery must not stop the others; its runs stay visible as open.
       logger.warn("Task restart recovery failed");
     }
+  }
+  // Once every task is recovered: a subtask's end reaches its parent (notification, wake, wait).
+  for (const run of ended) {
+    await hooks.afterRunEnded?.(run).catch(() => {
+      logger.warn("Task restart recovery could not report a subtask's end");
+    });
   }
   for (const taskId of byTask.keys()) {
     await queue.drain(taskId).catch(() => {
@@ -48,12 +67,13 @@ async function recoverTask(
   taskId: string,
   runs: TaskRun[],
   wakes: PendingWake[],
-): Promise<void> {
+): Promise<TaskRun | null> {
   const task = await service.tasks.get(taskId);
   const queued = new Set(task?.queue?.map((entry) => entry.runId));
   const open = runs.filter((run) => !queued.has(run.id));
   const away = !task || task.status === "settled" || task.status === "archived";
   const continued = away ? [] : open.filter(continuable);
+  let last: TaskRun | null = null;
   for (const run of open) {
     const ended = await service.tasks.runs.update(run.id, {
       status: continued.includes(run) ? "cancelled" : "failed",
@@ -61,9 +81,10 @@ async function recoverTask(
       error: "SERVER_RESTARTED",
     });
     service.options.bus.emit({ type: "task.run.updated", run: ended });
+    last = ended;
   }
   if (!task || !open.length) {
-    return;
+    return null;
   }
   const failedMessage = open.some(
     (run) => !continued.includes(run) && run.trigger.kind === "message",
@@ -76,7 +97,8 @@ async function recoverTask(
     }));
   }
   if (!continued.length) {
-    return;
+    // Nothing continues: the last ended run reports the task's end (a continuation's own end does).
+    return last;
   }
   const pending = wakes.filter((wake) => wake.taskId === taskId);
   await service.runner.appendItem({
@@ -90,6 +112,7 @@ async function recoverTask(
   for (const run of continued) {
     await continueRun(service, run, "restarted", inFlight);
   }
+  return null;
 }
 
 /** Message runs whose message never started (`itemId` empty) have nothing to continue. */
