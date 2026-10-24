@@ -220,6 +220,40 @@ Known limitations: private requests require a task-capable store and a task-boun
 An external MCP session without trusted task context cannot open one. Pending requests expire
 when next read after restart; they do not replay the interrupted model call.
 
+## Questions, subtasks and organise (v0.4)
+
+Five tools act on the calling task through the host's task system (`ToolContext.orchestrator`,
+passed to every task run as `AgentRunOptions.orchestrator`). Without a task run (external MCP
+clients, the CLI) they answer `TASK_REQUIRED`. Refusals the model can act on come back as tool
+errors with their code; anything else is `DEPENDENCY_ERROR`. Semantics are in
+[tasks](tasks.md#questions), [subtasks](tasks.md#subtasks) and [organise](tasks.md#organise).
+
+| Tool | Class | Input | Result |
+| --- | --- | --- | --- |
+| `ask_user` | R | `{ text (≤2,000), options? (≤6, each ≤200), blocking? = true }` | `{ itemId, status: "pending" \| "forwarded", blocking, note }`; `forwarded` in a subtask (the parent's agent answers) |
+| `task_delegate` | W | `{ message, title?, accountIds?, permissionMode? = "inherit" \| a trust level, mode? = "async" \| "wait", completionWake? = "settled_only" \| "always", taskId? }` | `{ subtask: TaskSubtaskStatus, note, untrusted }`; with `taskId`, a follow-up to that subtask (answers its question) |
+| `task_status` | R | `{ taskId? }` | `{ subtasks: TaskSubtaskStatus[], untrusted }` |
+| `task_cancel` | W | `{ taskId }` | `{ subtask: TaskSubtaskStatus }` |
+| `task_organize` | W | `{ action: snooze \| unsnooze \| settle \| pin \| unpin \| rename \| mark_unread, until? (UTC ISO, snooze), title? (rename) }` | `{ action, applies: "now" \| "run_end", task: { id, title, status, pinned, snoozedUntil, settleRequested } }` |
+
+`TaskSubtaskStatus` is `{ taskId, title, workState, status, needsUser, mode, completionWake,
+activeRuns, queued, pendingApprovals, pendingQuestion, lastRun, result }`. `workState` is
+`question` (answer it with `task_delegate` and its `taskId`), `working`, `needs_person` (an
+approval, failure or limit waits on the person), `cancelled`, `failed` or `result_available`.
+`result` is the subtask's last reply and `pendingQuestion.text` its question: both are model
+text that may quote mail, neutralized and labelled untrusted.
+
+- Class `W` means a write to Passport's own task state (no mail, no ActionRecord, no policy
+  category). `ask_user` is read-class so plan mode can still ask; the `W` tools return
+  `{ status: "planned" }` in plan mode.
+- Errors: `QUESTION_LIMIT` (5 open questions), `DEPTH_LIMIT` (subtasks nest at most two
+  deep), `SUBTASK_LIMIT` (10 working), `ACCOUNT_MISMATCH` (an account the parent lacks),
+  `TASK_SETTLED` (the person settled or archived the task), `NOT_A_SUBTASK` (`taskId` is not
+  this task's child), `INVALID_FIELD` (a snooze time in the past), `INVALID_INPUT` (schema;
+  `snooze` without `until`, `rename` without `title`).
+- A subtask's permission mode is the parent's effective mode or lower, never higher, and the
+  policy engine still caps every action at the minimum over the parent chain.
+
 ## On-demand results
 
 Every on-demand result carries `source` (`provider`, `cache` or `mixed`) and `cost`

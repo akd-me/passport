@@ -11,10 +11,13 @@ Vocabulary: "task" is agent work, "conversation" is an email thread, "matter" is
 
 | Type | Fields |
 |---|---|
-| `Task` | `id`, `title`, `accountIds`, `status` (`inbox` / `working` / `snoozed` / `settled` / `archived`), `pinned`, `snoozedUntil?`, `permissionMode` (`supervised` / `auto_accept_edits` / `auto` / `full_access`), `permissionModePinned?`, `interactionMode` (`default` / `plan`), `createdBy` (`user` / `agent` / `system`), `kind` (`task` / `inbox` / `routine`), `parentTaskId?`, `needsUser` (`null` / `approval` / `question` / `failure` / `limited`), `pendingActionIds?`, `lastActivityAt`, `createdAt`, `settledAt?`, `watches: ConversationWatch[]`, `jobId?` (routine), `revision?`, `approvalGrants?: TaskApprovalGrant[]`; v0.4, all optional: `returnedAt?`, `seenAt?`, `unseenOutcome?` (`done` / `woke` / `null`), `queue?: TaskQueueEntry[]`, `queueHeld?`, `limited?: TaskLimited \| null`, `titleGenerated?`, `providerSessionId?`, `providerSessionKind?` (`claude-code` / `codex`: the host-agent session follow-ups resume, see [Sessions](#sessions)) |
+| `Task` | `id`, `title`, `accountIds`, `status` (`inbox` / `working` / `snoozed` / `settled` / `archived`), `pinned`, `snoozedUntil?`, `permissionMode` (`supervised` / `auto_accept_edits` / `auto` / `full_access`), `permissionModePinned?`, `interactionMode` (`default` / `plan`), `createdBy` (`user` / `agent` / `system`), `kind` (`task` / `inbox` / `routine`), `parentTaskId?`, `needsUser` (`null` / `approval` / `question` / `failure` / `limited`), `pendingActionIds?`, `lastActivityAt`, `createdAt`, `settledAt?`, `watches: ConversationWatch[]`, `jobId?` (routine), `revision?`, `approvalGrants?: TaskApprovalGrant[]`; v0.4, all optional: `returnedAt?`, `seenAt?`, `unseenOutcome?` (`done` / `woke` / `null`), `queue?: TaskQueueEntry[]`, `queueHeld?`, `limited?: TaskLimited \| null`, `titleGenerated?`, `providerSessionId?`, `providerSessionKind?` (`claude-code` / `codex`: the host-agent session follow-ups resume, see [Sessions](#sessions)); v0.4 W2A, all optional: `pendingQuestions?: TaskPendingQuestion[]` ([Questions](#questions)), `delegation?: TaskDelegation \| null` (set on subtasks), `waitingOnTaskIds?` (subtasks started with `mode: "wait"` still working), `settleRequested?` (`task_organize` settle, applied at run end); see [Subtasks](#subtasks) and [Organise](#organise) |
 | `TaskApprovalGrant` | `category`, `actionId`, `trustLevel`, `risk`, `reversibility`, `grantedAt` (see [Approval scopes](#approval-scopes)) |
 | `ConversationWatch` | `threadHandle`, `account`, `since`, `lastWakeAt?`, `consecutiveWakes` |
-| `TaskQueueEntry` | `runId` (the `queued` TaskRun it runs as), `text`, `createdAt` (see [Follow-up queue](#follow-up-queue)) |
+| `TaskQueueEntry` | `runId` (the `queued` TaskRun it runs as), `text`, `createdAt`, `answers?` (the questions it answers) (see [Follow-up queue](#follow-up-queue)) |
+| `TaskPendingQuestion` | `itemId` (the `question` item), `runId`, `text`, `options?` (at most 6), `blocking`, `askedAt` |
+| `TaskDelegation` | `parentRunId`, `mode` (`async` / `wait`), `completionWake` (`always` / `settled_only`), `depth` (1 or 2), `delegatedAt`, `cancelledByParent?` |
+| `TaskLineage` | `taskId`, `parent: Task \| null`, `children: { task, activeRuns, lastRunStatus }[]` (newest first, at most 50) |
 | `TaskQueue` | `taskId`, `held`, `entries: TaskQueueEntry[]` |
 | `TaskLimited` | `runId` (the stopped run), `resetAt` (or `null` when unknown), `autoResume`, `source` (`host_agent` / `provider`), `at` (see [Usage limits](#usage-limits)) |
 | `TaskRestoreState` | `status`, `snoozedUntil`, `settledAt`: what settle, snooze and archive replaced (`TaskWithPrevious = Task & { previous }`) |
@@ -26,14 +29,14 @@ Item payloads by `kind`:
 
 | kind | payload |
 |---|---|
-| `user_message` | `{ text }` |
+| `user_message` | `{ text, answers? }`; `answers` lists the `question` items the message answered |
 | `assistant_message` | `{ text }` (model output; `untrusted: true` because it may quote mail) |
 | `tool_call` | `{ name, inputSummary, resultSummary, cost?, durationMs, isError, planned? }`; summaries are redacted (bodies, secrets, token-shaped strings) and at most 200 characters |
 | `approval_request` | `{ actionId, summary }`; approve or reject with `/api/actions/:id/{approve,reject}` |
-| `question` | `{ text }` (reserved: nothing emits it yet) |
+| `question` | `{ text, options?, blocking }` from `ask_user` (`untrusted: true`, model text); see [Questions](#questions) |
 | `secret_request` | `{ requestId, text, expiresAt }`; private password field, never the value; see [request_secret](tools.md#private-secrets-v04) |
-| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code (`USAGE_LIMITED` for a usage limit), `RESTARTED`, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`), `BUDGET_EXHAUSTED` (the run reached its [budget](#sessions)) |
-| `notification` | `{ source: "arrival" \| "watch" \| "schedule" \| "system", summary, row? }`; `row` is a `MailRow`. A task created with `matterId` or `emailIds` gets a `system` one on its first run ("With matter “…” and 2 messages “…”, “…”"; `row` when there is exactly one message) |
+| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code (`USAGE_LIMITED` for a usage limit), `RESTARTED`, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`), `BUDGET_EXHAUSTED` (the run reached its [budget](#sessions)), `QUESTION_DISMISSED` (`untrusted`, quotes the question) |
+| `notification` | `{ source: "arrival" \| "watch" \| "schedule" \| "system" \| "subtask", summary, row?, subtaskId? }`; `row` is a `MailRow`; `subtask` notifications (`untrusted`) name the child in `subtaskId`. A task created with `matterId` or `emailIds` gets a `system` one on its first run ("With matter “…” and 2 messages “…”, “…”"; `row` when there is exactly one message) |
 
 **Untrusted data.** Items with `untrusted: true` contain provider-derived strings (subjects,
 senders, snippets, tool arguments and results, model text). Their `$`, mention-style `@` and
@@ -166,12 +169,14 @@ natively, streaming as it goes. There is no JSON tool protocol and no per-step C
 ## Status rules
 
 The rules below are one pure function, `resolveTaskStatus(task, event)` in
-`apps/server/src/tasks/status.ts`, with three events: `run_started`, `run_ended` and `reopened`
-(unsettle, unsnooze, unarchive). Its table test is `status.test.ts`. The T3 Working predicate
+`apps/server/src/tasks/status.ts`, with five events: `run_started`, `run_ended`, `reopened`
+(unsettle, unsnooze, unarchive), and `question_asked` and `question_resolved` (v0.4). Its table test is `status.test.ts`. The T3 Working predicate
 is exported from `@passport/types` as `isTaskWorking(task, { activeRuns })`: false while the
-task waits on the person (`needsUser` set), otherwise true while a run is queued or running or
-a conversation is watched. `taskBadge(task, { activeRuns })` gives the one badge every surface
-shows, highest first: `approval`, `input` (question), `working` (a run), `waiting` (watching),
+task waits on the person (`needsUser` set) or, for a subtask, on its parent (a blocking
+question), otherwise true while a run is queued or running, a conversation is watched, or a
+subtask started with `mode: "wait"` is still working (`waitingOnTaskIds`). `taskBadge(task, { activeRuns })` gives the one badge every surface
+shows, highest first: `approval`, `input` (a question, including a subtask's question to its
+parent), `working` (a run), `waiting` (watching or waiting on subtasks),
 `limited`, `failed`, `woke`, `done`, or `null` when nothing is new.
 
 While a run is active the task is `working`. Two exceptions: snoozed and archived tasks stay
@@ -188,13 +193,25 @@ When a run ends, the first matching rule applies:
    failed run only sets `needsUser: "failure"`.
 1. Failed (not arrivals, which `ArrivalQueue` retries): `inbox` with `needsUser: "failure"`, or
    `needsUser: "limited"` when the run stopped at a [usage limit](#usage-limits).
-2. Pending approvals: `inbox` with `needsUser: "approval"`.
+2. Pending approvals: `inbox` with `needsUser: "approval"`; then pending questions (not a
+   subtask's): `inbox` with `needsUser: "question"`.
 3. Another run of the task is still active: `working`.
-4. A run started by the person's message: `inbox`, or `working` while it watches a conversation.
+4. A run started by the person's message: `inbox`, or `working` while it watches a conversation
+   or waits on `mode: "wait"` subtasks.
 5. Snoozed and archived tasks stay where they are through background work.
 6. Schedule, watch and wake runs that produced something (ActionRecords or assistant text):
    `inbox` (`working` while watching). Runs that produced nothing go back to where the task was.
 7. Arrival triage never moves the task by itself, only through rules 1–2.
+
+Then, when `settleRequested` is set ([Organise](#organise)): the task settles (watches end)
+unless the run failed or something waits on the person, which drops the request, or another
+run is active or a follow-up is queued, which keeps it for the next run end. A task the person
+put away during the run forgets the request; the person's next message or a reopen clears it.
+
+`question_asked` surfaces the task like a proposal (approvals keep priority; a snoozed task
+comes back early; a settled or archived one only records `needsUser`; a subtask's question
+does not surface it). `question_resolved` hands `needsUser` to the next thing waiting
+(approval, then another question) or clears a `question`; a failure or limit stays.
 
 `lastActivityAt` ("when it last came back to you") moves only when the task surfaces or the
 person acts. Background no-op runs don't count, so auto-settle is not reset by them. A task that
@@ -232,6 +249,73 @@ Lifecycle:
   held stays held until resumed.
 - Settle and archive also hold the follow-up queue first, so stopping the active run does not
   start the next queued message on a task the person put away.
+
+## Questions
+
+`ask_user({ text, options?, blocking? = true })` (a registry tool; see
+[tools](tools.md#questions-subtasks-and-organise-v04)) appends a `question` item, adds a
+`TaskPendingQuestion` to `Task.pendingQuestions` (at most 5 open, `409 QUESTION_LIMIT` to the
+tool), and surfaces the task with `needsUser: "question"`. The tool returns at once; with
+`blocking` the agent is told to end its turn. The run is not held open.
+
+- **Answer.** `POST /api/tasks/:id/questions/:itemId/answer { text }` answers that question:
+  the text becomes the task's next message through the [follow-up queue](#follow-up-queue)
+  (queued behind an active message run), its `user_message` carries `answers: [itemId]`, and
+  the prompt quotes the question (`You asked: "…"` / `The person's answer: …`). Any message
+  sent while questions are pending (`POST …/messages`, either mode) answers all of them.
+- **Dismiss.** `POST …/questions/:itemId/dismiss` resolves it without an answer and appends a
+  `QUESTION_DISMISSED` notice; no run starts. The agent sees the notice on its next turn.
+- Answering or dismissing a question that is no longer pending answers `409
+  QUESTION_RESOLVED`; an unknown item `404 NOT_FOUND`.
+- `needsUser` stays `"question"` while any question or a `request_secret` request is open;
+  approvals take priority, and deciding the last one hands over to the question.
+
+## Subtasks
+
+`task_delegate` starts a **subtask**: a `kind: "task"` child with `parentTaskId`,
+`createdBy: "agent"` and `delegation`. It runs its own message run on `message` (prompted as
+"The request from your parent task"), in the parent's interaction mode, on the parent's
+accounts or a subset (`ACCOUNT_MISMATCH` otherwise), with `permissionMode: "inherit"` (the
+parent's effective mode) or a lower one: the clamp never lets it exceed the parent. Limits:
+depth 2 (a top-level task's child is depth 1; `DEPTH_LIMIT`), 10 working subtasks per task
+(`SUBTASK_LIMIT`), and no subtasks from a settled or archived task (`TASK_SETTLED`).
+
+- **Completion.** When a subtask's work ends (its run ended and no follow-up waits), the parent
+  gets a `notification` (`source: "subtask"`, `subtaskId`): "Subtask “…” finished: <its reply>",
+  "failed (CODE)", "was stopped" or "stopped at a usage limit", plus how many of its proposals
+  wait for the person. The parent then **wakes** with a background `wake` run
+  (`reason: "subtasks"`, prompted to call `task_status`) when the child was started with
+  `mode: "wait"`, when it asked a question, when `completionWake` is `always`, or (`settled_only`,
+  the default) when none of the parent's subtasks is still working. Several completions share
+  one wake: a completion that finds the parent's subtask wake queued or running joins it (the
+  agent lane runs one run at a time, so a running wake started after that child finished). A
+  settled or archived parent gets the notification without a wake.
+- **Wait mode.** `mode: "wait"` records the child in the parent's `waitingOnTaskIds`: the agent
+  ends its turn, the parent rests in Working (badge Waiting) and wakes when the child finishes.
+- **Questions.** A subtask's `ask_user` question is recorded on the child
+  (`pendingQuestions`, its own `question` item) but never surfaces it to the person: the parent
+  gets a `notification` ("Subtask “…” asks: "…". Options: …") and wakes when the child's run
+  ends. The parent answers with `task_delegate({ taskId, message })`, which sends the message
+  to the child and answers its pending questions.
+- **Approvals.** Agents have no approval tool, so a subtask cannot approve anything and its
+  parent cannot approve for it: the child's proposals wait for the person on the child task,
+  which then appears in the sidebar and Needs you. Approval-scope grants are per task; a child
+  inherits none.
+- **Cancel.** `task_cancel` stops the child like the person's Stop (queue held, runs
+  cancelled), its own subtasks first, drops its open questions, removes it from
+  `waitingOnTaskIds` and marks `delegation.cancelledByParent`, so its end neither notifies nor
+  wakes the parent. A later `task_delegate` follow-up to it clears the mark.
+- **Lineage.** `GET /api/tasks/:id/lineage` returns the parent and the children (with
+  `activeRuns` and the last run's status); `GET /api/tasks?parentTaskId=<id>` lists children.
+  Subtasks are ordinary tasks for every other route.
+
+## Organise
+
+`task_organize({ action, until?, title? })` lets the agent file its own task: `snooze` (with
+a future `until`, the ordinary snooze), `unsnooze`, `pin`, `unpin`, `rename` (neutralized,
+`titleGenerated: true` until the person renames it), `mark_unread`, and `settle`. Settle is
+deferred: it sets `settleRequested` and the status rules apply it when the run ends (see
+[Status rules](#status-rules)). Each answers `{ action, applies: "now" | "run_end", task }`.
 
 ## Follow-up queue
 
@@ -342,7 +426,7 @@ Every route requires the bearer token. Errors use the standard body
 
 | Method and path | Body / query | Response |
 |---|---|---|
-| `GET /api/tasks` | `status=inbox,working` (comma list), `kind=task,inbox,routine`, `pinned=true\|false`, `limit` (1–500, default 50), `cursor` | `Page<Task>`: `{ items, total, nextCursor }`, ordered by `lastActivityAt` desc |
+| `GET /api/tasks` | `status=inbox,working` (comma list), `kind=task,inbox,routine`, `pinned=true\|false`, `parentTaskId` (v0.4: children only), `limit` (1–500, default 50), `cursor` | `Page<Task>`: `{ items, total, nextCursor }`, ordered by `lastActivityAt` desc |
 | `POST /api/tasks` | `{ message, title?, accountIds?, permissionMode?, interactionMode?, parentTaskId?, matterId?, emailIds? }` | `201 { task, run }` (the first run, `queued`) |
 | `GET /api/tasks/by-action/:actionId` | | `TaskByAction`: `{ taskId, runId }`; `404 NOT_FOUND` when no task run holds the action |
 | `GET /api/tasks/:id` | | `TaskDetail`: `{ task, runs }` (runs newest first, at most 50) |
@@ -364,6 +448,9 @@ Every route requires the bearer token. Errors use the standard body
 | `POST /api/tasks/:id/resume` | | `202 { task, run }` (`run` is the continuation, `null` if the stopped run is gone); `409 NOT_LIMITED` |
 | `POST /api/tasks/:id/resume-at-reset` | | `Task` (`limited.autoResume: true`); `409 NOT_LIMITED`, `409 RESET_UNKNOWN` |
 | `POST /api/tasks/:id/pin` · `/unpin` | | `Task` |
+| `POST /api/tasks/:id/questions/:itemId/answer` | `{ text }` | `202 { task, run }` (the answer's run, possibly `queued`); `404 NOT_FOUND`, `409 QUESTION_RESOLVED` |
+| `POST /api/tasks/:id/questions/:itemId/dismiss` | | `Task`; `404`, `409 QUESTION_RESOLVED` |
+| `GET /api/tasks/:id/lineage` | | `TaskLineage` |
 | `POST /api/tasks/:id/unwatch` | `{ threadHandle? }` (omit to stop every watch) | `Task` |
 | `PATCH /api/tasks/:id` | `{ title?, permissionMode?, interactionMode? }` | `Task` (mode clamped) |
 | `POST /api/actions/:id/approve` | `{ request?, scope?: "once" \| "task" \| "always" }` | `ActionRecord`; with `task` or `always` also `approvalScope: ApprovalScopeResult` (`{ requested, applied, taskId?, pinnedLevel?, code? }`). The task's `pendingActionIds` and `needsUser` follow |
@@ -532,6 +619,13 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 - **Refreshes.** The first `/ws` connect does not refetch; a reconnect refetches the open views
   and asks every working or seemingly running task for its runs again, so a run that ended
   offline stops showing as running. Window focus refetches only data older than 30 seconds.
+- **Questions and subtasks (v0.4).** Open questions sit above the composer: the question as
+  markdown, its options as buttons (each answers with that text) and Dismiss; typing in the
+  composer answers them all. Task details show a **Lineage** panel (the parent, or the
+  children with their status). The timeline ends with one collapsed line, "Started 3
+  subtasks, 2 working", that opens to the list. Subtasks stay out of the sidebar until they
+  need the person (`needsUser` set). Needs you shows questions in their own group, "Questions
+  for you", with the question text.
 - On the demo backend (`501 TASKS_UNAVAILABLE`) the sidebar and home say tasks need
   `passport serve`, and the composer runs the agent once (`POST /api/agent/run`) and shows the
   outcome inline.
@@ -556,14 +650,27 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 
 ## Not yet
 
-- General `question` items remain reserved. `request_secret` uses `secret_request` items
-  and `needsUser: "question"` for private input; there is no general question tool yet.
 - Staged changes, the worktree analogue, are not implemented. Approval stays per action.
 - Approval scopes apply to later proposals only: approving with `task` does not approve the
   task's other proposals that are already pending. The proposing tool call returns `proposed`
   even when a grant approves it a moment later; the run's change summary shows the outcome.
-- Child tasks: `parentTaskId` is honored for the permission clamp, but no tool spawns a child
-  task yet.
+
+## Known limitations (W2A questions and subtasks)
+
+- `mode: "wait"` does not block the tool call: the agent lane runs one run at a time, so a
+  parent waiting inside its run would starve its child. The parent ends its turn and wakes with
+  the result instead.
+- A subtask wake's prompt quotes the completion that started it; completions that joined it
+  are read through `task_status` (and, on a resumed session, the "since your last turn" list).
+- The subtasks line sits at the end of the timeline rather than where the subtasks were
+  started, and the Lineage request is not shared between the panel and the line.
+- Subtasks are not hidden from the ⌘K palette, and their pages are not read-only: the person
+  can message a subtask directly (T3 points to the parent instead).
+- Answering or dismissing the last question clears `needsUser` even while a `request_secret`
+  request is open in the same task (secret requests are not listed on the task row); the
+  secret card still works, but the task no longer shows Input for it.
+- Coalescing relies on the single agent lane; a future parallel lane would need an explicit
+  wake generation.
 
 ## Known limitations (W1A sessions)
 

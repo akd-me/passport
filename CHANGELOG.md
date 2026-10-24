@@ -37,6 +37,21 @@ version; release tags must match it. Move Unreleased to a date before tagging.
   characters (`titleGenerated: true` until you rename it).
 - `@passport/types` exports `isTaskWorking` and `taskBadge` (Approval, Input, Working, Waiting,
   Limited, Failed, Woke, Done); the server's status rules live in one `resolveTaskStatus`.
+- The agent can ask you a question (`ask_user`): it shows above the composer with its suggested
+  answers and Dismiss, the task waits in your inbox with the Input badge, and your answer (or
+  any message you send meanwhile) becomes the next run's message through the queue.
+  `POST /api/tasks/:id/questions/:itemId/answer` and `/dismiss`; Needs you lists questions in
+  their own group.
+- Subtasks: `task_delegate` starts child tasks (async, or wait to end the turn and wake with
+  the result) that never exceed the parent's mode or accounts and nest at most two deep;
+  `task_status` and `task_cancel` follow and stop them. A finished subtask notifies its parent
+  and wakes it (`completionWake: settled_only | always`, completions coalesce into one wake); a
+  subtask's question goes to the parent's agent, never to you, and subtasks cannot approve
+  anything. Task details gain a Lineage panel (`GET /api/tasks/:id/lineage`), the timeline a
+  collapsed "Started 3 subtasks, 2 working" line, and subtasks stay out of the sidebar unless
+  they need you.
+- `task_organize` lets the agent snooze, pin, rename or mark its task unread, and settle it
+  when the run ends (unless something then waits on you).
 
 ### Changed
 
