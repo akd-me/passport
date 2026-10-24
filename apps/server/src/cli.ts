@@ -29,6 +29,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   readBootstrap();
   takeEnvironmentKey();
   const [command = "serve", subcommand, kind] = args;
+  if (command === "task") return (await import("./cli/tasks.js")).runTaskCommand(args.slice(1));
   if (command === "mcp" && (subcommand === "install" || subcommand === "proxy")) {
     return (await import("./cli/mcp-install.js")).handleMcpCommand(args);
   }
@@ -52,7 +53,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   if (command === "--help" || command === "-h" || command === "help") {
     console.log(
-      "passport init | doctor | serve [--allow-remote] | demo [--allow-remote] | token [--rotate] | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | accounts connect --provider gmail|microsoft [--no-calendar] [--agent codex|claude-code] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo]",
+      "passport init | doctor | serve [--allow-remote] | demo [--allow-remote] | token [--rotate] | sync [--demo] | triage <emailId> | accounts list [--demo] | accounts add <kind> [--demo] | accounts connect --provider gmail|microsoft [--no-calendar] [--agent codex|claude-code] | mcp | trust [--demo] | decisions [--demo] | jobs list|run|pause|resume|add-routine [--demo] | task start|send|show|list|approve|reject (passport task --help)",
     );
     return;
   }

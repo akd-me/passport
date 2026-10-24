@@ -5,7 +5,10 @@ import { ApiError } from "../errors.js";
 import { activeOwner } from "../owner-lock.js";
 
 /** Never turn a reachable server's auth/error response into a second local writer. */
-export async function serverClient(config: PassportConfig) {
+export async function serverClient(
+  config: PassportConfig,
+  options: { requireServer?: boolean } = {},
+) {
   let token = process.env.PASSPORT_API_TOKEN;
   if (!token) {
     try {
@@ -24,6 +27,11 @@ export async function serverClient(config: PassportConfig) {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+  const unavailable = () =>
+    new ApiError(
+      "SERVER_UNAVAILABLE",
+      "No running server. Start passport serve with the same PASSPORT_DATA_DIR, PASSPORT_HOST and PASSPORT_PORT; task commands require the running server.",
+    );
   const decode = async (response: Response): Promise<unknown> => {
     if (response.status === 401) {
       throw new ApiError(
@@ -52,6 +60,9 @@ export async function serverClient(config: PassportConfig) {
         "This data directory has a live owner, but its server is unreachable. Wait for startup or stop that process before using local commands.",
       );
     }
+    if (options.requireServer) {
+      throw unavailable();
+    }
     console.error(
       "No running server (owner.lock absent/stale); using the local store without background jobs.",
     );
@@ -64,13 +75,21 @@ export async function serverClient(config: PassportConfig) {
       "The configured port is not a persistent Passport server; check PASSPORT_PORT and PASSPORT_DATA_DIR.",
     );
   }
-  return async (path: string, method = "GET", body?: unknown) =>
-    decode(
-      await fetch(`${base}${path}`, {
+  return async (path: string, method = "GET", body?: unknown) => {
+    let response: Response;
+    try {
+      response = await fetch(`${base}${path}`, {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(300000),
-      }),
-    );
+      });
+    } catch (error) {
+      if (options.requireServer) {
+        throw unavailable();
+      }
+      throw error;
+    }
+    return decode(response);
+  };
 }

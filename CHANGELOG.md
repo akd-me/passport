@@ -3,6 +3,18 @@
 Notable changes are recorded here. The first version heading is the CLI artifact
 version; release tags must match it. Move Unreleased to a date before tagging.
 
+## [Unreleased]
+
+### Added
+
+- `passport task start`, `send`, `show`, `list`, `approve` and `reject`, with human-readable
+  output and `--json`. `start` and `send` support `--wait` for the submitted run's summary
+  (exit 2 when the person is needed). Task commands require the running server and never
+  open the store directly.
+- CLI usage in the installation guide and a loopback/Tailscale Serve remote-access recipe,
+  with offline coverage for configuration, token login, Host/Origin checks and WebSocket
+  authorization; remote browsers do not receive the Mac app's native notifications.
+
 ## [0.3.2] — 2026-10-24
 
 ### Fixed
