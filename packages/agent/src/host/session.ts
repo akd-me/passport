@@ -82,7 +82,8 @@ const catalogs = new Map<string, Promise<string | undefined>>();
 
 /**
  * The binary's model catalog with native tools removed (`codexToolCatalog`), fetched once per
- * binary. Undefined, and retried on the next run, when the CLI cannot print one.
+ * binary and process. Undefined when the CLI cannot print one (an older Codex): sessions then
+ * rely on the feature switches alone.
  */
 function restrictedCodexCatalog(
   binary: string,
@@ -97,7 +98,6 @@ function restrictedCodexCatalog(
       .catch(() => undefined)
       .then((catalog) => {
         if (!catalog) {
-          catalogs.delete(binary);
           // Codex model catalog unavailable; native tool removal is limited to feature switches.
           log?.(
             "Codex model catalog unavailable; native tool removal is limited to feature switches",

@@ -321,10 +321,12 @@ process.stdin.on("end", () => {
     try {
       const run = await backend.agent.run({ kind: "manual", instruction: "Tidy my inbox" });
       expect(run.error ?? null).toBeNull();
+      // The production client first asks Codex for its model catalog (R1-7).
       const [call] = (await readFile(log, "utf8"))
         .trim()
         .split("\n")
-        .map((line) => JSON.parse(line));
+        .map((line) => JSON.parse(line))
+        .filter((entry) => entry.args[0] !== "debug");
       expect(call.cwd).toBe(await realpath(join(dir, "host-agent")));
       expect(call.args).toEqual(expect.arrayContaining(["exec", "--json", "-m", "gpt-6-sol"]));
       expect(call.input).toContain("Tidy my inbox");

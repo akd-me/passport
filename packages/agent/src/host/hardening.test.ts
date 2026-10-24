@@ -3,7 +3,7 @@
  * (R1-6, R1-33) and transcript persistence (R1-5).
  */
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -195,6 +195,20 @@ describe("host failure classification (R1-6, R1-33)", () => {
       code: "HOST_AGENT_RATE_LIMIT",
       message: "Codex usage limit reached (try again in 3 hours 20 minutes)",
     });
+  });
+});
+
+describe("Claude session system prompt (R1-39)", () => {
+  it("travels in a private file, never in argv, and is removed on cleanup", async () => {
+    const invocation = await claudeInvocation({ ...session(), kind: "claude-code" });
+    const { args } = invocation;
+    const promptFile = args[args.indexOf("--system-prompt-file") + 1] ?? "";
+    expect(await readFile(promptFile, "utf8")).toBe("SYS");
+    expect((await stat(promptFile)).mode & 0o777).toBe(0o600);
+    expect(args).not.toContain("SYS");
+    expect(args).not.toContain("--system-prompt");
+    await invocation.cleanup();
+    await expect(stat(promptFile)).rejects.toThrow();
   });
 });
 

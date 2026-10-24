@@ -115,11 +115,14 @@ export async function claudeInvocation(spec: HostRunSpec): Promise<HostInvocatio
     }
   }
   // Last, after the checks that can throw, so a failed build leaves no private directory.
-  if (spec.systemPrompt !== undefined) {
-    // The system prompt holds USER.md: a private file keeps it out of the process list (R1-39).
+  if (spec.systemPrompt !== undefined && !spec.completion) {
+    // A session's system prompt holds USER.md: a private file keeps it out of the process list
+    // (R1-39). Completions still pass theirs in argv.
     const path = join(await privateDir(), "system-prompt.md");
     await writeFile(path, spec.systemPrompt, { mode: 0o600 });
     args.push("--system-prompt-file", path);
+  } else if (spec.systemPrompt !== undefined) {
+    args.push("--system-prompt", spec.systemPrompt);
   }
   return {
     args,
