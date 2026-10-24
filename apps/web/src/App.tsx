@@ -14,6 +14,7 @@ import { useWorkspace } from "./state";
 import { DecisionLink } from "./tasks/DecisionLink";
 import { TasksProvider } from "./tasks/store";
 import { isTyping, type SettingsSection, useUi } from "./ui-state";
+import { useWindowKeydown } from "./use-window-keydown";
 import { Activity } from "./views/Activity";
 import { WorkQueue } from "./views/Decisions";
 import { MatterPage, Matters } from "./views/Matters";
@@ -81,7 +82,7 @@ export function useGlobalShortcuts() {
   const ui = useUi(),
     { noticeAction, notify } = useWorkspace(),
     navigate = useNavigate();
-  useEffect(() => {
+  useWindowKeydown((event) => {
     /** ⌘-chords; true when handled. */
     const chord = (event: KeyboardEvent, modal: boolean) => {
       const key = event.key.toLowerCase();
@@ -129,19 +130,15 @@ export function useGlobalShortcuts() {
       }
       return true;
     };
-    const onKey = (event: KeyboardEvent) => {
-      const modal = !!document.querySelector('[aria-modal="true"]');
-      const handled =
-        event.metaKey || event.ctrlKey
-          ? chord(event, modal)
-          : !modal && !isTyping(event.target) && plain(event);
-      if (handled) {
-        event.preventDefault();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [ui, navigate, noticeAction, notify]);
+    const modal = !!document.querySelector('[aria-modal="true"]');
+    const handled =
+      event.metaKey || event.ctrlKey
+        ? chord(event, modal)
+        : !modal && !isTyping(event.target) && plain(event);
+    if (handled) {
+      event.preventDefault();
+    }
+  });
 }
 
 function Shell() {
