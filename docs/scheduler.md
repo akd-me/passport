@@ -186,8 +186,9 @@ Deliveries retain `id, jobId, receivedAt, outcome, prompt?`. Outcomes:
 `accepted | dispatch_failed | duplicate | coalesced | rejected_signature | disabled | rate_limited | expired | filtered`.
 Accepted/coalesced return HTTP 202 after persistence, before execution.
 Duplicate/filtered/expired return 200, invalid signatures 401, disabled routines 410.
-The first delivery's outcome changes to `dispatch_failed` if dispatch fails or overlaps an
-active job. Expanded rendered instructions are plain text. The latest 50 entries are retained.
+The window's accepted entry (or its latest retained coalesced entry) changes to `dispatch_failed`
+if dispatch fails or overlaps an active job. Expanded rendered instructions are plain text.
+The latest 50 entries are retained.
 
 ### Known limitations
 

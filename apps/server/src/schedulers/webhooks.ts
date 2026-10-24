@@ -22,6 +22,7 @@ interface PendingWindow {
   receivedAt: number;
   key: string;
   deliveryId: string;
+  latestDeliveryId?: string;
   dueAt: number;
   prompt: string;
 }
@@ -156,15 +157,16 @@ export class RoutineWebhooks {
           state.rate.rejected = (state.rate.rejected ?? 0) + 1;
         }
         // One rate-limit record per minute bounds writes during a flood.
-        if (
-          outcome !== "rate_limited" ||
-          !state.deliveries.some(
+        const alreadyLimited =
+          outcome === "rate_limited" &&
+          state.deliveries.some(
             (delivery) =>
               delivery.outcome === outcome && Date.parse(delivery.receivedAt) >= minute * 60000,
-          )
-        ) {
-          this.log(id, state, outcome);
+          );
+        if (alreadyLimited) {
+          return { outcome, status };
         }
+        this.log(id, state, outcome);
         await this.save();
         return { outcome, status };
       };
@@ -247,7 +249,7 @@ export class RoutineWebhooks {
         state.rate.updates++;
         pending.prompt = prompt;
         pending.receivedAt = this.now();
-        this.log(id, state, "coalesced", prompt);
+        pending.latestDeliveryId = this.log(id, state, "coalesced", prompt).id;
       } else {
         state.rate.deliveries++;
         const delivery = this.log(id, state, "accepted", prompt);
@@ -321,7 +323,9 @@ export class RoutineWebhooks {
           return;
         }
         state.pending = state.pending.filter((entry) => entry.deliveryId !== window.deliveryId);
-        const delivery = state.deliveries.find((entry) => entry.id === window.deliveryId);
+        const delivery =
+          state.deliveries.find((entry) => entry.id === window.deliveryId) ??
+          state.deliveries.find((entry) => entry.id === window.latestDeliveryId);
         if (delivery) {
           delivery.outcome = outcome;
           this.bus.emit({ type: "job.delivery", delivery });

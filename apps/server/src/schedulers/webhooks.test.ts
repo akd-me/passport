@@ -100,8 +100,20 @@ describe("durable webhook delivery windows", () => {
       expect((await send(token, "update-" + index, String(index))).outcome).toBe("coalesced");
     }
     expect((await send(token, "excess", "excess")).status).toBe(429);
+    const writes = vi.spyOn(store.kv, "set");
+    expect((await send(token, "flood", "flood")).status).toBe(429);
+    expect(writes).not.toHaveBeenCalled();
+    dispatch.mockResolvedValueOnce({
+      runId: "failed",
+      startedAt: new Date().toISOString(),
+      durationMs: 1,
+      status: "error",
+    });
     await vi.advanceTimersByTimeAsync(10000);
     expect(dispatch.mock.calls[0]![1]).toContain("59");
+    expect(
+      hooks.deliveries(routine.id).some((delivery) => delivery.outcome === "dispatch_failed"),
+    ).toBe(true);
   });
   it("expires an overdue window and drops paused or deleted work on restart", async () => {
     routine.schedule.maxDeliveryAgeMinutes = 1;
