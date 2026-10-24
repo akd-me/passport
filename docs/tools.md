@@ -13,6 +13,9 @@ calendar provider. No tool reads account credentials or provider settings.
 
 ## Catalogue
 
+The full registry has **69 tools**, shared with MCP. Arrival, routine and voice-learning
+runs restrict that catalogue further (see [tool scopes](#arrival-and-routine-tool-scopes)).
+
 Columns: **Class** is `R` (read), `RW` (reversible write, the executor stores an
 inverse), `IW` (irreversible, held or asked as policy says). **Cost** is per call, in
 Gmail units / Graph requests / IMAP commands; "+20/row" means 20 Gmail units per row
@@ -209,7 +212,9 @@ state or trusts a VIP merely because they appeared in the sample.
 Arrival sessions can supply `category` on `create_matter` / `attach_to_matter`; the runtime
 validates the arrival ID, preserves sensitive/known-sender constraints, and supplies the
 executor’s trusted `emailPatch` alongside resolved people IDs. External callers cannot use this
-field to change classifications or override an action’s inferred policy category. The arrival
+field to change classifications or override an action’s inferred policy category. The chosen
+classification applies only to the arrival’s own matter create/attach operation, not later
+drafts or mail operations; their categories remain inferred. The arrival
 prompt is under 4 KiB and frames the `MailRow`, heuristic evidence and matter-watch matches as
 untrusted data. Routine mail uses the deterministic playbooks described in [tasks](tasks.md#arrival-triage-migration-v04).
 
@@ -219,8 +224,9 @@ untrusted data. Routine mail uses the deterministic playbooks described in [task
 comparison as a task timeline item. Use ordinary messages for plain prose. The trusted
 `ToolContext.taskId` and `runId` must identify an active run, otherwise `TASK_REQUIRED`.
 This is local presentation, available even in plan mode; it does not execute a mail action.
-Every attempt counts against the run's tool-call budget. At most **10 successful renders
-per run** are stored, including concurrent calls and recreated registries (`RENDER_LIMIT`).
+Every attempt counts against the run's tool-call budget. At most **10 renders including sanitiser failures per run** are allowed, including
+concurrent calls and recreated registries (`RENDER_LIMIT`). The cap is checked before parsing;
+successes are counted from stored items and failures in a bounded in-memory counter.
 
 - Title: 1–200 characters. HTML: at most **64 KiB UTF-8**, both before and after sanitising
   (`RENDER_TOO_LARGE`). Height: integer **80–1200 px**, or a bounded content estimate.
@@ -231,8 +237,9 @@ per run** are stored, including concurrent calls and recreated registries (`REND
   no anchors survive, including for `javascript:` URLs. Active subtrees, scripts, styles,
   forms, iframes, images, external assets and event handlers never reach the document.
 - Output is `{ status: "rendered", itemId, title, height }`; HTML stays in the `render`
-  item `{ title, html, height }`, marked `untrusted: true`. Text and decoded entities have
-  their command sigils neutralised. Tool-call summaries redact the HTML body as usual.
+  item `{ title, html, height }`, marked `untrusted: true`. The parser scans in linear time, preserves stray `<` text, decodes numeric and common
+  named entities (including accented letters), and decodes link URLs once. Unknown entity
+  names remain literal text. Text and decoded entities have their command sigils neutralised. Tool-call summaries redact the HTML body as usual.
 - The UI uses a fluid-width `<iframe sandbox="" srcdoc=…>` with no scripts or same-origin
   access, an internal deny-by-default CSP, Passport's original theme variables for both
   themes, and **Open full size**. There is no surrounding card.
@@ -245,8 +252,11 @@ Pending `draft_create` proposals (including `reply_draft` tool results) and inli
 have **Review draft** in task approvals and Needs you: conversation on the left through the
 existing message/thread read routes, editable draft on the right. **Save draft** persists
 only text through `PATCH /api/actions/:id/draft`, reusing approval-edit validation; it keeps
-status `proposed`, policy and recipients unchanged and clears stale `htmlBody`. Approval
-still goes through the executor. Existing one-click Approve remains available. **As they
+status `proposed` and the same recipients, subject and category, and clears stale `htmlBody`.
+Saving shares the executor’s approval lock: if a decision wins, save returns `409 ACTION_DECIDED`.
+The first agent draft is retained across saves and restarts. Later approval re-evaluates policy
+and records `approved_edited` with edit distance from that original, rather than earning
+unchanged-approval trust. Approval still goes through the executor. Existing one-click Approve remains available. **As they
 will see it** sends the draft plus quoted history to `POST /api/render/preview` and displays
 the sanitised result through the very same sandbox.
 
@@ -280,17 +290,31 @@ task messages, logs, tool arguments or domain-event values.
 Consumers accept the reference directly:
 
 - Webhook routines: `schedule.signature.secretRef` on `POST/PATCH /api/jobs`. Installing it
-  consumes the reference and stores a private encrypted signing key for future deliveries.
+  stores a private encrypted signing key for future deliveries and consumes the reference
+  only after the routine and schedule persist. A failed install rolls back the signing key.
 - IMAP account setup: a secret descriptor field such as
   `fields.password: { secretRef: "secret:…" }` on the account/test API, instead of plaintext.
-  It is consumed into the encrypted account credentials, never account settings.
+  The test route peeks without consuming it or creating voice-learning work. Account
+  installation persists credentials/config first, then atomically consumes references; failed
+  installs clean up and leave references reusable until expiry. Values never enter account settings.
 
 Do not ask the person to paste a secret into chat. Request-ID retries return the same reference;
-once consumed, that reference cannot install another consumer.
+once consumed, that reference cannot install another consumer. Saved references expire after
+one hour by default; their encrypted deadline survives restart, expired reads are refused, and
+store maintenance sweeps them. Older references without a deadline are revoked. This TTL is
+separate from the request’s 10–600 second input deadline.
 
 Known limitations: private requests require a task-capable store and a task-bound caller.
-An external MCP session without trusted task context cannot open one. Pending requests expire
-when next read after restart; they do not replay the interrupted model call.
+An external MCP session without trusted task context cannot open one. Pending requests
+retain their original `expiresAt` across restart and become `timed_out` when read after it;
+restart itself does not expire them or replay the interrupted model call. Resolving a request
+after its run ended still clears its pending ID while preserving other questions/secret requests.
+
+The manual account wizard still uses a password field, and agent-driven OAuth setup has its
+own tools; neither currently produces or accepts `secretRef`. Account references are an API
+capability. The routine form asks for a signing reference but offers no private reference
+picker. Do not work around that gap by echoing refs in chat: refs can then remain in the
+timeline and CLI transcripts. Private reference handoff in those forms is deferred.
 
 ## Questions, subtasks and organise (v0.4)
 
@@ -320,11 +344,54 @@ text that may quote mail, neutralized and labelled untrusted.
   `{ status: "planned" }` in plan mode.
 - Errors: `QUESTION_LIMIT` (5 open questions), `DEPTH_LIMIT` (subtasks nest at most two
   deep), `SUBTASK_LIMIT` (10 working), `ACCOUNT_MISMATCH` (an account the parent lacks),
-  `TASK_SETTLED` (the person settled or archived the task), `NOT_A_SUBTASK` (`taskId` is not
+  `TASK_SETTLED` (settled/archived task or child), `PERSON_CHOICE` (a person’s snooze/title),
+  `DELEGATE_UNAVAILABLE` (Inbox tasks or arrival/schedule runs cannot delegate), `NOT_A_SUBTASK` (`taskId` is not
   this task's child), `INVALID_FIELD` (a snooze time in the past), `INVALID_INPUT` (schema;
   `snooze` without `until`, `rename` without `title`).
 - A subtask's permission mode is the parent's effective mode or lower, never higher, and the
-  policy engine still caps every action at the minimum over the parent chain.
+  policy engine checks the current parent-chain ceiling on every action, capped by the run’s
+  starting ceiling. Lowering reaches a running session; raising takes effect on the next run.
+
+## Arrival and routine tool scopes
+
+Arrival sessions enforce `ARRIVAL_TOOLS` in `packages/agent/src/triage-session.ts` on every call.
+The exact allowlist is:
+
+```text
+mail_read mail_search mail_list mail_count mail_grep mail_labels mail_accounts
+mail_attachment_read search_emails get_email get_email_body get_thread summarize_thread
+list_mailboxes people_lookup people_history search_people list_people get_person
+list_recent_from_person notes_read notes_search notes_write list_matters get_matter
+create_matter attach_to_matter update_matter reply_draft create_draft list_events
+free_busy find_free_slots respond_to_event propose_meeting archive_emails label_emails mark_read
+```
+
+Matter create/attach and archive/label/mark-read are scoped to the arrival's own email.
+Other tools, including `task_delegate`, `ask_user`, `task_organize`, `request_secret`, `render`,
+send, unsubscribe and profile edits, return `INPUT_TRIAGE`. Arrival category/people context
+is trusted runtime input; model-provided classifications still obey sensitive/known-sender floors.
+
+Daily digest, matter review and user routines expose only `ROUTINE_TOOLS` in
+`packages/agent/src/routine-session.ts`:
+
+```text
+mail_read mail_search mail_list mail_count mail_grep mail_labels mail_accounts
+mail_attachment_read mail_changes provider_get search_emails get_email get_email_body
+get_thread summarize_thread list_mailboxes people_lookup people_history search_people
+list_people get_person list_recent_from_person notes_read notes_search notes_write
+list_matters get_matter create_matter attach_to_matter update_matter list_events free_busy
+find_free_slots list_pending_decisions list_actions get_trust get_user_profile
+get_standing_rules get_daily_log explain_decision preview_unsubscribe archive_emails
+label_emails mark_read move_emails snooze batch_archive_by_query apply_label_by_query
+reply_draft create_draft render
+```
+
+This includes context reads, notes/matters, organizing mail, drafts and render. It omits all
+five orchestration tools, secrets, sends, unsubscribe execution, meeting proposals/responses,
+profile edits and conversation watches. Scheduled mail/webhook input cannot enlarge that scope.
+Voice learning instead permits `get_user_profile`, one bounded Sent `mail_search`, sampled
+`mail_read` calls and one `profile_update`; a pending account profile proposal blocks competing
+sampling/proposals (`INPUT_VOICE_LIMIT`).
 
 ## On-demand results
 
@@ -617,7 +684,7 @@ The registry receives its actor from trusted host code. MCP always uses
 `{kind:"external-agent",id:transportId}` and respects `externalAgentCeiling`.
 Stdio allocates a random identity at server startup; HTTP uses the authenticated session ID.
 Client names are audit labels in action reasons and cannot claim undo/cancellation ownership. HTTP bearer auth authenticates access to the MCP
-listener; it does not grant higher trust. Tools accept no actor/category override.
+listener; it does not grant higher trust. Tools accept no actor override; arrival-only category inputs are ignored for external actors.
 Resources and prompts remain available at `passport://matters/{id}`,
 `passport://people/{id}`, `passport://user-profile`, `passport://decisions`,
 `triage_inbox` and `summarize_matter`.
@@ -805,7 +872,8 @@ already loads and passes the shared token through its small listener seam.
 (`toolCallResponse`), Host checks and no browser origins. The tools execute in the server
 process, so each call keeps the run's agent actor, `ToolContext.taskId`, the task's
 permission ceiling (looked up by run id), plan-mode read-only and the injected `readers`;
-`call` validates arguments against the tool's schema, applies the draft signature, counts
+The default MCP tool timeout is **660 seconds** (600-second maximum secret wait plus
+60 seconds). `call` validates arguments against the tool's schema, applies the draft signature, counts
 the budget and refuses calls once the run is cancelled or out of budget. A stdio child
 was rejected: it would need its own store handle, quota governor and reader credentials,
 and could not keep the run's actor and timeline observer. The runtime uses a session when a
@@ -814,6 +882,9 @@ tool belt is configured and the LLM client is a host agent
 and non-routine arrivals and scheduled work use it directly. Routine tasks start fresh sessions
 for their ticks; Inbox tasks start fresh for each material arrival. API providers use the native
 tool loop with the same budget. Tool readers keep the run’s quota lane and abort signal.
+Only eligible ordinary task message/watch/wake runs persist; Inbox/routine work, scheduled
+fresh children and voice learning stay ephemeral. Host invocations use disposable private OS
+temp working directories; CLI-owned resumable transcripts remain outside them.
 `HostAgentSessionRequest` gains `persistSession` and `resumeSessionId`; Claude Code then
 drops `--no-session-persistence` (and adds `--resume <id>`), Codex drops `--ephemeral`
 (`codex exec resume <id>`, read-only sandbox through `-c sandbox_mode`). Session ids are

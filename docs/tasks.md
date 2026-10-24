@@ -1,6 +1,6 @@
 # Tasks
 
-A **task** is the unit of agent work in Passport v0.3, the email analogue of a T3 Code thread:
+A **task** is the unit of agent work in Passport v0.4:
 a durable conversation with **runs** (one agent pass each), a timeline of **items** (messages,
 tool calls, approvals, notices), and a server-owned lifecycle. Design: `docs/design/on-demand.md`
 §3 and §4.3. Types: `packages/types/src/tasks.ts` (re-exported from `@passport/types`).
@@ -11,7 +11,7 @@ Vocabulary: "task" is agent work, "conversation" is an email thread, "matter" is
 
 | Type | Fields |
 |---|---|
-| `Task` | `id`, `title`, `accountIds`, `status` (`inbox` / `working` / `snoozed` / `settled` / `archived`), `pinned`, `snoozedUntil?`, `permissionMode` (`supervised` / `auto_accept_edits` / `auto` / `full_access`), `permissionModePinned?`, `interactionMode` (`default` / `plan`), `createdBy` (`user` / `agent` / `system`), `kind` (`task` / `inbox` / `routine`), `parentTaskId?`, `needsUser` (`null` / `approval` / `question` / `failure` / `limited`), `pendingActionIds?`, `lastActivityAt`, `createdAt`, `settledAt?`, `watches: ConversationWatch[]`, `jobId?` (routine), `revision?`, `approvalGrants?: TaskApprovalGrant[]`; v0.4, all optional: `returnedAt?`, `seenAt?`, `unseenOutcome?` (`done` / `woke` / `null`), `queue?: TaskQueueEntry[]`, `queueHeld?`, `limited?: TaskLimited \| null`, `titleGenerated?`, `providerSessionId?`, `providerSessionKind?` (`claude-code` / `codex`: the host-agent session follow-ups resume, see [Sessions](#sessions)); v0.4 W2A, all optional: `pendingQuestions?: TaskPendingQuestion[]` ([Questions](#questions)), `delegation?: TaskDelegation \| null` (set on subtasks), `waitingOnTaskIds?` (subtasks started with `mode: "wait"` still working), `settleRequested?` (`task_organize` settle, applied at run end); see [Subtasks](#subtasks) and [Organise](#organise) |
+| `Task` | `id`, `title`, `accountIds`, `status` (`inbox` / `working` / `snoozed` / `settled` / `archived`), `pinned`, `snoozedUntil?`, `permissionMode` (`supervised` / `auto_accept_edits` / `auto` / `full_access`), `permissionModePinned?`, `interactionMode` (`default` / `plan`), `createdBy` (`user` / `agent` / `system`), `kind` (`task` / `inbox` / `routine`), `parentTaskId?`, `needsUser` (`null` / `approval` / `question` / `failure` / `limited`), `pendingActionIds?`, `lastActivityAt`, `createdAt`, `settledAt?`, `watches`, `jobId?`, `revision?`, `approvalGrants?`; optional v0.4 fields below |
 | `TaskApprovalGrant` | `category`, `actionId`, `trustLevel`, `risk`, `reversibility`, `grantedAt` (see [Approval scopes](#approval-scopes)) |
 | `ConversationWatch` | `threadHandle`, `account`, `since`, `lastWakeAt?`, `consecutiveWakes` |
 | `TaskQueueEntry` | `runId` (the `queued` TaskRun it runs as), `text`, `createdAt`, `answers?` (the questions it answers) (see [Follow-up queue](#follow-up-queue)) |
@@ -21,9 +21,23 @@ Vocabulary: "task" is agent work, "conversation" is an email thread, "matter" is
 | `TaskQueue` | `taskId`, `held`, `entries: TaskQueueEntry[]` |
 | `TaskLimited` | `runId` (the stopped run), `resetAt` (or `null` when unknown), `autoResume`, `source` (`host_agent` / `provider`), `at` (see [Usage limits](#usage-limits)) |
 | `TaskRestoreState` | `status`, `snoozedUntil`, `settledAt`: what settle, snooze and archive replaced (`TaskWithPrevious = Task & { previous }`) |
-| `TaskRun` | `id`, `taskId`, `status` (`queued` / `running` / `waiting` / `completed` / `failed` / `cancelled`), `trigger`, `priority` (`interactive` / `background`), `agentRunId`, `createdAt`, `startedAt?`, `endedAt?`, `summary?`, `actionIds`, `usage?` (`llmCalls`, `toolCalls`, `inputTokens`, `outputTokens`), `error?` (a stable code), `restartOf?` (v0.4: the run a restart interrupted and this one continues) |
+| `TaskRun` | `id`, `taskId`, `status` (`queued` / `running` / `waiting` / `completed` / `failed` / `cancelled`), `trigger`, `priority` (`interactive` / `background`), `agentRunId`, `createdAt`, `startedAt?`, `endedAt?`, `summary?`, `actionIds`, `usage?` (`llmCalls`, `toolCalls`, `inputTokens`, `outputTokens`), `error?` (a stable code), `request?: string[]` (the whole request, oldest first, including cancelled messages carried by a steer and answers quoted with their questions), `restartOf?` (the run a restart interrupted and this one continues) |
 | `TaskRunTrigger` | `{ kind: "message", itemId, mode }` · `{ kind: "arrival", emailId }` · `{ kind: "schedule", jobId, name }` · `{ kind: "watch", threadHandle, emailId }` · `{ kind: "wake", reason }` |
 | `TaskItem` | `id`, `runId` (null for lifecycle notices), `taskId`, `seq` (per task, from 1), `kind`, `at`, `payload`, `untrusted?` |
+
+Optional v0.4 fields on `Task` (older stored rows may omit them):
+
+| Field | Meaning |
+|---|---|
+| `returnedAt`, `seenAt`, `unseenOutcome` | Last return to the person, last marked seen, and unseen `done` / `woke` / `null` outcome |
+| `queue`, `queueHeld` | Ordered `TaskQueueEntry[]` and hold until Resume or a new message from the person |
+| `limited` | `TaskLimited` or `null`; the stopped run and its recovery settings |
+| `titleGenerated` | Suggested title; `false` after the person renames it |
+| `providerSessionId`, `providerSessionKind` | Resumable provider session and `claude-code` / `codex`; see [Sessions](#sessions) |
+| `pendingQuestions`, `pendingSecretRequestIds` | Open `TaskPendingQuestion[]` and private-input request IDs; tracked independently |
+| `delegation`, `waitingOnTaskIds` | Subtask metadata (`TaskDelegation` or `null`) and IDs of children started with wait mode |
+| `settleRequested` | Agent's request to settle when a run ends, subject to the status rules |
+| `voiceLearning` | Trusted `{ accountId, sentContainer }` metadata limiting the one-time Sent sampling task |
 
 Item payloads by `kind`:
 
@@ -33,11 +47,10 @@ Item payloads by `kind`:
 | `assistant_message` | `{ text }` (model output; `untrusted: true` because it may quote mail) |
 | `tool_call` | `{ name, inputSummary, resultSummary, cost?, durationMs, isError, planned? }`; summaries are redacted (bodies, secrets, token-shaped strings) and at most 200 characters |
 | `approval_request` | `{ actionId, summary }`; approve or reject with `/api/actions/:id/{approve,reject}` |
-| `question` | `{ text }` (reserved: nothing emits it yet) |
 | `render` | `{ title, html, height }`; server-sanitised restricted HTML, `untrusted: true`, 64 KiB and 10 per run; see [rich output](tools.md#rich-output-v04) |
 | `question` | `{ text, options?, blocking }` from `ask_user` (`untrusted: true`, model text); see [Questions](#questions) |
 | `secret_request` | `{ requestId, text, expiresAt }`; private password field, never the value; see [request_secret](tools.md#private-secrets-v04) |
-| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code (`USAGE_LIMITED` for a usage limit), `RESTARTED`, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`), `BUDGET_EXHAUSTED` (the run reached its [budget](#sessions)), `QUESTION_DISMISSED` (`untrusted`, quotes the question) |
+| `system_notice` | `{ text, code? }`: `RUN_CANCELLED`, `RUN_FAILED` or another run error code (`USAGE_LIMITED` for a usage limit), `RESTARTED`, `RETRY`, `WATCH_LOOP_GUARD`, `WATCH_EXPIRED`, `ARRIVALS_DROPPED` (inbox tasks), `APPROVAL_SCOPE`, `ALWAYS_UNAVAILABLE`, `TASK_APPROVED` (approval scopes; `TASK_APPROVED` is `untrusted`), `BUDGET_EXHAUSTED` (the run reached its [budget](#sessions)), `QUESTION_DISMISSED` (`untrusted`, quotes the question); arrival failures can report `TRIAGE_INCOMPLETE` |
 | `notification` | `{ source: "arrival" \| "watch" \| "schedule" \| "system" \| "subtask", summary, row?, subtaskId? }`; `row` is a `MailRow`; `subtask` notifications (`untrusted`) name the child in `subtaskId`. A task created with `matterId` or `emailIds` gets a `system` one on its first run ("With matter “…” and 2 messages “…”, “…”"; `row` when there is exactly one message) |
 
 **Untrusted data.** Items with `untrusted: true` contain provider-derived strings (subjects,
@@ -63,7 +76,7 @@ loses its `<` (becomes `‹`), so mail can neither close the frame nor open a de
 
 - **`task`**: started from the composer (`POST /api/tasks`, or `/api/agent/run` for the v0.2
   composer). Title: the `title` field or the first 60 characters of the message. Without a
-  `title`, when the first run ends a fast-model completion (`model: "fast"`, the request and the
+  `title`, after the initial run (or its steer/restart/limit continuation) ends a fast-model completion (`model: "fast"`, the request and the
   framed first reply) proposes one of at most 60 characters, neutralized like model text, and
   the task gets `titleGenerated: true`. Any later rename (`PATCH`) sets it to `false`; a rename
   before the proposal arrives wins. Without a configured model the message title stays.
@@ -99,10 +112,11 @@ System tasks (`inbox`, `routine`) follow the global trust dial: before each run 
   message run: it waits in the task's [follow-up queue](#follow-up-queue) and enters the lane
   only when the run before it ends. `mode: "steer"` cancels the task's active message runs and
   starts one new run whose prompt holds both the cancelled message and the new one; the queue
-  is left as it is and drains after it. A run waiting in the lane leaves it immediately. A
-  running one stops at its next model or tool call, and the answer of an in-flight model call
-  is discarded. Arrival and routine runs can't be cancelled. Steering a system task queues.
-- **Interrupt** holds the queue (`queueHeld: true` when it has entries) and cancels every
+  is left as it is and drains after it. A run waiting in the lane leaves it immediately. An API-provider
+  loop checks cancellation at model/tool boundaries; host-session cancellation immediately
+  terminates the CLI process group. A completed successful result stays completed if Stop or
+  steer arrives while that result is being recorded; a late steer carries only its new message. Arrival and routine runs can't be cancelled. Steering a system task queues.
+- **Interrupt** holds the queue (`queueHeld: true`, even when empty) and cancels every
   cancellable run of the task. Each one ends `cancelled` with a `RUN_CANCELLED` notice. A run
   cancelled by a steer leaves the status to its replacement, so the task never bounces through
   the inbox.
@@ -118,8 +132,13 @@ System tasks (`inbox`, `routine`) follow the global trust dial: before each run 
   run's `agentRunId`. Fetch `/api/actions?runId=<agentRunId>` for the records and their undo.
 - **Permission clamp.** A task's mode is clamped to the global trust dial at creation and on
   `PATCH`, and a child task's mode to its parent's. During a run, the policy engine also caps
-  every action of that run at the task's effective mode (the minimum over the parent chain). It
-  can only lower the level the trust ladder would give.
+  every action at the minimum of the run's starting ceiling and the task's current effective
+  mode over its parent chain. Lowering the task or an ancestor reaches the next policy decision;
+  raising the mode waits for the next run. Switching an active default run to plan lowers its
+  policy ceiling to `supervised` (subsequent writes ask); runs started in plan skip writes.
+  Account-scoped tools enforce the run's `accountIds` with `ACCOUNT_FORBIDDEN`, including on
+  subtask follow-ups. Routine tasks and fresh system-created routine children use all currently
+  connected accounts; tasks with an empty account list also have no account filter.
 - **Restart continuation.** At startup, each message, watch or wake run a previous process left
   `queued` or `running` ends `cancelled` (`SERVER_RESTARTED`) and is continued once: the task
   gets one `RESTARTED` notice listing what was in flight (the interrupted runs, the conversations
@@ -128,11 +147,15 @@ System tasks (`inbox`, `routine`) follow the global trust dial: before each run 
   rules treat it as the person's); watch and wake runs continue as a background `wake` run
   (`reason: "restarted"`). The prompt says the run was cut off, lists the watched and pending
   handles (JSON-quoted), asks the agent to check what was already done before repeating a
-  write, and repeats the person's request (or the framed notification that started the run).
+  write, and repeats the run's whole `request` (including a steer's carried messages or an answer's
+  question), or the framed notification that started it. Continuations use the host-session
+  path with the tool belt and resume an eligible provider session; a fresh session also gets
+  the bounded task history. A continuation preserves a snooze the person chose.
   A run that already continued a restart, runs of a settled or archived task, and arrival and
   schedule runs (which have their own retries), are marked `failed` (`SERVER_RESTARTED`) as before, and an interrupted message run
-  that is not continued surfaces the task with `needsUser: "failure"`. Queued follow-ups are not
-  runs yet: they stay in the queue and drain once recovery is done.
+  that is not continued surfaces the task with `needsUser: "failure"`. Queued follow-ups already have durable placeholder runs: entries still in `Task.queue`
+  are excluded from interrupted-run recovery and drain once recovery is done. Recovery also
+  reports a subtask's end to its parent.
 
 ### Sessions
 
@@ -144,8 +167,11 @@ natively, streaming as it goes. There is no JSON tool protocol and no per-step C
   `{kind:"agent",id:runId}`, with `ToolContext.taskId`, the run's permission ceiling, plan-mode
   read-only and the on-demand readers) are served from the server process over Streamable HTTP
   on `127.0.0.1`, behind a fresh 32-byte bearer per run that is revoked when the run ends. The
-  CLI sees them as `mcp__passport__<tool>` and nothing else: shell, file edits, web search and
-  the person's own CLI configuration stay off. The session's system prompt adds a short
+  CLI sees `mcp__passport__<tool>`. Shell, file edits, web search and the person's CLI
+  configuration/plugins are disabled. Codex feature switches and a rewritten model catalogue
+  remove code-mode `exec`, `apply_patch`, image and sub-agent tools, clock tools and native
+  `request_user_input`; three inert MCP resource-list/read helpers remain (no resources are
+  served by the belt). The session's system prompt adds a short
   orchestration section (what a task is, how approvals come back, the budget, when to hand
   back), under 4 KB.
 - **Timeline.** Items are appended as the session streams: a `tool_call` when each tool call
@@ -160,30 +186,47 @@ natively, streaming as it goes. There is no JSON tool protocol and no per-step C
   and the work done so far (including proposals) is kept. Routine scheduler timeouts are one
   minute longer than the configured runtime budget, so the runtime can report exhaustion first.
   Task-bound daily digests keep their deterministic saved evidence and ask the same session for
-  one `render` summarising the day.
-- **Resume.** The provider session id is recorded on the task (`providerSessionId`,
+  one `render` summarising the day. The belt's default MCP tool timeout is **660 seconds**, above
+  `request_secret`'s 600-second maximum. A spent time budget stops the session; in-flight calls
+  get 10 seconds of grace before their tool abort signal fires.
+- **Persistence scope.** Ordinary `kind: "task"` message, watch and wake runs, including
+  subtask runs and restart/limit continuations, keep a resumable transcript. Inbox and routine
+  tasks stay ephemeral even for a person's message, watch, wake or continuation. Arrivals,
+  scheduled built-ins/user routines and voice learning do not keep a new CLI transcript or
+  record a session ID (`--no-session-persistence` / `--ephemeral`). A fresh routine child is
+  `kind: "task"`, but its scheduled run is still ephemeral; later message/watch/wake runs
+  on that child may keep a session.
+- **Working directory.** Every host invocation, including completions, runs in its own private
+  `passport-host-run-*` directory under the OS temp root, outside the data directory, removed
+  on success, failure or cancellation. Temporary Claude MCP/system-prompt files and Codex
+  catalogue/output files are also cleaned up. `mail_export` keeps its separate data-directory
+  scratch location. Persistent CLI transcripts live in the CLI's own profile, outside these
+  directories (see [Known limitations](#known-limitations-2026-10-24)).
+- **Resume.** For eligible runs the provider session id is recorded on the task (`providerSessionId`,
   `providerSessionKind`) as soon as the session starts. The next run resumes it
   (`claude --resume <session_id>`, `codex exec resume <thread_id>`), resolved when that run
   starts, so a follow-up queued behind the first run resumes it too. The resumed turn holds
   the task line, the current plan mode, notifications and notices since the person's previous
   message, the current status of the task's last 10 proposals (both framed as untrusted data),
   and the request. The full history prompt is used instead when the task has no session, when
-  the configured host agent is a different one, and when a resume fails before the session
-  did anything (the provider no longer has it); the fresh session's id replaces the old one.
+  the configured host agent is a different one, and only when a resume fails with `HOST_AGENT_SESSION_MISSING` before any text/tool activity.
+  Network, authentication, overload, limit and other failures do not trigger fallback. The
+  fresh session's ID replaces the old one only after that attempt succeeds.
 - **Stop and steer.** Interrupt and steer cancel the session: the CLI process group is stopped,
-  any later tool call it makes is refused, and the run ends `cancelled` once in-flight tool
-  calls return. A steer's replacement run resumes the cancelled session with both messages.
+  any later tool call it makes is refused. An unfinished run ends `cancelled`; a successful
+  session result stays completed if cancellation arrives during result recording. Calls already
+  started may finish or observe their abort signal. A steer's replacement resumes an eligible
+  session with the cancelled request plus the new message, unless the earlier run had finished.
 - **API providers** (Anthropic, OpenAI, OpenAI-compatible, Ollama) keep the native tool loop
   in-process with the same budget, and task runs get the same orchestration section. A host
-  agent without a tool belt keeps the completion loop, with the same budget. Each arrival and
-  scheduled run starts a fresh session; a person’s follow-up may resume the last session recorded
-  on that Inbox or routine task. Native tool reads retain the run’s quota lane and cancellation.
+  agent without a tool belt keeps the completion loop, with the same budget. Arrivals and routine tasks start fresh sessions; a person’s follow-up on an Inbox or
+  routine task also stays ephemeral. Native tool reads retain the run’s quota lane and cancellation.
 
 ## Status rules
 
 The rules below are one pure function, `resolveTaskStatus(task, event)` in
 `apps/server/src/tasks/status.ts`, with five events: `run_started`, `run_ended`, `reopened`
-(unsettle, unsnooze, unarchive), and `question_asked` and `question_resolved` (v0.4). Its table test is `status.test.ts`. The T3 Working predicate
+(unsettle, unsnooze, unarchive and a due snooze wake), and `question_asked` and `question_resolved` (v0.4). Its table test is `status.test.ts`. The T3 Working predicate
 is exported from `@passport/types` as `isTaskWorking(task, { activeRuns })`: false while the
 task waits on the person (`needsUser` set) or, for a subtask, on its parent (a blocking
 question), otherwise true while a run is queued or running, a conversation is watched, or a
@@ -193,38 +236,42 @@ parent), `working` (a run), `waiting` (watching or waiting on subtasks),
 `limited`, `failed`, `woke`, `done`, or `null` when nothing is new.
 
 While a run is active the task is `working`. Two exceptions: snoozed and archived tasks stay
-hidden, and an inbox task already waiting on the person stays in the inbox. A user message also
-un-snoozes and un-settles the task and clears a previous failure.
+hidden, and a background run leaves an inbox task already waiting on the person in the inbox. A new
+message run moves an Approval or Input task to `working` while preserving what waits on the
+person. A new user message also un-snoozes, un-settles and un-archives the task and clears a
+previous failure, handing `needsUser` to any pending approval, question or secret request.
+A continuation preserves a hidden snoozed/archived state instead of treating it as a new message.
 
 A proposal surfaces the task as soon as it appears: `status: "inbox"`,
 `needsUser: "approval"`, and the action id is added to `pendingActionIds`. Deciding the action
-anywhere removes it from the list, and `needsUser` clears once the list is empty.
+anywhere removes it from the list, and `needsUser` hands over to open questions or private secret requests before clearing.
 
 When a run ends, the first matching rule applies:
 
 0. The person settled, snoozed or archived the task while the run was active: it stays there. A
-   failed run only sets `needsUser: "failure"`.
+   failed run only sets `needsUser: "failure"` or `"limited"` for a usage limit.
 1. Failed (not arrivals, which `ArrivalQueue` retries): `inbox` with `needsUser: "failure"`, or
    `needsUser: "limited"` when the run stopped at a [usage limit](#usage-limits).
 2. Pending approvals: `inbox` with `needsUser: "approval"`; then pending questions (not a
-   subtask's): `inbox` with `needsUser: "question"`.
+   subtask's) or private secret requests: `inbox` with `needsUser: "question"`.
 3. Another run of the task is still active: `working`.
 4. A run started by the person's message: `inbox`, or `working` while it watches a conversation
    or waits on `mode: "wait"` subtasks.
 5. Snoozed and archived tasks stay where they are through background work.
-6. Schedule, watch and wake runs that produced something (ActionRecords or assistant text):
+6. Schedule, watch and wake runs that produced something (ActionRecords, assistant text or a render):
    `inbox` (`working` while watching). Runs that produced nothing go back to where the task was.
 7. Arrival triage never moves the task by itself, only through rules 1–2.
 
 Then, when `settleRequested` is set ([Organise](#organise)): the task settles (watches end)
 unless the run failed or something waits on the person, which drops the request, or another
-run is active or a follow-up is queued, which keeps it for the next run end. A task the person
+run is active or a follow-up is queued, which keeps it temporarily. Starting that queued
+message run clears the request: it does not settle after the person's follow-up. A task the person
 put away during the run forgets the request; the person's next message or a reopen clears it.
 
 `question_asked` surfaces the task like a proposal (approvals keep priority; a snoozed task
 comes back early; a settled or archived one only records `needsUser`; a subtask's question
 does not surface it). `question_resolved` hands `needsUser` to the next thing waiting
-(approval, then another question) or clears a `question`; a failure or limit stays.
+(approval, then another question or private secret request) or clears a `question`; a failure or limit stays.
 
 `lastActivityAt` ("when it last came back to you") moves only when the task surfaces or the
 person acts. Background no-op runs don't count, so auto-settle is not reset by them. A task that
@@ -243,15 +290,17 @@ null and `needsUser` is null.
 Lifecycle:
 
 - **Snooze** hides the task until `snoozedUntil`. The `tasks.maintenance` job (every 10 minutes)
-  returns it to `inbox` when that time passes. An approval, a failure or a user message brings it
+  reopens it through the status rules when that time passes (Working if it watches or waits
+  on a child and nothing needs the person, otherwise the inbox), setting `unseenOutcome: "woke"`. An approval, a failure or a user message brings it
   back sooner.
 - **Settle** and **archive** end every conversation watch and cancel the task's cancellable runs
   (each ends `cancelled`). A non-cancellable run (arrival triage, routines) finishes, but the
   task stays settled or archived, and new approvals only add to `pendingActionIds` and set
   `needsUser`. A settled or archived task cannot start a watch (`TASK_SETTLED`).
 - **Pin** never changes status, so pinning during a run is kept as well.
-- **Auto-settle.** Tasks in `inbox` that are idle for 3 days, not pinned, and with no
-  `needsUser` move to `settled`.
+- **Auto-settle.** Tasks in `inbox` that are idle for 3 days, not pinned, with no
+  `needsUser` or active runs move to `settled`. Maintenance re-checks the current row before
+  either auto-settle or a snooze wake so an intervening person's action wins.
 - **Undo and reopen.** Settle, snooze and archive answer with the task plus `previous`
   (`status`, `snoozedUntil`, `settledAt` before the call). `/unsettle`, `/unsnooze` and
   `/unarchive` bring a task in that state back to where it rests now (Working while a run is
@@ -260,7 +309,7 @@ Lifecycle:
   harmless. To restore a snooze that settle replaced, follow `/unsettle` with `/snooze` and
   `previous.snoozedUntil`. Watches that settle or archive ended stay ended, and the queue they
   held stays held until resumed.
-- Settle and archive also hold the follow-up queue first, so stopping the active run does not
+- Snooze holds an existing follow-up queue. Settle and archive also hold it first, so stopping the active run does not
   start the next queued message on a task the person put away.
 
 ## Questions
@@ -289,8 +338,10 @@ tool), and surfaces the task with `needsUser: "question"`. The tool returns at o
 `createdBy: "agent"` and `delegation`. It runs its own message run on `message` (prompted as
 "The request from your parent task"), in the parent's interaction mode, on the parent's
 accounts or a subset (`ACCOUNT_MISMATCH` otherwise), with `permissionMode: "inherit"` (the
-parent's effective mode) or a lower one: the clamp never lets it exceed the parent. Limits:
-depth 2 (a top-level task's child is depth 1; `DEPTH_LIMIT`), 10 working subtasks per task
+parent's effective mode) or a lower one: the clamp never lets it exceed the parent.
+Account-scoped tools enforce that subset on every call, not just at creation. Limits:
+depth 2 counted through the real ancestry, including fresh routine children and tasks
+created with `parentTaskId` (a top-level task's child is depth 1; `DEPTH_LIMIT`), 10 working subtasks per task
 (`SUBTASK_LIMIT`), and no subtasks from a settled or archived task (`TASK_SETTLED`).
 
 - **Completion.** When a subtask's work ends (its run ended and no follow-up waits), the parent
@@ -302,7 +353,9 @@ depth 2 (a top-level task's child is depth 1; `DEPTH_LIMIT`), 10 working subtask
   the default) when none of the parent's subtasks is still working. Several completions share
   one wake: a completion that finds the parent's subtask wake queued or running joins it (the
   agent lane runs one run at a time, so a running wake started after that child finished). A
-  settled or archived parent gets the notification without a wake.
+  settled, archived, stopped (`queueHeld`) or Limited parent gets the notification without a
+  wake. A child the person stopped, settled or archived also notifies without waking the parent;
+  the parent cannot restart it through delegation while it is put away.
 - **Wait mode.** `mode: "wait"` records the child in the parent's `waitingOnTaskIds`: the agent
   ends its turn, the parent rests in Working (badge Waiting) and wakes when the child finishes.
 - **Questions.** A subtask's `ask_user` question is recorded on the child
@@ -317,7 +370,11 @@ depth 2 (a top-level task's child is depth 1; `DEPTH_LIMIT`), 10 working subtask
 - **Cancel.** `task_cancel` stops the child like the person's Stop (queue held, runs
   cancelled), its own subtasks first, drops its open questions, removes it from
   `waitingOnTaskIds` and marks `delegation.cancelledByParent`, so its end neither notifies nor
-  wakes the parent. A later `task_delegate` follow-up to it clears the mark.
+  wakes the parent. A later `task_delegate` follow-up clears the mark and the hold created by `task_cancel`.
+  Direct messages from the person do not clear that mark; see Known limitations.
+- **Availability.** Inbox tasks and arrival/schedule runs cannot delegate
+  (`DELEGATE_UNAVAILABLE` at the orchestration seam, `INPUT_TRIAGE` for a disallowed arrival
+  tool). Scheduled tool belts omit orchestration entirely; see [tool scopes](tools.md#arrival-and-routine-tool-scopes).
 - **Lineage.** `GET /api/tasks/:id/lineage` returns the parent and the children (with
   `activeRuns` and the last run's status); `GET /api/tasks?parentTaskId=<id>` lists children.
   Subtasks are ordinary tasks for every other route.
@@ -329,6 +386,12 @@ a future `until`, the ordinary snooze), `unsnooze`, `pin`, `unpin`, `rename` (ne
 `titleGenerated: true` until the person renames it), `mark_unread`, and `settle`. Settle is
 deferred: it sets `settleRequested` and the status rules apply it when the run ends (see
 [Status rules](#status-rules)). Each answers `{ action, applies: "now" | "run_end", task }`.
+
+The agent cannot snooze/unsnooze a settled or archived task (`TASK_SETTLED`), override a snooze
+chosen by the person, or rename a title the person chose (`PERSON_CHOICE`). The organizer
+remembers its own snoozes only in memory: after restart an existing snooze counts as the
+person's. Delegation also refuses a settled/archived task; a follow-up to a settled/archived child is refused with `TASK_SETTLED`, while a
+message to a stopped or Limited child waits for the person to release the hold or limit.
 
 ## Follow-up queue
 
@@ -346,7 +409,8 @@ the entry and runs it under its `runId`.
   `DELETE …/queue/:runId` removes one, its run ending `cancelled` with `QUEUE_REMOVED` and no
   timeline notice; `POST …/queue/:runId/promote-to-steer` sends it now as a steer under the
   same run id. An entry that already started answers `404 NOT_FOUND`.
-- **Held queue.** `/interrupt`, settle and archive set `queueHeld: true` when entries exist.
+- **Held queue.** `/interrupt` always sets `queueHeld: true`, even with no entries, to stop
+  later subtask completions from waking the parent. Snooze, settle and archive hold existing entries.
   Nothing drains until `POST …/queue/resume` or the person's next message (which clears the hold,
   joins the end of the queue, and the oldest entry starts).
 - At most 20 entries (`409 QUEUE_FULL`). The queue survives restarts.
@@ -359,15 +423,17 @@ failure. Detection: `HOST_AGENT_RATE_LIMIT`, a host CLI failure whose text says 
 Code's `usage limit reached|<epoch>`, Codex's "hit your usage limit"), and `LLM_HTTP` with
 status 429 after the client's own retries. The task surfaces with `needsUser: "limited"` and
 `limited: { runId, resetAt, autoResume: false, source, at }`; `resetAt` is parsed from the error
-text (an epoch, an ISO time, or "try again in 2 hours 5 minutes") and is `null` when the CLI did
-not say. Recovery:
+text (an epoch, an ISO time, or "try again in 2 hours 5 minutes"; `340ms` is milliseconds).
+For an API 429, the client converts `Retry-After` seconds or HTTP-date into an ISO reset time
+in that error. Reset times must be future and within 31 days; otherwise `resetAt` is `null`. Recovery:
 
 - `POST /api/tasks/:id/resume` clears the limit and continues the stopped run now (the same
   continuation as a restart: a message run continues on its `user_message` item; watch and wake
   runs as a `wake` run with `reason: "limit_resumed"`), then the queue drains after it.
 - `POST /api/tasks/:id/resume-at-reset` sets `autoResume: true` and continues the run at
   `resetAt` (an in-process timer, re-armed at startup, with `tasks.maintenance` as the durable
-  backstop). `409 RESET_UNKNOWN` when `resetAt` is null.
+  backstop). Settle/archive turn off automatic resume; timers never reopen those tasks. A
+  continuation keeps a snooze the person chose. `409 RESET_UNKNOWN` when `resetAt` is null.
 - Snooze until the reset is the ordinary `/snooze` with `until: limited.resetAt`.
 - A new message counts as resume: the stopped run continues first, then the message.
 - The follow-up queue waits while the task is limited.
@@ -443,12 +509,18 @@ reads mail and notes, organizes the arrival with `create_matter` / `attach_to_ma
 logs notes, and proposes a reply only when warranted. Code preserves sensitive classifications,
 clamps `replies_known` to actual known senders, and attaches the resolved people. Scheduling uses
 availability tools and `respond_to_event` / `propose_meeting`; a reply draft covers a request with
-no available slots. Triage cannot send, unsubscribe or change USER.md. Human-review decisions
+no available slots. The explicit arrival allowlist permits mail/context reads, notes, matters, drafts and
+scheduling, plus label/archive/mark-read of this arrival only. It refuses send, unsubscribe,
+USER.md changes, `task_delegate`, `ask_user`, `task_organize`, `request_secret` and `render`
+with `INPUT_TRIAGE`. Classification is scoped to this arrival's own matter create/attach
+operation; drafts and other mail operations keep their inferred policy categories. Human-review decisions
 are retained for sensitive/stranger/other mail and `alwaysAsk` categories.
 
-Session retries with existing ActionRecords, or a successfully completed run checkpoint, acknowledge
-the arrival without repeating inference. If a crash left partial work, the prior actions and run
-remain the review record rather than replaying the session. The pipeline fallback keeps its
+Session retries acknowledge an arrival only after its session organized it (a `matter_create`
+or `matter_attach` ActionRecord), the session checkpoint, or a completed run checkpoint.
+People-resolution actions alone do not count: inference repeats. A session ending after partial
+work without organizing the arrival fails with `TRIAGE_INCOMPLETE` unless it was read-only or
+budget-exhausted, so the arrival queue retries and can surface its final failure. The pipeline fallback keeps its
 step-level recovery. Stable `arrival:<emailId>` IDs, queue claims, retry/backlog limits,
 `ARRIVALS_DROPPED` and the conversation-watch loop guard are unchanged.
 
@@ -484,11 +556,9 @@ The approval panel and Decisions show the proposed USER.md. The executor leaves 
 unchanged until approval and captures its value at execution for undo. VIP suggestions are knowledge,
 not relationship or verification changes.
 
-Known limitations: the sample is small and may not represent every writing context. Voice and
-Signature suggestions are single lines; at most twenty VIP entries are accepted. The learned
-proposal replaces the whole effective profile while preserving unrelated sections when proposed;
-review it against any human edits made while it was pending. A failed or empty learning run can be
-revisited by sending a message in its task; it does not automatically sample again on reconnect.
+A pending `profile_update` for the account seeds the guard before a restart or follow-up:
+no second Sent search or competing profile proposal is allowed while it waits. Sampling bounds
+are per run when there is no pending proposal. See the consolidated Known limitations below.
 
 ## HTTP API
 
@@ -509,9 +579,10 @@ Every route requires the bearer token. Errors use the standard body
 | `POST /api/tasks` | `{ message, title?, accountIds?, permissionMode?, interactionMode?, parentTaskId?, matterId?, emailIds? }` | `201 { task, run }` (the first run, `queued`) |
 | `GET /api/tasks/by-action/:actionId` | | `TaskByAction`: `{ taskId, runId }`; `404 NOT_FOUND` when no task run holds the action |
 | `GET /api/tasks/:id` | | `TaskDetail`: `{ task, runs }` (runs newest first, at most 50) |
+| `GET /api/tasks/:id/runs/:runId` | | One durable `TaskRun`, independent of the latest-50 detail window; `404 NOT_FOUND` for a missing run or another task's run |
 | `GET /api/tasks/:id/items` | `afterSeq` (default 0), `limit` (default 100) | `{ items, lastSeq }` (ascending `seq`) |
 | `POST /api/tasks/:id/messages` | `{ text, mode?: "queue" \| "steer" }` | `202 { task, run }`; a queued message's `run` is `queued` with an empty `trigger.itemId` |
-| `POST /api/tasks/:id/interrupt` | | `Task` (`queueHeld` when entries are waiting) |
+| `POST /api/tasks/:id/interrupt` | | `Task` (`queueHeld: true`, including an empty queue) |
 | `POST /api/tasks/:id/snooze` | `{ until }` (future ISO time) | `TaskWithPrevious`: the `Task` plus `previous` |
 | `POST /api/tasks/:id/settle` | | `TaskWithPrevious` |
 | `POST /api/tasks/:id/archive` | | `TaskWithPrevious` |
@@ -530,10 +601,12 @@ Every route requires the bearer token. Errors use the standard body
 | `POST /api/tasks/:id/questions/:itemId/answer` | `{ text }` | `202 { task, run }` (the answer's run, possibly `queued`); `404 NOT_FOUND`, `409 QUESTION_RESOLVED` |
 | `POST /api/tasks/:id/questions/:itemId/dismiss` | | `Task`; `404`, `409 QUESTION_RESOLVED` |
 | `GET /api/tasks/:id/lineage` | | `TaskLineage` |
+| `GET /api/tasks/:taskId/secrets/:id` | | Private request metadata, without value or `secretRef`; expired pending requests become `timed_out` |
+| `POST /api/tasks/:taskId/secrets/:id` | `{ value }` (1–65,536 characters) or `{ status: "declined" \| "cancelled" }` | Metadata only; task-scoped; resolving after run completion still clears the pending ID |
 | `POST /api/tasks/:id/unwatch` | `{ threadHandle? }` (omit to stop every watch) | `Task` |
 | `PATCH /api/tasks/:id` | `{ title?, permissionMode?, interactionMode? }` | `Task` (mode clamped) |
 | `POST /api/actions/:id/approve` | `{ request?, scope?: "once" \| "task" \| "always" }` | `ActionRecord`; with `task` or `always` also `approvalScope: ApprovalScopeResult` (`{ requested, applied, taskId?, pinnedLevel?, code? }`). The task's `pendingActionIds` and `needsUser` follow |
-| `PATCH /api/actions/:id/draft` | `{ textBody }` (1–100,000 characters) | Pending proposal only; `ActionRecord`, still `proposed`; only body changes, stale HTML cleared; `409 ACTION_NOT_PENDING` after a decision |
+| `PATCH /api/actions/:id/draft` | `{ textBody }` (1–100,000 characters) | Pending proposal only; `ActionRecord`, still `proposed`; only body changes, stale HTML cleared; `409 ACTION_DECIDED` after a decision; serialized with approval, retaining the original for edited-approval feedback |
 | `POST /api/render/preview` | `{ html, height? }` | `{ html, height }` through the render tool's parser, without persisting an item; same 64 KiB and 80–1200 px limits |
 | `POST /api/actions/:id/reject` | unchanged | `ActionRecord` |
 | `POST /api/agent/run` | unchanged v0.2 body `{ instruction?, emailIds?, matterId? }` | the finished `AgentRun` plus `taskId`; a `kind: "task"` task is created per call |
@@ -637,8 +710,11 @@ lifecycle change (seen, mark-unread, reopen, queue edits and holds, limits, gene
 renames) is a `task.updated` frame, because the queue, the limit and the seen state ride on the
 task row; queued runs and their removal are `task.run.updated` frames. After a
 reconnect, refetch `GET /api/tasks/:id` and page items with `afterSeq=<last seen seq>`.
-`action.updated` carries an `ActionRecord` after a pending draft is saved (without an
-approval or execution). Other `agent.run.*` and `action.*` events continue as before.
+`secret.request.updated` carries `SecretRequest` metadata (and an optional one-use
+`secretRef`), never the entered value. Questions, subtask waits and settle requests also update
+the task; questions/notifications append items. `action.updated` carries an `ActionRecord`
+after a pending draft is saved (without approval or execution); the later approval records
+`approved_edited` feedback against the preserved agent draft. Other `agent.run.*` and `action.*` events continue as before.
 
 ## Scheduler
 
@@ -647,7 +723,8 @@ approval or execution). Other `agent.run.*` and `action.*` events continue as be
 - Job functions pass `ctx.agentRunOptions` to `AgentRuntime.run`.
 - User routines choose `runOn: "bound" | "fresh"`; fresh runs create a child task. Webhook
   deliveries use the same schedule-run seam with a framed `ctx.webhookPrompt`, and their
-  durable queue owns payload recovery. See [scheduler](scheduler.md#webhook-routines).
+  durable queue owns payload recovery. Scheduled runs use the explicit routine tool allowlist;
+  they cannot delegate, ask questions, request secrets or file their own task. See [scheduler](scheduler.md#webhook-routines).
 - `tasks.maintenance` (every 10 minutes) handles snooze wake-ups, auto-settle, watch expiry,
   due `resume-at-reset` continuations (the durable backstop for their timers) and
   the 24-hour `mail_export` sweep (`<dataDir>/scratch`, also swept at startup). See
@@ -793,83 +870,70 @@ The web UI (`apps/web/src/tasks`, `views/Task.tsx`) is built on this contract:
 - **Approve scope:** a server without `scope` on `/approve` ignores it and approves once; the
   UI cannot tell, so "Approve for this task" and "Always" then act like Approve.
 
-## Not yet
+## Known limitations (2026-10-24)
 
-- Staged changes, the worktree analogue, are not implemented. Approval stays per action.
-- Approval scopes apply to later proposals only: approving with `task` does not approve the
-  task's other proposals that are already pending. The proposing tool call returns `proposed`
-  even when a grant approves it a moment later; the run's change summary shows the outcome.
+The UI-owned review R5 list above is retained for the pending web handoff. Server/runtime
+limitations from R4, W1A, W2A, lifecycle and rich-output work are consolidated here:
 
-## Known limitations (W2A questions and subtasks)
+- Staged changes are deferred; approval stays per action. Task approval scopes cover later
+  proposals only, not other proposals already pending. A tool can return `proposed` just before
+  an approval grant applies; the run's action summary is authoritative.
+- `mode: "wait"` ends the parent's turn instead of blocking its tool call, because one agent
+  lane runs one run at a time. Coalesced subtask completions are read through `task_status`;
+  a future parallel lane would need an explicit wake generation.
+- Stopping, settling or archiving a parent does not stop its subtasks. They finish and notify
+  without waking a stopped/settled/archived/Limited parent. Use `task_cancel` or open the child.
+- A direct message to a child cancelled by `task_cancel` does not clear
+  `delegation.cancelledByParent`; its later completion still does not notify the parent.
+  Use a parent `task_delegate` follow-up to clear that mark and its cancellation hold.
+- A settle request survives an active/queued run only until a new message run starts, which
+  clears it. Reopen restores neither ended watches nor a replaced snooze automatically, and
+  leaves a held queue held.
+- CLI transcripts for persistent runs remain in the provider CLI's profile
+  (`~/.claude/projects/…`, `~/.codex/sessions/…`, or its configured profile). They contain
+  prompts and tool results, including mail. Passport cleans temporary working files, not these
+  transcripts; settling/archiving a task does not delete them. Ephemeral runs do not keep a
+  new CLI transcript; their Passport timeline/action records remain in SQLite.
+- Cancellation terminates the CLI process group. A server-side call already running may still
+  finish and be recorded without the model seeing its result. Resume lists proposals, not
+  every interrupted read. Descendants that leave the process group can escape group cleanup.
+- `llmCalls` counts sessions (two after a missing-session fallback), not internal model turns.
+  Subscription usage has no Passport cost estimate. Title generation runs outside the agent
+  lane/budget and can start a second CLI beside an active run.
+- Limit recovery applies to message/watch/wake runs. Scheduled runs report `JOB_FAILED` and
+  arrivals retry instead. Without a parsable reset time, resume-at-reset is unavailable.
+- Continuations retain provider session context when available and repeat the whole request;
+  a fresh/API session gets bounded history, not the interrupted run's tool results. A crash
+  between removing a queue entry and starting its message still loses that entry; its empty
+  placeholder run fails with `SERVER_RESTARTED`.
+- Voice sampling is small and bounded per run; an interrupted run before any proposal may
+  sample again. A pending account profile proposal blocks competing learning, but USER.md is
+  replaced as a whole on approval: review human edits made while it waited. Voice/Signature
+  are single lines and VIP suggestions are capped at twenty. Empty/failed learning can be
+  revisited by messaging its task; reconnect does not retry it automatically.
+- Session triage parity uses fixtures. Live judgments/draft wording remain unverified; the
+  structured arrival pipeline is retained for one release.
+- **R4-8:** there is no daily cap per watch beyond the loop guard. Three unattended sends in
+  a human back-and-forth can stop the watch and hand back.
+- **R4-23:** send-as aliases outside account/verified-self addresses, filed outside Sent,
+  can wake a task as a `reply`; the loop guard still applies.
+- **R4-29:** `passport sync` in client mode performs a forced watcher tick beside the server,
+  costing duplicate provider reads; arrival dedupe prevents double triage.
+- **R4-32:** explicit triage of an uncached handle caches its row before normalization;
+  `personIds`, `category` and `matterId` fill on the next read.
+- Render height is estimated (80–1200 px); long output scrolls or opens full size. Draft
+  preview omits attachments/remote assets and uses loaded conversation text, so client-specific
+  mail layout is not reproduced. Oversized previews fail at 64 KiB. Saves edit only text,
+  clear stale HTML, leave approval pending, and affect later edited-approval trust feedback.
+- Private secret input is available to task-bound callers only. The account wizard/setup agent
+  do not accept `secretRef`; raw API callers can use references. The current routine form asks
+  for a signing reference without exposing a private way to obtain it. Do not repeat refs in
+  chat; see [secret limitations](tools.md#private-secrets-v04). Manual Run now on a webhook
+  routine has no request payload and leaves template placeholders literal.
 
-- `mode: "wait"` does not block the tool call: the agent lane runs one run at a time, so a
-  parent waiting inside its run would starve its child. The parent ends its turn and wakes with
-  the result instead.
-- A subtask wake's prompt quotes the completion that started it; completions that joined it
-  are read through `task_status` (and, on a resumed session, the "since your last turn" list).
+UI-specific W2A items retained for the web step:
+
 - The subtasks line sits at the end of the timeline rather than where the subtasks were
   started, and the Lineage request is not shared between the panel and the line.
 - Subtasks are not hidden from the ⌘K palette, and their pages are not read-only: the person
   can message a subtask directly (T3 points to the parent instead).
-- Answering or dismissing the last question clears `needsUser` even while a `request_secret`
-  request is open in the same task (secret requests are not listed on the task row); the
-  secret card still works, but the task no longer shows Input for it.
-- Coalescing relies on the single agent lane; a future parallel lane would need an explicit
-  wake generation.
-- Settling, archiving or stopping a parent does not stop its subtasks; they finish and leave a
-  notification without waking it. Use `task_cancel` (the agent) or open the subtask.
-
-## Known limitations (W1A sessions)
-
-- Session transcripts are kept by the CLI in its own data directory (`~/.claude/projects/…`,
-  `~/.codex/sessions/…`), keyed by the `<data-dir>/host-agent` working directory, so resume
-  works. They contain tool results, that is mail content. Passport does not delete them; a
-  task that is settled or archived does not remove its session.
-- A cancelled session is killed rather than drained: a tool call already running in the server
-  completes and is recorded, but the model never sees its result. The next run's resume turn
-  lists proposals, not every read.
-- `llmCalls` counts sessions (one per run, two when a failed resume fell back), not model turns
-  inside a session. Claude Code reports a list-price cost that Passport ignores; usage has no
-  cost for subscriptions.
-- Session triage parity is fixture-based; live model judgments and draft wording are not asserted.
-  The structured arrival pipeline remains available for one release (see the migration notes above).
-
-## Known limitations (review R4)
-
-- **R4-8:** there is no separate cap on wakes per watch per day; the loop guard above is the only
-  bound. A long, genuinely human back-and-forth that the agent answers with unattended sends
-  stops after three exchanges and hands back.
-- **R4-23:** replies sent from a send-as alias that is neither an account address nor a
-  verified-self person and that the provider files outside Sent can still wake the task (they
-  are classified `reply`, so the loop guard applies).
-- **R4-29:** `passport sync` in client mode runs its own forced watcher tick next to the server's.
-  Arrival dedupe prevents double triage; the cost is duplicate provider reads.
-- **R4-32:** explicit triage of an uncached handle caches the provider row without normalising
-  it first (`personIds`, `category` and `matterId` fill in on the next read).
-
-## Known limitations (v0.4 lifecycle, server side)
-
-- Queued messages are not on the timeline until they start; the web UI shows them in the queue
-  strip above the composer (and as queued runs in task details).
-- Limits are detected on task message, watch and wake runs. Routine (`schedule`) runs and
-  arrival triage report a limit as an ordinary failure (`JOB_FAILED`, or an arrival retry).
-  A limit message without a parsable reset time leaves `resetAt: null`, so only `/resume` and a
-  manual snooze are offered.
-- Continuations (restart and limit resume) build a fresh prompt from the request or the
-  notification that started the run; they do not replay the interrupted run's tool results.
-- Reopen does not restore watches that settle or archive ended, nor the snooze that settle
-  replaced (follow with `/snooze`). A held queue stays held after reopening.
-- A message that was leaving the queue at the exact moment of a crash (after it left
-  `Task.queue`, before its run started) is lost; its run ends `failed` (`SERVER_RESTARTED`).
-- Title generation runs outside the agent lane, so on a host CLI it can start a second CLI
-  process next to an active run.
-
-## Known limitations (W2D rich output and review)
-
-- Opaque sandboxes cannot measure their own height without scripts; the tool estimates within
-  80–1200 px, with scrolling and a full-size dialog for long output.
-- Draft preview uses the loaded conversation text as quoted history and omits attachments and
-  remote assets. It approximates what a recipient reads; client-specific mail layout is not
-  reproduced. The 64 KiB preview limit reports oversized content instead of truncating it.
-- Review edits only the text body. Saving clears stale HTML and leaves recipients, subject,
-  policy and approval status unchanged. Existing one-click approval and edit-and-approve stay.
