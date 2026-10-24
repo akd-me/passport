@@ -221,7 +221,7 @@ Verification remains bounded by the evidence below:
 | IMAP and JMAP against real servers | Not verified |
 | Mac app (unsigned, arm64) | Previously built and smoke-tested locally; packaging was not rerun by this docs pass |
 | Signing, notarization, auto-update | **Not done**; right-click → **Open** on first launch |
-| npm, GHCR and release workflow | Not yet live-published |
+| npm, GHCR and release workflow | Workflow exists; live publication was not checked in this pass |
 
 Deferred: Gmail Pub/Sub push and Graph subscriptions (the watcher polls), a deep local index, OCR for scanned attachments, staged task changes (approval is per action), and private reference handoff in account/routine forms. Task approval scopes for later proposals are implemented; they do not approve proposals already pending. **Hosted identity and SMTP+ are parked.** See [CHANGELOG.md](CHANGELOG.md).
 

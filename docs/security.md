@@ -91,7 +91,7 @@ It **cannot**:
   always-ask rules, risk and reversibility checks, and the outbox hold for sends.
 - Exceed its ceiling. A task's permission mode is clamped to the trust dial and to its parent task,
   and checked live on every policy decision against the run’s starting ceiling. Lowering a
-  task or ancestor takes effect in a running session; raises wait until the next run. A run
+  task or ancestor takes effect in a running session; authority cannot rise above its starting ceiling. A run
   started in plan skips writes. Switching a default run to plan mid-run lowers its policy
   ceiling to `supervised`, so writes ask rather than becoming planned calls. MCP clients
   are capped by `externalAgentCeiling`, and the HTTP MCP bearer token grants access, not trust.

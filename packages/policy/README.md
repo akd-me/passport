@@ -85,7 +85,7 @@ approval computes edit distance against that original and records `approved_edit
 
 The host can inject a per-request `ceiling`. Task runs use the minimum of their starting
 ceiling and the current task/ancestor mode, consulted on each policy decision; lowering reaches
-an active run and raising waits until the next run.
+an active run; authority cannot rise above the starting ceiling until a new run.
 
 ## Trust and promotions
 

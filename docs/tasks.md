@@ -134,7 +134,7 @@ System tasks (`inbox`, `routine`) follow the global trust dial: before each run 
   `PATCH`, and a child task's mode to its parent's. During a run, the policy engine also caps
   every action at the minimum of the run's starting ceiling and the task's current effective
   mode over its parent chain. Lowering the task or an ancestor reaches the next policy decision;
-  raising the mode waits for the next run. Switching an active default run to plan lowers its
+  a higher ceiling than the run started with requires a new run. Switching an active default run to plan lowers its
   policy ceiling to `supervised` (subsequent writes ask); runs started in plan skip writes.
   Account-scoped tools enforce the run's `accountIds` with `ACCOUNT_FORBIDDEN`, including on
   subtask follow-ups. Routine tasks and fresh system-created routine children use all currently
@@ -572,7 +572,8 @@ keep priority). Saving, declining, timeout or run cancellation resolves the requ
 entered value is appended to the timeline. `secret.request.updated` events carry metadata
 and an optional one-use reference, never the secret. See [tools](tools.md#private-secrets-v04).
 
-Every route requires the bearer token. Errors use the standard body
+Every route requires a bearer token or an authenticated browser session (cookie writes also
+need `X-Requested-With: passport`). Errors use the standard body
 `{ "error": { "code", "message" } }`. On the demo backend every task route answers
 `501 TASKS_UNAVAILABLE`.
 
@@ -906,6 +907,8 @@ limitations from R4, W1A, W2A, lifecycle and rich-output work are consolidated h
 - `llmCalls` counts sessions (two after a missing-session fallback), not internal model turns.
   Subscription usage has no Passport cost estimate. Title generation runs outside the agent
   lane/budget and can start a second CLI beside an active run.
+- Live permission lookups inspect up to eight ancestors; ordinary delegated subtasks are
+  limited to depth two. A failed live lookup falls back to the run’s starting ceiling.
 - Limit recovery applies to message/watch/wake runs. Scheduled runs report `JOB_FAILED` and
   arrivals retry instead. Without a parsable reset time, resume-at-reset is unavailable.
 - Continuations retain provider session context when available and repeat the whole request;

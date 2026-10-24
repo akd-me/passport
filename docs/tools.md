@@ -350,7 +350,8 @@ text that may quote mail, neutralized and labelled untrusted.
   `snooze` without `until`, `rename` without `title`).
 - A subtask's permission mode is the parent's effective mode or lower, never higher, and the
   policy engine checks the current parent-chain ceiling on every action, capped by the run’s
-  starting ceiling. Lowering reaches a running session; raising takes effect on the next run.
+  starting ceiling. Lowering reaches a running session; increasing authority above its starting
+  ceiling requires a new run.
 
 ## Arrival and routine tool scopes
 
