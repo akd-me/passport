@@ -264,6 +264,9 @@ export class TaskRunner {
   private async onToolCall(active: ActiveRun, event: ToolCallEvent) {
     await this.markRunning(active);
     const cost = costOf(event.result);
+    if (event.name === "render" && event.result.status === "rendered") {
+      active.produced = true;
+    }
     await this.appendItem({
       taskId: active.run.taskId,
       runId: active.run.id,

@@ -68,6 +68,9 @@ importers:
       '@passport/store':
         specifier: workspace:*
         version: link:../../packages/store
+      '@passport/tools':
+        specifier: workspace:*
+        version: link:../../packages/tools
       '@passport/types':
         specifier: workspace:*
         version: link:../../packages/types

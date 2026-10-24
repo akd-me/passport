@@ -23,6 +23,7 @@ import { extractJson, isObject, validateJson } from "./llm/json.js";
 import type { LlmClient } from "./llm/types.js";
 import { manual } from "./manual.js";
 import { getUserProfile, setUserProfile } from "./profile.js";
+import { digestRenderPrompt } from "./prompts/digest.js";
 import { systemPrompt } from "./prompts/index.js";
 import { RunQueue } from "./queue.js";
 import { createRunReads } from "./reads.js";
@@ -231,6 +232,20 @@ class PersonalAgentRuntime implements AgentRuntime {
           switch (trigger.name) {
             case "daily_digest":
               await dailyDigest(ctx, policy);
+              if (options.taskId && store.tasks && ctx.digest) {
+                const digest = {
+                  kind: "manual" as const,
+                  instruction: digestRenderPrompt(ctx.digest.markdown),
+                };
+                if (this.options.toolBelt && isSessionLlmClient(this.llm)) {
+                  await agenticSession(ctx, digest, this.llm, this.options.toolBelt, {
+                    ...options,
+                    session: {},
+                  });
+                } else {
+                  await manual(ctx, digest, { orchestration: true });
+                }
+              }
               break;
             case "matter_review":
               await reviewMatters(ctx, this.options.matterReviewDays ?? 7);

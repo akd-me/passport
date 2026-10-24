@@ -115,7 +115,7 @@ export function editedRequest(value: unknown, original: ActionRequest): ActionRe
     ...original,
     params: {
       ...original.params,
-      draft: { ...oldDraft, textBody },
+      draft: { ...oldDraft, textBody, htmlBody: null },
     } as ActionRequest["params"],
   };
 }

@@ -211,7 +211,8 @@ export type TaskItemKind =
   | "question"
   | "system_notice"
   | "notification"
-  | "secret_request";
+  | "secret_request"
+  | "render";
 
 export interface TaskToolCallPayload {
   name: string;
@@ -227,6 +228,8 @@ export interface TaskToolCallPayload {
 }
 
 export interface TaskItemPayloads {
+  /** v0.4: server-sanitised restricted HTML; display only in an opaque sandbox. */
+  render: { title: string; html: string; height: number };
   secret_request: { requestId: string; text: string; expiresAt: Timestamp };
   user_message: { text: string };
   assistant_message: { text: string };
