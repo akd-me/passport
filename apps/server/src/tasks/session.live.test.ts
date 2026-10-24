@@ -30,7 +30,7 @@ const codeWord: Tool = {
   handler: async () => ({}),
 };
 
-describe.each((["claude-code", "codex"] as const).filter(ready))("live %s session", (kind) => {
+describe.each(["claude-code", "codex"] as const)("live %s session", (kind) => {
   let dir: string;
   beforeAll(async () => {
     dir = await mkdtemp(join(tmpdir(), "passport-session-live-"));
@@ -41,51 +41,55 @@ describe.each((["claude-code", "codex"] as const).filter(ready))("live %s sessio
     }
   });
 
-  it("calls the tool belt natively, then resumes the provider session", async () => {
-    const calls: string[] = [];
-    const listener = new ToolBeltListener();
-    const binding = await listener.bind({
-      tools: [codeWord],
-      call: async (name) => {
-        calls.push(name);
-        return { codeWord: "PELICAN" };
-      },
-    });
-    const client = new HostAgentLlmClient({
-      kind,
-      model: FAST[kind],
-      reasoning: { main: "low" },
-      cwd: join(dir, "work"),
-    });
-    const run = (prompt: string, resumeSessionId?: string) =>
-      client.session(
-        {
-          prompt,
-          systemPrompt: "You are a terse test assistant. Use the passport tools when asked.",
-          mcpServers: { passport: binding.server },
-          allowedTools: ["mcp__passport"],
-          ...(resumeSessionId ? { resumeSessionId } : {}),
-          timeoutMs: 180_000,
+  it.skipIf(!ready(kind))(
+    "calls the tool belt natively, then resumes the provider session",
+    async () => {
+      const calls: string[] = [];
+      const listener = new ToolBeltListener();
+      const binding = await listener.bind({
+        tools: [codeWord],
+        call: async (name) => {
+          calls.push(name);
+          return { codeWord: "PELICAN" };
         },
-        () => {},
-      ).done;
-    try {
-      const first = await run("Call get_code_word and reply with the code word only.");
-      expect(first.error).toBeUndefined();
-      expect(first.ok).toBe(true);
-      expect(calls).toEqual(["get_code_word"]);
-      expect(first.text.toUpperCase()).toContain("PELICAN");
-      expect(first.sessionId).toBeTruthy();
-      const second = await run(
-        "Without calling any tool: what was the code word you got earlier? Reply with it only.",
-        first.sessionId,
-      );
-      expect(second.error).toBeUndefined();
-      expect(second.text.toUpperCase()).toContain("PELICAN");
-      expect(calls).toHaveLength(1);
-    } finally {
-      await binding.release();
-      await listener.close();
-    }
-  }, 400_000);
+      });
+      const client = new HostAgentLlmClient({
+        kind,
+        model: FAST[kind],
+        reasoning: { main: "low" },
+        cwd: join(dir, "work"),
+      });
+      const run = (prompt: string, resumeSessionId?: string) =>
+        client.session(
+          {
+            prompt,
+            systemPrompt: "You are a terse test assistant. Use the passport tools when asked.",
+            mcpServers: { passport: binding.server },
+            allowedTools: ["mcp__passport"],
+            ...(resumeSessionId ? { resumeSessionId } : {}),
+            timeoutMs: 180_000,
+          },
+          () => {},
+        ).done;
+      try {
+        const first = await run("Call get_code_word and reply with the code word only.");
+        expect(first.error).toBeUndefined();
+        expect(first.ok).toBe(true);
+        expect(calls).toEqual(["get_code_word"]);
+        expect(first.text.toUpperCase()).toContain("PELICAN");
+        expect(first.sessionId).toBeTruthy();
+        const second = await run(
+          "Without calling any tool: what was the code word you got earlier? Reply with it only.",
+          first.sessionId,
+        );
+        expect(second.error).toBeUndefined();
+        expect(second.text.toUpperCase()).toContain("PELICAN");
+        expect(calls).toHaveLength(1);
+      } finally {
+        await binding.release();
+        await listener.close();
+      }
+    },
+    400_000,
+  );
 });
