@@ -2,6 +2,7 @@ import type { Task } from "@passport/types";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { useAccountId } from "../accounts/AccountFilter";
+import { markdownToText } from "../components/Markdown";
 import { relativeTime } from "../components/ui";
 import { needsYou, returnedOf } from "../tasks/model";
 import { useTasks } from "../tasks/store";
@@ -16,7 +17,8 @@ export function needText(task: Task) {
     case "failure":
       return "Stopped with an error";
     case "question":
-      return task.pendingQuestions?.[0]?.text ?? "Has a question for you";
+      // The question is markdown; a one-line row shows it as plain text.
+      return markdownToText(task.pendingQuestions?.[0]?.text ?? "") || "Has a question for you";
     case "limited":
       return "Paused at a usage limit";
     default:

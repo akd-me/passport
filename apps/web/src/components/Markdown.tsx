@@ -256,6 +256,8 @@ function renderLines(lines: string[]): ReactNode[] {
 interface InlineRule {
   pattern: RegExp;
   render: (match: RegExpExecArray, key: number) => ReactNode;
+  /** The same span as plain text, for one-line rows (`markdownToText`). */
+  text: (match: RegExpExecArray) => string;
 }
 
 // Order is precedence when two rules match at the same offset.
@@ -263,35 +265,43 @@ const INLINE_RULES: InlineRule[] = [
   {
     pattern: /`([^`\n]+)`/,
     render: (m, key) => <code key={key}>{m[1]}</code>,
+    text: (m) => m[1] ?? "",
   },
   {
     // An image is never loaded: its alt text and the URL are shown, so the reader sees both.
     pattern: /!\[([^\]\n]*)\]\(\s*([^)\s]+)(?:\s+"[^"\n]*")?\s*\)/,
     render: (m, key) => <LinkText key={key} label={m[1] ?? ""} url={m[2] ?? ""} />,
+    text: (m) => linkText(m[1] ?? "", m[2] ?? ""),
   },
   {
     pattern: /\[([^\]\n]+)\]\(\s*([^)\s]+)(?:\s+"[^"\n]*")?\s*\)/,
     render: (m, key) => <LinkText key={key} label={m[1] ?? ""} url={m[2] ?? ""} />,
+    text: (m) => linkText(m[1] ?? "", m[2] ?? ""),
   },
   {
     pattern: /\*\*(?=\S)([\s\S]+?\S)\*\*/,
     render: (m, key) => <strong key={key}>{renderInline(m[1] ?? "")}</strong>,
+    text: (m) => inlineText(m[1] ?? ""),
   },
   {
     pattern: /(?<![\w\\])__(?=\S)([\s\S]+?\S)__(?!\w)/,
     render: (m, key) => <strong key={key}>{renderInline(m[1] ?? "")}</strong>,
+    text: (m) => inlineText(m[1] ?? ""),
   },
   {
     pattern: /~~(?=\S)([\s\S]+?\S)~~/,
     render: (m, key) => <del key={key}>{renderInline(m[1] ?? "")}</del>,
+    text: (m) => inlineText(m[1] ?? ""),
   },
   {
     pattern: /(?<!\*)\*(?=[^\s*])([^*\n]+?[^\s*])\*(?!\*)/,
     render: (m, key) => <em key={key}>{renderInline(m[1] ?? "")}</em>,
+    text: (m) => inlineText(m[1] ?? ""),
   },
   {
     pattern: /(?<![\w\\])_(?=[^\s_])([^_\n]+?[^\s_])_(?!\w)/,
     render: (m, key) => <em key={key}>{renderInline(m[1] ?? "")}</em>,
+    text: (m) => inlineText(m[1] ?? ""),
   },
 ];
 
@@ -308,20 +318,26 @@ function LinkText({ label, url }: { label: string; url: string }) {
   );
 }
 
+/** The earliest inline rule match in `text`, by precedence at equal offsets. */
+function firstInline(text: string) {
+  let best: { rule: InlineRule; match: RegExpExecArray } | null = null;
+  for (const rule of INLINE_RULES) {
+    const match = rule.pattern.exec(text);
+    if (match && (best === null || match.index < best.match.index)) {
+      best = { rule, match };
+      if (match.index === 0) break;
+    }
+  }
+  return best;
+}
+
 /** Inline markdown as React nodes. Anything not matched stays a text node. */
 export function renderInline(text: string, keyBase = 0): ReactNode[] {
   const out: ReactNode[] = [];
   let rest = text;
   let key = keyBase;
   while (rest.length > 0) {
-    let best: { rule: InlineRule; match: RegExpExecArray } | null = null;
-    for (const rule of INLINE_RULES) {
-      const match = rule.pattern.exec(rest);
-      if (match && (best === null || match.index < best.match.index)) {
-        best = { rule, match };
-        if (match.index === 0) break;
-      }
-    }
+    const best = firstInline(rest);
     if (best === null) {
       out.push(rest);
       break;
@@ -332,4 +348,54 @@ export function renderInline(text: string, keyBase = 0): ReactNode[] {
     rest = rest.slice(best.match.index + best.match[0].length);
   }
   return out;
+}
+
+const linkText = (label: string, url: string) => {
+  const shown = inlineText(label.trim());
+  return !shown || shown === url ? url : `${shown} (${url})`;
+};
+
+function inlineText(text: string): string {
+  let out = "";
+  let rest = text;
+  while (rest.length > 0) {
+    const best = firstInline(rest);
+    if (best === null) {
+      return out + rest;
+    }
+    out += rest.slice(0, best.match.index) + best.rule.text(best.match);
+    rest = rest.slice(best.match.index + best.match[0].length);
+  }
+  return out;
+}
+
+function blockText(block: Block): string[] {
+  switch (block.kind) {
+    case "p":
+      return block.lines.map(inlineText);
+    case "h":
+      return [inlineText(block.text)];
+    case "code":
+      return [block.text];
+    case "quote":
+      return block.blocks.flatMap(blockText);
+    case "hr":
+      return [];
+    case "table":
+      return [block.head, ...block.rows].map((row) => row.map(inlineText).join(" "));
+    case "list":
+      return block.items.flatMap((item) => [
+        ...item.lines.map(inlineText),
+        ...item.children.flatMap(blockText),
+      ]);
+  }
+}
+
+/**
+ * Markdown as one line of plain text, for rows that show a question or message in a single
+ * line (Needs you, Home, the palette): markers dropped, link URLs kept visible, whitespace
+ * collapsed.
+ */
+export function markdownToText(text: string): string {
+  return parseBlocks(text.split("\n")).flatMap(blockText).join(" ").replace(/\s+/g, " ").trim();
 }

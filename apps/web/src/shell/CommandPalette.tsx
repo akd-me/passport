@@ -272,13 +272,17 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     [active, setActive] = useState(0);
   const results = useMemo(() => {
     const filtered = filterCommands(commands, query).slice(0, 60);
-    return query
-      ? filtered
-      : groupOrder.flatMap((g) =>
-          filtered
-            .filter((c) => c.group === g)
-            .slice(0, g === "People" || g === "Matters" ? 5 : g === "Tasks" ? 8 : 20),
-        );
+    if (query) {
+      // Ranked, then grouped: each group once, groups in the order of their best match, and
+      // results keep their rank within the group.
+      const order = [...new Set(filtered.map((c) => c.group))];
+      return order.flatMap((g) => filtered.filter((c) => c.group === g));
+    }
+    return groupOrder.flatMap((g) =>
+      filtered
+        .filter((c) => c.group === g)
+        .slice(0, g === "People" || g === "Matters" ? 5 : g === "Tasks" ? 8 : 20),
+    );
   }, [commands, query]);
   const current = Math.min(active, Math.max(0, results.length - 1));
   const move = (delta: number) => {
